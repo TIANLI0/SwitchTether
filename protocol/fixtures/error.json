@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "step_up_required",
+    "message": "terminal access requires biometric confirmation",
+    "retryable": false,
+    "details": { "scope": "terminal" }
+  }
+}

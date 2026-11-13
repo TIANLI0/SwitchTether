@@ -1,0 +1,10 @@
+{
+  "protocolVersion": 1,
+  "minProtocolVersion": 1,
+  "serverId": "6b7d2a1e-6c1b-4d8e-9b5a-0f1e2d3c4b5a",
+  "serverName": "DESKTOP-01",
+  "serverVersion": "0.1.0",
+  "paired": true,
+  "deviceId": "0c3e9a77-2b9f-4f61-8a43-5d1b2e3f4a5b",
+  "epoch": "a1b2c3d4-0000-4000-8000-000000000001"
+}

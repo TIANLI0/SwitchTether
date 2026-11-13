@@ -1,0 +1,10 @@
+{
+  "pairingId": "2f6c1b8e-4b0d-4c5e-9f2a-7e8d9c0b1a2f",
+  "secret": "Xq3v0-9aZb_1234567890abcdefghijklmnopqrstu",
+  "deviceName": "Pixel 9",
+  "platform": "android",
+  "osVersion": "15",
+  "appVersion": "0.1.0",
+  "protocolVersion": 1,
+  "stepUpPublicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE"
+}

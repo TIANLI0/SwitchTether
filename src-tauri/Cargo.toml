@@ -1,3 +1,8 @@
+[workspace]
+# SwitchTether: the Remote Core lives in its own crate so upstream CC Switch
+# syncs rarely conflict with it. See docs/ARCHITECTURE.md.
+members = [".", "crates/switchtether-core"]
+
 [package]
 name = "switchtether"
 # Cargo version tracks the merged CC Switch upstream release (third-party
@@ -28,6 +33,7 @@ test-hooks = []
 tauri-build = { version = "2.4.0", features = [] }
 
 [dependencies]
+switchtether-core = { path = "crates/switchtether-core" }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
