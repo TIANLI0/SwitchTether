@@ -309,13 +309,54 @@ pub fn get_claude_settings_path() -> PathBuf {
     settings
 }
 
-/// 获取应用配置目录路径 (~/.cc-switch)
+/// SwitchTether: name of the per-user data directory under the home dir.
+///
+/// SwitchTether is a long-lived fork of CC Switch. Its data lives in
+/// `~/.switchtether` instead of upstream's `~/.cc-switch`, so that an installed
+/// CC Switch and SwitchTether never write the same SQLite database without
+/// coordination. Existing CC Switch data is imported by copy (never moved or
+/// modified) on first launch — see `switchtether_import`.
+pub const APP_DIR_NAME: &str = ".switchtether";
+
+/// Upstream CC Switch's data directory name (read-only import source).
+pub const UPSTREAM_APP_DIR_NAME: &str = ".cc-switch";
+
+/// Directory name actually used for app data.
+///
+/// Production always uses [`APP_DIR_NAME`]. When the explicit test-home override
+/// (`CC_SWITCH_TEST_HOME`) is active, the upstream name is kept so that the large
+/// upstream test-suite (which builds `<home>/.cc-switch/...` fixture paths) stays
+/// merge-compatible across upstream syncs. Set `SWITCHTETHER_TEST_APP_DIR=1` to
+/// exercise the production name under a test home (see `switchtether_paths`
+/// tests). End users never set either variable.
+pub fn app_dir_name() -> &'static str {
+    if test_home_override().is_some() && std::env::var_os("SWITCHTETHER_TEST_APP_DIR").is_none()
+    {
+        UPSTREAM_APP_DIR_NAME
+    } else {
+        APP_DIR_NAME
+    }
+}
+
+/// `~/.switchtether` — the device-local state root (not affected by the
+/// configurable app-config-dir override).
+pub fn get_app_home_dir() -> PathBuf {
+    get_home_dir().join(app_dir_name())
+}
+
+/// Upstream CC Switch data directory (`~/.cc-switch`), used only as a
+/// read-only import source.
+pub fn get_upstream_app_home_dir() -> PathBuf {
+    get_home_dir().join(UPSTREAM_APP_DIR_NAME)
+}
+
+/// 获取应用配置目录路径 (~/.switchtether; upstream: ~/.cc-switch)
 pub fn get_app_config_dir() -> PathBuf {
     if let Some(custom) = crate::app_store::get_app_config_dir_override() {
         return custom;
     }
 
-    let default_dir = get_home_dir().join(".cc-switch");
+    let default_dir = get_app_home_dir();
 
     // 兼容 v3.10.3：当用户环境存在 `HOME` 且与真实用户目录不同，
     // v3.10.3 可能在 `HOME/.cc-switch/` 下创建/使用了数据库。
@@ -338,7 +379,7 @@ pub fn get_app_config_dir() -> PathBuf {
             if let Ok(home_env) = std::env::var("HOME") {
                 let trimmed = home_env.trim();
                 if !trimmed.is_empty() {
-                    let legacy_dir = PathBuf::from(trimmed).join(".cc-switch");
+                    let legacy_dir = PathBuf::from(trimmed).join(app_dir_name());
                     if legacy_dir.join("cc-switch.db").exists() {
                         log::info!(
                             "Detected v3.10.3 legacy database at {}, using it instead of {}",

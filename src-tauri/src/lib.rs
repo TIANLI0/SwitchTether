@@ -47,6 +47,7 @@ mod services;
 mod session_manager;
 mod settings;
 mod store;
+mod switchtether;
 
 mod tray;
 #[cfg(target_os = "windows")]
@@ -308,7 +309,7 @@ fn handle_deeplink_url(
     focus_main_window: bool,
     source: &str,
 ) -> bool {
-    if !url_str.starts_with("ccswitch://") {
+    if !url_str.starts_with("switchtether://") && !url_str.starts_with("ccswitch://") {
         return false;
     }
 
@@ -631,7 +632,7 @@ pub fn run() {
                             Target::new(TargetKind::Stdout),
                             Target::new(TargetKind::Folder {
                                 path: log_dir,
-                                file_name: Some("cc-switch".into()),
+                                file_name: Some("switchtether".into()),
                             }),
                         ])
                         // KeepSome(4) 保留 4 个轮转归档，加上当前文件最多约 100 MiB。
@@ -644,11 +645,18 @@ pub fn run() {
 
                 // 用户配置存在数据库中，数据库尚未打开时使用保守的 Info 级别。
                 log::set_max_level(log::LevelFilter::Info);
-                log::info!("=== CC Switch v{} started ===", env!("CARGO_PKG_VERSION"));
+                log::info!(
+                    "=== SwitchTether v{} (CC Switch base v{}) started ===",
+                    app.package_info().version,
+                    env!("CARGO_PKG_VERSION")
+                );
             }
 
             #[cfg(unix)]
             raise_open_file_limit();
+
+            // SwitchTether: one-time non-destructive copy of ~/.cc-switch data.
+            crate::switchtether::on_setup_before_database();
 
             // 首次读取覆盖路径时 logger 尚未可用；此处重放一次，
             // 让 Store 损坏或路径无效等启动警告能够真正落盘。
@@ -1216,12 +1224,12 @@ pub fn run() {
                 #[cfg(target_os = "linux")]
                 {
                     // Use Tauri's path API to get correct path (includes app identifier)
-                    // tauri-plugin-deep-link writes to: ~/.local/share/com.ccswitch.desktop/applications/cc-switch-handler.desktop
+                    // tauri-plugin-deep-link writes to: ~/.local/share/<identifier>/applications/switchtether-handler.desktop
                     // Only register if .desktop file doesn't exist to avoid overwriting user customizations
                     let should_register = app
                         .path()
                         .data_dir()
-                        .map(|d| !d.join("applications/cc-switch-handler.desktop").exists())
+                        .map(|d| !d.join("applications/switchtether-handler.desktop").exists())
                         .unwrap_or(true);
 
                     if should_register {
@@ -1300,7 +1308,7 @@ pub fn run() {
                 .show_menu_on_left_click(tray::native_menu_on_left_click(native_menu));
             // 鼠标悬停提示（macOS 不设，见 `tray::TRAY_TOOLTIP_ENABLED`）
             if tray::TRAY_TOOLTIP_ENABLED {
-                tray_builder = tray_builder.tooltip("CC Switch");
+                tray_builder = tray_builder.tooltip("SwitchTether");
             }
             if native_menu {
                 let menu = tray::create_tray_menu(app.handle(), &app_state)?;
