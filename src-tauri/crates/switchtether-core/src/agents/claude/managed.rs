@@ -39,6 +39,8 @@ pub struct ManagedClaudeOptions {
     pub permission_mode: Option<String>,
     /// Continue from an existing (not live) session's history in a fork.
     pub resume_from: Option<String>,
+    /// With `resume_from`: start a fork (new session id) instead of continuing it.
+    pub fork: bool,
 }
 
 struct Pending {
@@ -141,7 +143,10 @@ impl ManagedClaude {
         if let Some(r) = &options.resume_from {
             // Always fork: resuming a session in place while another process
             // might hold it would interleave two writers in one transcript.
-            cmd.args(["--resume", r, "--fork-session"]);
+            cmd.args(["--resume", r]);
+            if options.fork {
+                cmd.arg("--fork-session");
+            }
         }
         cmd.current_dir(&options.cwd)
             .env("CLAUDE_CODE_ENTRYPOINT", "sdk-switchtether")

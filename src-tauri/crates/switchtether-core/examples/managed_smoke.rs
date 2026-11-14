@@ -46,11 +46,17 @@ async fn main() -> anyhow::Result<()> {
     let s = hub
         .create_managed(CreateSession {
             agent: agent_id.into(),
-            cwd: cwd.clone(),
+            // When continuing, the original session's cwd is used.
+            cwd: if std::env::var("SMOKE_RESUME").is_ok() {
+                String::new()
+            } else {
+                cwd.clone()
+            },
             prompt: Some(prompt),
             model,
             permission_mode: None,
-            resume_from: None,
+            resume_from: std::env::var("SMOKE_RESUME").ok(),
+            mode: std::env::var("SMOKE_MODE").ok(),
         })
         .await;
     let s = match s {

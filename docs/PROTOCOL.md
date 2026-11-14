@@ -189,7 +189,12 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `GET /v1/sessions/{sessionId}` → `SessionDetail` (includes `liveness`, `control`, `capabilities`)
 - `GET /v1/sessions/{sessionId}/events?before=<eventSeq>&after=<eventSeq>&limit=` → paged `AgentEvent`s
 - `GET /v1/sessions/{sessionId}/events/{eventId}/payload?offset&limit` → large tool output chunks
-- `POST /v1/sessions` `{commandId, agent, cwd, prompt?, model?, permissionMode?, resumeFrom?}` → creates a **SwitchTether-managed** session (clearly labelled `origin: "managed"`)
+- `POST /v1/sessions` `{commandId, agent, cwd?, prompt?, model?, permissionMode?, resumeFrom?, mode?}` → creates a **SwitchTether-managed** session (clearly labelled `origin: "managed"`).
+  With `resumeFrom` (an existing `claude:`/`codex:` session) it **continues that conversation** ("接续会话"):
+  `mode: "continue"` (default) keeps the same session/thread id; `mode: "fork"` (Claude only) starts a fork. `cwd` defaults
+  to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
+  while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
+  Session capabilities advertise this as `continueSession: "PARTIAL"`.
 - `POST /v1/sessions/{id}/messages` `{commandId, text}`
 - `POST /v1/sessions/{id}/interrupt` `{commandId}`
 - `POST /v1/sessions/{id}/approvals/{requestId}` `{commandId, decision: "allow"|"allow_session"|"deny"|"abort", message?, updatedInput?}`

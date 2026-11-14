@@ -96,6 +96,18 @@ assistant_message  DONE
 status             "idle"
 ```
 
+## 6a. Continuing an externally started session ("接续会话")
+
+Because in-place control of the original process is BLOCKED, SwitchTether offers the strongest
+legitimate alternative: the **same conversation** continues in a new SwitchTether-owned process.
+
+| | Claude Code (CLI / VS Code) | Codex (CLI / Desktop) |
+|---|---|---|
+| Mechanism | `claude --resume <same id>` (no fork) with the user's settings | `thread/resume` on SwitchTether's own `codex app-server` |
+| Status | **PARTIAL — VERIFIED live** (2026-11-14): an external `claude -p` session was told a code word; continuing it from SwitchTether answered with that word, and the new turn was appended to the original transcript file | PARTIAL — implemented; not run live (no isolated authenticated Codex home) |
+| Safety guard | refused while the original is `busy`/`waiting` (unit test `continuing_a_busy_external_session_is_refused`) | Codex itself refuses while the thread is open elsewhere ("active writer"), surfaced as 409 |
+| Limitations | the original window (terminal / VS Code panel) does not show the phone's turns and must not be used at the same time; it is not an in-place takeover | the original client cannot write to the thread while SwitchTether holds it |
+
 ## 7. Other agents (Gemini CLI, OpenCode, …)
 
 History from CC Switch's session index is shown read-only (`readHistory: PARTIAL`, plain

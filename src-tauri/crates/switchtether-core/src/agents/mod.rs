@@ -85,12 +85,17 @@ pub struct SessionQuery {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSession {
     pub agent: String,
+    /// Working directory; defaults to the original session's cwd when continuing.
+    #[serde(default)]
     pub cwd: String,
     pub prompt: Option<String>,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
-    /// Session id (e.g. `claude:<id>`) whose history to continue in a fork.
+    /// Existing session (e.g. `claude:<id>`, `codex:<id>`) to continue.
     pub resume_from: Option<String>,
+    /// `continue` (default; same conversation id) or `fork` (Claude only: new id
+    /// with the same history).
+    pub mode: Option<String>,
 }
 
 pub struct AgentHub {
@@ -310,6 +315,60 @@ impl AgentHub {
         (page, next)
     }
 
+    /// Fallback for Claude sessions that are not (yet) in CC Switch's index:
+    /// locate the transcript by session id and read its first records.
+    fn claude_summary_from_transcript(&self, id: &str) -> Option<SessionSummary> {
+        let native = id.strip_prefix("claude:")?;
+        if native.is_empty()
+            || !native
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return None;
+        }
+        let path = self.claude.transcript_path(None, native)?;
+        let meta = std::fs::metadata(&path).ok()?;
+        let mut parser = ClaudeParser::new();
+        if let Ok(f) = std::fs::File::open(&path) {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(f)
+                .lines()
+                .take(200)
+                .map_while(Result::ok)
+            {
+                if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                    parser.feed(&v);
+                }
+            }
+        }
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64);
+        let cwd = parser.cwd.clone();
+        Some(SessionSummary {
+            id: id.to_string(),
+            agent: "claude_code".into(),
+            origin: Origin::Unknown,
+            native_id: native.to_string(),
+            title: parser.title.clone(),
+            project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
+            cwd,
+            liveness: Liveness::Ended,
+            status: "ended".into(),
+            waiting_for: None,
+            control: Control::History,
+            created_at_ms: None,
+            last_active_at_ms: modified,
+            model: parser.model.clone(),
+            git_branch: parser.git_branch.clone(),
+            pid: None,
+            managed: false,
+            source_path: Some(path.to_string_lossy().into_owned()),
+        })
+    }
+
     pub async fn summary(&self, id: &str) -> Option<SessionSummary> {
         if let Some(m) = self.managed.read().get(id).cloned() {
             return Some(self.managed_summary(id, m.as_ref()));
@@ -331,7 +390,7 @@ impl AgentHub {
             }
             match next {
                 Some(n) => cursor = Some(n),
-                None => return None,
+                None => return self.claude_summary_from_transcript(id),
             }
         }
     }
@@ -529,6 +588,42 @@ impl AgentHub {
     }
 
     pub async fn create_managed(&self, req: CreateSession) -> ApiResult<SessionSummary> {
+        let mut req = req;
+        // Continuing a session started elsewhere ("接续会话"): never in place —
+        // a new SwitchTether-owned process continues the same conversation.
+        let mut continue_from: Option<(SessionSummary, bool)> = None;
+        if let Some(target) = req.resume_from.clone() {
+            let s = self
+                .summary(&target)
+                .await
+                .ok_or_else(|| ApiError::not_found("unknown session to continue"))?;
+            if s.managed {
+                return Err(ApiError::validation(
+                    "this session is already controlled by SwitchTether",
+                ));
+            }
+            if s.agent != req.agent {
+                return Err(ApiError::validation("agent does not match the session"));
+            }
+            let fork = match req.mode.as_deref() {
+                None | Some("continue") => false,
+                Some("fork") => true,
+                Some(_) => return Err(ApiError::validation("mode must be continue or fork")),
+            };
+            if !fork
+                && s.liveness == Liveness::Live
+                && matches!(s.status.as_str(), "busy" | "waiting")
+            {
+                return Err(ApiError::conflict(
+                    "The session is running on the computer right now (busy or waiting for input). Continue it when it is idle, or fork it instead.",
+                )
+                .with_details(json!({ "status": s.status, "waitingFor": s.waiting_for })));
+            }
+            if req.cwd.trim().is_empty() {
+                req.cwd = s.cwd.clone().unwrap_or_default();
+            }
+            continue_from = Some((s, fork));
+        }
         let cwd = PathBuf::from(&req.cwd);
         if !cwd.is_absolute() || !cwd.is_dir() {
             return Err(ApiError::validation(
@@ -543,6 +638,43 @@ impl AgentHub {
             id.clone(),
             Some(self.bus.clone()),
         )));
+        if let Some((s, _)) = &continue_from {
+            // Show the whole conversation on the phone, not just the new turns.
+            let history = match s.agent.as_str() {
+                "claude_code" => s
+                    .source_path
+                    .clone()
+                    .map(PathBuf::from)
+                    .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+                    .or_else(|| self.claude.transcript_path(s.cwd.as_deref(), &s.native_id))
+                    .map(|p| (p, Box::new(ClaudeParser::new()) as Box<dyn LineParser>)),
+                "codex" => s
+                    .source_path
+                    .clone()
+                    .map(PathBuf::from)
+                    .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+                    .map(|p| (p, Box::new(CodexParser::new()) as Box<dyn LineParser>)),
+                _ => None,
+            };
+            if let Some((path, parser)) = history {
+                if let Err(e) = load_file(&path, parser, &log) {
+                    log::warn!("[agents] could not preload history: {e}");
+                }
+            }
+            log.lock().upsert(
+                EventDraft::new(
+                    "continued",
+                    "system",
+                    crate::util::now_rfc3339(),
+                    json!({
+                        "subtype": "continued",
+                        "text": "Continued in SwitchTether. New turns run in a SwitchTether process; the original window on the computer does not show them.",
+                        "from": s.id,
+                    }),
+                ),
+                false,
+            );
+        }
         let session: Arc<dyn ManagedSession> = match req.agent.as_str() {
             "claude_code" => {
                 let bin = self.claude.claude_bin.clone().ok_or_else(|| {
@@ -557,15 +689,9 @@ impl AgentHub {
                         ))
                     }
                 };
-                let resume_from = match req.resume_from.as_deref() {
-                    Some(r) => Some(
-                        r.strip_prefix("claude:")
-                            .ok_or_else(|| {
-                                ApiError::validation("resumeFrom must be a claude session")
-                            })?
-                            .to_string(),
-                    ),
-                    None => None,
+                let (resume_from, fork) = match &continue_from {
+                    Some((s, fork)) => (Some(s.native_id.clone()), *fork),
+                    None => (None, false),
                 };
                 ManagedClaude::spawn(
                     id.clone(),
@@ -575,6 +701,7 @@ impl AgentHub {
                         model: req.model.clone(),
                         permission_mode,
                         resume_from,
+                        fork,
                     },
                     log,
                 )
@@ -582,12 +709,13 @@ impl AgentHub {
                 .map_err(|e| ApiError::internal("start claude", e))?
             }
             "codex" => {
-                if req.resume_from.is_some() {
-                    return Err(ApiError::unavailable_capability(
-                        "BLOCKED",
-                        "Continuing an existing Codex thread from SwitchTether is disabled: Codex refuses a second writer for a thread that is open elsewhere, and taking it over would lock the original client out.",
-                    ));
-                }
+                let resume_thread = match &continue_from {
+                    Some((_, true)) => {
+                        return Err(ApiError::validation("fork is not supported for Codex"))
+                    }
+                    Some((s, false)) => Some(s.native_id.clone()),
+                    None => None,
+                };
                 let bin = self.codex_bin.clone().ok_or_else(|| {
                     ApiError::validation("Codex (`codex`) was not found on this computer")
                 })?;
@@ -607,11 +735,20 @@ impl AgentHub {
                         cwd,
                         model: req.model.clone(),
                         approval_policy: approval_policy.into(),
+                        resume_thread,
                     },
                     log,
                 )
                 .await
-                .map_err(|e| ApiError::internal("start codex", e))?
+                .map_err(|e| {
+                    let msg = format!("{e:#}");
+                    if msg.contains("active writer") {
+                        // Codex enforces a single writer per thread.
+                        ApiError::conflict("This Codex thread is open in another Codex client (Codex Desktop or a terminal). Close it there, then continue it here.")
+                    } else {
+                        ApiError::internal("start codex", msg)
+                    }
+                })?
             }
             other => {
                 return Err(ApiError::unavailable_capability(
@@ -797,9 +934,10 @@ fn observed_caps(agent: &str) -> Capabilities {
         approve: Some(CapStatus::Blocked),
         answer_question: Some(CapStatus::Blocked),
         interrupt: Some(CapStatus::Blocked),
+        continue_session: known.then_some(CapStatus::Partial),
         reason: Some(match agent {
-            "claude_code" => "Externally started Claude Code sessions (CLI / VS Code) can only be observed: the official runtime offers no supported interface for another program to send input, answer prompts or interrupt them.".into(),
-            "codex" => "Externally started Codex sessions (CLI / Desktop) can only be observed: their app-server runs in-process over private stdio.".into(),
+            "claude_code" => "The original Claude Code process (CLI / VS Code) cannot be controlled from another program. Use \"Continue on phone\": the same conversation continues in a SwitchTether process (only while the original is idle; the original window will not show the new turns).".into(),
+            "codex" => "The original Codex process (CLI / Desktop) cannot be controlled from another program. Use \"Continue on phone\": the thread continues on SwitchTether's own app-server, which Codex allows only when the thread is not open elsewhere.".into(),
             _ => "History only.".into(),
         }),
     }
@@ -813,6 +951,7 @@ fn managed_caps() -> Capabilities {
         approve: Some(CapStatus::Verified),
         answer_question: Some(CapStatus::Untested),
         interrupt: Some(CapStatus::Verified),
+        continue_session: None,
         reason: None,
     }
 }
@@ -899,6 +1038,58 @@ mod tests {
         tail_file(&mut t, &log, true).unwrap();
         assert_eq!(log.lock().len(), 2);
         assert_eq!(bus.head_seq(), 1, "tail events are published");
+    }
+
+    #[tokio::test]
+    async fn continuing_a_busy_external_session_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = tmp.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let pid = std::process::id();
+        std::fs::write(
+            sessions.join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"sessionId":"busy-1","cwd":"{}","status":"busy","entrypoint":"cli"}}"#,
+                tmp.path().to_string_lossy().replace('\\', "/")),
+        )
+        .unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(16),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        let s = hub.summary("claude:busy-1").await.unwrap();
+        assert_eq!(s.liveness, Liveness::Live);
+        assert_eq!(
+            hub.capabilities_for(&s).continue_session,
+            Some(CapStatus::Partial)
+        );
+        let e = hub
+            .create_managed(CreateSession {
+                agent: "claude_code".into(),
+                cwd: String::new(),
+                prompt: None,
+                model: None,
+                permission_mode: None,
+                resume_from: Some("claude:busy-1".into()),
+                mode: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::Conflict);
+        // wrong agent is a validation error, not a takeover
+        let e = hub
+            .create_managed(CreateSession {
+                agent: "codex".into(),
+                cwd: String::new(),
+                prompt: None,
+                model: None,
+                permission_mode: None,
+                resume_from: Some("claude:busy-1".into()),
+                mode: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::ValidationFailed);
     }
 
     #[tokio::test]

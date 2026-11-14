@@ -33,6 +33,8 @@ pub struct ManagedCodexOptions {
     pub model: Option<String>,
     /// `on-request` (default) or `untrusted`.
     pub approval_policy: String,
+    /// Continue an existing thread (`thread/resume`) instead of starting one.
+    pub resume_thread: Option<String>,
 }
 
 struct PendingApproval {
@@ -148,10 +150,21 @@ impl ManagedCodex {
         if let Some(m) = &me.options.model {
             params["model"] = json!(m);
         }
-        let started = me
-            .request("thread/start", params, Duration::from_secs(60))
-            .await
-            .map_err(|e| anyhow::anyhow!("thread/start failed: {e}"))?;
+        let (method, params) = match &me.options.resume_thread {
+            Some(t) => {
+                let mut p = params;
+                p["threadId"] = json!(t);
+                ("thread/resume", p)
+            }
+            None => ("thread/start", params),
+        };
+        let started = match me.request(method, params, Duration::from_secs(60)).await {
+            Ok(v) => v,
+            Err(e) => {
+                me.kill();
+                anyhow::bail!("{method} failed: {}", e.message);
+            }
+        };
         {
             let mut st = me.state.lock();
             st.thread_id = started.get("thread").and_then(|t| s(t, "id"));

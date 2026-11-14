@@ -72,6 +72,9 @@ pub struct Capabilities {
     pub approve: Option<CapStatus>,
     pub answer_question: Option<CapStatus>,
     pub interrupt: Option<CapStatus>,
+    /// Continue this (externally started) conversation in a SwitchTether process.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continue_session: Option<CapStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
