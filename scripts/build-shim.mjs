@@ -33,7 +33,12 @@ mkdirSync(join(tauriDir, "binaries"), { recursive: true });
 const ext = target.includes("windows") ? ".exe" : "";
 const out = join(tauriDir, "binaries", `switchtether-shim-${target}${ext}`);
 if (target === "universal-apple-darwin") {
-  const parts = ["aarch64-apple-darwin", "x86_64-apple-darwin"].map((t) => build(t, true));
+  // Tauri builds each architecture separately and looks up the per-arch sidecar too.
+  const arches = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
+  const parts = arches.map((t) => build(t, true));
+  arches.forEach((t, i) =>
+    copyFileSync(parts[i], join(tauriDir, "binaries", `switchtether-shim-${t}`)),
+  );
   execFileSync("lipo", ["-create", "-output", out, ...parts], { stdio: "inherit" });
 } else {
   copyFileSync(build(target, Boolean(explicit) && explicit !== host), out);

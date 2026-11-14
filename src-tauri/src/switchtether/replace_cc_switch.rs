@@ -12,14 +12,18 @@
 //! `~/.switchtether/logs/replace-cc-switch.log`; failures are reported but do
 //! not undo the SwitchTether installation.
 
+#[cfg(windows)]
 use std::io::Write;
 use std::process::ExitCode;
 
+#[cfg(windows)]
 const UPSTREAM_RUN_VALUE: &str = "CC Switch";
 pub const AUTOSTART_NAME: &str = "SwitchTether";
 
+#[cfg(windows)]
 struct Log(Option<std::fs::File>);
 
+#[cfg(windows)]
 impl Log {
     fn open() -> Self {
         let dir = crate::config::get_app_home_dir().join("logs");
@@ -138,6 +142,7 @@ fn stop_cc_switch(log: &mut Log) {
 }
 
 /// Split `"C:\path\uninstall.exe" /args` or `MsiExec.exe /X{GUID}`.
+#[cfg(any(windows, test))]
 fn split_command(cmd: &str) -> (String, Vec<String>) {
     let cmd = cmd.trim();
     if let Some(rest) = cmd.strip_prefix('"') {
@@ -156,6 +161,7 @@ fn split_command(cmd: &str) -> (String, Vec<String>) {
 }
 
 /// Silent uninstall command for one CC Switch installation.
+#[cfg(any(windows, test))]
 fn uninstall_command(uninstall: &str, quiet: Option<&str>) -> (String, Vec<String>) {
     let lower = uninstall.to_ascii_lowercase();
     if lower.contains("msiexec") {

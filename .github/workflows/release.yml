@@ -170,7 +170,10 @@ jobs:
           mkdir -p dist-android
           signed=android/app/build/outputs/apk/release/app-release.apk
           if [ -f "$signed" ]; then
-            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$signed" | grep -E "Signer #1 certificate (DN|SHA-256)"
+            certs="$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$signed")"
+            echo "$certs" | grep -E "certificate (DN|SHA-256 digest)"
+            # The release key's certificate; installed apps only accept updates signed by it.
+            echo "$certs" | grep -q "certificate SHA-256 digest: 214a252bda32cb7e65e68a82f6322e509899e8f8aa08c07e12eb25dd84e90ab6"               || { echo "::error::APK is not signed with the SwitchTether release key"; exit 1; }
             cp "$signed" "dist-android/SwitchTether-$ver-android.apk"
           else
             echo "::warning::No signing secrets: the APK is UNSIGNED and cannot update an installed app."
