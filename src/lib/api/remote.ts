@@ -76,6 +76,21 @@ export interface RemoteTerminal {
   ownerDeviceId?: string | null;
   exited: boolean;
   exitCode?: number | null;
+  /** Mirrored from the user's own terminal window (st-claude / st-codex). */
+  external?: boolean;
+}
+
+export type TakeoverHook = "vscode" | "codex_desktop" | "cli";
+
+export interface TakeoverStatus {
+  shimAvailable: boolean;
+  vscode: {
+    available: boolean;
+    enabled: boolean;
+    editors: { editor: string; enabled: boolean; foreignWrapper?: string | null }[];
+  };
+  codexDesktop: { available: boolean; enabled: boolean; foreignValue?: string | null };
+  cli: { available: boolean; enabled: boolean; binDir: string; pathAdded: boolean };
 }
 
 export interface AuditEntry {
@@ -112,4 +127,10 @@ export const remoteApi = {
   listTerminals: () => invoke<RemoteTerminal[]>("remote_list_terminals"),
   killTerminal: (id: string) => invoke<boolean>("remote_kill_terminal", { id }),
   auditLog: (limit = 50) => invoke<AuditEntry[]>("remote_audit_log", { limit }),
+  takeoverStatus: () => invoke<TakeoverStatus>("remote_takeover_status"),
+  setTakeover: (hook: TakeoverHook, enabled: boolean) =>
+    invoke<{ report: Record<string, unknown>[]; status: TakeoverStatus }>(
+      "remote_set_takeover",
+      { hook, enabled },
+    ),
 };

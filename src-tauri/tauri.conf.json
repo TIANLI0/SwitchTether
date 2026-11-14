@@ -7,8 +7,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm run dev:renderer",
-    "beforeBuildCommand": "pnpm run build:renderer"
+    "beforeDevCommand": "node scripts/build-shim.mjs && pnpm run dev:renderer",
+    "beforeBuildCommand": "node scripts/build-shim.mjs --release && pnpm run build:renderer"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -57,7 +57,10 @@
     },
     "macOS": {
       "minimumSystemVersion": "12.0"
-    }
+    },
+    "externalBin": [
+      "binaries/switchtether-shim"
+    ]
   },
   "plugins": {
     "deep-link": {

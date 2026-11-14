@@ -7,6 +7,7 @@
 pub mod bridge;
 pub mod commands;
 pub mod remote;
+pub mod takeover;
 pub mod upstream_import;
 
 use tauri::Manager;
@@ -44,6 +45,8 @@ pub fn setup_remote(app: &tauri::App) {
     app.manage(remote::RemoteState::default());
     let handle = app.handle().clone();
     tauri::async_runtime::spawn(async move {
+        // Keep the shim used by enabled takeover hooks up to date.
+        let _ = tokio::task::spawn_blocking(takeover::refresh_installed_shim).await;
         match remote::RemoteRuntime::init(handle.clone()).await {
             Ok(rt) => {
                 if let Some(state) = handle.try_state::<remote::RemoteState>() {

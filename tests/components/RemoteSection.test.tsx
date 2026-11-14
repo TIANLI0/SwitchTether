@@ -23,6 +23,20 @@ const { listeners, api, toastError } = vi.hoisted(() => {
     terminals: 1,
     managedSessions: 0,
   };
+  const takeover = {
+    shimAvailable: true,
+    vscode: {
+      available: true,
+      enabled: false,
+      editors: [{ editor: "Code", enabled: false, foreignWrapper: null }],
+    },
+    codexDesktop: {
+      available: true,
+      enabled: false,
+      foreignValue: "C:\other\codex.exe",
+    },
+    cli: { available: true, enabled: false, binDir: "C:\bin", pathAdded: false },
+  };
   const api = {
     status: vi.fn(async () => status),
     listDevices: vi.fn(async () => [
@@ -80,6 +94,14 @@ const { listeners, api, toastError } = vi.hoisted(() => {
     forgetDevice: vi.fn(async () => true),
     renameDevice: vi.fn(async () => {}),
     killTerminal: vi.fn(async () => true),
+    takeoverStatus: vi.fn(async () => takeover),
+    setTakeover: vi.fn(async (hook: string, enabled: boolean) => ({
+      report: [{ editor: "Code", result: enabled ? "enabled" : "disabled" }],
+      status: {
+        ...takeover,
+        vscode: { ...takeover.vscode, enabled: hook === "vscode" && enabled },
+      },
+    })),
   };
   return {
     listeners: [] as Array<(e: { payload: unknown }) => void>,
@@ -104,7 +126,11 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/lib/toast", () => ({
-  toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) },
+  toast: {
+    success: vi.fn(),
+    warning: vi.fn(),
+    error: (...a: unknown[]) => toastError(...a),
+  },
 }));
 
 vi.mock("@/lib/api/remote", async () => {
@@ -179,5 +205,27 @@ describe("RemoteSection", () => {
     await screen.findByText("build");
     fireEvent.click(screen.getByText("remote.terminals.end"));
     await waitFor(() => expect(api.killTerminal).toHaveBeenCalledWith("t1"));
+  });
+
+  it("turns the VS Code takeover hook on and never overrides a foreign CODEX_CLI_PATH", async () => {
+    render(<RemoteSection />);
+    const vscode = await screen.findByRole("switch", {
+      name: "remote.takeover.vscode.label",
+    });
+    expect(
+      screen.getByRole("switch", { name: "remote.takeover.codex_desktop.label" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(/remote.takeover.codex_desktop.foreign/),
+    ).toBeInTheDocument();
+    fireEvent.click(vscode);
+    await waitFor(() =>
+      expect(api.setTakeover).toHaveBeenCalledWith("vscode", true),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("switch", { name: "remote.takeover.vscode.label" }),
+      ).toBeChecked(),
+    );
   });
 });

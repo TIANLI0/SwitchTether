@@ -126,7 +126,15 @@ retries.
 ## 9. Agent safety boundaries
 
 - SwitchTether never edits Claude Code / Codex configuration, hooks, plugins, MCP settings or
-  launch commands to gain control; externally started sessions are observe-only.
+  launch commands to gain control; externally started sessions are observe-only — except
+  through the opt-in takeover hooks the user turns on (AGENT_COMPATIBILITY §6b), which back up
+  first, never replace a value the user set and are removed exactly.
+- Attach broker (takeover): listens on 127.0.0.1 only, random port; a 256-bit random token in
+  `~/.switchtether/remote/attach.json` (owner-only file) must be presented in the first frame
+  (constant-time compare, 5 s deadline, 32 MiB frame limit). It never kills or restarts the
+  user's processes. Without the broker the shim degrades to a plain pass-through.
+- Terminal-mirrored sessions: messages from the phone that start with `!` (Claude Code's
+  shell escape) are refused; shell access stays behind the step-up gated terminal view.
 - Managed sessions are explicit, labelled, and run with the user's normal settings.
 - Codex threads open elsewhere are never resumed (single-writer locks are respected and never
   probed).

@@ -5448,7 +5448,8 @@
       "title": "Uzak terminaller",
       "help": "Telefondan açılan kabuklar bu bilgisayardaki kullanıcı hesabınızın izinleriyle çalışır. Telefon bağlantıyı kesse de çalışmaya devam eder ve SwitchTether kapandığında sona erer.",
       "empty": "Çalışan uzak terminal yok.",
-      "end": "Sonlandır"
+      "end": "Sonlandır",
+      "external": "Senin terminal pencerin"
     },
     "audit": {
       "title": "Güvenlik günlüğü",
@@ -5456,6 +5457,31 @@
       "empty": "Henüz olay yok."
     },
     "close": "Kapat",
-    "cancel": "İptal"
+    "cancel": "İptal",
+    "takeover": {
+      "title": "Kendi başlattığım oturumları devral",
+      "help": "İsteğe bağlı. VS Code, Codex Desktop veya bir terminalde başlattığın Claude Code / Codex oturumlarını telefondan kontrol etmeni sağlar: SwitchTether'in küçük bir aktarım sarmalayıcısı programın ile ajan arasına girer. SwitchTether çalışmıyorsa sarmalayıcı her şeyi olduğu gibi aktarır. Her anahtar değiştirdiği şeyi ~/.switchtether/backups içine yedekler ve kapatıldığında yalnızca o değişikliği geri alır.",
+      "noShim": "Bu kurulumda devralma sarmalayıcısı eksik; bu anahtarları kullanmak için SwitchTether'i yeniden kur.",
+      "skipped": "{{editors}} atlandı: orada zaten bir işlem sarmalayıcısı ayarlı ve SwitchTether onu değiştirmez.",
+      "disabledToast": "Devralma kapatıldı. Etkinleşmesi için programı yeniden başlat.",
+      "vscode": {
+        "label": "VS Code · Claude Code",
+        "description": "{{editors}} içinde claudeCode.claudeProcessWrapper ayarını yapar. Bundan sonra açılan Claude Code panellerine uygulanır.",
+        "unavailable": "VS Code ailesinden bir düzenleyici bulunamadı.",
+        "enabledToast": "Açıldı. VS Code'da yeni bir Claude Code paneli aç."
+      },
+      "codex_desktop": {
+        "label": "Codex Desktop",
+        "description": "CODEX_CLI_PATH kullanıcı ortam değişkenini ayarlar. Codex Desktop yeniden başlatılınca etkinleşir.",
+        "unavailable": "Codex Desktop bulunamadı (bu sürümde yalnızca Windows).",
+        "foreign": "CODEX_CLI_PATH zaten {{value}} olarak ayarlı; SwitchTether bunu değiştirmez.",
+        "enabledToast": "Açıldı. Codex Desktop'tan çıkıp yeniden başlat."
+      },
+      "cli": {
+        "label": "Terminal · st-claude / st-codex",
+        "description": "st-claude ve st-codex komutlarını ekler ({{dir}}). Telefondan erişmek istediğin oturumlar için claude / codex yerine bunları kullan; claude ve codex'in kendisi değişmez.",
+        "enabledToast": "Açıldı. Yeni bir terminal açıp st-claude veya st-codex çalıştır."
+      }
+    }
   }
 }

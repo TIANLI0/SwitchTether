@@ -36,6 +36,8 @@ import {
   type RemoteStatus,
   type RemoteTerminal,
   type RemoteUiEvent,
+  type TakeoverHook,
+  type TakeoverStatus,
 } from "@/lib/api/remote";
 
 function formatTime(ms?: number | null): string {
@@ -63,6 +65,8 @@ export function RemoteSection() {
   const [devices, setDevices] = useState<RemoteDevice[]>([]);
   const [terminals, setTerminals] = useState<RemoteTerminal[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [takeover, setTakeoverState] = useState<TakeoverStatus | null>(null);
+  const [takeoverBusy, setTakeoverBusy] = useState<TakeoverHook | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [portDraft, setPortDraft] = useState("");
@@ -89,6 +93,10 @@ export function RemoteSection() {
       setTerminals(term.filter((x) => !x.exited));
       setAudit(a);
       setLoadError(null);
+      remoteApi
+        .takeoverStatus()
+        .then(setTakeoverState)
+        .catch(() => setTakeoverState(null));
       setPortDraft((p) => p || String(s.config.port));
       setNameDraft((n) => n || s.config.serverName || s.serverName);
     } catch (e) {
@@ -130,6 +138,31 @@ export function RemoteSection() {
       toast.error(String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const toggleTakeover = async (hook: TakeoverHook, enabled: boolean) => {
+    setTakeoverBusy(hook);
+    try {
+      const res = await remoteApi.setTakeover(hook, enabled);
+      setTakeoverState(res.status);
+      const skipped = res.report.filter((r) => r.result === "skipped");
+      if (skipped.length > 0) {
+        toast.warning(
+          t("remote.takeover.skipped", {
+            editors: skipped.map((r) => String(r.editor)).join(", "),
+          }),
+        );
+      }
+      toast.success(
+        enabled
+          ? t(`remote.takeover.${hook}.enabledToast`)
+          : t("remote.takeover.disabledToast"),
+      );
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setTakeoverBusy(null);
     }
   };
 
@@ -403,6 +436,75 @@ export function RemoteSection() {
         </SettingsCard>
       </SettingsBlock>
 
+      {takeover && (
+        <SettingsBlock
+          title={t("remote.takeover.title")}
+          help={{
+            title: t("remote.takeover.title"),
+            body: t("remote.takeover.help"),
+          }}
+        >
+          <SettingsCard>
+            {!takeover.shimAvailable && (
+              <div className="px-4 py-3 text-body text-fg-2">
+                {t("remote.takeover.noShim")}
+              </div>
+            )}
+            <SettingsSwitchRow
+              label={t("remote.takeover.vscode.label")}
+              description={
+                takeover.vscode.available
+                  ? t("remote.takeover.vscode.description", {
+                      editors: takeover.vscode.editors
+                        .map((e) => e.editor)
+                        .join(", "),
+                    })
+                  : t("remote.takeover.vscode.unavailable")
+              }
+              checked={takeover.vscode.enabled}
+              disabled={
+                !takeover.vscode.available ||
+                (!takeover.shimAvailable && !takeover.vscode.enabled) ||
+                takeoverBusy !== null
+              }
+              onCheckedChange={(v) => void toggleTakeover("vscode", v)}
+            />
+            <SettingsSwitchRow
+              label={t("remote.takeover.codex_desktop.label")}
+              description={
+                takeover.codexDesktop.foreignValue
+                  ? t("remote.takeover.codex_desktop.foreign", {
+                      value: takeover.codexDesktop.foreignValue,
+                    })
+                  : takeover.codexDesktop.available
+                    ? t("remote.takeover.codex_desktop.description")
+                    : t("remote.takeover.codex_desktop.unavailable")
+              }
+              checked={takeover.codexDesktop.enabled}
+              disabled={
+                !takeover.codexDesktop.available ||
+                Boolean(takeover.codexDesktop.foreignValue) ||
+                (!takeover.shimAvailable && !takeover.codexDesktop.enabled) ||
+                takeoverBusy !== null
+              }
+              onCheckedChange={(v) => void toggleTakeover("codex_desktop", v)}
+            />
+            <SettingsSwitchRow
+              label={t("remote.takeover.cli.label")}
+              description={t("remote.takeover.cli.description", {
+                dir: takeover.cli.binDir,
+              })}
+              checked={takeover.cli.enabled}
+              disabled={
+                (!takeover.shimAvailable && !takeover.cli.enabled) ||
+                takeoverBusy !== null
+              }
+              onCheckedChange={(v) => void toggleTakeover("cli", v)}
+            />
+          </SettingsCard>
+        </SettingsBlock>
+      )}
+
       <SettingsBlock
         title={t("remote.terminals.title")}
         help={{
@@ -427,15 +529,21 @@ export function RemoteSection() {
               }
               description={`${term.shell} · ${term.cwd} · ${formatTime(term.createdAtMs)}`}
               control={
-                <Button
-                  variant="neutral"
-                  size="compact"
-                  onClick={() =>
-                    void remoteApi.killTerminal(term.id).then(refresh)
-                  }
-                >
-                  {t("remote.terminals.end")}
-                </Button>
+                term.external ? (
+                  <span className="text-caption text-fg-2">
+                    {t("remote.terminals.external")}
+                  </span>
+                ) : (
+                  <Button
+                    variant="neutral"
+                    size="compact"
+                    onClick={() =>
+                      void remoteApi.killTerminal(term.id).then(refresh)
+                    }
+                  >
+                    {t("remote.terminals.end")}
+                  </Button>
+                )
               }
             />
           ))}

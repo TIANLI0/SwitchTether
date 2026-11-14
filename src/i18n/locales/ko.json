@@ -5448,7 +5448,8 @@
       "title": "원격 터미널",
       "help": "휴대폰에서 연 셸은 이 컴퓨터의 사용자 권한으로 실행됩니다. 휴대폰 연결이 끊겨도 계속 실행되며 SwitchTether가 종료되면 끝납니다.",
       "empty": "실행 중인 원격 터미널이 없습니다.",
-      "end": "종료"
+      "end": "종료",
+      "external": "내 터미널 창"
     },
     "audit": {
       "title": "보안 로그",
@@ -5456,6 +5457,31 @@
       "empty": "아직 이벤트가 없습니다."
     },
     "close": "닫기",
-    "cancel": "취소"
+    "cancel": "취소",
+    "takeover": {
+      "title": "내가 시작한 세션 넘겨받기",
+      "help": "선택 기능입니다. VS Code, Codex Desktop 또는 터미널에서 시작한 Claude Code / Codex 세션을 휴대폰에서 제어할 수 있게 합니다. SwitchTether의 가벼운 전달 프로그램이 프로그램과 에이전트 사이에 위치합니다. SwitchTether가 실행 중이 아니면 그대로 전달만 합니다. 각 스위치는 변경 내용을 ~/.switchtether/backups에 백업하고, 끄면 그 변경만 되돌립니다.",
+      "noShim": "이 설치에는 전달 프로그램이 없습니다. SwitchTether를 다시 설치하세요.",
+      "skipped": "{{editors}}을(를) 건너뛰었습니다. 이미 다른 프로세스 래퍼가 설정되어 있어 SwitchTether가 바꾸지 않습니다.",
+      "disabledToast": "넘겨받기를 껐습니다. 해당 프로그램을 다시 시작하면 적용됩니다.",
+      "vscode": {
+        "label": "VS Code · Claude Code",
+        "description": "{{editors}}에 claudeCode.claudeProcessWrapper를 설정합니다. 이후 새로 연 Claude Code 패널에 적용됩니다.",
+        "unavailable": "VS Code 계열 편집기를 찾을 수 없습니다.",
+        "enabledToast": "켰습니다. VS Code에서 새 Claude Code 패널을 여세요."
+      },
+      "codex_desktop": {
+        "label": "Codex Desktop",
+        "description": "사용자 환경 변수 CODEX_CLI_PATH를 설정합니다. Codex Desktop을 다시 시작하면 적용됩니다.",
+        "unavailable": "Codex Desktop을 찾을 수 없습니다(이 버전은 Windows만 지원).",
+        "foreign": "CODEX_CLI_PATH가 이미 {{value}}(으)로 설정되어 있습니다. SwitchTether는 바꾸지 않습니다.",
+        "enabledToast": "켰습니다. Codex Desktop을 종료한 후 다시 여세요."
+      },
+      "cli": {
+        "label": "터미널 · st-claude / st-codex",
+        "description": "st-claude와 st-codex 명령을 추가합니다({{dir}}). 휴대폰에서 제어할 세션은 claude / codex 대신 이 명령으로 시작하세요. claude와 codex 자체는 그대로입니다.",
+        "enabledToast": "켰습니다. 새 터미널에서 st-claude 또는 st-codex를 실행하세요."
+      }
+    }
   }
 }

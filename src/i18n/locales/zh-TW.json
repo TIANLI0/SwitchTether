@@ -5448,7 +5448,8 @@
       "title": "遠端終端機",
       "help": "從手機開啟的 Shell 以你在這台電腦上的使用者權限執行。手機中斷後仍會繼續執行，SwitchTether 結束時一併結束。",
       "empty": "沒有正在執行的遠端終端機。",
-      "end": "結束"
+      "end": "結束",
+      "external": "你的終端機視窗"
     },
     "audit": {
       "title": "安全日誌",
@@ -5456,6 +5457,31 @@
       "empty": "暫無記錄。"
     },
     "close": "關閉",
-    "cancel": "取消"
+    "cancel": "取消",
+    "takeover": {
+      "title": "接管我自己啟動的工作階段",
+      "help": "選用功能。讓手機能控制你在 VS Code、Codex Desktop 或終端機中啟動的 Claude Code / Codex 工作階段：SwitchTether 的輕量轉送器位於你的程式與 Agent 之間。SwitchTether 未執行時轉送器只會原樣轉送。每個開關都會先備份它變更的內容（~/.switchtether/backups），關閉時只撤銷這一處變更。",
+      "noShim": "此安裝缺少接管轉送器，請重新安裝 SwitchTether 後再使用這些開關。",
+      "skipped": "已略過 {{editors}}：那裡已設定其他程序包裝器，SwitchTether 不會取代。",
+      "disabledToast": "已關閉接管，重新啟動對應程式後生效。",
+      "vscode": {
+        "label": "VS Code · Claude Code",
+        "description": "在 {{editors}} 中設定 claudeCode.claudeProcessWrapper，對之後新開的 Claude Code 面板生效。",
+        "unavailable": "找不到 VS Code 系列編輯器。",
+        "enabledToast": "已開啟。在 VS Code 中新開一個 Claude Code 面板即可接管。"
+      },
+      "codex_desktop": {
+        "label": "Codex Desktop",
+        "description": "設定使用者環境變數 CODEX_CLI_PATH，重新啟動 Codex Desktop 後生效。",
+        "unavailable": "找不到 Codex Desktop（此版本僅支援 Windows）。",
+        "foreign": "CODEX_CLI_PATH 已設定為 {{value}}，SwitchTether 不會取代。",
+        "enabledToast": "已開啟。結束並重新開啟 Codex Desktop 後生效。"
+      },
+      "cli": {
+        "label": "終端機 · st-claude / st-codex",
+        "description": "新增 st-claude 與 st-codex 指令（{{dir}}）。想在手機上接管的工作階段改用它們代替 claude / codex 啟動；claude 與 codex 本身不變。",
+        "enabledToast": "已開啟。開啟新的終端機執行 st-claude 或 st-codex。"
+      }
+    }
   }
 }

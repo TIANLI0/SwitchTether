@@ -262,6 +262,8 @@ Session-level `capabilities` override the agent defaults (e.g. a managed session
 |---|---|
 | `agent` | `claude_code`, `codex`, or any CC Switch session provider id (`gemini`, `opencode`, …) — history only |
 | `origin` | `cli`, `vscode`, `desktop_app`, `managed` (started by SwitchTether), `unknown` |
+| `managed` | `true` only for sessions SwitchTether started. A session of the user's own process that SwitchTether is attached to through an opt-in takeover hook has its real origin, `managed: false` and `control: "full"` |
+| `terminalId` | optional; set for sessions running in the user's terminal window (`st-claude` / `st-codex`). The id of an **external** terminal (`/v1/terminals`, `external: true`) mirroring that window; prompts are answered there |
 | `liveness` | `live` (process running), `ended`, `unknown` |
 | `status` | `busy`, `idle`, `waiting`, `completed`, `error`, `unknown` |
 | `waitingFor` | `permission prompt`, `input needed`, … (as reported by the agent), or `null` |

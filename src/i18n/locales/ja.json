@@ -5448,7 +5448,8 @@
       "title": "リモートターミナル",
       "help": "スマホから開いたシェルは、このコンピューターでのあなたのユーザー権限で実行されます。スマホが切断されても動作し続け、SwitchTether の終了時に終了します。",
       "empty": "実行中のリモートターミナルはありません。",
-      "end": "終了"
+      "end": "終了",
+      "external": "あなたのターミナル"
     },
     "audit": {
       "title": "セキュリティログ",
@@ -5456,6 +5457,31 @@
       "empty": "まだイベントはありません。"
     },
     "close": "閉じる",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "takeover": {
+      "title": "自分で起動したセッションを引き継ぐ",
+      "help": "オプション機能です。VS Code、Codex Desktop、ターミナルで起動した Claude Code / Codex のセッションをスマートフォンから操作できるようにします。SwitchTether の軽量な中継プログラムがアプリとエージェントの間に入ります。SwitchTether が起動していないときはそのまま中継するだけです。各スイッチは変更内容を ~/.switchtether/backups にバックアップし、オフにするとその変更だけを元に戻します。",
+      "noShim": "このインストールには中継プログラムがありません。SwitchTether を再インストールしてください。",
+      "skipped": "{{editors}} はスキップしました。別のプロセスラッパーが設定済みのため、SwitchTether は置き換えません。",
+      "disabledToast": "引き継ぎをオフにしました。対象のアプリを再起動すると反映されます。",
+      "vscode": {
+        "label": "VS Code · Claude Code",
+        "description": "{{editors}} に claudeCode.claudeProcessWrapper を設定します。この後に開いた Claude Code パネルに適用されます。",
+        "unavailable": "VS Code 系のエディターが見つかりません。",
+        "enabledToast": "オンにしました。VS Code で新しい Claude Code パネルを開いてください。"
+      },
+      "codex_desktop": {
+        "label": "Codex Desktop",
+        "description": "ユーザー環境変数 CODEX_CLI_PATH を設定します。Codex Desktop の再起動後に反映されます。",
+        "unavailable": "Codex Desktop が見つかりません（このバージョンは Windows のみ対応）。",
+        "foreign": "CODEX_CLI_PATH は既に {{value}} に設定されています。SwitchTether は置き換えません。",
+        "enabledToast": "オンにしました。Codex Desktop を終了して再起動してください。"
+      },
+      "cli": {
+        "label": "ターミナル · st-claude / st-codex",
+        "description": "st-claude と st-codex コマンドを追加します（{{dir}}）。スマートフォンから操作したいセッションは claude / codex の代わりにこれらで起動します。claude と codex 自体は変わりません。",
+        "enabledToast": "オンにしました。新しいターミナルで st-claude または st-codex を実行してください。"
+      }
+    }
   }
 }

@@ -130,3 +130,18 @@ pub async fn remote_audit_log(
 pub async fn remote_quit_impact(state: State<'_, RemoteState>) -> Result<Value, String> {
     Ok(state.get()?.quit_impact().await)
 }
+
+/// Opt-in takeover hooks (VS Code wrapper, Codex Desktop, terminal launchers).
+#[tauri::command]
+pub async fn remote_takeover_status() -> Result<Value, String> {
+    tokio::task::spawn_blocking(super::takeover::status)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remote_set_takeover(hook: String, enabled: bool) -> Result<Value, String> {
+    tokio::task::spawn_blocking(move || super::takeover::set(&hook, enabled))
+        .await
+        .map_err(|e| e.to_string())?
+}

@@ -316,13 +316,40 @@ impl AgentHub {
 
     /// Static capability matrix (docs/AGENT_COMPATIBILITY.md).
     pub fn capability_matrix(&self) -> Value {
+        let attached = |terminal: bool| {
+            let s = SessionSummary {
+                id: String::new(),
+                agent: String::new(),
+                origin: Origin::Unknown,
+                native_id: String::new(),
+                title: None,
+                cwd: None,
+                project: None,
+                liveness: Liveness::Live,
+                status: String::new(),
+                waiting_for: None,
+                control: Control::Full,
+                created_at_ms: None,
+                last_active_at_ms: None,
+                model: None,
+                git_branch: None,
+                pid: None,
+                managed: false,
+                terminal_id: terminal.then(String::new),
+                source_path: None,
+            };
+            attached_caps(&s)
+        };
         json!([
-            { "agent": "claude_code", "origin": "cli", "capabilities": observed_caps("claude_code"), "notes": "Live sessions discovered via `claude agents --json`; transcript tailed read-only. No supported interface to send messages, approve or interrupt an externally started session." },
-            { "agent": "claude_code", "origin": "vscode", "capabilities": observed_caps("claude_code"), "notes": "The extension drives claude over private stdio pipes; no public extension API. Observation only." },
+            { "agent": "claude_code", "origin": "cli", "capabilities": observed_caps("claude_code"), "notes": "Started with plain `claude`: discovered via `claude agents --json`, transcript tailed read-only. Can be continued in a SwitchTether process." },
+            { "agent": "claude_code", "origin": "cli", "takeover": "st-claude", "capabilities": attached(true), "notes": "Started with `st-claude` (opt-in launcher): the TUI is mirrored as a terminal; messages are typed into it; prompts are answered in the terminal view." },
+            { "agent": "claude_code", "origin": "vscode", "capabilities": observed_caps("claude_code"), "notes": "Without the opt-in wrapper: observation only." },
+            { "agent": "claude_code", "origin": "vscode", "takeover": "claudeProcessWrapper", "capabilities": attached(false), "notes": "With the opt-in claudeCode.claudeProcessWrapper hook: messages, approvals (first answer wins; the IDE dialog is dismissed) and interrupt from the phone." },
             { "agent": "claude_code", "origin": "managed", "capabilities": managed_caps(), "notes": "New sessions started by SwitchTether via the Agent SDK stream-json protocol with the user's normal settings, plugins, MCP and hooks." },
-            { "agent": "codex", "origin": "cli", "capabilities": observed_caps("codex"), "notes": "Rollout files tailed read-only. A second app-server cannot attach to a live thread (Codex enforces a single writer)." },
+            { "agent": "codex", "origin": "cli", "capabilities": observed_caps("codex"), "notes": "Rollout files tailed read-only; `st-codex` mirrors the TUI as a terminal." },
             { "agent": "codex", "origin": "managed", "capabilities": managed_caps(), "notes": "New threads on SwitchTether's own codex app-server (stdio), using the normal Codex config and login." },
-            { "agent": "codex", "origin": "desktop_app", "capabilities": observed_caps("codex"), "notes": "Codex Desktop runs its own app-server; no external attach. Observation of rollouts only." },
+            { "agent": "codex", "origin": "desktop_app", "capabilities": observed_caps("codex"), "notes": "Without the opt-in hook: observation of rollouts only." },
+            { "agent": "codex", "origin": "desktop_app", "takeover": "CODEX_CLI_PATH", "capabilities": attached(false), "notes": "With the opt-in CODEX_CLI_PATH hook: every thread loaded in Codex Desktop can be messaged, approved and interrupted from the phone." },
         ])
     }
 

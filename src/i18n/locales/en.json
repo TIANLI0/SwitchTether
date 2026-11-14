@@ -5448,7 +5448,8 @@
       "title": "Remote terminals",
       "help": "Shells opened from the phone run with your user account's permissions on this computer. They keep running when the phone disconnects and end when SwitchTether quits.",
       "empty": "No remote terminal is running.",
-      "end": "End"
+      "end": "End",
+      "external": "Your terminal window"
     },
     "audit": {
       "title": "Security log",
@@ -5456,6 +5457,31 @@
       "empty": "No events yet."
     },
     "close": "Close",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "takeover": {
+      "title": "Take over sessions I start myself",
+      "help": "Optional. Lets the phone control Claude Code / Codex sessions you start in VS Code, Codex Desktop or a terminal: SwitchTether's small pass-through wrapper sits between your program and the agent. When SwitchTether is not running the wrapper simply passes everything through. Each switch backs up what it changes (in ~/.switchtether/backups) and turning it off removes exactly that change.",
+      "noShim": "The takeover wrapper is missing from this installation; reinstall SwitchTether to use these switches.",
+      "skipped": "Skipped {{editors}}: a process wrapper is already configured there and SwitchTether will not replace it.",
+      "disabledToast": "Takeover turned off. Restart the program to apply.",
+      "vscode": {
+        "label": "VS Code · Claude Code",
+        "description": "Sets claudeCode.claudeProcessWrapper in {{editors}}. Applies to Claude Code panels opened after this.",
+        "unavailable": "No VS Code-family editor found.",
+        "enabledToast": "Enabled. Open a new Claude Code panel in VS Code to use it."
+      },
+      "codex_desktop": {
+        "label": "Codex Desktop",
+        "description": "Sets the user environment variable CODEX_CLI_PATH. Restart Codex Desktop to apply.",
+        "unavailable": "Codex Desktop was not found (Windows only in this version).",
+        "foreign": "CODEX_CLI_PATH is already set to {{value}}; SwitchTether will not replace it.",
+        "enabledToast": "Enabled. Quit and restart Codex Desktop to use it."
+      },
+      "cli": {
+        "label": "Terminal · st-claude / st-codex",
+        "description": "Adds st-claude and st-codex commands ({{dir}}). Use them instead of claude / codex for sessions you want to reach from the phone; claude and codex themselves are unchanged.",
+        "enabledToast": "Enabled. Open a new terminal and run st-claude or st-codex."
+      }
+    }
   }
 }

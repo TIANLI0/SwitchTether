@@ -18,7 +18,8 @@ SwitchTether surfaces three kinds of sessions and never presents one as another:
 
 | Kind | Origin label | What the phone can do |
 |---|---|---|
-| A session you started yourself (terminal CLI, VS Code panel, Codex Desktop) | `cli` / `vscode` / `desktop_app` | **Observe**: discover, read history, near-real-time events. Control is **BLOCKED** upstream. |
+| A session you started yourself (terminal CLI, VS Code panel, Codex Desktop) | `cli` / `vscode` / `desktop_app` | **Observe**: discover, read history, near-real-time events. In-place control is **BLOCKED** upstream — unless the opt-in takeover hook for that client is on (§6b). |
+| A session you started yourself **with the opt-in takeover hook on** (§6b) | `cli` / `vscode` / `desktop_app`, `control: full`, `managed: false` | Send, approve, interrupt (terminal: through the mirrored terminal) |
 | History indexed by CC Switch (all supported agents) | `unknown`, liveness `ended` | Read |
 | A **new session started by SwitchTether** on your request (optionally continuing an old Claude history as a fork) | `managed` | Full control: send, approve, answer, interrupt |
 
@@ -107,6 +108,27 @@ legitimate alternative: the **same conversation** continues in a new SwitchTethe
 | Status | **PARTIAL — VERIFIED live** (2026-11-14): an external `claude -p` session was told a code word; continuing it from SwitchTether answered with that word, and the new turn was appended to the original transcript file | PARTIAL — implemented; not run live (no isolated authenticated Codex home) |
 | Safety guard | refused while the original is `busy`/`waiting` (unit test `continuing_a_busy_external_session_is_refused`) | Codex itself refuses while the thread is open elsewhere ("active writer"), surfaced as 409 |
 | Limitations | the original window (terminal / VS Code panel) does not show the phone's turns and must not be used at the same time; it is not an in-place takeover | the original client cannot write to the thread while SwitchTether holds it |
+
+## 6b. Opt-in takeover of sessions you start yourself ("接管")
+
+Turned on per client in Settings → Remote → "Take over sessions I start myself". Each switch
+points the client at `switchtether-shim`, a pass-through wrapper shipped with SwitchTether
+(copied to `~/.switchtether/bin`). The shim starts the real agent, forwards everything between
+the client and the agent unchanged, and mirrors the traffic to SwitchTether's local attach
+broker; the phone's input is injected into the same stream. If SwitchTether is not running the
+shim only passes through. Nothing is injected into running processes: the hook applies to
+sessions started after it is turned on.
+
+| Client | Hook (opt-in, backed up, removed exactly) | Phone can | Status / evidence (2026-11-14) |
+|---|---|---|---|
+| Claude Code in VS Code (and Insiders, Cursor, Windsurf, VSCodium) | `claudeCode.claudeProcessWrapper` in the editor's user `settings.json`; never replaces an existing wrapper | send, approve / deny (first answer wins; the IDE dialog is dismissed with `control_cancel_request`), interrupt; prompts typed in the IDE appear on the phone | **PARTIAL** — verified live with the shim wrapping real `claude` and a test harness speaking the extension's stream-json protocol: phone approval ran the command and dismissed the host's dialog, a phone message produced a turn whose output reached the host, the session ended when the host closed. Inside the real VS Code extension: UNTESTED (needs the user to open a new panel). Interrupt: implemented, not exercised live. |
+| Codex Desktop (Windows) | user environment variable `CODEX_CLI_PATH` (refused if already set); restart Codex Desktop | every thread loaded in Desktop: send (`turn/start`, `turn/steer`), approve (Desktop gets `serverRequest/resolved`), interrupt | **PARTIAL** — verified live with Codex Desktop's own bundled `codex.exe` 0.167 behind the shim and a harness playing Desktop: phone approval ran the command, a phone message produced a turn streamed to the host. Real Codex Desktop launching the shim: UNTESTED (needs a Desktop restart). |
+| Terminal | `st-claude` / `st-codex` launchers in `~/.switchtether/bin` (Windows: added to the user PATH). Plain `claude` / `codex` are never redirected | the TUI is mirrored as an external terminal (step-up gated like any terminal); messages are typed into the TUI (bracketed paste + Enter; `!` shell lines refused); Esc interrupts; prompts are answered in the terminal view; conversation read from the transcript once the session id is matched (pid / cwd) | **PARTIAL** — real `claude` TUI rendered through the shim's PTY and mirrored (folder-trust screen captured); typing/size/exit covered by `tests/attach_broker.rs`. Typing into a live authenticated TUI: UNTESTED. |
+
+Attached sessions are listed with their real origin (`vscode`, `desktop_app`, `cli`),
+`control: "full"` and `managed: false`; they are never labelled `managed`, and quitting
+SwitchTether never stops them. The observed id (`claude:<id>` / `codex:<id>`) of the same
+conversation resolves to the attached session.
 
 ## 7. Other agents (Gemini CLI, OpenCode, …)
 

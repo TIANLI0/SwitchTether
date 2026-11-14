@@ -1625,6 +1625,8 @@ pub fn run() {
             switchtether::commands::remote_kill_terminal,
             switchtether::commands::remote_audit_log,
             switchtether::commands::remote_quit_impact,
+            switchtether::commands::remote_takeover_status,
+            switchtether::commands::remote_set_takeover,
             commands::get_providers,
             commands::get_current_provider,
             commands::add_provider,

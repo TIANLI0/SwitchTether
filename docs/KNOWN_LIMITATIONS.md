@@ -5,11 +5,15 @@ TODO list. Each item says what the user experiences.
 
 ## Agent control
 
-1. **Sessions you started yourself cannot be controlled from the phone.** For Claude Code
-   (terminal and VS Code) and Codex (CLI 0.137 and Desktop) there is no supported interface for
-   another program to send input, answer a permission prompt or interrupt an existing session.
-   The phone shows them read-only with a "BLOCKED" explanation. Control requires starting a
-   **new SwitchTether-managed session** (optionally continuing a Claude history as a fork).
+1. **Sessions you started yourself are controllable only with the opt-in takeover hooks.**
+   Without them there is no supported interface for another program to send input, answer a
+   permission prompt or interrupt an existing session, and the phone shows them read-only.
+   With a hook on (Settings → Remote, docs/AGENT_COMPATIBILITY.md §6b) only sessions started
+   *after* turning it on are controllable; already running VS Code panels, Codex Desktop
+   windows and terminals stay observe-only. Codex Desktop takeover is Windows-only. Terminal
+   sessions (`st-claude` / `st-codex`) answer prompts in the mirrored terminal view, not with
+   approval cards. Turns sent from the phone into a VS Code panel run in that panel's process,
+   but whether the extension's chat view redraws them is up to the extension (UNTESTED).
    Evidence: docs/research/CLAUDE_CODE_RUNTIME.md, docs/research/CODEX_RUNTIME.md.
 2. **Live view of external sessions is near-real-time, not streaming.** Transcripts are tailed
    (~0.8 s) and contain completed records only. A pending permission dialog in a terminal
