@@ -162,7 +162,10 @@ async fn pair(
 
 async fn status(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice) -> Json<Value> {
     let cfg = ctx.config.read().clone();
+    let (tz, offset_min) = crate::util::desktop_time_zone();
     Json(json!({
+        "timeZone": tz,
+        "utcOffsetMinutes": offset_min,
         "serverId": ctx.server_id,
         "serverName": cfg.server_name,
         "serverVersion": cfg.server_version,

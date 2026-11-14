@@ -84,6 +84,13 @@ pub fn verification_code(server_fp: &str, client_fp: &str) -> String {
     format!("{n:06}")
 }
 
+/// Desktop time zone: IANA name (if the OS reports one) and current UTC offset
+/// in minutes. Usage buckets and "today" are computed in this zone.
+pub fn desktop_time_zone() -> (Option<String>, i32) {
+    let offset = chrono::Local::now().offset().local_minus_utc() / 60;
+    (iana_time_zone::get_timezone().ok(), offset)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -177,6 +177,21 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   `GET /v1/usage/models?…` · `GET /v1/usage/providers?…` ·
   `GET /v1/usage/quota/{tool}` (subscription quota; `available:false` + `reason` when the
   upstream service does not expose it — never fabricated).
+- Usage ranges are epoch seconds; buckets and "today" use the **desktop's time zone**
+  (`GET /v1/status` → `timeZone` (IANA, may be null) and `utcOffsetMinutes`). Trend buckets carry
+  `date` (RFC 3339, desktop offset), `startMs` and `realTotalTokens`; the response has `timeZone`.
+- `GET /v1/usage/logs?from&to&app&provider&model&status&page&pageSize` → `{ data: [RequestLog],
+  total, page, pageSize }` (page 0-based, pageSize ≤ 100, default 20). `RequestLog`: `requestId,
+  providerName, appType, model, requestModel, inputTokens, outputTokens, cacheReadTokens,
+  cacheCreationTokens, inputCostUsd, outputCostUsd, cacheReadCostUsd, cacheCreationCostUsd,
+  totalCostUsd, isStreaming, latencyMs, firstTokenMs, durationMs, statusCode, errorMessage,
+  createdAt, dataSource` (metadata only — no request or response bodies).
+- `GET /v1/usage/logs/{requestId}` → one `RequestLog` (404 if unknown).
+- `GET /v1/usage/first-date?app&provider&model` → `{ firstDateMs, firstDate }` (desktop-local
+  midnight; both null without data).
+- `GET /v1/usage/last-sync` → `{ lastSyncMs }` (last completed session-log scan, or null).
+- `GET /v1/settings` includes `usageDisplay` (currency, exchangeRates, rateSource,
+  autoExchangeRates, …) and `visibleApps`.
 
 ### 7.4 MCP / Skills / Prompts / Settings / Proxy / Health
 - `GET /v1/mcp/servers` (env/headers redacted) · `POST /v1/mcp/servers/{id}/toggle` `{app, enabled, commandId}`

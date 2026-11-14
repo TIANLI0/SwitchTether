@@ -27,6 +27,10 @@ pub fn routes() -> Router<Arc<ApiContext>> {
         .route("/v1/usage/trends", get(usage_trends))
         .route("/v1/usage/models", get(usage_models))
         .route("/v1/usage/providers", get(usage_providers))
+        .route("/v1/usage/logs", get(usage_logs))
+        .route("/v1/usage/logs/:id", get(usage_log))
+        .route("/v1/usage/first-date", get(usage_first_date))
+        .route("/v1/usage/last-sync", get(usage_last_sync))
         .route("/v1/usage/quota/:tool", get(quota))
         .route("/v1/mcp/servers", get(mcp_servers))
         .route("/v1/mcp/servers/:id/toggle", post(mcp_toggle))
@@ -244,6 +248,80 @@ usage_route!(usage_summary, usage_summary);
 usage_route!(usage_trends, usage_trends);
 usage_route!(usage_models, usage_models);
 usage_route!(usage_providers, usage_providers);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LogParams {
+    #[serde(flatten)]
+    usage: UsageParams,
+    status: Option<u16>,
+    page: Option<u32>,
+    page_size: Option<u32>,
+}
+
+/// `GET /v1/usage/logs?from&to&app&provider&model&status&page&pageSize`
+/// (page is 0-based, pageSize 1..=100, default 20).
+async fn usage_logs(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(p): Query<LogParams>,
+) -> ApiResult<Json<Value>> {
+    let page_size = p.page_size.unwrap_or(20).clamp(1, 100);
+    ctx.backend
+        .usage_logs(p.usage.into(), p.status, p.page.unwrap_or(0), page_size)
+        .await
+        .map(|mut v| {
+            crate::redact::redact_json(&mut v);
+            Json(v)
+        })
+        .map_err(|e| backend_err(&ctx, e))
+}
+
+async fn usage_log(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_:.".contains(c))
+    {
+        return Err(ApiError::validation("invalid request id"));
+    }
+    match ctx.backend.usage_log(&id).await {
+        Ok(Value::Null) => Err(ApiError::not_found("no such request")),
+        Ok(mut v) => {
+            crate::redact::redact_json(&mut v);
+            Ok(Json(v))
+        }
+        Err(e) => Err(backend_err(&ctx, e)),
+    }
+}
+
+async fn usage_first_date(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(p): Query<UsageParams>,
+) -> ApiResult<Json<Value>> {
+    ctx.backend
+        .usage_first_date(p.into())
+        .await
+        .map(Json)
+        .map_err(|e| backend_err(&ctx, e))
+}
+
+async fn usage_last_sync(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+) -> ApiResult<Json<Value>> {
+    ctx.backend
+        .usage_last_sync()
+        .await
+        .map(Json)
+        .map_err(|e| backend_err(&ctx, e))
+}
 
 async fn quota(
     State(ctx): State<Arc<ApiContext>>,

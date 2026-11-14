@@ -72,6 +72,20 @@ pub trait CcSwitchBackend: Send + Sync + 'static {
     async fn usage_trends(&self, q: UsageQuery) -> BackendResult<Value>;
     async fn usage_models(&self, q: UsageQuery) -> BackendResult<Value>;
     async fn usage_providers(&self, q: UsageQuery) -> BackendResult<Value>;
+    /// One request log entry (metadata only), or `null`.
+    async fn usage_log(&self, request_id: &str) -> BackendResult<Value>;
+    /// Earliest usage day: `{ firstDateMs }` (desktop-local midnight) or null.
+    async fn usage_first_date(&self, q: UsageQuery) -> BackendResult<Value>;
+    /// Last completed session-log scan: `{ lastSyncMs }` or null.
+    async fn usage_last_sync(&self) -> BackendResult<Value>;
+    /// Request log (metadata only: model, tokens, cost, status, latency), newest first.
+    async fn usage_logs(
+        &self,
+        q: UsageQuery,
+        status: Option<u16>,
+        page: u32,
+        page_size: u32,
+    ) -> BackendResult<Value>;
     async fn quota(&self, tool: &str) -> BackendResult<Value>;
 
     // ---- MCP / skills / prompts ----
@@ -132,6 +146,24 @@ impl CcSwitchBackend for UnavailableBackend {
         Err("backend unavailable".into())
     }
     async fn usage_providers(&self, _q: UsageQuery) -> BackendResult<Value> {
+        Err("backend unavailable".into())
+    }
+    async fn usage_log(&self, _id: &str) -> BackendResult<Value> {
+        Err("backend unavailable".into())
+    }
+    async fn usage_first_date(&self, _q: UsageQuery) -> BackendResult<Value> {
+        Err("backend unavailable".into())
+    }
+    async fn usage_last_sync(&self) -> BackendResult<Value> {
+        Err("backend unavailable".into())
+    }
+    async fn usage_logs(
+        &self,
+        _q: UsageQuery,
+        _s: Option<u16>,
+        _p: u32,
+        _ps: u32,
+    ) -> BackendResult<Value> {
         Err("backend unavailable".into())
     }
     async fn quota(&self, _t: &str) -> BackendResult<Value> {

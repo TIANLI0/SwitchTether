@@ -287,6 +287,31 @@ impl CcSwitchBackend for CcSwitchBridge {
             )
             .map_err(|e| e.to_string())
             .and_then(|v| to_json(v).map(|d| json!({ "days": d })))
+            .map(|mut v| {
+                // Bucket start (epoch ms) and the real token total, so phones label
+                // buckets exactly like the desktop (desktop time zone).
+                if let Some(days) = v["days"].as_array_mut() {
+                    for d in days {
+                        let start = d["date"]
+                            .as_str()
+                            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                            .map(|t| t.timestamp_millis());
+                        let real = [
+                            "totalInputTokens",
+                            "totalOutputTokens",
+                            "totalCacheReadTokens",
+                            "totalCacheCreationTokens",
+                        ]
+                        .iter()
+                        .map(|k| d[*k].as_u64().unwrap_or(0))
+                        .sum::<u64>();
+                        d["startMs"] = json!(start);
+                        d["realTotalTokens"] = json!(real);
+                    }
+                }
+                v["timeZone"] = json!(switchtether_core::util::desktop_time_zone().0);
+                v
+            })
         })
         .await
     }
@@ -319,6 +344,72 @@ impl CcSwitchBackend for CcSwitchBridge {
             .and_then(|v| to_json(v).map(|d| json!({ "providers": d })))
         })
         .await
+    }
+
+    async fn usage_logs(
+        &self,
+        q: UsageQuery,
+        status: Option<u16>,
+        page: u32,
+        page_size: u32,
+    ) -> BackendResult<Value> {
+        self.blocking(move |s| {
+            let filters = crate::services::usage_stats::LogFilters {
+                app_type: q.app,
+                provider_name: q.provider,
+                model: q.model,
+                status_code: status,
+                start_date: q.from,
+                end_date: q.to,
+            };
+            s.db.get_request_logs(&filters, page, page_size)
+                .map_err(|e| e.to_string())
+                .and_then(to_json)
+                .map(|mut v| {
+                    if let Some(items) = v["data"].as_array_mut() {
+                        for it in items {
+                            strip_log_internals(it);
+                        }
+                    }
+                    v
+                })
+        })
+        .await
+    }
+
+    async fn usage_log(&self, request_id: &str) -> BackendResult<Value> {
+        let id = request_id.to_string();
+        self.blocking(move |s| {
+            let detail = s.db.get_request_detail(&id).map_err(|e| e.to_string())?;
+            let mut v = to_json(detail)?;
+            strip_log_internals(&mut v);
+            Ok(v)
+        })
+        .await
+    }
+
+    async fn usage_first_date(&self, q: UsageQuery) -> BackendResult<Value> {
+        self.blocking(move |s| {
+            let day = s
+                .db
+                .get_first_usage_date(q.app.as_deref(), q.provider.as_deref(), q.model.as_deref())
+                .map_err(|e| e.to_string())?;
+            let ms = day
+                .as_deref()
+                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+                .and_then(|d| d.and_hms_opt(0, 0, 0))
+                .and_then(|dt| dt.and_local_timezone(chrono::Local).earliest())
+                .map(|t| t.timestamp_millis());
+            Ok(json!({ "firstDateMs": ms, "firstDate": day }))
+        })
+        .await
+    }
+
+    async fn usage_last_sync(&self) -> BackendResult<Value> {
+        let at = crate::services::session_usage::last_sync_completed_at();
+        // Stored in seconds or ms depending on the upstream version: normalise to ms.
+        let ms = at.map(|t| if t < 100_000_000_000 { t * 1000 } else { t });
+        Ok(json!({ "lastSyncMs": ms }))
     }
 
     async fn quota(&self, tool: &str) -> BackendResult<Value> {
@@ -401,6 +492,7 @@ impl CcSwitchBackend for CcSwitchBridge {
             "quotaDisplay",
             // Currency, exchange rates and digits used to show costs (the phone mirrors them).
             "usageDisplay",
+            "visibleApps",
         ];
         let mut out = serde_json::Map::new();
         for k in keys {
@@ -495,5 +587,14 @@ mod tests {
         );
         assert!(!view.to_string().contains("0123456789abcdef"));
         assert_eq!(view["isCurrent"], true);
+    }
+}
+
+/// Fields of a request log entry that phones don't need.
+fn strip_log_internals(v: &mut Value) {
+    if let Some(o) = v.as_object_mut() {
+        for k in ["providerId", "costMultiplier", "pricingModel"] {
+            o.remove(k);
+        }
     }
 }
