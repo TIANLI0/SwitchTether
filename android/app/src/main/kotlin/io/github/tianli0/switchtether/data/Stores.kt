@@ -35,6 +35,12 @@ data class PairedDesktop(
     val stepUpAlias: String?,
     val stepUpEnabled: Boolean,
     val pairedAtMs: Long,
+    /** Relay of this desktop (pairing link `r`, docs/RELAY.md); used only when no direct host answers. */
+    val relayUrl: String? = null,
+    /** Legacy plaintext token from early builds: never written any more, never used. */
+    val relayToken: String? = null,
+    /** Relay token + relay key, encrypted with a Keystore key (see KeystoreRelaySecrets). */
+    val relaySecret: String? = null,
 ) {
     /** Host candidates with the last successful one first. */
     fun orderedHosts(): List<String> = listOfNotNull(lastGoodHost) + hosts.filter { it != lastGoodHost }
@@ -73,6 +79,8 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
     private val keyTheme = stringPreferencesKey("theme_mode")
     private val keyBackground = booleanPreferencesKey("background_connection")
     private val keyNotifyOn = stringSetPreferencesKey("notify_enabled_types")
+    /** Types that existed when [keyNotifyOn] was written: types added later get their default. */
+    private val keyNotifyKnown = stringSetPreferencesKey("notify_known_types")
     private val keyMutedAgents = stringSetPreferencesKey("notify_muted_agents")
     private val keyMutedProjects = stringSetPreferencesKey("notify_muted_projects")
     private val keyQuiet = stringPreferencesKey("notify_quiet") // "on|start|end"
@@ -103,7 +111,11 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
         val d = NotifyPrefs()
         val quiet = p[keyQuiet]?.split('|')
         NotifyPrefs(
-            enabled = p[keyNotifyOn]?.mapNotNull { v -> NotifyType.entries.firstOrNull { it.name == v } }?.toSet() ?: d.enabled,
+            enabled = p[keyNotifyOn]?.let { saved ->
+                val known = p[keyNotifyKnown] ?: LEGACY_NOTIFY_TYPES
+                val chosen = saved.mapNotNull { v -> NotifyType.entries.firstOrNull { it.name == v } }.toSet()
+                chosen + d.enabled.filter { it.name !in known }
+            } ?: d.enabled,
             mutedAgents = p[keyMutedAgents].orEmpty(),
             mutedProjects = p[keyMutedProjects].orEmpty(),
             quietHoursEnabled = quiet?.getOrNull(0) == "1",
@@ -124,6 +136,7 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
         val n = transform(notifyPrefs.first())
         store.edit { p ->
             p[keyNotifyOn] = n.enabled.map { it.name }.toSet()
+            p[keyNotifyKnown] = NotifyType.entries.map { it.name }.toSet()
             p[keyMutedAgents] = n.mutedAgents
             p[keyMutedProjects] = n.mutedProjects
             p[keyQuiet] = "${if (n.quietHoursEnabled) 1 else 0}|${n.quietStartMin}|${n.quietEndMin}"
@@ -144,3 +157,7 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
         store.edit { p -> p.asMap().keys.filter { it.name.startsWith(draftPrefix) }.forEach { p.remove(it) } }
     }
 }
+
+/** Notification types that existed before `notify_known_types` was stored (Phase D). */
+private val LEGACY_NOTIFY_TYPES: Set<String> =
+    NotifyType.entries.map { it.name }.toSet() - setOf("SESSION_EXITED", "TERMINAL_EXITED", "LIVE_UPDATE")

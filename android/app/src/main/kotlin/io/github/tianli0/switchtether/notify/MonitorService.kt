@@ -13,6 +13,14 @@ import androidx.core.content.ContextCompat
 import io.github.tianli0.switchtether.MainActivity
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.SwitchTetherApp
+import io.github.tianli0.switchtether.connection.ConnectionState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * Foreground service that keeps the single desktop connection (events WebSocket) alive while the
@@ -28,7 +36,19 @@ import io.github.tianli0.switchtether.SwitchTetherApp
  * user setting "Stay connected in background" is on; stopped on unpair or when turned off.
  */
 class MonitorService : Service() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var watching = false
+
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun build(online: Boolean) = NotificationCompat.Builder(this, Notifier.SERVICE_CHANNEL)
+        .setSmallIcon(R.drawable.ic_stat_notify)
+        .setContentTitle(getString(if (online) R.string.service_title else R.string.service_title_reconnecting))
+        .setContentText(getString(R.string.service_text))
+        .setOngoing(true)
+        .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+        .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        .build()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -36,15 +56,7 @@ class MonitorService : Service() {
             return START_NOT_STICKY
         }
         val container = (application as SwitchTetherApp).container
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(this, Notifier.SERVICE_CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_notify)
-            .setContentTitle(getString(R.string.service_title))
-            .setContentText(getString(R.string.service_text))
-            .setOngoing(true)
-            .setContentIntent(open)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+        val notification = build(container.connection.state.value is ConnectionState.Online)
         val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
         runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type) }
             .onFailure {
@@ -52,10 +64,20 @@ class MonitorService : Service() {
                 return START_NOT_STICKY
             }
         container.onServiceKeepAlive()
+        if (!watching) {
+            watching = true
+            // The ongoing notification says whether the computer is actually reachable right now.
+            scope.launch {
+                container.connection.state.map { it is ConnectionState.Online }.distinctUntilChanged().collect { online ->
+                    runCatching { androidx.core.app.NotificationManagerCompat.from(this@MonitorService).notify(NOTIFICATION_ID, build(online)) }
+                }
+            }
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        scope.cancel()
         (application as SwitchTetherApp).container.onServiceStopped()
         super.onDestroy()
     }

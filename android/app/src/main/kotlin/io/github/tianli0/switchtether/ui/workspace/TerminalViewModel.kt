@@ -62,6 +62,7 @@ class TerminalViewModel(
     private val conn: ConnectionController,
     private val gate: StepUpGate,
     private val stepUpAvailable: () -> Boolean,
+    private val onKill: (String) -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(TerminalUiState())
     val state: StateFlow<TerminalUiState> = _state.asStateFlow()
@@ -193,6 +194,7 @@ class TerminalViewModel(
     fun kill() {
         val id = _state.value.selectedId ?: return
         val api = conn.apiOrNull() ?: return
+        onKill(id)
         viewModelScope.launch {
             runCatching { api.killTerminal(id) }.onFailure { e -> _state.update { it.copy(error = ConnectionManager.describe(e)) } }
             disconnect()

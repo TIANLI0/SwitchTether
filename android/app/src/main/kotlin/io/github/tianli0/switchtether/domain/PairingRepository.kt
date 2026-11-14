@@ -61,6 +61,7 @@ class DefaultPairingRepository(
     /** Called with the previous pairing when a new one replaces it (best-effort remote unpair + key wipe). */
     private val onReplaced: suspend (PairedDesktop) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
+    private val relaySecrets: io.github.tianli0.switchtether.connection.RelaySecrets = io.github.tianli0.switchtether.connection.RelaySecrets.None,
 ) : PairingRepository {
     override suspend fun pair(link: PairingLink, deviceName: String, osVersion: String, appVersion: String): PairingResult {
         val identity = keys.createIdentity()
@@ -123,6 +124,9 @@ class DefaultPairingRepository(
                 stepUpAlias = stepUpAlias.takeIf { response.stepUpEnabled },
                 stepUpEnabled = response.stepUpEnabled,
                 pairedAtMs = clock(),
+                relayUrl = link.relayUrl,
+                // Token + key are secrets: stored only Keystore-encrypted; no key → relay unusable.
+                relaySecret = link.relayKey?.let { relaySecrets.seal(io.github.tianli0.switchtether.connection.RelaySecret(link.relayToken, it)) },
             )
             store.save(desktop)
             if (!response.stepUpEnabled && stepUpAlias != null) keys.delete(stepUpAlias)

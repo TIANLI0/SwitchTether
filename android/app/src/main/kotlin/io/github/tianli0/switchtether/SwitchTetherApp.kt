@@ -12,6 +12,7 @@ class SwitchTetherApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        io.github.tianli0.switchtether.update.UpdateCheckWorker.schedule(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = container.onForeground()
             override fun onStop(owner: LifecycleOwner) = container.onBackground()

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Monochrome (Android 13+ themed icons) copy of the SwitchTether mark: two nodes (phone, computer) joined by one tether curve.
+  108dp adaptive canvas; the mark stays inside a 32.3dp radius around the centre, well within the
+  66dp safe zone, so every launcher mask (circle, squircle, teardrop) keeps it intact.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M38,68C38,50 70,58 70,40"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M28.5,68a9.5,9.5 0,1 0,19 0a9.5,9.5 0,1 0,-19 0z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M59,40a11,11 0,1 0,22 0a11,11 0,1 0,-22 0z" />
+</vector>

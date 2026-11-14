@@ -9,25 +9,12 @@ import java.util.Locale
 import kotlin.math.abs
 
 object Formatters {
-    fun tokens(n: Long): String = when {
-        abs(n) >= 1_000_000_000 -> DecimalFormat("0.##").format(n / 1e9) + "B"
-        abs(n) >= 1_000_000 -> DecimalFormat("0.##").format(n / 1e6) + "M"
-        abs(n) >= 10_000 -> DecimalFormat("0.#").format(n / 1e3) + "K"
-        else -> n.toString()
-    }
+    /** Same strings as the desktop (UsageFormat.tokens): 1,234 / 48.2K / 18.2M. */
+    fun tokens(n: Long): String = io.github.tianli0.switchtether.remote.usage.UsageFormat.tokens(n)
 
-    fun usd(v: Double?): String = when {
-        v == null -> "—"
-        v >= 100 -> "$" + DecimalFormat("#,##0").format(v)
-        v >= 1 -> "$" + DecimalFormat("0.00").format(v)
-        else -> "$" + DecimalFormat("0.000").format(v)
-    }
-
-    fun percent(v: Double?): String = when {
-        v == null -> "—"
-        v <= 1.0 -> DecimalFormat("0.#").format(v * 100) + "%"
-        else -> DecimalFormat("0.#").format(v) + "%"
-    }
+    /** Compact cost per turn in the desktop's display currency: $0.0081 / ¥0.087 / $1.25. */
+    fun usd(v: Double?, display: io.github.tianli0.switchtether.remote.usage.MoneyDisplay): String =
+        if (v == null) "—" else io.github.tianli0.switchtether.remote.usage.UsageFormat.moneyCompact(v, display)
 
     fun dateTime(epochMs: Long?): String = epochMs?.let {
         DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).withLocale(Locale.getDefault())

@@ -60,12 +60,21 @@ class AppContainer(private val context: Context) {
         override fun delete(alias: String?) = keys.delete(alias)
     }
 
+    /** Android 17 local network permission state. */
+    val localNetwork = io.github.tianli0.switchtether.connection.LocalNetworkAccess(context)
+
+    /** LAN discovery (NSD); runs only on demand. */
+    val discovery = io.github.tianli0.switchtether.connection.NsdDiscovery(context)
+
     val connection = ConnectionManager(
         scope = appScope,
         pairingStore = pairingStore,
         identityLoader = { keys.loadIdentity(it) },
         onRevoked = { desktop, _ -> wipeLocal(desktop) },
         baseClient = baseClient,
+        discover = { fp, timeoutMs -> discovery.find(fp, timeoutMs) },
+        localNetworkAllowed = { localNetwork.isGranted() },
+        relaySecrets = io.github.tianli0.switchtether.connection.KeystoreRelaySecrets,
     )
 
     val sessions: SessionRepository = RemoteSessionRepository(connection)
@@ -75,6 +84,7 @@ class AppContainer(private val context: Context) {
         keys = keyProvider,
         store = pairingStore,
         baseClient = baseClient,
+        relaySecrets = io.github.tianli0.switchtether.connection.KeystoreRelaySecrets,
         onReplaced = { previous ->
             // Best effort: the old desktop keeps a record until revoked there; wipe our keys for it.
             keys.delete(previous.identityAlias)
@@ -89,7 +99,44 @@ class AppContainer(private val context: Context) {
     @Volatile private var serviceRunning = false
 
     val notifyPrefsState = settingsStore.notifyPrefs.stateIn(appScope, SharingStarted.Eagerly, io.github.tianli0.switchtether.remote.notify.NotifyPrefs())
-    private val notifier = io.github.tianli0.switchtether.notify.Notifier(context, appScope, connection, notifyPrefsState) { isForeground }
+    private val notifier = io.github.tianli0.switchtether.notify.Notifier(context, appScope, connection, notifyPrefsState, { isForeground }) { id -> liveUpdates.isPinned(id) }
+
+    /** Home-screen widget data (memory only). */
+    val widget = io.github.tianli0.switchtether.widget.StatusWidgetUpdater(context, appScope, connection, sessions)
+    val money = io.github.tianli0.switchtether.domain.MoneySettings(context, appScope, connection)
+
+    /** Session detail currently on screen (Android 17 Handoff offers it to the user's other device). */
+    val handoffSession = MutableStateFlow<String?>(null)
+
+    /** Paired desktop's server id, kept in memory for synchronous callers (Handoff). */
+    @Volatile var pairedServerIdCache: String? = null
+        private set
+
+    init {
+        appScope.launch { pairingStore.desktop.collect { pairedServerIdCache = it?.serverId } }
+    }
+
+    /** Pinned tasks → Android 16 Live Updates (ColorOS 16 Fluid Cloud / 流体云). */
+    val liveUpdates: io.github.tianli0.switchtether.notify.LiveUpdates by lazy {
+        io.github.tianli0.switchtether.notify.LiveUpdates(
+            context = context,
+            scope = appScope,
+            conn = connection,
+            pairingStore = pairingStore,
+            channel = io.github.tianli0.switchtether.notify.AndroidLiveUpdateChannel(context),
+            resolveApproval = { s, r, d, c -> sessions.resolveApproval(s, r, d, c) },
+            enabled = { io.github.tianli0.switchtether.remote.notify.NotifyType.LIVE_UPDATE in notifyPrefsState.value.enabled },
+        )
+    }
+
+    /** Self-update (GitHub releases; checksum + signing-certificate verified). */
+    val updates = io.github.tianli0.switchtether.update.UpdateManager(context)
+
+    /** Set by the "new version" notification: the main shell shows the update sheet. */
+    val showUpdateRequest = MutableStateFlow(false)
+
+    /** The phone itself interrupted/stopped a session or killed a terminal (suppresses the echo notification). */
+    fun noteLocalAction(target: String, action: io.github.tianli0.switchtether.remote.notify.LocalAction) = notifier.noteLocalAction(target, action)
 
     /** Session id requested by a notification tap (consumed by the main shell). */
     val openSessionRequest = MutableStateFlow<String?>(null)
@@ -102,7 +149,8 @@ class AppContainer(private val context: Context) {
         network.start()
         connection.start()
         appScope.launch {
-            if (pairingStore.current() != null && settingsStore.backgroundConnection.first()) {
+            // A pinned task keeps the connection alive (its Live Update must follow the session).
+            if (pairingStore.current() != null && (settingsStore.backgroundConnection.first() || liveUpdates.pins.value.isNotEmpty())) {
                 io.github.tianli0.switchtether.notify.MonitorService.start(context)
             }
         }
@@ -178,6 +226,7 @@ class AppContainer(private val context: Context) {
         keys.delete(desktop.stepUpAlias)
         keys.deleteAllExcept(emptySet())
         draftStore.clearAll()
+        money.clear()
         clearCaches()
         stepUpGate.clear()
     }
@@ -216,6 +265,20 @@ class AppContainer(private val context: Context) {
     init {
         appScope.launch { pairingStore.desktop.collect { stepUpEnabledCache = it?.stepUpEnabled == true } }
         notifier.start()
+        liveUpdates.start()
+        widget.start()
+        money.start()
+        // Pinning a task while the app is open must keep the connection once the app goes to the
+        // background (foreground services may only be started from the foreground).
+        appScope.launch {
+            liveUpdates.pins.collect { pins ->
+                if (pins.isNotEmpty() && isForeground && pairingStore.current() != null) {
+                    io.github.tianli0.switchtether.notify.MonitorService.start(context)
+                } else if (pins.isEmpty() && serviceRunning && !settingsStore.backgroundConnection.first()) {
+                    io.github.tianli0.switchtether.notify.MonitorService.stop(context)
+                }
+            }
+        }
     }
 
     /** Whether the current pairing has a step-up key (terminal/file writes possible at all). */

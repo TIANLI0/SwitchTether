@@ -8,6 +8,7 @@ import java.util.Base64
  * A parsed pairing link (docs/PROTOCOL.md §3):
  *
  * `switchtether://pair?v=1&h=192.168.1.20,100.88.1.7&p=47615&fp=<sha256>&id=<pairingId>&s=<secret>&n=<name>`
+ * plus, when the desktop's relay is on (docs/RELAY.md §5), `&r=<relay url>&rt=<relay token>`.
  *
  * The secret is single-use and short-lived; it must never be persisted.
  */
@@ -20,15 +21,22 @@ data class PairingLink(
     val pairingId: String,
     val secret: String,
     val desktopName: String,
+    /** Relay URL (`tcp://host:port`, `wss://host/v1/tunnel`), null when the desktop has no relay. */
+    val relayUrl: String? = null,
+    /** Relay access token checked by the desktop (not secret from the relay operator, see RELAY.md §6). */
+    val relayToken: String? = null,
+    /** Relay key (`rk`, base64url of 32 bytes): proves to the relay that this phone may use it. Secret. */
+    val relayKey: String? = null,
 ) {
     override fun toString(): String =
-        "PairingLink(v=$version, hosts=$hosts, port=$port, fp=${fingerprint.take(16)}…, id=$pairingId, secret=<redacted>, name=$desktopName)"
+        "PairingLink(v=$version, hosts=$hosts, port=$port, fp=${fingerprint.take(16)}…, id=$pairingId, secret=<redacted>, name=$desktopName, relay=${relayUrl ?: "none"})"
 
     companion object {
         const val SCHEME = "switchtether"
         const val SUPPORTED_VERSION = 1
         const val DEFAULT_PORT = 47615
         const val MAX_HOSTS = 8
+        private val PLACEHOLDER_KEY = "A".repeat(43)
 
         private val HEX64 = Regex("^[0-9a-f]{64}$")
         private val PAIRING_ID = Regex("^[A-Za-z0-9._-]{1,128}$")
@@ -93,7 +101,22 @@ data class PairingLink(
 
             val name = sanitizeName(params["n"].orEmpty()).ifEmpty { hosts.first() }
 
-            return PairingLink(version, hosts, port, fp, id, secret, name)
+            val relayUrl = params["r"]?.trim()?.takeIf { it.isNotEmpty() }
+            val relayToken = params["rt"]?.trim()?.takeIf { it.isNotEmpty() }
+            val relayKey = params["rk"]?.trim()?.takeIf { it.isNotEmpty() }
+            if (relayKey != null && io.github.tianli0.switchtether.remote.relay.RelayConfig.decodeKey(relayKey) == null) {
+                throw PairingLinkException(Reason.INVALID_FIELD, "rk")
+            }
+            // Validate the URL / token shape with a placeholder key (the relay is only used with a real one).
+            if (relayUrl != null && io.github.tianli0.switchtether.remote.relay.RelayConfig.parseOrNull(relayUrl, relayToken, PLACEHOLDER_KEY) == null) {
+                throw PairingLinkException(Reason.INVALID_FIELD, "r")
+            }
+
+            return PairingLink(
+                version, hosts, port, fp, id, secret, name, relayUrl,
+                if (relayUrl != null) relayToken else null,
+                if (relayUrl != null) relayKey else null,
+            )
         }
 
         fun parseOrNull(input: String): PairingLink? = runCatching { parse(input) }.getOrNull()

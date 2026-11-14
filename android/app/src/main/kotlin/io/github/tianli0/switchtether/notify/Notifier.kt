@@ -20,6 +20,12 @@ import io.github.tianli0.switchtether.remote.notify.NotificationEngine
 import io.github.tianli0.switchtether.remote.notify.NotifyIntent
 import io.github.tianli0.switchtether.remote.notify.NotifyPrefs
 import io.github.tianli0.switchtether.remote.notify.NotifyType
+import io.github.tianli0.switchtether.remote.notify.LocalAction
+import io.github.tianli0.switchtether.remote.notify.NotifySlot
+import io.github.tianli0.switchtether.remote.notify.slot
+import io.github.tianli0.switchtether.remote.protocol.long
+import io.github.tianli0.switchtether.remote.protocol.str
+import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
 import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.remote.protocol.SessionSummary
@@ -44,6 +50,8 @@ class Notifier(
     private val conn: ConnectionController,
     private val prefs: StateFlow<NotifyPrefs>,
     private val isForeground: () -> Boolean,
+    /** Pinned sessions are followed by their Live Update; their waits and outcomes are not notified twice. */
+    private val isPinned: (String) -> Boolean = { false },
 ) {
     private val engine = NotificationEngine({ prefs.value }, { LocalTime.now().let { it.hour * 60 + it.minute } }, t = ResourceNotifyText(context))
     private val sessions = ConcurrentHashMap<String, SessionSummary>()
@@ -57,11 +65,19 @@ class Notifier(
                 val intent = when (ev.topic) {
                     "session.upserted" -> runCatching { ProtocolJson.decodeFromJsonElement(SessionSummary.serializer(), (data["session"] as? JsonObject) ?: data) }.getOrNull()?.let {
                         sessions[it.id] = it
+                        // Nobody is waiting any more: drop the "needs you" notification of that session.
+                        if (it.waitingFor == null && it.status != "waiting") cancel(it.id, NotifySlot.ATTENTION)
                         engine.onSessionUpsert(it)
                     }
                     "session.event" -> runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()?.let {
-                        engine.onSessionEvent(it, sessions[it.sessionId])
+                        if ((it.kind == "approval_request" || it.kind == "question") && it.data.bool("resolved") == true) cancel(it.sessionId, NotifySlot.ATTENTION)
+                        engine.onSessionEvent(it, sessions[it.sessionId] ?: lookup(it.sessionId))
                     }
+                    "terminal.created" -> {
+                        data.str("id")?.let { engine.onTerminalCreated(it, data.str("title") ?: data.str("shell")) }
+                        null
+                    }
+                    "terminal.exited" -> data.str("id")?.let { engine.onTerminalExited(it, data.long("exitCode")) }
                     else -> null
                 }
                 intent?.let(::post)
@@ -91,12 +107,27 @@ class Notifier(
         }
     }
 
+    /** Summary of a session not seen in `session.upserted` yet (title/project for the notification text). */
+    private suspend fun lookup(sessionId: String): SessionSummary? = runCatching {
+        kotlinx.coroutines.withTimeoutOrNull(3_000) { conn.apiOrNull()?.session(sessionId)?.summary }
+    }.getOrNull()?.also { sessions[it.id] = it }
+
+    /** The phone itself interrupted/stopped a session or killed a terminal: don't notify the echo. */
+    fun noteLocalAction(target: String, action: LocalAction) = engine.noteLocalAction(target, action)
+
+    private fun notificationId(sessionId: String?, slot: NotifySlot, key: String): Int =
+        if (sessionId != null && slot != NotifySlot.OTHER) "$sessionId:$slot".hashCode() else key.hashCode()
+
+    private fun cancel(sessionId: String, slot: NotifySlot) {
+        runCatching { nm.cancel(notificationId(sessionId, slot, "")) }
+    }
+
     private fun createChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val mgr = context.getSystemService(NotificationManager::class.java)
-        NotifyType.entries.forEach { t ->
+        NotifyType.entries.filter { it != NotifyType.LIVE_UPDATE }.forEach { t ->
             val importance = when (t) {
-                NotifyType.WAITING_APPROVAL, NotifyType.WAITING_INPUT, NotifyType.TASK_FAILED -> NotificationManager.IMPORTANCE_HIGH
+                NotifyType.WAITING_APPROVAL, NotifyType.WAITING_INPUT, NotifyType.TASK_FAILED, NotifyType.SESSION_EXITED -> NotificationManager.IMPORTANCE_HIGH
                 NotifyType.TOOL_CALL, NotifyType.TASK_STARTED -> NotificationManager.IMPORTANCE_LOW
                 else -> NotificationManager.IMPORTANCE_DEFAULT
             }
@@ -110,6 +141,8 @@ class Notifier(
 
     private fun post(n: NotifyIntent) {
         if (isForeground()) return
+        val sid = n.sessionId
+        if (sid != null && isPinned(sid) && n.type in COVERED_BY_LIVE_UPDATE) return
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -119,6 +152,7 @@ class Notifier(
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 n.sessionId?.let { putExtra(MainActivity.EXTRA_SESSION_ID, it) }
+                n.terminalId?.let { putExtra(MainActivity.EXTRA_TERMINAL_ID, it) }
             },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
@@ -137,13 +171,19 @@ class Notifier(
             .setPublicVersion(public)
             .setSilent(n.silent)
             .setCategory(if (n.type == NotifyType.WAITING_APPROVAL || n.type == NotifyType.WAITING_INPUT) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
+            // One "needs you" and one "status" notification per session, grouped by session.
             .setGroup(n.sessionId ?: "switchtether")
             .build()
-        runCatching { nm.notify(n.sessionId?.hashCode() ?: n.type.ordinal, notif) }
+        runCatching { nm.notify(notificationId(n.sessionId, n.type.slot, n.key), notif) }
     }
 
     companion object {
         const val SERVICE_CHANNEL = "service"
+
+        private val COVERED_BY_LIVE_UPDATE = setOf(
+            NotifyType.WAITING_APPROVAL, NotifyType.WAITING_INPUT, NotifyType.TASK_STARTED, NotifyType.TASK_COMPLETED,
+            NotifyType.TASK_FAILED, NotifyType.SESSION_INTERRUPTED, NotifyType.SESSION_EXITED, NotifyType.LONG_RUNNING, NotifyType.TOOL_CALL,
+        )
 
         fun channelId(t: NotifyType) = "evt_" + t.name.lowercase()
 
@@ -154,6 +194,9 @@ class Notifier(
             NotifyType.TASK_COMPLETED -> R.string.notif_ch_completed
             NotifyType.TASK_FAILED -> R.string.notif_ch_failed
             NotifyType.SESSION_INTERRUPTED -> R.string.notif_ch_interrupted
+            NotifyType.SESSION_EXITED -> R.string.notif_ch_exited
+            NotifyType.TERMINAL_EXITED -> R.string.notif_ch_terminal
+            NotifyType.LIVE_UPDATE -> R.string.notif_ch_live
             NotifyType.TOOL_CALL -> R.string.notif_ch_tool
             NotifyType.AGENT_REPLY -> R.string.notif_ch_reply
             NotifyType.LONG_RUNNING -> R.string.notif_ch_long
@@ -173,6 +216,10 @@ private class ResourceNotifyText(private val c: Context) : io.github.tianli0.swi
     override fun finished(name: String) = s(R.string.ntf_finished, name)
     override fun failed(name: String) = s(R.string.ntf_failed, name)
     override fun interrupted(name: String) = s(R.string.ntf_interrupted, name)
+    override fun stopped(name: String) = s(R.string.ntf_stopped, name)
+    override fun exited(name: String) = s(R.string.ntf_exited, name)
+    override fun terminalExited(title: String, code: Long?) =
+        if (code != null) s(R.string.ntf_terminal_exited_code, title, code.toInt()) else s(R.string.ntf_terminal_exited, title)
     override fun waitingInput(name: String) = s(R.string.ntf_waiting_input, name)
     override fun waitingForYou(name: String) = s(R.string.ntf_waiting_for_you, name)
     override fun toolCall(name: String, tool: String?) = s(R.string.ntf_tool_call, name, tool ?: s(R.string.ntf_tool))

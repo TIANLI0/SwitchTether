@@ -104,8 +104,24 @@
     <string name="option_deny">Deny</string>
     <string name="option_abort">Stop the agent</string>
     <string name="attached_badge">Attached · %1$s</string>
+    <string name="attached_tag">Attached</string>
     <string name="client_terminal">Terminal</string>
     <string name="open_terminal">Open terminal</string>
     <string name="session_unnamed">Untitled session</string>
     <string name="session_info_id">Session ID</string>
+    <string name="render_system_turn_stopped">The turn stopped before it finished.</string>
+    <string name="outgoing_sending">Sending…</string>
+    <string name="outgoing_delivered">Delivered</string>
+    <string name="outgoing_waiting">Waiting for connection</string>
+    <string name="outgoing_failed">Not sent</string>
+    <string name="outgoing_retry">Retry</string>
+    <string name="outgoing_delete">Delete</string>
+    <string name="outgoing_session_ended">The session ended; not sent</string>
+    <string name="session_typing">Replying…</string>
+    <string name="jump_latest">Back to latest</string>
+    <plurals name="new_messages">
+        <item quantity="one">%d new message</item>
+        <item quantity="other">%d new messages</item>
+    </plurals>
+    <string name="composer_queue_hint">Offline: messages you send go out when the connection is back.</string>
 </resources>

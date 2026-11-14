@@ -1,5 +1,13 @@
 package io.github.tianli0.switchtether.ui.manage
 
+import androidx.compose.foundation.layout.Box
+
+import androidx.compose.foundation.clickable
+
+import androidx.compose.ui.platform.testTag
+
+import io.github.tianli0.switchtether.remote.usage.UsageFormat
+
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +58,7 @@ import io.github.tianli0.switchtether.remote.protocol.UsageBreakdownRow
 import io.github.tianli0.switchtether.remote.protocol.UsageSummary
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.chart.BarChart
+import kotlinx.coroutines.launch
 import io.github.tianli0.switchtether.ui.chart.BarPoint
 import io.github.tianli0.switchtether.ui.common.CommandPromptDialog
 import io.github.tianli0.switchtether.ui.common.ConfirmDialog
@@ -235,45 +245,69 @@ fun UsageScreen(onBack: () -> Unit) {
     val vm = containerViewModel { UsageViewModel(it.connection, it.management) }
     val state by vm.state.collectAsStateWithLifecycle()
     val conn by container.connection.state.collectAsStateWithLifecycle()
-    Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::load) }) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // The desktop's currency may have changed since we connected: re-read it with the numbers.
+    androidx.compose.runtime.LaunchedEffect(Unit) { container.money.refresh() }
+    val refresh = { vm.load(); scope.launch { container.money.refresh() }; Unit }
+    Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), refresh) }) {
         ConnectionBanner(conn, { container.connection.retryNow() })
-        TabRow(
-            tabs = listOf(stringResource(R.string.usage_today), stringResource(R.string.usage_7d), stringResource(R.string.usage_30d)),
-            selectedTabIndex = state.range.ordinal,
-            onTabSelected = { vm.setRange(UsageRange.entries[it]) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        val presets = io.github.tianli0.switchtether.remote.usage.UsageRangePreset.entries
+        io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+            tabs = presets.map { io.github.suqi8.coui.kmp.basic.ChipTabData(presetLabel(it)) },
+            selectedIndex = presets.indexOf(state.preset),
+            onSelectedChange = { vm.setPreset(presets[it]) },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            modifier = Modifier.padding(vertical = 4.dp).testTag("usage-range"),
         )
-        UsageContent(state, vm::load)
+        val apps = listOf<String?>(null) + DEFAULT_APPS
+        io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+            tabs = apps.map { io.github.suqi8.coui.kmp.basic.ChipTabData(if (it == null) stringResource(R.string.usage_all_apps) else Formatters.agentLabel(it).let { l -> if (it == "claude") "Claude" else l }) },
+            selectedIndex = apps.indexOf(state.app).coerceAtLeast(0),
+            onSelectedChange = { vm.setApp(apps[it]) },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            modifier = Modifier.padding(vertical = 2.dp),
+        )
+        UsageContent(state, vm::load, vm::setMetric)
     }
 }
 
 @Composable
-fun UsageContent(state: UsageState, onRetry: () -> Unit) {
+private fun presetLabel(p: io.github.tianli0.switchtether.remote.usage.UsageRangePreset): String = stringResource(
+    when (p) {
+        io.github.tianli0.switchtether.remote.usage.UsageRangePreset.TODAY -> R.string.usage_preset_today
+        io.github.tianli0.switchtether.remote.usage.UsageRangePreset.LAST_24H -> R.string.usage_preset_24h
+        io.github.tianli0.switchtether.remote.usage.UsageRangePreset.DAYS_7 -> R.string.usage_preset_7d
+        io.github.tianli0.switchtether.remote.usage.UsageRangePreset.DAYS_14 -> R.string.usage_preset_14d
+        io.github.tianli0.switchtether.remote.usage.UsageRangePreset.DAYS_30 -> R.string.usage_preset_30d
+        io.github.tianli0.switchtether.remote.usage.UsageRangePreset.ALL -> R.string.usage_preset_all
+    },
+)
+
+@Composable
+fun UsageContent(state: UsageState, onRetry: () -> Unit, onMetric: (UsageMetric) -> Unit = {}) {
     // One honest page-level error instead of repeating it on every card (e.g. 503 from CC Switch).
     (state.summary as? Loadable.Failed)?.let { failed ->
         LoadableContent(failed, onRetry = onRetry) {}
         return
     }
-    LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-        item { SectionHeader(stringResource(R.string.usage_summary)) }
+    LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
+        item { PageCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
+        item { SectionHeader(stringResource(if (state.hourly) R.string.usage_trend_hourly else R.string.usage_trend_daily)) }
         item {
             PageCard {
-                SmallLoadable(state.summary, onRetry) { s -> SummaryGrid(s) }
+                SmallLoadable(state.trend, onRetry) { days -> TrendChart(days, state.metric, state.hourly, onMetric) }
             }
         }
-        item { SectionHeader(stringResource(R.string.usage_trend)) }
-        item {
-            PageCard {
-                SmallLoadable(state.trend, onRetry) { days -> TrendChart(days) }
-            }
-        }
-        item { SectionHeader(stringResource(R.string.usage_by_model)) }
-        item { PageCard { SmallLoadable(state.models, onRetry) { BreakdownTable(it) } } }
         item { SectionHeader(stringResource(R.string.usage_by_provider)) }
-        item { PageCard { SmallLoadable(state.providers, onRetry) { BreakdownTable(it) } } }
+        item { PageCard { SmallLoadable(state.providers, onRetry) { BreakdownTable(it, showAvgCost = false) } } }
+        item { SectionHeader(stringResource(R.string.usage_by_model)) }
+        item { PageCard { SmallLoadable(state.models, onRetry) { BreakdownTable(it, showAvgCost = true) } } }
         item { SectionHeader(stringResource(R.string.usage_quota)) }
-        items(state.quotas, key = { it.first }) { (tool, q) ->
+        items(state.quotas, key = { it.first }) { (_, q) ->
             PageCard { SmallLoadable(q, onRetry) { QuotaCard(it) } }
+        }
+        item {
+            Text(stringResource(R.string.usage_tz_note), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
@@ -297,66 +331,138 @@ private fun <T> SmallLoadable(state: Loadable<T>, onRetry: () -> Unit, content: 
     }
 }
 
+/** The desktop's hero: cost, requests, total tokens, cache hit rate; token details expandable. */
 @Composable
-private fun SummaryGrid(s: UsageSummary) {
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row {
-            Stat(stringResource(R.string.usage_cost), Formatters.usd(s.totalCostUsd), Modifier.weight(1f))
-            Stat(stringResource(R.string.usage_tokens_label), Formatters.tokens(s.totalTokens), Modifier.weight(1f))
+private fun SummaryHero(s: UsageSummary) {
+    val empty = s.totalRequests == 0L
+    fun dash(v: String) = if (empty) "—" else v
+    var open by remember { mutableStateOf(false) }
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column {
+            Text(stringResource(R.string.usage_cost), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+            Text(dash(UsageFormat.money(s.totalCostUsd, io.github.tianli0.switchtether.domain.LocalMoney.current, 2)), style = COUITheme.textStyles.title2, fontWeight = FontWeight.SemiBold, color = COUITheme.colorScheme.onSurface)
         }
         Row {
-            Stat(stringResource(R.string.usage_requests), s.totalRequests.toString(), Modifier.weight(1f))
-            Stat(stringResource(R.string.usage_success), Formatters.percent(s.successRate), Modifier.weight(1f))
+            Stat(stringResource(R.string.usage_requests), dash(UsageFormat.tokens(s.totalRequests)), Modifier.weight(1f))
+            Stat(stringResource(R.string.usage_total_tokens), dash(UsageFormat.tokens(s.totalTokens)), Modifier.weight(1f))
+            Stat(stringResource(R.string.usage_cache_hit), dash(UsageFormat.hitRate(s.cacheHitRate)), Modifier.weight(1f))
         }
-        Text(
-            "in ${Formatters.tokens(s.inputTokens)} · out ${Formatters.tokens(s.outputTokens)} · cache r ${Formatters.tokens(s.cacheReadTokens)} w ${Formatters.tokens(s.cacheCreationTokens)}" +
-                (s.cacheHitRate?.let { " · hit ${Formatters.percent(it)}" } ?: ""),
-            style = DevType.codeSmall,
-            color = COUITheme.colorScheme.onSurfaceVariantSummary,
-        )
+        Row(
+            Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { open = !open },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(stringResource(R.string.usage_details), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary, modifier = Modifier.weight(1f))
+            io.github.suqi8.coui.kmp.basic.ExpandArrow(expanded = open)
+        }
+        if (open) {
+            Row {
+                Stat(stringResource(R.string.usage_input), dash(UsageFormat.tokens(s.inputTokens)), Modifier.weight(1f))
+                Stat(stringResource(R.string.usage_output), dash(UsageFormat.tokens(s.outputTokens)), Modifier.weight(1f))
+            }
+            Row {
+                Stat(stringResource(R.string.usage_cache_write), dash(UsageFormat.tokens(s.cacheCreationTokens)), Modifier.weight(1f))
+                Stat(stringResource(R.string.usage_cache_read), dash(UsageFormat.tokens(s.cacheReadTokens)), Modifier.weight(1f))
+            }
+            Stat(stringResource(R.string.usage_success), dash(UsageFormat.successRate(s.successRate)), Modifier.fillMaxWidth())
+        }
     }
 }
 
 @Composable
 private fun Stat(label: String, value: String, modifier: Modifier) {
     Column(modifier) {
-        Text(value, style = COUITheme.textStyles.title3, color = COUITheme.colorScheme.onSurface)
+        Text(value, style = COUITheme.textStyles.title4, color = COUITheme.colorScheme.onSurface)
         Text(label, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
     }
 }
 
+/** Bucket label: HH:mm for hourly ranges, MM-dd for days, read from the server's RFC3339 date (desktop-local). */
+private fun bucketLabel(date: String, hourly: Boolean): String = runCatching {
+    val t = java.time.OffsetDateTime.parse(date)
+    if (hourly) "%02d:%02d".format(t.hour, t.minute) else "%02d-%02d".format(t.monthValue, t.dayOfMonth)
+}.getOrElse { date.take(10).let { if (it.length == 10) it.substring(5) else it } }
+
 @Composable
-private fun TrendChart(days: List<DailyUsage>) {
-    if (days.isEmpty()) {
+private fun TrendChart(days: List<DailyUsage>, metric: UsageMetric, hourly: Boolean, onMetric: (UsageMetric) -> Unit) {
+    if (days.isEmpty() || days.all { it.requests == 0L && it.tokens == 0L }) {
         EmptyMessage(stringResource(R.string.usage_no_data))
         return
     }
-    val points = days.map { d -> BarPoint(d.date.take(10).let { if (it.length == 10) it.substring(5) else it }, d.tokens.toDouble()) }
-    val summary = stringResource(R.string.usage_trend_a11y, days.size) + " " + days.joinToString("; ") { "${it.date}: ${Formatters.tokens(it.tokens)}" }
-    Column(Modifier.padding(16.dp)) {
-        Text(stringResource(R.string.usage_tokens_per_day), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
-        BarChart(points = points, summary = summary, formatValue = { Formatters.tokens(it.toLong()) })
+    val metrics = UsageMetric.entries
+    Column(Modifier.padding(vertical = 12.dp)) {
+        io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+            tabs = metrics.map {
+                io.github.suqi8.coui.kmp.basic.ChipTabData(
+                    stringResource(
+                        when (it) {
+                            UsageMetric.TOKENS -> R.string.usage_metric_tokens
+                            UsageMetric.COST -> R.string.usage_metric_cost
+                            UsageMetric.REQUESTS -> R.string.usage_metric_requests
+                        },
+                    ),
+                )
+            },
+            selectedIndex = metrics.indexOf(metric),
+            onSelectedChange = { onMetric(metrics[it]) },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+        )
+        val value: (DailyUsage) -> Double = when (metric) {
+            UsageMetric.TOKENS -> { d -> d.tokens.toDouble() }
+            UsageMetric.COST -> { d -> d.costUsd ?: 0.0 }
+            UsageMetric.REQUESTS -> { d -> d.requests.toDouble() }
+        }
+        val money = io.github.tianli0.switchtether.domain.LocalMoney.current
+        // Bars carry the value label (desktop chart tooltip: money(value, 4)).
+        val fmt: (Double) -> String = when (metric) {
+            UsageMetric.COST -> { v -> UsageFormat.money(v, money, 4) }
+            else -> { v -> UsageFormat.tokens(v.toLong()) }
+        }
+        val points = days.map { d -> BarPoint(bucketLabel(d.date, hourly), value(d)) }
+        val summary = stringResource(R.string.usage_trend_a11y, days.size) + " " + points.joinToString("; ") { "${it.label}: ${fmt(it.value)}" }
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            BarChart(points = points, summary = summary, formatValue = fmt)
+        }
     }
 }
 
+/**
+ * Desktop `getUsageProviderLabel`: placeholder names of usage read from session logs
+ * ("Claude (Session)") are shown as "Claude · 会话日志"; an empty name is "未知供应商".
+ */
 @Composable
-private fun BreakdownTable(rows: List<UsageBreakdownRow>) {
+private fun providerLabel(name: String): String {
+    if (name.isBlank() || name == "?") return stringResource(R.string.usage_unknown_provider)
+    Regex("""^(.+) \(Session\)$""").matchEntire(name)?.let { return stringResource(R.string.usage_session_provider, it.groupValues[1]) }
+    Regex("""^(.+) \(OAuth\)$""").matchEntire(name)?.let { return stringResource(R.string.usage_session_account_provider, it.groupValues[1]) }
+    return name
+}
+
+/** Provider / model rows: name, then requests · success · speed · first token; cost and tokens on the right. */
+@Composable
+private fun BreakdownTable(rows: List<UsageBreakdownRow>, showAvgCost: Boolean) {
     if (rows.isEmpty()) {
         EmptyMessage(stringResource(R.string.usage_no_data))
         return
     }
-    val maxTokens = rows.maxOf { it.tokens }.coerceAtLeast(1)
-    Column(Modifier.padding(vertical = 8.dp)) {
-        rows.sortedByDescending { it.tokens }.take(20).forEach { r ->
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.padding(vertical = 6.dp)) {
+        rows.take(30).forEach { r ->
+            val details = listOfNotNull(
+                r.app?.let { Formatters.agentLabel(it) },
+                stringResource(R.string.usage_requests_n, r.requests.toInt()),
+                r.successRate?.let { stringResource(R.string.usage_success_n, UsageFormat.successRate(it)) },
+                UsageFormat.tokensPerSecond(r.tokensPerSecond)?.let { (if (r.speedEstimated) "≈" else "") + stringResource(R.string.usage_speed, it) },
+                UsageFormat.firstTokenSeconds(r.firstTokenMs)?.let { stringResource(R.string.usage_first_token, (if (r.firstTokenEstimated) "≈" else "") + it) },
+                if (showAvgCost) r.avgCostPerRequest?.let { stringResource(R.string.usage_avg_cost, UsageFormat.money(it, io.github.tianli0.switchtether.domain.LocalMoney.current, 4)) } else null,
+            ).joinToString(" · ")
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(r.label, style = DevType.code, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    io.github.suqi8.coui.kmp.basic.LinearProgressIndicator(progress = r.tokens.toFloat() / maxTokens, modifier = Modifier.fillMaxWidth().padding(top = 3.dp))
+                    Text(if (r.app != null) providerLabel(r.label) else r.label, style = COUITheme.textStyles.body2, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(details, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.size(10.dp))
                 Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(min = 72.dp)) {
-                    Text(Formatters.tokens(r.tokens), style = DevType.codeSmall, color = COUITheme.colorScheme.onSurface)
-                    Text(Formatters.usd(r.costUsd) + " · ${r.requests}", style = DevType.label, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                    Text(UsageFormat.money(r.costUsd, io.github.tianli0.switchtether.domain.LocalMoney.current, 2), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                    Text(UsageFormat.tokens(r.tokens), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                 }
             }
         }

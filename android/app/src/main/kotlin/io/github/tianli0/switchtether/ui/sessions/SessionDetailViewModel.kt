@@ -9,6 +9,9 @@ import io.github.tianli0.switchtether.data.DraftStore
 import io.github.tianli0.switchtether.domain.SessionChange
 import io.github.tianli0.switchtether.domain.SessionRepository
 import io.github.tianli0.switchtether.domain.createdSession
+import io.github.tianli0.switchtether.connection.ConnectionManager
+import io.github.tianli0.switchtether.remote.command.CommandOutcome
+import io.github.tianli0.switchtether.remote.command.newCommandId
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
 import io.github.tianli0.switchtether.remote.protocol.Capability
@@ -68,10 +71,22 @@ data class SessionDetailState(
     val draft: String = "",
     /** Managed session created by "continue on phone" (navigate to it once). */
     val continuedAs: io.github.tianli0.switchtether.remote.protocol.SessionSummary? = null,
+    /** Messages sent from this phone and not echoed by the desktop yet (optimistic bubbles). */
+    val outgoing: List<OutgoingMessage> = emptyList(),
+    /** "正在回复…" row after the user's latest message. */
+    val typing: Boolean = false,
+    /** Bumped on every send: the list jumps to the newest message. */
+    val sendTick: Int = 0,
+    /** Our message was echoed and the agent has not answered yet. */
+    val awaitingReply: Boolean = false,
 ) {
     val online: Boolean get() = connection is ConnectionState.Online
     fun cap(c: Capability): CapStatus = detail.valueOrNull?.capabilities?.status(c) ?: CapStatus.UNKNOWN
     val canSend: Boolean get() = online && cap(Capability.SEND_MESSAGE).usable
+
+    /** Offline but the session could take messages when last seen: a send waits for the connection. */
+    val canQueue: Boolean get() = !online && connection !is ConnectionState.Unpaired && cap(Capability.SEND_MESSAGE).usable &&
+        detail.valueOrNull?.summary?.isLive == true
     val canInterrupt: Boolean get() = online && cap(Capability.INTERRUPT).usable
     val rollingStatus: AgentEvent? get() = log[ROLLING_STATUS_ID]
 
@@ -91,9 +106,22 @@ data class SessionDetailState(
     val originalBusy: Boolean get() = detail.valueOrNull?.summary?.let { it.isLive && it.status == "busy" } == true
 
     /** Rebuild derived rows after the log / collapse / expansion state changed. */
-    fun derive(log: AgentEventLog = this.log, collapsed: Set<String> = this.collapsed, expandedSteps: Set<String> = this.expandedSteps): SessionDetailState {
+    fun derive(
+        log: AgentEventLog = this.log,
+        collapsed: Set<String> = this.collapsed,
+        expandedSteps: Set<String> = this.expandedSteps,
+        outgoing: List<OutgoingMessage> = this.outgoing,
+    ): SessionDetailState {
         val items = log.renderItems(collapsed).filter { it.event.id != ROLLING_STATUS_ID && !isLowValueSystem(it.event) }
+        val pendingOut = reconcileOutgoing(outgoing, log)
+        val busy = detail.valueOrNull?.summary?.let { it.isLive && it.status == "busy" } == true
+        // One of our bubbles was just echoed: keep "正在回复…" even if the summary still says idle.
+        val echoed = pendingOut.size < outgoing.size
+        val awaiting = (awaitingReply || echoed) && !agentRepliedAfterLastUser(items)
         return copy(
+            outgoing = pendingOut,
+            awaitingReply = awaiting,
+            typing = showTypingRow(items, pendingOut, busy || awaiting),
             log = log,
             collapsed = collapsed,
             expandedSteps = expandedSteps,
@@ -110,6 +138,8 @@ class SessionDetailViewModel(
     private val conn: ConnectionController,
     private val repo: SessionRepository,
     private val drafts: DraftStore,
+    /** Tells the notifier about the phone's own actions (no echo notification). */
+    private val onLocalAction: (String, io.github.tianli0.switchtether.remote.notify.LocalAction) -> Unit = { _, _ -> },
 ) : ViewModel() {
     private val _state = MutableStateFlow(SessionDetailState(sessionId, connection = conn.state.value))
     val state: StateFlow<SessionDetailState> = _state.asStateFlow()
@@ -145,7 +175,9 @@ class SessionDetailViewModel(
                     is SessionChange.Upserted -> if (ch.session.id == sessionId) {
                         _state.update { st ->
                             val d = st.detail.valueOrNull ?: return@update st
-                            st.copy(detail = Loadable.Ready(d.copy(summary = ch.session)))
+                            // A turn that ends without output (interrupted, failed) ends the wait too.
+                            val turnEnded = d.summary.status == "busy" && ch.session.status != "busy"
+                            st.copy(detail = Loadable.Ready(d.copy(summary = ch.session)), awaitingReply = st.awaitingReply && !turnEnded && ch.session.isLive).derive()
                         }
                     }
                     else -> Unit
@@ -165,6 +197,7 @@ class SessionDetailViewModel(
                 val log = AgentEventLog.of(page.events)
                 _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
+                flushWaiting()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -302,16 +335,81 @@ class SessionDetailViewModel(
         draftFlow.value = text
     }
 
-    fun send(label: String) {
-        val text = _state.value.draft.trim()
-        if (text.isEmpty() || !_state.value.canSend) return
-        commands.run(label, onSuccess = {
-            _state.update { it.copy(draft = "") }
-            viewModelScope.launch { drafts.setDraft(sessionId, "") }
-        }) { id -> repo.sendMessage(sessionId, text, id) }
+    /**
+     * Optimistic send: the bubble appears at once ("发送中"), the composer clears, and the list jumps
+     * to the bottom. The desktop's `user_message` echo replaces the bubble ([reconcileOutgoing]).
+     * Offline (session usable when last seen) it waits for the connection with the same commandId.
+     */
+    fun send() {
+        val st = _state.value
+        val text = st.draft.trim()
+        if (text.isEmpty() || !(st.canSend || st.canQueue)) return
+        val msg = OutgoingMessage(
+            commandId = newCommandId(),
+            text = text,
+            status = if (st.canSend) OutgoingStatus.SENDING else OutgoingStatus.WAITING_CONNECTION,
+            afterSeq = st.log.maxSeq ?: 0,
+        )
+        _state.update { it.derive(outgoing = it.outgoing + msg).copy(draft = "", sendTick = it.sendTick + 1) }
+        draftFlow.value = ""
+        viewModelScope.launch { drafts.setDraft(sessionId, "") }
+        if (st.canSend) deliver(msg.commandId)
+    }
+
+    /** Tap on a failed bubble: same commandId, so the desktop runs it at most once. */
+    fun retrySend(commandId: String) {
+        val st = _state.value
+        if (st.outgoing.none { it.commandId == commandId }) return
+        if (st.canSend) deliver(commandId) else setOutgoing(commandId, OutgoingStatus.WAITING_CONNECTION, null)
+    }
+
+    fun deleteOutgoing(commandId: String) {
+        _state.update { st -> st.derive(outgoing = st.outgoing.filterNot { it.commandId == commandId }) }
+    }
+
+    private fun setOutgoing(commandId: String, status: OutgoingStatus, error: String?) {
+        _state.update { st ->
+            if (st.outgoing.none { it.commandId == commandId }) st // already echoed: nothing to update
+            else st.derive(outgoing = st.outgoing.map { if (it.commandId == commandId) it.copy(status = status, error = error) else it })
+        }
+    }
+
+    private fun deliver(commandId: String) {
+        val msg = _state.value.outgoing.firstOrNull { it.commandId == commandId } ?: return
+        setOutgoing(commandId, OutgoingStatus.SENDING, null)
+        viewModelScope.launch {
+            when (val out = repo.sendMessage(sessionId, msg.text, commandId)) {
+                is CommandOutcome.Succeeded, is CommandOutcome.InProgress -> setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
+                is CommandOutcome.Rejected -> setOutgoing(commandId, OutgoingStatus.FAILED, out.error.body.message.ifBlank { out.error.code })
+                is CommandOutcome.NotSent ->
+                    if (_state.value.online) setOutgoing(commandId, OutgoingStatus.FAILED, ConnectionManager.describe(out.cause))
+                    else setOutgoing(commandId, OutgoingStatus.WAITING_CONNECTION, null)
+                // Sent but unconfirmed (§5): ask the desktop first (read-only); retry only on the user's tap.
+                is CommandOutcome.Unknown -> when (val st = runCatching { repo.commandStatus(commandId) }.getOrNull()) {
+                    is io.github.tianli0.switchtether.remote.command.CommandStatus.Succeeded,
+                    is io.github.tianli0.switchtether.remote.command.CommandStatus.Pending -> setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
+                    is io.github.tianli0.switchtether.remote.command.CommandStatus.Failed ->
+                        setOutgoing(commandId, OutgoingStatus.FAILED, (st.record.error as? kotlinx.serialization.json.JsonObject)?.get("message")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content })
+                    else -> setOutgoing(commandId, OutgoingStatus.FAILED, ConnectionManager.describe(out.cause))
+                }
+            }
+        }
+    }
+
+    /** Back online with a fresh detail: send what the user queued, or say why it cannot go. */
+    private fun flushWaiting() {
+        val st = _state.value
+        st.outgoing.filter { it.status == OutgoingStatus.WAITING_CONNECTION }.forEach { m ->
+            when {
+                st.canSend -> deliver(m.commandId)
+                st.online && st.detail.valueOrNull?.summary?.isLive == false -> setOutgoing(m.commandId, OutgoingStatus.FAILED, SESSION_ENDED)
+                st.online -> setOutgoing(m.commandId, OutgoingStatus.FAILED, null)
+            }
+        }
     }
 
     fun interrupt(label: String) {
+        onLocalAction(sessionId, io.github.tianli0.switchtether.remote.notify.LocalAction.INTERRUPT)
         commands.run(label) { id -> repo.interrupt(sessionId, id) }
     }
 
@@ -324,6 +422,8 @@ class SessionDetailViewModel(
     }
 
     companion object {
+        /** [OutgoingMessage.error] marker: the session ended while the message waited. */
+        const val SESSION_ENDED = "session_ended"
         const val PAGE = 300
         const val CATCH_UP_MAX_PAGES = 20
     }

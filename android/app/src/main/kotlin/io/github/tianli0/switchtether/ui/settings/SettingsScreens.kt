@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -125,6 +126,26 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
                     }
                 }
             }
+            // Android 13+: the system's per-app language page (locales_config lists en / zh-CN).
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                item {
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    PageCard {
+                        ArrowPreference(
+                            title = stringResource(R.string.settings_language),
+                            summary = stringResource(R.string.settings_language_summary),
+                            onClick = {
+                                runCatching {
+                                    ctx.startActivity(
+                                        android.content.Intent(android.provider.Settings.ACTION_APP_LOCALE_SETTINGS)
+                                            .setData(android.net.Uri.fromParts("package", ctx.packageName, null)),
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
             item { SectionHeader(stringResource(R.string.settings_connection)) }
             item {
                 PageCard {
@@ -147,6 +168,24 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
             item {
                 PageCard {
                     KeyValueRow(stringResource(R.string.settings_version), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                    val updState by container.updates.state.collectAsStateWithLifecycle()
+                    var beta by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(container.updates.includePrerelease) }
+                    ArrowPreference(
+                        title = stringResource(R.string.update_check),
+                        summary = updateSummary(updState, BuildConfig.VERSION_NAME),
+                        onClick = {
+                            scope.launch {
+                                if (container.updates.check() is io.github.tianli0.switchtether.update.UpdateState.Available) container.showUpdateRequest.value = true
+                            }
+                        },
+                        modifier = Modifier.testTag("update-check"),
+                    )
+                    SwitchPreference(
+                        checked = beta,
+                        onCheckedChange = { v -> beta = v; container.updates.includePrerelease = v },
+                        title = stringResource(R.string.update_beta),
+                        summary = stringResource(R.string.update_beta_summary),
+                    )
                     KeyValueRow(stringResource(R.string.settings_protocol), "v${io.github.tianli0.switchtether.remote.protocol.CLIENT_PROTOCOL_VERSION}")
                     ArrowPreference(title = stringResource(R.string.settings_licenses), onClick = { onOpen(Route.Licenses) })
                 }
@@ -217,6 +256,39 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
     fun update(t: (NotifyPrefs) -> NotifyPrefs) = container.appScope.launch { container.settingsStore.updateNotifyPrefs(t) }
     Page(title = stringResource(R.string.settings_notifications), onBack = onBack) {
         LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            item { SectionHeader(stringResource(R.string.live_settings_title)) }
+            item {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                val live = container.liveUpdates
+                var autoPin by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(live.autoPinPhoneSessions) }
+                var promotable by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(live.canPromote()) }
+                androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+                    promotable = live.canPromote()
+                    onPauseOrDispose { }
+                }
+                PageCard {
+                    ArrowPreference(
+                        title = stringResource(R.string.live_settings_status),
+                        summary = stringResource(
+                            when {
+                                android.os.Build.VERSION.SDK_INT < 36 -> R.string.live_status_unsupported
+                                promotable -> R.string.live_status_on
+                                else -> R.string.live_status_off
+                            },
+                        ),
+                        onClick = { runCatching { ctx.startActivity(io.github.tianli0.switchtether.ui.common.promotionSettingsIntent(ctx)) } },
+                    )
+                    io.github.tianli0.switchtether.ui.common.fluidCloudSettingsIntent(ctx)?.let { intent ->
+                        ArrowPreference(title = stringResource(R.string.pin_open_fluid_cloud), onClick = { runCatching { ctx.startActivity(intent) } })
+                    }
+                    SwitchPreference(
+                        checked = autoPin,
+                        onCheckedChange = { v -> autoPin = v; live.autoPinPhoneSessions = v },
+                        title = stringResource(R.string.live_auto_pin),
+                        summary = stringResource(R.string.live_auto_pin_summary),
+                    )
+                }
+            }
             item {
                 PageCard {
                     NotifyType.entries.forEachIndexed { i, type ->
@@ -295,7 +367,7 @@ val LICENSES = listOf(
     LicenseEntry("COUI (suqi8/coui), Miuix (compose-miuix-ui/miuix)", "Apache-2.0", "Upstream projects of coui17 (NOTICE)"),
     LicenseEntry("COUI-Kit (ItosEO/COUI-Kit)", "MPL-2.0", "Ported files keep their MPL-2.0 headers"),
     LicenseEntry("Jetpack Compose / Compose Multiplatform", "Apache-2.0", "Google LLC, JetBrains s.r.o."),
-    LicenseEntry("AndroidX (activity, core, fragment, lifecycle, datastore, biometric, camera, dynamicanimation, navigationevent)", "Apache-2.0", "The Android Open Source Project"),
+    LicenseEntry("AndroidX (activity, core, fragment, lifecycle, datastore, biometric, camera, work, dynamicanimation, navigationevent)", "Apache-2.0", "The Android Open Source Project"),
     LicenseEntry("Kotlin stdlib, kotlinx.coroutines, kotlinx.serialization", "Apache-2.0", "JetBrains s.r.o."),
     LicenseEntry("OkHttp / Okio", "Apache-2.0", "Square, Inc."),
     LicenseEntry("ZXing core", "Apache-2.0", "ZXing authors"),

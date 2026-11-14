@@ -101,8 +101,23 @@
     <string name="option_deny">拒绝</string>
     <string name="option_abort">停止智能体</string>
     <string name="attached_badge">已接管 · %1$s</string>
+    <string name="attached_tag">已接管</string>
     <string name="client_terminal">终端</string>
     <string name="open_terminal">打开终端</string>
     <string name="session_unnamed">未命名会话</string>
     <string name="session_info_id">会话 ID</string>
+    <string name="render_system_turn_stopped">本轮在完成前已停止。</string>
+    <string name="outgoing_sending">发送中…</string>
+    <string name="outgoing_delivered">已送达</string>
+    <string name="outgoing_waiting">等待连接</string>
+    <string name="outgoing_failed">发送失败</string>
+    <string name="outgoing_retry">重试</string>
+    <string name="outgoing_delete">删除</string>
+    <string name="outgoing_session_ended">会话已结束，未发送</string>
+    <string name="session_typing">正在回复…</string>
+    <string name="jump_latest">回到最新</string>
+    <plurals name="new_messages">
+        <item quantity="other">%d 条新消息</item>
+    </plurals>
+    <string name="composer_queue_hint">离线：发送的消息会在重新连接后发出。</string>
 </resources>

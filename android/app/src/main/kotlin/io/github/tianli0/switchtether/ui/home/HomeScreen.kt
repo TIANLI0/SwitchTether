@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -132,9 +133,12 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
 
 @Composable
 private fun SessionGroup(list: List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>, onOpen: (Route) -> Unit) {
+    val pins by io.github.tianli0.switchtether.ui.appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
+    var menuFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.remote.protocol.SessionSummary?>(null) }
+    io.github.tianli0.switchtether.ui.sessions.PinMenuDialog(menuFor, menuFor?.id in pins) { menuFor = null }
     GroupCard {
         list.forEachIndexed { i, it ->
-            SessionRow(it, onClick = { onOpen(Route.SessionDetail(it.id, it.title)) }, position = cardListPositionOf(i, list.size), compact = true)
+            SessionRow(it, onClick = { onOpen(Route.SessionDetail(it.id, it.title)) }, position = cardListPositionOf(i, list.size), compact = true, pinned = it.id in pins, onLongClick = { menuFor = it })
         }
     }
 }
@@ -160,7 +164,7 @@ private fun CompactNote(text: String) {
 @Composable
 private fun UsageRow(today: Loadable<UsageSummary>, onRetry: () -> Unit, position: CardListPosition, onOpen: () -> Unit) {
     val summary = when (today) {
-        is Loadable.Ready -> stringResource(R.string.home_usage_today, Formatters.usd(today.value.totalCostUsd), Formatters.tokens(today.value.totalTokens))
+        is Loadable.Ready -> stringResource(R.string.home_usage_today, io.github.tianli0.switchtether.remote.usage.UsageFormat.moneyShort(today.value.totalCostUsd, io.github.tianli0.switchtether.domain.LocalMoney.current), Formatters.tokens(today.value.totalTokens))
         is Loadable.Failed -> if (today.error.kind == UiError.Kind.BACKEND_UNAVAILABLE) stringResource(R.string.usage_unavailable) else today.error.title()
         Loadable.Loading -> stringResource(R.string.state_loading)
     }

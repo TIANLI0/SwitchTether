@@ -476,6 +476,158 @@ the scratch directory), d03-codex-session, d04-claude-session, d05-nav-workspace
 d03 shows a real desktop error: the sandbox's default Codex model `gpt-6.1-sol` is rejected for a
 ChatGPT-account login. That is a desktop/Codex configuration issue, not an app error.
 
+## 13. Phase E: notifications, Live Updates, update, Android 17, relay, chat UX
+
+### 13.1 Task-state notifications
+- `NotificationEngine` (core) tracks turns per session: "waiting for approval/input", "turn
+  completed", "failed", "interrupted / turn_stopped", "process exited" and "terminal exited",
+  for attached sessions exactly as for managed ones. Keys are per turn (`done:<sid>:<n>`), so a
+  state is notified once per turn.
+- One notification per (session, slot): ATTENTION (approval / input), STATUS (done / failed /
+  stopped / exited), OTHER (connection, terminal). A resolved approval cancels its ATTENTION
+  notification. Grouped per session; tapping opens the session (or the terminal).
+- No echo of the phone's own actions: interrupt / stop / kill terminal are noted as
+  `LocalAction` for 60 s and the resulting events are not notified.
+- Per-category toggles under Settings → 通知. The stored "enabled" set also records which types
+  existed when it was saved (`notify_known_types`); types added later get their default, so an
+  upgrade never switches a new category (e.g. Live Updates) off silently.
+- The ongoing keep-alive notification says "已连接到你的电脑" or "正在重新连接你的电脑…"
+  depending on the connection.
+
+### 13.2 Launcher icon
+Adaptive icon (gradient background + white tether mark), monochrome layer for themed icons, the
+same mark as the notification small icon (`ic_stat_notify`). Exports in `android/docs/icon/`.
+
+### 13.3 Self-update (GitHub releases)
+- `GithubReleases.fetch` with ETag / If-None-Match; every 12 h (WorkManager) and on "检查更新";
+  "测试版" includes pre-releases. Asset contract: `SwitchTether-<version>-android.apk` +
+  `SHA256SUMS.txt`.
+- Before installing: SHA-256 from `SHA256SUMS.txt`, the APK's package name, and its signing
+  certificate digest must match the installed app (rotation lineage accepted). Install through
+  `PackageInstaller`; without "install unknown apps" the sheet explains and opens the system page.
+- Verified end-to-end against a local mock of the GitHub API (debug-only `-PupdateApiBase`):
+  bad checksum refused, good update installed. The real repository currently has no releases
+  ("尚未发布任何版本").
+
+### 13.4 Usage parity and display currency
+- `UsageFormat` mirrors `src/components/usage/format.ts`: tokens (K/M/B), success/hit rate,
+  tokens/s, first-token time, range presets (今天 / 24 小时 / 7 / 14 / 30 天 / 全部), hourly buckets
+  for ranges ≤ 24 h.
+- Costs follow the desktop's **display currency** (`settings.usageDisplay`): `MoneyDisplay.resolve`
+  is `resolveMoneyDisplay` (currencies USD/CNY/EUR/JPY/TWD/TRY/KRW, the same default rates, auto vs
+  manual rate source), `UsageFormat.money / moneyCompact / moneyShort / moneyTick` are
+  `formatMoney…` (same symbols, ¥/₩ digit rules, 2-significant-digit fallback, grouping). Tests
+  reuse the desktop's own test cases. The phone never fetches exchange rates.
+- Read from `GET /v1/settings` on connect and when the Usage page opens; the last value is kept
+  per paired computer (display preference only). Until the desktop exposes `usageDisplay` the
+  desktop default (USD) applies (desktop gap, see report).
+
+### 13.5 LAN discovery
+`NsdDiscovery` browses `_switchtether._tcp` (TXT `v`, `fp`, `id`, `n`) only while needed, with a
+multicast lock. Used as fallback when every stored host fails; a match must have the paired
+fingerprint, and the found address is stored (`lastGoodHost`, merged host list). "附近的电脑" on
+the pairing screen lists advertised computers.
+
+### 13.6 Relay client (docs/RELAY.md)
+- Order: stored hosts → LAN discovery → relay. TCP (`tcp://`, default port 47700) or WebSocket
+  (`wss://…/v1/tunnel`) transports are plain `Socket`s under the unchanged TLS 1.3 + pinning +
+  client certificate.
+- Handshake (§2.3): `ST-RELAY/1 CONNECT <fp> <token>` → `CHALLENGE <nonce>` → `KEY <mac>` → `OK`,
+  mac = base64url-no-pad(HMAC-SHA256(relay key, "switchtether-relay-v1 connect\n" + nonce + "\n" + fp)).
+- The relay key comes from the pairing link (`rk`) or `GET /v1/relay` (refreshed after every direct
+  connect). Token and key are stored only encrypted with a non-exportable AndroidKeyStore
+  AES-256-GCM key (`KeystoreRelaySecrets`), deleted on unpair. No key → the relay is not tried.
+  `ERR auth_failed` is shown as "中转密钥无效". The relay endpoint is never stored as a host.
+- Tests: fake TCP and WebSocket relays (CHALLENGE / MAC checked), an independently computed MAC
+  reference value, the connection order test, and an opt-in test against the Go relay
+  (`SWITCHTETHER_RELAY_TEST`, `SWITCHTETHER_RELAY_KEY`).
+
+### 13.7 Android 17 (targetSdk 37, minSdk 29)
+- **Local network permission** (`ACCESS_LOCAL_NETWORK`): requested with a Chinese rationale sheet at
+  pairing (when the link has LAN hosts) and at the first LAN connect. Denied → LAN hosts and
+  discovery are skipped (Tailscale / relay still work) and a strip "未授予局域网权限… 去授权" offers
+  the fix. `LocalNetwork.isLocal` classifies RFC 1918, link-local, ULA and `.local`.
+- Certificate Transparency default: unaffected (the app pins its own leaf certificate). Background
+  activity launch hardening: all activity starts come from user actions or notification taps.
+- **Home-screen widget** "待处理 / 运行中": counts and up to three waiting sessions; a row opens the
+  session. No approve buttons, no bitmaps (RemoteViews memory limit), data in memory only.
+  "运行中" counts busy sessions only.
+- **Handoff** (API 37): the open session is offered for continuation; the receiving app opens it
+  only when it is paired with the same computer. UNTESTED (needs two devices).
+- Skipped: `BiometricPrompt.Builder.addFallbackOption` (our prompt already allows the device
+  credential as fallback), AppFunctions (needs the Jetpack AppFunctions SDK and privileged callers;
+  cannot be verified), `AppWidgetEvent` (engagement statistics only).
+
+### 13.8 Live Updates / Fluid Cloud (钉住任务)
+ColorOS 16 shows Android 16 Live Updates in Fluid Cloud (流体云); the app posts standard Live
+Updates only (no OPPO SDK).
+- Pin up to 3 sessions ("钉到流体云" in the session toolbar, long-press on a row; optional
+  "从手机发起的任务自动钉住"). One promoted ongoing notification per pin, updated at most once per
+  second; a pin keeps the connection alive (the keep-alive service starts when the first pin is
+  added and stops with the last one unless "后台保持连接" is on).
+- States: 运行中 (step text + timer), 待确认 (alerts once; 批准 / 拒绝 need the phone unlocked;
+  a 409 says "已在电脑上处理"; questions offer 回答), 已完成 / 出错 / 已中断 (promoted for 60 s, then
+  demoted), 离线 (promoted only while a turn was running), session ended (final card, then the pin
+  is removed). Swiping the card away is respected until the state changes.
+- Progress track (one model): one coloured segment per stage, **no points**: 运行 | 待确认 | 完成
+  when the turn asked something, else 运行 | 完成 (segments sum to 100). Running has no known
+  total → **indeterminate** bar, no tracker. Waiting: tracker at the end of 运行; done: full;
+  failed / stopped: at the last stage reached. The tracker is `ic_tracker_claude` /
+  `ic_tracker_codex`, a 24 dp square vector with the mark centred (3 dp padding).
+- Step text is human, never a tool name: 运行命令 <command>, 编辑 <file>, 读取 <file>, 搜索文件,
+  访问网页 <host>, 搜索网页, 子任务, 更新计划, 发送消息, else 处理中; no "第 N 步". Approvals read
+  "需要你批准 · tracker.txt" (a bare path shows its file name).
+- Visual design guide (OPPO Fluid Cloud template 2.0): capsule = mark + at most 5 characters
+  (运行中 / 待确认 / 已完成 / 出错 / 已中断 / 离线); card = title / core text / auxiliary line
+  ("Claude Code · 项目"); text-only buttons (2–3); progress with 2–4 stages; lock screen shows only
+  "SwitchTether · 待确认" when the user hides sensitive content; never colorized.
+- Platform-free parts (`LiveReducer`, `LiveUpdateRenderer`) are unit-tested; the brand marks' path
+  data must spell out arc flags (`VectorPathDataTest`: SystemUI's parser rejects `0 01-.1`).
+
+### 13.9 Session chat: optimistic send, follow the latest message
+- **Send** inserts the user's bubble immediately ("发送中…", dimmed), clears the composer and jumps
+  to the bottom. After the POST: "已送达" + a "正在回复…" row until the agent's first output. The
+  desktop's `user_message` replaces the bubble in place: exact match on `data.clientId ==
+  commandId`, else (older desktops) same normalized text from the phone, newer than the send.
+- Failures: "发送失败 · <reason>" with **重试** (same commandId, so it runs at most once) and **删除**.
+  An unknown outcome is first checked with `GET /v1/commands/{id}` (read-only); no automatic resend.
+  Offline (session usable when last seen): "等待连接", sent with the same commandId on reconnect, or
+  "会话已结束，未发送".
+- **Stick to bottom**: at the end of the list, new rows and growing rows keep it pinned (one scroll
+  per frame, no animation per delta). Scrolling up stops following; a pill "N 条新消息 ↓" / "回到最新"
+  jumps back. Opening a session lands at the bottom; older pages keep the position.
+- Tests: ViewModel (optimistic insert, both matching modes, retry, offline queue, unknown outcome)
+  and Compose (follow, pill, own bubble, failed bubble, typing row).
+
+### 13.10 Navigation, predictive back, language
+- Per-tab back stacks: switching tabs keeps each tab's place; re-selecting a tab returns to its root.
+- `AnimatedNavHost`: shared X axis for push / pop, fade-through between tabs, each entry's UI state
+  saved while it is in the stack. The system back gesture seeks the pop transition
+  (`PredictiveBackHandler` + `SeekableTransitionState`); release commits, cancel springs back. At
+  Home with nothing to pop no handler is enabled, so the system "back to home" animation runs.
+  `enableOnBackInvokedCallback="true"`; edge-to-edge via `enableEdgeToEdge()`.
+- Per-app language: `locales_config` (en, zh-CN) and Settings → 语言 opens the system page
+  (Android 13+).
+
+### 13.11 Press feedback: never a square mask
+Every clickable gets its indication clipped to its visible shape: coui components (`BasicComponent`
+inside cards, `IconButton`, `Card`) already mask their content; our own `clickable` /
+`combinedClickable` must have `.clip(shape)` **before** the click modifier (CircleShape for round
+buttons, the card's corner radius on the first / last row of a group, rounded rows for chip rows).
+Purely gestural targets (terminal lines) use `indication = null`.
+
+### 13.12 Attached Codex sessions in lists
+The row tag is just "已接管"; the client moves to the summary line ("Codex Desktop", or
+"Claude Code · VS Code"). The wide "已接管 · Codex Desktop" pill had squeezed long Codex thread
+slugs into 3–4 lines. `AttachedCodexScreenshotTest` renders rows in light and dark (and asserts the
+detail screen: badge, slug title, composer, no read-only tip, no 接续).
+
+Screenshots (zh-CN): `android/docs/screenshots/phase-e/` — 01–04 self-update, 05–06
+notifications, 07 usage, 10–12 local network permission, 20–31 Live Updates on the API 37 emulator
+(before the stage-track change), 32–34 Live Updates after it (API 36: waiting, running, done),
+40 widget (computer name blurred), 41 attached Codex rows, 50–53 optimistic send / follow /
+new-message pill, 60 predictive back mid-gesture.
+
 ## 9. Known limitations
 
 - Event-stream `subscribe` frames are not sent (the server currently broadcasts all topics).
@@ -488,6 +640,8 @@ ChatGPT-account login. That is a desktop/Codex configuration issue, not an app e
   the desktop grant is still valid (it could query `GET /v1/auth/step-up`).
 - One approval can notify twice when the desktop also lists the managed process as an observed
   `claude:<id>` live session (its `session.upserted` is not filtered the way the session list is).
+- Robolectric cannot draw screens whose app bar uses coui's RuntimeShader masks to a bitmap, so
+  screenshot tests cover rows/components; full screens are captured on the emulator.
 - Terminal cell width assumes a monospace font; CJK double-width glyphs may drift slightly.
 - Re-pairing while already paired via a deep link is not supported (unpair first).
 - `ui` component registry has only two built-in components.

@@ -19,6 +19,16 @@ sealed interface TimelineRow {
         override val key: String get() = item.key
     }
 
+    /** Optimistic bubble of a message sent from this phone, until the desktop echoes it. */
+    data class Outgoing(val message: OutgoingMessage) : TimelineRow {
+        override val key: String get() = "out:${message.commandId}"
+    }
+
+    /** "正在回复…" placeholder until the agent's first output arrives. */
+    data object Typing : TimelineRow {
+        override val key: String get() = "typing"
+    }
+
     data class Steps(
         val groupId: String,
         val steps: Int,

@@ -618,6 +618,7 @@ fun statusStateLabel(state: String?): String = when (state) {
     "completed" -> stringResource(R.string.render_status_completed)
     "error" -> stringResource(R.string.render_status_error)
     "idle" -> stringResource(R.string.render_status_idle)
+    "interrupted" -> stringResource(R.string.step_interrupted)
     null -> ""
     else -> state
 }
@@ -652,6 +653,7 @@ fun SystemRow(item: RenderItem) {
             when (d.str("subtype")) {
                 // Known desktop notices are shown in the app language instead of the server's English.
                 "continued" -> stringResource(R.string.render_system_continued)
+                "turn_stopped" -> stringResource(R.string.render_system_turn_stopped)
                 "init" -> stringResource(R.string.render_system_init) + (d.str("text")?.substringAfter(" · ", "")?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
                 else -> stringResource(R.string.render_system, listOfNotNull(d.str("subtype"), d.str("text")).joinToString(": "))
             },
@@ -673,7 +675,7 @@ fun UsageRow(item: RenderItem) {
         Formatters.tokens(d.long("outputTokens") ?: 0),
         Formatters.tokens(d.long("cacheReadTokens") ?: 0),
         Formatters.tokens(d.long("cacheWriteTokens") ?: 0),
-    ) + (d.double("costUsd")?.let { " · " + Formatters.usd(it) } ?: "")
+    ) + (d.double("costUsd")?.let { " · " + Formatters.usd(it, io.github.tianli0.switchtether.domain.LocalMoney.current) } ?: "")
     Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 2.dp), contentAlignment = Alignment.Center) {
         Text(text, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
     }

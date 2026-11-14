@@ -5,6 +5,8 @@ import com.adamglin.PhosphorIcons
 import com.adamglin.phosphoricons.Fill
 import com.adamglin.phosphoricons.Regular
 import com.adamglin.phosphoricons.regular.ArrowClockwise
+import com.adamglin.phosphoricons.regular.ArrowDown
+import com.adamglin.phosphoricons.regular.Clock
 import com.adamglin.phosphoricons.regular.ArrowLeft
 import com.adamglin.phosphoricons.regular.ArrowsLeftRight
 import com.adamglin.phosphoricons.regular.Brain
@@ -30,6 +32,8 @@ import com.adamglin.phosphoricons.regular.Plugs
 import com.adamglin.phosphoricons.regular.Plus
 import com.adamglin.phosphoricons.regular.PlusCircle
 import com.adamglin.phosphoricons.regular.PuzzlePiece
+import com.adamglin.phosphoricons.regular.PushPin
+import com.adamglin.phosphoricons.regular.PushPinSlash
 import com.adamglin.phosphoricons.regular.Question
 import com.adamglin.phosphoricons.regular.Robot
 import com.adamglin.phosphoricons.regular.Stack
@@ -90,6 +94,10 @@ object AppIcons {
     val Show: ImageVector get() = PhosphorIcons.Regular.Eye
     val Hide: ImageVector get() = PhosphorIcons.Regular.EyeSlash
     val Terminal: ImageVector get() = PhosphorIcons.Regular.TerminalWindow
+    val Pin: ImageVector get() = PhosphorIcons.Regular.PushPin
+    val Unpin: ImageVector get() = PhosphorIcons.Regular.PushPinSlash
+    val ArrowDown: ImageVector get() = PhosphorIcons.Regular.ArrowDown
+    val Clock: ImageVector get() = PhosphorIcons.Regular.Clock
 
     // States.
     val Done: ImageVector get() = PhosphorIcons.Regular.Check

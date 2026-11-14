@@ -34,6 +34,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -87,6 +88,9 @@ fun SessionsContent(
     onOpen: (Route) -> Unit,
 ) {
     val refreshing = state.items is Loadable.Ready && (state.items as Loadable.Ready).refreshing
+    val pins by io.github.tianli0.switchtether.ui.appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
+    var menuFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.remote.protocol.SessionSummary?>(null) }
+    PinMenuDialog(menuFor, menuFor?.id in pins) { menuFor = null }
     Page(
         title = stringResource(R.string.tab_sessions),
         actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), onReload) },
@@ -143,7 +147,7 @@ fun SessionsContent(
                         item(key = "g-$title") {
                             GroupCard {
                                 list.forEachIndexed { i, s ->
-                                    SessionRow(s, onClick = { onOpen(Route.SessionDetail(s.id, s.title)) }, position = cardListPositionOf(i, list.size))
+                                    SessionRow(s, onClick = { onOpen(Route.SessionDetail(s.id, s.title)) }, position = cardListPositionOf(i, list.size), pinned = s.id in pins, onLongClick = { menuFor = s })
                                 }
                             }
                         }

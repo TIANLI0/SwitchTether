@@ -23,6 +23,7 @@ Settings → About → Open source licenses (`LicensesScreen`).
 | `androidx.fragment:fragment` | 1.8.9 | Apache-2.0 | FragmentActivity for BiometricPrompt |
 | `androidx.lifecycle` (runtime-compose, viewmodel-compose, process) | 2.10.0 | Apache-2.0 | |
 | `androidx.datastore:datastore-preferences` | 1.2.1 | Apache-2.0 | non-secret pairing metadata + settings |
+| `androidx.work:work-runtime` | 2.12.0 | Apache-2.0 | 12-hourly update check |
 | `androidx.biometric:biometric` | 1.1.0 | Apache-2.0 | step-up confirmation |
 | `androidx.camera` (core, camera2, lifecycle, view) | 1.6.2 | Apache-2.0 | QR scanning preview |
 | `com.google.zxing:core` | 3.5.4 | Apache-2.0 | QR decoding (no Play Services / ML Kit) |

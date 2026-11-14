@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.common
 
+import androidx.compose.ui.platform.testTag
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,12 +40,21 @@ fun connectionText(state: ConnectionState): String {
         }
     }
     return when (state) {
-        is ConnectionState.Online -> stringResource(R.string.conn_online, state.desktop.name, state.endpoint.toString())
+        is ConnectionState.Online -> if (state.endpoint.host == io.github.tianli0.switchtether.remote.relay.RELAY_HOST) {
+            stringResource(R.string.conn_via_relay, relayHostOf(state.desktop.relayUrl))
+        } else {
+            stringResource(R.string.conn_online, state.desktop.name, state.endpoint.toString())
+        }
         is ConnectionState.Connecting -> stringResource(R.string.conn_connecting, state.desktop.name)
         is ConnectionState.Offline -> {
             val secs = state.retryAtMs?.let { ((it - now) / 1000).coerceAtLeast(0) }
             val base = if (secs != null) stringResource(R.string.conn_offline_retry, secs) else stringResource(R.string.conn_offline)
-            if (state.reason != null) "$base\n${state.reason}" else base
+            when {
+                // The relay refused our relay key (RELAY.md §2.0): say so in words.
+                state.reason?.contains("relay: auth_failed") == true -> "$base\n" + stringResource(R.string.conn_relay_key_invalid)
+                state.reason != null && state.reason != io.github.tianli0.switchtether.connection.ConnectionManager.LOCAL_NETWORK_DENIED -> "$base\n${state.reason}"
+                else -> base
+            }
         }
         is ConnectionState.Revoked -> stringResource(R.string.conn_revoked, state.reason)
         is ConnectionState.Incompatible -> when (state.kind) {
@@ -57,7 +68,19 @@ fun connectionText(state: ConnectionState): String {
 /** Thin banner for non-online states, used at the top of pages. */
 @Composable
 fun ConnectionBanner(state: ConnectionState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-    if (state is ConnectionState.Online) return
+    // Android 17: LAN access not granted → say what still works and offer to fix it.
+    LocalNetworkStrip()
+    if (state is ConnectionState.Online) {
+        // Healthy direct connection: nothing to say. Through the relay: say so, quietly.
+        if (state.endpoint.host == io.github.tianli0.switchtether.remote.relay.RELAY_HOST) {
+            Banner(
+                text = stringResource(R.string.conn_via_relay, relayHostOf(state.desktop.relayUrl)),
+                color = LocalDevColors.current.info,
+                modifier = modifier.testTag("relay-strip"),
+            )
+        }
+        return
+    }
     Banner(
         text = connectionText(state),
         color = connectionColor(state),
@@ -97,3 +120,6 @@ fun sessionStatusColor(status: String, dev: DevColors = LocalDevColors.current):
     "completed" -> dev.ok
     else -> dev.neutral
 }
+
+/** Host part of a relay URL for display ("relay.example.com"). */
+fun relayHostOf(url: String?): String = url?.let { runCatching { java.net.URI(it.trim()).host }.getOrNull() } ?: "—"

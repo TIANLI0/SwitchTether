@@ -1,47 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  SwitchTether mark (desktop + phone joined by a tether), converted from
-  src/assets/icons/switchtether-logo.svg (original artwork, MIT). The solid #1F6BFF rounded square
-  of the SVG is the adaptive-icon background; the glyph is scaled into the 66dp safe zone.
+  SwitchTether mark: two nodes (phone, computer) joined by one tether curve.
+  108dp adaptive canvas; the mark stays inside a 32.3dp radius around the centre, well within the
+  66dp safe zone, so every launcher mask (circle, squircle, teardrop) keeps it intact.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="1024"
-    android:viewportHeight="1024">
-    <group
-        android:pivotX="537"
-        android:pivotY="530"
-        android:scaleX="0.8"
-        android:scaleY="0.8"
-        android:translateX="-25"
-        android:translateY="-18">
-        <!-- desktop -->
-        <path
-            android:pathData="M270,250 H578 A56,56 0 0 1 634,306 V494 A56,56 0 0 1 578,550 H270 A56,56 0 0 1 214,494 V306 A56,56 0 0 1 270,250 Z"
-            android:strokeWidth="56"
-            android:strokeColor="#FFFFFF" />
-        <path
-            android:pathData="M334,652 H514"
-            android:strokeWidth="56"
-            android:strokeColor="#FFFFFF"
-            android:strokeLineCap="round" />
-        <path
-            android:pathData="M424,550 V652"
-            android:strokeWidth="56"
-            android:strokeColor="#FFFFFF" />
-        <!-- tether -->
-        <path
-            android:pathData="M634,400 C742,400 762,470 762,520"
-            android:strokeWidth="40"
-            android:strokeColor="#9CC1FF"
-            android:strokeLineCap="round" />
-        <!-- phone -->
-        <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M708,520 H816 A44,44 0 0 1 860,564 V776 A44,44 0 0 1 816,820 H708 A44,44 0 0 1 664,776 V564 A44,44 0 0 1 708,520 Z" />
-        <path
-            android:fillColor="#1F6BFF"
-            android:pathData="M736,770 H788 A8,8 0 0 1 796,778 A8,8 0 0 1 788,786 H736 A8,8 0 0 1 728,778 A8,8 0 0 1 736,770 Z" />
-    </group>
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M38,68C38,50 70,58 70,40"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M28.5,68a9.5,9.5 0,1 0,19 0a9.5,9.5 0,1 0,-19 0z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M59,40a11,11 0,1 0,22 0a11,11 0,1 0,-22 0z" />
 </vector>

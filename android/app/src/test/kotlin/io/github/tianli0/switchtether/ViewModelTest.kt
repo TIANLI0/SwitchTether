@@ -27,6 +27,7 @@ import io.github.tianli0.switchtether.ui.home.HomeViewModel
 import io.github.tianli0.switchtether.ui.onboarding.PairingUiState
 import io.github.tianli0.switchtether.ui.onboarding.PairingViewModel
 import io.github.tianli0.switchtether.ui.sessions.ROLLING_STATUS_ID
+import io.github.tianli0.switchtether.ui.sessions.OutgoingStatus
 import io.github.tianli0.switchtether.ui.sessions.SessionDetailViewModel
 import io.github.tianli0.switchtether.ui.sessions.SessionScope
 import io.github.tianli0.switchtether.ui.sessions.SessionsViewModel
@@ -158,70 +159,147 @@ class ViewModelTest {
         val vm = detailVm(repo)
         advanceUntilIdle()
         vm.setDraft("please fix it")
-        vm.send("Send")
+        vm.send()
         advanceUntilIdle()
         assertFalse(vm.state.value.canSend)
         assertTrue(repo.sent.isEmpty())
+        assertTrue(vm.state.value.outgoing.isEmpty())
 
         val repo2 = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList()) }
         val drafts = FakeDrafts()
         val vm2 = detailVm(repo2, drafts = drafts)
         advanceUntilIdle()
         vm2.setDraft("please fix it")
-        vm2.send("Send")
+        vm2.send()
+        // Optimistic: bubble + cleared composer right away.
+        assertEquals("please fix it", vm2.state.value.outgoing.single().text)
+        assertEquals("", vm2.state.value.draft)
+        assertEquals(1, vm2.state.value.sendTick)
         advanceUntilIdle()
         assertEquals("please fix it", repo2.sent.single().second)
-        assertEquals("", vm2.state.value.draft) // cleared after success
+        assertEquals(OutgoingStatus.DELIVERED, vm2.state.value.outgoing.single().status)
+        assertTrue("typing row after a delivered message", vm2.state.value.typing)
     }
 
     @Test
-    fun offlineNeverSendsButKeepsDraft() = runTest(dispatcher) {
+    fun echoWithClientIdReplacesTheBubbleWithoutDuplicates() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList()) }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        vm.setDraft("hello there")
+        vm.send()
+        advanceUntilIdle()
+        val id = repo.sent.single().first
+        // A different text with the right clientId still replaces it (exact match wins).
+        vm.applyEvents(listOf(event("u9", 9, "user_message", """{"text":"hello  there\n","source":"phone","clientId":"$id"}""")))
+        assertTrue(vm.state.value.outgoing.isEmpty())
+        assertEquals(1, vm.state.value.items.count { it.event.kind == "user_message" })
+        assertTrue("still waiting for the agent", vm.state.value.typing)
+        vm.applyEvents(listOf(event("a10", 10, "assistant_message", """{"text":"Hi"}""")))
+        assertFalse(vm.state.value.typing)
+    }
+
+    @Test
+    fun olderDesktopsMatchByNormalizedTextFromThePhone() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply {
+            detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
+            events = listOf(event("u1", 1, "user_message", """{"text":"run tests","source":"phone"}"""))
+        }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        vm.setDraft("  run   tests ")
+        vm.send()
+        advanceUntilIdle()
+        // The identical older message (seq 1) is not the echo; a desktop-typed one is not either.
+        vm.applyEvents(listOf(event("u2", 2, "user_message", """{"text":"run tests","source":"desktop"}""")))
+        assertEquals(1, vm.state.value.outgoing.size)
+        vm.applyEvents(listOf(event("u3", 3, "user_message", """{"text":"run tests","source":"phone"}""")))
+        assertTrue(vm.state.value.outgoing.isEmpty())
+    }
+
+    @Test
+    fun rejectedSendFailsAndRetriesWithTheSameCommandId() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply {
+            detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
+            nextOutcome = { id -> CommandOutcome.Rejected(id, ApiException(409, ApiErrorBody("conflict", "session busy"), null)) }
+        }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        vm.setDraft("x")
+        vm.send()
+        advanceUntilIdle()
+        val failed = vm.state.value.outgoing.single()
+        assertEquals(OutgoingStatus.FAILED, failed.status)
+        assertEquals("session busy", failed.error)
+        assertEquals("x", failed.text) // the text is kept
+        repo.nextOutcome = { id -> CommandOutcome.Succeeded(id, io.github.tianli0.switchtether.remote.api.CommandResponse(kotlinx.serialization.json.JsonNull, false)) }
+        vm.retrySend(failed.commandId)
+        advanceUntilIdle()
+        assertEquals(listOf(failed.commandId, failed.commandId), repo.sent.map { it.first })
+        assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.single().status)
+        vm.deleteOutgoing(failed.commandId)
+        assertTrue(vm.state.value.outgoing.isEmpty())
+    }
+
+    @Test
+    fun offlineWithoutALoadedSessionNeverSendsButKeepsDraft() = runTest(dispatcher) {
         val conn = FakeConnection(ConnectionState.Offline(TEST_DESKTOP, "down", null))
         val repo = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList()) }
         val drafts = FakeDrafts()
         val vm = detailVm(repo, conn, drafts)
         vm.setDraft("later")
-        vm.send("Send")
+        vm.send()
         advanceUntilIdle()
         assertTrue(repo.sent.isEmpty())
         assertEquals("later", vm.state.value.draft)
     }
 
     @Test
-    fun unknownOutcomeIsNotRetriedAutomaticallyAndChecksStatusFirst() = runTest(dispatcher) {
+    fun queuedWhileOfflineGoesOutOnReconnectWithTheSameCommandId() = runTest(dispatcher) {
+        val conn = FakeConnection()
+        val repo = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList()) }
+        val vm = detailVm(repo, conn)
+        advanceUntilIdle()
+        conn.state.value = ConnectionState.Offline(TEST_DESKTOP, "down", null)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.canQueue)
+        vm.setDraft("when you can")
+        vm.send()
+        advanceUntilIdle()
+        val queued = vm.state.value.outgoing.single()
+        assertEquals(OutgoingStatus.WAITING_CONNECTION, queued.status)
+        assertTrue(repo.sent.isEmpty())
+        conn.state.value = ONLINE
+        advanceUntilIdle()
+        assertEquals(listOf(queued.commandId to "when you can"), repo.sent)
+        assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.single().status)
+    }
+
+    @Test
+    fun unknownOutcomeChecksStatusBeforeOfferingRetry() = runTest(dispatcher) {
         val repo = FakeSessionRepository().apply {
             detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
             nextOutcome = { id -> CommandOutcome.Unknown(id, IOException("timeout")) }
+            nextStatus = CommandStatus.NotFound
         }
         val vm = detailVm(repo)
         advanceUntilIdle()
         vm.setDraft("run tests")
-        vm.send("Send")
+        vm.send()
         advanceUntilIdle()
-        val prompt = vm.commands.prompt.value
-        assertNotNull(prompt)
-        assertEquals(CommandPrompt.Kind.UNKNOWN, prompt!!.kind)
-        assertNull("no retry before the status is known", prompt.retryId)
+        val m = vm.state.value.outgoing.single()
+        assertEquals(listOf(m.commandId), repo.statusQueries) // asked, not resent
         assertEquals(1, repo.sent.size)
-        vm.commands.retry() // ignored: not allowed yet
-        advanceUntilIdle()
-        assertEquals(1, repo.sent.size)
-
-        // Desktop never got it → retry allowed with the SAME command id, only on explicit tap.
-        repo.nextStatus = CommandStatus.NotFound
-        vm.commands.checkStatus()
-        advanceUntilIdle()
-        assertEquals(listOf(prompt.commandId), repo.statusQueries)
-        assertEquals(prompt.commandId, vm.commands.prompt.value!!.retryId)
+        assertEquals(OutgoingStatus.FAILED, m.status)
+        // Explicit tap: same command id.
         repo.nextOutcome = { id -> CommandOutcome.Succeeded(id, io.github.tianli0.switchtether.remote.api.CommandResponse(kotlinx.serialization.json.JsonNull, false)) }
-        vm.commands.retry()
+        vm.retrySend(m.commandId)
         advanceUntilIdle()
-        assertEquals(listOf(prompt.commandId, prompt.commandId), repo.sent.map { it.first })
-        assertNull(vm.commands.prompt.value)
+        assertEquals(listOf(m.commandId, m.commandId), repo.sent.map { it.first })
     }
 
     @Test
-    fun unknownOutcomeThatActuallySucceededIsTreatedAsSuccess() = runTest(dispatcher) {
+    fun unknownOutcomeThatActuallySucceededIsTreatedAsDelivered() = runTest(dispatcher) {
         val repo = FakeSessionRepository().apply {
             detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
             nextOutcome = { id -> CommandOutcome.Unknown(id, IOException("timeout")) }
@@ -230,11 +308,9 @@ class ViewModelTest {
         val vm = detailVm(repo)
         advanceUntilIdle()
         vm.setDraft("x")
-        vm.send("Send")
+        vm.send()
         advanceUntilIdle()
-        vm.commands.checkStatus()
-        advanceUntilIdle()
-        assertNull(vm.commands.prompt.value)
+        assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.single().status)
         assertEquals("", vm.state.value.draft)
         assertEquals(1, repo.sent.size)
     }

@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -102,8 +103,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> Unit, onOpenSession: (String, String?) -> Unit = { _, _ -> }) {
     val container = appContainer()
-    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore) }
+    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val pins by container.liveUpdates.pins.collectAsStateWithLifecycle()
+    val pinned = sessionId in pins
+    val context = androidx.compose.ui.platform.LocalContext.current
     val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
     val busy by vm.commands.busy.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
@@ -158,11 +162,15 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
         onLoadOlder = vm::loadOlder,
         onToggleSteps = vm::toggleSteps,
         onDraft = vm::setDraft,
-        onSend = { vm.send(sendLabel) },
+        onSend = vm::send,
+        onRetryOutgoing = vm::retrySend,
+        onDeleteOutgoing = vm::deleteOutgoing,
         onInterrupt = { confirmInterrupt = true },
         onContinue = { showContinue = true },
         onRetryConnection = { container.connection.retryNow() },
         onOpenTerminal = { id -> container.openTerminalRequest.value = id },
+        pinned = pinned,
+        onTogglePin = { state.detail.valueOrNull?.summary?.let { s -> io.github.tianli0.switchtether.ui.common.togglePin(context, s) } },
     )
 
     ContinueSheet(
@@ -225,6 +233,10 @@ fun SessionDetailContent(
     onContinue: () -> Unit,
     onRetryConnection: () -> Unit,
     onOpenTerminal: (String) -> Unit = {},
+    pinned: Boolean = false,
+    onTogglePin: () -> Unit = {},
+    onRetryOutgoing: (String) -> Unit = {},
+    onDeleteOutgoing: (String) -> Unit = {},
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
@@ -236,6 +248,13 @@ fun SessionDetailContent(
         subtitle = summary?.let { listOfNotNull(Formatters.agentLabel(it.agent), it.model).joinToString(" · ") } ?: "",
         onBack = onBack,
         actions = {
+            if (summary != null && (summary.isLive || pinned)) {
+                ToolbarIcon(
+                    if (pinned) AppIcons.Unpin else AppIcons.Pin,
+                    stringResource(if (pinned) R.string.pin_remove else R.string.pin_add),
+                    onTogglePin,
+                )
+            }
             summary?.terminalId?.let { tid -> ToolbarIcon(AppIcons.Terminal, stringResource(R.string.open_terminal), { onOpenTerminal(tid) }) }
             ToolbarIcon(AppIcons.Info, stringResource(R.string.session_info), { showInfo = true })
             ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), onReload)
@@ -278,7 +297,7 @@ fun SessionDetailContent(
             when (val ev = state.events) {
                 Loadable.Loading -> LoadingState(stringResource(R.string.state_loading))
                 is Loadable.Failed -> ErrorState(ev.error.title(), ev.error.detail, stringResource(R.string.action_retry), onReload)
-                is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps)
+                is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing)
             }
         }
         Composer(state, busy, onDraft, onSend, onInterrupt, onContinue)
@@ -292,9 +311,11 @@ private fun StatusChipRow(state: SessionDetailState, onClick: () -> Unit) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
     Column(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onClick).padding(vertical = 4.dp),
+        // Press highlight follows a rounded outline inset from the screen edges (no full-width square).
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onClick).padding(vertical = 4.dp),
     ) {
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             io.github.tianli0.switchtether.ui.common.AgentBadge(s.agent, size = 28.dp)
             if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary, color = COUITheme.colorScheme.primary)
             if (s.isLive) {
@@ -329,28 +350,20 @@ private fun EventList(
     listState: androidx.compose.foundation.lazy.LazyListState,
     onLoadOlder: () -> Unit,
     onToggleSteps: (String) -> Unit,
+    onRetryOutgoing: (String) -> Unit,
+    onDeleteOutgoing: (String) -> Unit,
 ) {
-    val rows = state.timeline
-    // Start at the newest event; follow new events only while the user is at the bottom.
+    val rows = chatRows(state)
+    val follow = rememberFollowState()
+    // Opening a session lands at the bottom; only then may scrolling to the top load older pages.
     var initialScrollDone by remember(state.sessionId) { mutableStateOf(false) }
-    val atBottom by remember {
-        derivedStateOf {
-            val info = listState.layoutInfo
-            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= info.totalItemsCount - 2
-        }
-    }
-    // Own messages always bring the view to the bottom (the keyboard may have shrunk the list).
-    val lastIsOwnMessage = (rows.lastOrNull() as? TimelineRow.Event)?.item?.event?.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.USER_MESSAGE
-    LaunchedEffect(rows.size) {
-        if (rows.isEmpty()) return@LaunchedEffect
-        if (!initialScrollDone) {
-            listState.scrollToItem(rows.size)
+    LaunchedEffect(rows.isNotEmpty()) {
+        if (rows.isNotEmpty() && !initialScrollDone) {
+            listState.scrollToEnd()
             initialScrollDone = true
-        } else if (atBottom || lastIsOwnMessage) {
-            listState.animateScrollToItem(rows.size)
         }
     }
+    FollowBottomEffects(listState, follow, rows, state.sendTick)
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }.collect { if (it <= 1 && initialScrollDone) onLoadOlder() }
     }
@@ -358,22 +371,34 @@ private fun EventList(
         Text(stringResource(R.string.session_no_events), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(24.dp))
         return
     }
-    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(bottom = 8.dp)) {
-        item(key = "older") {
-            Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-                when {
-                    state.loadingOlder -> RotatingProgressIndicator(size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
-                    state.hasMoreBefore -> TextButton(text = stringResource(R.string.session_load_older), onClick = onLoadOlder)
-                    else -> Text(stringResource(R.string.session_start), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(bottom = 8.dp)) {
+            item(key = "older") {
+                Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        state.loadingOlder -> RotatingProgressIndicator(size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
+                        state.hasMoreBefore -> TextButton(text = stringResource(R.string.session_load_older), onClick = onLoadOlder)
+                        else -> Text(stringResource(R.string.session_start), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                    }
+                }
+            }
+            items(rows, key = { it.key }, contentType = {
+                when (it) {
+                    is TimelineRow.Event -> it.item.event.kind
+                    is TimelineRow.Steps -> "steps"
+                    is TimelineRow.Outgoing -> "outgoing"
+                    TimelineRow.Typing -> "typing"
+                }
+            }) { row ->
+                when (row) {
+                    is TimelineRow.Event -> TimelineEventRow(row.item, row.segment, ctx)
+                    is TimelineRow.Steps -> StepsHeader(row, onToggleSteps)
+                    is TimelineRow.Outgoing -> OutgoingBubble(row.message, onRetryOutgoing, onDeleteOutgoing)
+                    TimelineRow.Typing -> TypingRow(ctx)
                 }
             }
         }
-        items(rows, key = { it.key }, contentType = { if (it is TimelineRow.Event) it.item.event.kind else "steps" }) { row ->
-            when (row) {
-                is TimelineRow.Event -> TimelineEventRow(row.item, row.segment, ctx)
-                is TimelineRow.Steps -> StepsHeader(row, onToggleSteps)
-            }
-        }
+        NewMessagesPill(listState, follow, rows)
     }
 }
 
@@ -463,7 +488,7 @@ private fun Composer(
         }
         if (!state.online) {
             Text(
-                stringResource(R.string.composer_offline),
+                stringResource(if (state.canQueue) R.string.composer_queue_hint else R.string.composer_offline),
                 style = COUITheme.textStyles.footnote2,
                 color = LocalDevColors.current.warn,
                 modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
@@ -479,13 +504,14 @@ private fun Composer(
                 value = state.draft,
                 onValueChange = onDraft,
                 placeholder = when {
-                    state.canSend -> stringResource(R.string.composer_hint)
+                    state.canSend || state.canQueue -> stringResource(R.string.composer_hint)
                     state.online -> stringResource(R.string.composer_send_unavailable)
                     else -> stringResource(R.string.composer_draft_hint)
                 },
                 sendLabel = stringResource(R.string.session_send),
                 onSend = onSend,
-                state = InputPillState(enabled = state.canSend, sendEnabled = state.canSend && state.draft.isNotBlank(), busy = busy != null),
+                // Sending never blocks the field: the bubble shows the message's own progress.
+                state = InputPillState(enabled = state.canSend || state.canQueue, sendEnabled = (state.canSend || state.canQueue) && state.draft.isNotBlank(), busy = false),
                 modifier = Modifier.weight(1f),
                 fieldModifier = Modifier.testTag("composer"),
                 sendModifier = Modifier.testTag("send"),

@@ -54,7 +54,7 @@ fun WorkspaceScreen() {
     val context = LocalContext.current
     val conn by container.connection.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val termVm = containerViewModel { c -> TerminalViewModel(c.connection, c.stepUpGate) { c.pairingStoreStepUpEnabled() } }
+    val termVm = containerViewModel { c -> TerminalViewModel(c.connection, c.stepUpGate, { c.pairingStoreStepUpEnabled() }, { id -> c.noteLocalAction(id, io.github.tianli0.switchtether.remote.notify.LocalAction.KILL_TERMINAL) }) }
     val openTerminal by container.openTerminalRequest.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(openTerminal) {
         val id = openTerminal ?: return@LaunchedEffect

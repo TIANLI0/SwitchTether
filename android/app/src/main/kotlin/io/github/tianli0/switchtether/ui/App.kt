@@ -2,7 +2,7 @@ package io.github.tianli0.switchtether.ui
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
-import androidx.activity.compose.BackHandler
+import io.github.tianli0.switchtether.ui.nav.AnimatedNavHost
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -101,7 +102,9 @@ fun SwitchTetherRoot() {
       CompositionLocalProvider(
         io.github.suqi8.coui.kmp.layout.LocalSheetCloseLabel provides stringResource(R.string.action_close),
         io.github.tianli0.switchtether.ui.components.LocalExpandStateLabels provides (stringResource(R.string.state_expanded) to stringResource(R.string.state_collapsed)),
+        io.github.tianli0.switchtether.domain.LocalMoney provides container.money.display.collectAsState().value,
       ) {
+        io.github.tianli0.switchtether.ui.common.LocalNetworkPermissionHost()
         val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = LOADING_SENTINEL)
         val conn by container.connection.state.collectAsState()
         val pending by container.pendingVerification.collectAsState()
@@ -128,6 +131,18 @@ private val LOADING_SENTINEL = io.github.tianli0.switchtether.data.PairedDesktop
 fun MainShell() {
     val nav: NavViewModel = viewModel()
     val container = appContainer()
+    io.github.tianli0.switchtether.ui.settings.UpdateHost()
+    io.github.tianli0.switchtether.ui.common.PinExplainSheet()
+    // First LAN connect on Android 17: explain and ask once for the local network permission.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val access = container.localNetwork
+        val d = container.pairingStore.current()
+        if (access.required && !access.isGranted() && !access.rationaleShown &&
+            d != null && d.hosts.any(io.github.tianli0.switchtether.remote.pairing.LocalNetwork::isLocal)
+        ) {
+            io.github.tianli0.switchtether.ui.common.localNetworkAsk.value = io.github.tianli0.switchtether.ui.common.LocalNetworkAsk()
+        }
+    }
     val openRequest by container.openSessionRequest.collectAsState()
     val openTerminal by container.openTerminalRequest.collectAsState()
     // Switch to Workspace; WorkspaceScreen consumes the request and attaches (with step-up).
@@ -148,7 +163,7 @@ fun MainShell() {
             androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
     }
-    BackHandler(enabled = nav.stack.isNotEmpty() || nav.tab != Tab.HOME) { nav.back() }
+    // Back (incl. the predictive gesture) is handled by AnimatedNavHost.
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val top = nav.top
@@ -157,7 +172,13 @@ fun MainShell() {
         io.github.tianli0.switchtether.ui.sessions.NewSessionSheet(
             show = showNewSession,
             onDismiss = { showNewSession = false },
-            onCreated = { id, title -> nav.push(Route.SessionDetail(id, title)) },
+            onCreated = { id, title ->
+                // "从手机发起的任务自动钉住": the phone started it, so following it is user-initiated.
+                if (container.liveUpdates.autoPinPhoneSessions) {
+                    container.liveUpdates.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true))
+                }
+                nav.push(Route.SessionDetail(id, title))
+            },
         )
         val items = listOf(
             NavItem(Tab.HOME, stringResource(R.string.tab_home), AppIcons.Home, AppIcons.HomeSelected),
@@ -179,7 +200,7 @@ fun MainShell() {
                         )
                     }
                 }
-                Box(Modifier.weight(1f).fillMaxSize()) { Destination(nav, top) }
+                Box(Modifier.weight(1f).fillMaxSize()) { AnimatedNavHost(nav) { Destination(nav, it) } }
             }
         } else {
             // ColorOS 17 floating glass capsule (coui17 BottomFloatingNavigationBar), wired exactly like
@@ -202,7 +223,7 @@ fun MainShell() {
                         LocalBlurEnabled provides false,
                         LocalBottomBarSpace provides if (showBar) 96.dp else 0.dp,
                     ) {
-                        Destination(nav, top)
+                        AnimatedNavHost(nav) { Destination(nav, it) }
                     }
                 }
                 AnimatedVisibility(
@@ -225,6 +246,7 @@ fun MainShell() {
                                     Box(
                                         Modifier
                                             .fillMaxSize()
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
                                             .clickable(role = Role.Button, onClickLabel = newSessionLabel) { showNewSession = true }
                                             .semantics { contentDescription = newSessionLabel },
                                         contentAlignment = Alignment.Center,
@@ -256,10 +278,17 @@ fun MainShell() {
 private class NavItem(val tab: Tab, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
 @Composable
-private fun Destination(nav: NavViewModel, top: Route?) {
+private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether.ui.nav.NavEntry) {
     val onBack: () -> Unit = { nav.back() }
-    when (top) {
-        is Route.SessionDetail -> SessionDetailScreen(top.sessionId, top.title, onBack, onOpenSession = { id, title -> nav.push(Route.SessionDetail(id, title)) })
+    when (val top = entry.route) {
+        is Route.SessionDetail -> {
+            val container = appContainer()
+            androidx.compose.runtime.DisposableEffect(top.sessionId) {
+                container.handoffSession.value = top.sessionId
+                onDispose { if (container.handoffSession.value == top.sessionId) container.handoffSession.value = null }
+            }
+            SessionDetailScreen(top.sessionId, top.title, onBack, onOpenSession = { id, title -> nav.push(Route.SessionDetail(id, title)) })
+        }
         Route.NewSession -> NewSessionScreen(onBack, onCreated = { id, title ->
             nav.back()
             nav.push(Route.SessionDetail(id, title))
@@ -272,7 +301,7 @@ private fun Destination(nav: NavViewModel, top: Route?) {
         Route.NotificationPrefs -> NotificationPrefsScreen(onBack)
         Route.Licenses -> LicensesScreen(onBack)
         Route.DesktopInfo -> DesktopInfoScreen(onBack)
-        null -> when (nav.tab) {
+        null -> when (entry.tab) {
             Tab.HOME -> HomeScreen(onOpen = nav::push, onSelectTab = nav::select)
             Tab.SESSIONS -> SessionsScreen(onOpen = nav::push)
             Tab.WORKSPACE -> WorkspaceScreen()

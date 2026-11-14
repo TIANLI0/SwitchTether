@@ -103,7 +103,16 @@ fun OnboardingScreen(revokedReason: Pair<String, String?>?) {
         onSubmitLink = { vm.submitLink() },
         onScan = vm::startScan,
         onScanned = vm::onScanned,
-        onPair = vm::pair,
+        onPair = {
+            // Android 17: pairing over a LAN address needs ACCESS_LOCAL_NETWORK. Explain + ask first;
+            // pairing continues either way (a VPN/Tailscale address may still work).
+            val link = (state as? PairingUiState.Confirm)?.link
+            if (link != null && link.hosts.any(io.github.tianli0.switchtether.remote.pairing.LocalNetwork::isLocal)) {
+                io.github.tianli0.switchtether.ui.common.localNetworkAsk.value = io.github.tianli0.switchtether.ui.common.LocalNetworkAsk { vm.pair() }
+            } else {
+                vm.pair()
+            }
+        },
         onBack = vm::backToIntro,
         onDone = { container.onPaired() },
         onRejectCodes = { scope.launch { container.unpair(); container.pendingVerification.value = null; vm.backToIntro() } },
@@ -203,6 +212,7 @@ private fun IntroContent(
         modifier = Modifier.fillMaxWidth().testTag("scan"),
         colors = ButtonDefaults.buttonColorsPrimary(),
     ) { Text(stringResource(R.string.onboarding_scan), color = COUITheme.colorScheme.onPrimary) }
+    NearbyDesktops()
     Spacer(Modifier.height(20.dp))
     Text(stringResource(R.string.onboarding_paste_label), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
     Spacer(Modifier.height(6.dp))
@@ -374,3 +384,30 @@ fun pairingReasonText(reason: PairingException.Reason): String = stringResource(
         PairingException.Reason.FAILED -> R.string.pair_err_failed
     },
 )
+
+/**
+ * "附近的电脑": SwitchTether desktops advertised on this network (NSD, only while this screen is
+ * visible). Informational: pairing still requires the QR code / link with its one-time secret.
+ */
+@Composable
+private fun NearbyDesktops() {
+    val discovery = appContainer().discovery
+    val nearby by androidx.compose.runtime.produceState(initialValue = emptyList<io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop>(), discovery) {
+        discovery.browse().collect { value = it.distinctBy { d -> d.fingerprint } }
+    }
+    if (nearby.isEmpty()) return
+    Spacer(Modifier.height(20.dp))
+    Text(stringResource(R.string.nearby_title), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+    Spacer(Modifier.height(6.dp))
+    Card(Modifier.fillMaxWidth().testTag("nearby")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            nearby.forEach { d ->
+                Column {
+                    Text(d.name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
+                    Text("${d.host}:${d.port} · ${Fingerprints.short(d.fingerprint)}…", style = DevType.codeSmall, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                }
+            }
+            Text(stringResource(R.string.nearby_hint), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+        }
+    }
+}

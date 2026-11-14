@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether.ui.manage
 
+import io.github.tianli0.switchtether.remote.usage.UsageRangePreset
+import io.github.tianli0.switchtether.remote.usage.isHourlyRange
+import io.github.tianli0.switchtether.remote.usage.resolveUsageRange
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.tianli0.switchtether.connection.ConnectionController
@@ -103,22 +107,30 @@ class ProvidersViewModel(
 
 // ---- Usage --------------------------------------------------------------------------------------
 
-enum class UsageRange(val days: Int) { TODAY(1), WEEK(7), MONTH(30) }
+enum class UsageMetric { TOKENS, COST, REQUESTS }
 
+/** Same presets, default (today), app filter and range math as the desktop Usage page. */
 data class UsageState(
-    val range: UsageRange = UsageRange.WEEK,
+    val preset: UsageRangePreset = UsageRangePreset.TODAY,
+    /** null = all apps (the desktop's "All"). */
+    val app: String? = null,
+    val metric: UsageMetric = UsageMetric.TOKENS,
+    val fromSec: Long = 0,
+    val toSec: Long = 0,
     val summary: Loadable<UsageSummary> = Loadable.Loading,
     val trend: Loadable<List<DailyUsage>> = Loadable.Loading,
     val models: Loadable<List<UsageBreakdownRow>> = Loadable.Loading,
     val providers: Loadable<List<UsageBreakdownRow>> = Loadable.Loading,
     val quotas: List<Pair<String, Loadable<QuotaView>>> = emptyList(),
-)
+) {
+    val hourly: Boolean get() = isHourlyRange(fromSec, toSec)
+}
 
 class UsageViewModel(
     private val conn: ConnectionController,
     private val repo: ManagementRepository,
     private val zone: ZoneId = ZoneId.systemDefault(),
-    private val nowSec: () -> Long = { System.currentTimeMillis() / 1000 },
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
     private val _state = MutableStateFlow(UsageState())
     val state: StateFlow<UsageState> = _state.asStateFlow()
@@ -128,20 +140,28 @@ class UsageViewModel(
         viewModelScope.launch { repo.changes.collect { if (it == "usage.updated") load() } }
     }
 
-    fun setRange(r: UsageRange) {
-        _state.update { it.copy(range = r) }
+    fun setPreset(p: UsageRangePreset) {
+        _state.update { it.copy(preset = p) }
         load()
     }
 
+    fun setApp(app: String?) {
+        _state.update { it.copy(app = app) }
+        load()
+    }
+
+    fun setMetric(m: UsageMetric) = _state.update { it.copy(metric = m) }
+
     fun load() {
-        val range = _state.value.range
-        val today = LocalDate.now(zone)
-        val from = today.minusDays((range.days - 1).toLong()).atStartOfDay(zone).toEpochSecond()
-        val to = nowSec()
-        viewModelScope.launch { val r = loadable { repo.usageSummary(from, to) }; _state.update { it.copy(summary = r) } }
-        viewModelScope.launch { val r = loadable { repo.usageTrend(from, to) }; _state.update { it.copy(trend = r) } }
-        viewModelScope.launch { val r = loadable { repo.usageModels(from, to) }; _state.update { it.copy(models = r) } }
-        viewModelScope.launch { val r = loadable { repo.usageProviders(from, to) }; _state.update { it.copy(providers = r) } }
+        val st = _state.value
+        val (from, to) = resolveUsageRange(st.preset, nowMs(), zone)
+        val app = st.app
+        _state.update { it.copy(fromSec = from, toSec = to) }
+        viewModelScope.launch { val r = loadable { repo.usageSummary(from, to, app) }; _state.update { it.copy(summary = r) } }
+        viewModelScope.launch { val r = loadable { repo.usageTrend(from, to, app) }; _state.update { it.copy(trend = r) } }
+        // The desktop sorts both tables by request count (descending) by default.
+        viewModelScope.launch { val r = loadable { repo.usageModels(from, to, app).sortedByDescending { it.requests } }; _state.update { it.copy(models = r) } }
+        viewModelScope.launch { val r = loadable { repo.usageProviders(from, to, app).sortedByDescending { it.requests } }; _state.update { it.copy(providers = r) } }
         viewModelScope.launch {
             val tools = listOf("claude", "codex")
             val quotas = tools.map { t -> t to loadable { repo.quota(t) } }

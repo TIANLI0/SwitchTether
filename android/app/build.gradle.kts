@@ -16,10 +16,15 @@ android {
     defaultConfig {
         applicationId = "io.github.tianli0.switchtether"
         minSdk = 29
-        targetSdk = 36
+        // Android 17. Local network access needs ACCESS_LOCAL_NETWORK (requested at runtime).
+        targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Self-update source: public GitHub releases of TIANLI0/SwitchTether. The API base can be
+        // overridden for local end-to-end tests (`-PupdateApiBase=http://10.0.2.2:8765`, debug only).
+        buildConfigField("String", "UPDATE_REPO", "\"TIANLI0/SwitchTether\"")
+        buildConfigField("String", "UPDATE_API_BASE", "\"https://api.github.com\"")
     }
 
     // Release signing: the keystore and its passwords live OUTSIDE the repository. Point to a
@@ -58,6 +63,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            (project.findProperty("updateApiBase") as String?)?.let { buildConfigField("String", "UPDATE_API_BASE", "\"$it\"") }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -107,6 +115,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)

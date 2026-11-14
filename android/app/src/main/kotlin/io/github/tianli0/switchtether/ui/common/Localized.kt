@@ -56,9 +56,9 @@ fun stepStatusLabel(status: StepStatus): String = stringResource(
 )
 
 @Composable
-fun waitingLabel(waitingFor: String): String = when (waitingFor) {
-    "approval" -> stringResource(R.string.waiting_for_approval)
-    "input", "question" -> stringResource(R.string.waiting_for_input)
+fun waitingLabel(waitingFor: String): String = when {
+    io.github.tianli0.switchtether.remote.notify.isApprovalWait(waitingFor) -> stringResource(R.string.waiting_for_approval)
+    waitingFor == "input" || waitingFor == "question" -> stringResource(R.string.waiting_for_input)
     else -> stringResource(R.string.waiting_for_other, waitingFor)
 }
 

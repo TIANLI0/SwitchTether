@@ -93,6 +93,18 @@ class ConnectionManager(
     private val onRevoked: suspend (PairedDesktop, String) -> Unit,
     private val baseClient: OkHttpClient = OkHttpClient(),
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * LAN discovery (NSD): endpoints currently advertised by the desktop with this fingerprint.
+     * Used only when every stored host failed (e.g. the computer got a new IP address).
+     */
+    private val discover: (suspend (fingerprint: String, timeoutMs: Long) -> List<Endpoint>)? = null,
+    /**
+     * Android 17 `ACCESS_LOCAL_NETWORK`. When false, LAN hosts and LAN discovery are skipped (they
+     * could only time out); VPN/Tailscale/DNS hosts and the relay are still tried.
+     */
+    private val localNetworkAllowed: () -> Boolean = { true },
+    /** Opens/seals the stored relay token + key (Keystore-encrypted in the app). */
+    private val relaySecrets: RelaySecrets = RelaySecrets.None,
 ) : ConnectionController {
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Unpaired)
     override val state: StateFlow<ConnectionState> = _state.asStateFlow()
@@ -209,41 +221,113 @@ class ConnectionManager(
         return c
     }
 
+    private suspend fun refreshRelay(remote: RemoteApi) {
+        val r = runCatching { remote.relay() }.getOrNull() ?: return
+        val cur = pairingStore.current() ?: return
+        val url = r.url
+        val key = r.key
+        val updated = if (r.enabled && url != null && key != null &&
+            io.github.tianli0.switchtether.remote.relay.RelayConfig.parseOrNull(url, r.token, key) != null
+        ) {
+            if (cur.relayUrl == url && relaySecrets.open(cur) == RelaySecret(r.token, key)) return
+            val sealed = relaySecrets.seal(RelaySecret(r.token, key)) ?: return
+            cur.copy(relayUrl = url, relaySecret = sealed, relayToken = null)
+        } else {
+            if (cur.relayUrl == null && cur.relaySecret == null) return
+            cur.copy(relayUrl = null, relaySecret = null, relayToken = null)
+        }
+        pairingStore.save(updated)
+    }
+
     private suspend fun connectOnce(desktop: PairedDesktop, identity: ClientIdentity): Outcome {
         val client = clientFor(desktop, identity)
         var authFailure: ApiException? = null
-        val makeApi = { ep: Endpoint ->
-            RemoteApi(client, ep) {
-                // Any REST call of any screen answered unpaired/device_revoked: end the session.
-                authFailure = it
-                streamJob?.cancel()
+        val makeApiFor = { c: OkHttpClient ->
+            { ep: Endpoint ->
+                RemoteApi(c, ep) {
+                    // Any REST call of any screen answered unpaired/device_revoked: end the session.
+                    authFailure = it
+                    streamJob?.cancel()
+                }
             }
         }
+        val makeApi = makeApiFor(client)
+        var pathClient = client
 
-        // Last good host first (fast path), then race every candidate.
-        val ordered = desktop.orderedHosts().map { Endpoint(it, desktop.port) }
+        // 1. Stored hosts: last good host first (fast path), then race every candidate.
+        // 2. LAN discovery (same pinned fingerprint) when all stored hosts failed.
+        // 3. The desktop's relay, if it has one. TLS, pin and client certificate are identical on every path.
+        val lanAllowed = localNetworkAllowed()
+        val ordered = desktop.orderedHosts()
+            .let { if (lanAllowed) it else io.github.tianli0.switchtether.remote.pairing.LocalNetwork.withoutLocal(it) }
+            .map { Endpoint(it, desktop.port) }
         val (endpoint, hello) = try {
+            if (ordered.isEmpty()) throw NoReachableHostException(emptyList())
             val first = ordered.first()
             val quick = withTimeoutOrNull(3_000) { runCatching { makeApi(first).hello() }.getOrNull() }
             if (quick != null) first to quick else HostRace.first(ordered) { ep -> makeApi(ep).hello() }
         } catch (e: NoReachableHostException) {
             if (e.pinMismatch) return Outcome.Failed("certificate mismatch: the desktop presented a different certificate than the one paired")
             if (isRevokedTlsAlert(e)) return Outcome.Revoked("the desktop refused this phone's certificate")
-            return Outcome.Failed(describe(e.failures.lastOrNull()?.second ?: e))
+            val direct = if (!lanAllowed && e.failures.isEmpty()) LOCAL_NETWORK_DENIED else describe(e.failures.lastOrNull()?.second ?: e)
+            val lan = discover?.takeIf { lanAllowed }?.let { find ->
+                val found = runCatching { find(desktop.fingerprint, DISCOVERY_TIMEOUT_MS) }.getOrDefault(emptyList())
+                    .filter { it !in ordered }
+                if (found.isEmpty()) null else runCatching { HostRace.first(found) { ep -> makeApi(ep).hello() } }.getOrNull()
+            }
+            if (lan != null) {
+                // The computer moved (new IP): remember the discovered address for next time.
+                val (ep, _) = lan
+                pairingStore.save(
+                    desktop.copy(
+                        hosts = io.github.tianli0.switchtether.remote.discovery.DiscoveryTxt.mergeHosts(desktop.hosts, ep.host),
+                        lastGoodHost = ep.host,
+                        port = ep.port,
+                    ),
+                )
+                lan
+            } else {
+                // No relay key (or it cannot be opened): the relay would refuse us; do not try.
+                val secret = relaySecrets.open(desktop)
+                val relay = io.github.tianli0.switchtether.remote.relay.RelayConfig.parseOrNull(desktop.relayUrl, secret?.token, secret?.key)
+                    ?: return Outcome.Failed(direct)
+                val relayClient = TlsClientFactory.create(
+                    identity,
+                    desktop.fingerprint,
+                    base = io.github.tianli0.switchtether.remote.relay.relayBaseClient(baseClient, relay, desktop.fingerprint, baseClient),
+                    connectTimeoutMs = 15_000,
+                )
+                val ep = Endpoint(io.github.tianli0.switchtether.remote.relay.RELAY_HOST, 443)
+                val h = try {
+                    makeApiFor(relayClient)(ep).hello()
+                } catch (re: Exception) {
+                    if (re is CancellationException) throw re
+                    if (re.causeChain().any { it is io.github.tianli0.switchtether.remote.tls.PinMismatchException }) {
+                        return Outcome.Failed("certificate mismatch: the desktop presented a different certificate than the one paired")
+                    }
+                    return Outcome.Failed("$direct; relay: ${describe(re)}")
+                }
+                pathClient = relayClient
+                ep to h
+            }
         }
 
         val compat = hello.compatibility()
         if (compat != Hello.Compatibility.OK) return Outcome.Incompatible(compat, hello.serverVersion)
         if (!hello.paired) return Outcome.Revoked("the desktop no longer knows this phone")
 
-        val remote = makeApi(endpoint)
+        val remote = makeApiFor(pathClient)(endpoint)
         val status = try {
             remote.status()
         } catch (e: ApiException) {
             if (e.isAuthFailure) return Outcome.Revoked(e.body.message.ifEmpty { e.code })
             null
         }
-        if (desktop.lastGoodHost != endpoint.host) pairingStore.save(desktop.copy(lastGoodHost = endpoint.host))
+        val viaRelay = endpoint.host == io.github.tianli0.switchtether.remote.relay.RELAY_HOST
+        if (!viaRelay && desktop.lastGoodHost != endpoint.host) pairingStore.current()?.let { cur -> pairingStore.save(cur.copy(lastGoodHost = endpoint.host)) }
+        // Direct connection: pick up relay changes (new URL, reset token, rotated key) over the
+        // authenticated channel (GET /v1/relay, RELAY.md §5). Older desktops without it: keep what we have.
+        if (!viaRelay) scope.launch { refreshRelay(remote) }
 
         // Epoch bookkeeping: a new epoch (desktop restart) or first connect → refetch everything.
         val serverEpoch = status?.epoch?.takeIf { it.isNotEmpty() } ?: hello.epoch
@@ -315,6 +399,12 @@ class ConnectionManager(
     }
 
     companion object {
+        /** How long LAN discovery may take before falling back to the relay. */
+        const val DISCOVERY_TIMEOUT_MS = 5_000L
+
+        /** Offline reason when only LAN hosts are known and the local-network permission is missing. */
+        const val LOCAL_NETWORK_DENIED = "local network permission not granted"
+
         fun describe(e: Throwable): String = when (e) {
             is ApiException -> "${e.code}: ${e.body.message}"
             else -> e.causeChain().lastOrNull { it.message != null }?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: e.javaClass.simpleName

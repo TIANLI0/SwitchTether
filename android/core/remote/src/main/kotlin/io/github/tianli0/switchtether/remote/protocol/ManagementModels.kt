@@ -122,14 +122,38 @@ data class UsageSummary(
     }
 }
 
-data class DailyUsage(val date: String, val requests: Long, val costUsd: Double?, val tokens: Long) {
+/**
+ * One trend bucket (an hour when the range is <= 24 h, else a desktop-local day). [tokens] is the
+ * real total (input + output + cache write + cache read) like the desktop chart; the server's
+ * `totalTokens` of a trend bucket is input + output only.
+ */
+data class DailyUsage(
+    val date: String,
+    val requests: Long,
+    val costUsd: Double?,
+    val tokens: Long,
+    val inputTokens: Long = 0,
+    val outputTokens: Long = 0,
+    val cacheCreationTokens: Long = 0,
+    val cacheReadTokens: Long = 0,
+) {
     companion object {
         fun parseList(e: JsonElement): List<DailyUsage> = e.listOfObjects("trends", "days", "stats").map { o ->
+            val input = o.long("totalInputTokens", "inputTokens")
+            val output = o.long("totalOutputTokens", "outputTokens")
+            val write = o.long("totalCacheCreationTokens", "cacheCreationTokens") ?: 0
+            val read = o.long("totalCacheReadTokens", "cacheReadTokens") ?: 0
+            val real = o.long("realTotalTokens")
+                ?: if (input != null || output != null) (input ?: 0) + (output ?: 0) + write + read else null
             DailyUsage(
                 date = o.str("date", "day", "bucket") ?: "",
                 requests = o.long("requestCount", "requests", "totalRequests") ?: 0,
                 costUsd = o.double("totalCost", "costUsd", "cost"),
-                tokens = o.long("totalTokens", "realTotalTokens", "tokens") ?: 0,
+                tokens = real ?: o.long("totalTokens", "tokens") ?: 0,
+                inputTokens = input ?: 0,
+                outputTokens = output ?: 0,
+                cacheCreationTokens = write,
+                cacheReadTokens = read,
             )
         }
     }
@@ -141,22 +165,50 @@ data class UsageBreakdownRow(
     val requests: Long,
     val tokens: Long,
     val costUsd: Double?,
+    /** 0–100. */
     val successRate: Double?,
+    val app: String? = null,
+    val avgCostPerRequest: Double? = null,
+    /** Output tokens per second; [speedEstimated] when only the estimate is available ("≈"). */
+    val tokensPerSecond: Double? = null,
+    val speedEstimated: Boolean = false,
+    val firstTokenMs: Double? = null,
+    val firstTokenEstimated: Boolean = false,
 ) {
     companion object {
+        private fun speed(o: JsonObject): Pair<Double?, Boolean> {
+            val tok = o.double("speedOutputTokens")
+            val ms = o.double("speedGenerationMs")
+            if (tok != null && ms != null && ms > 0) return tok / (ms / 1000.0) to false
+            val et = o.double("estSpeedOutputTokens")
+            val ems = o.double("estSpeedDurationMs")
+            if (et != null && ems != null && ems > 0) return et / (ems / 1000.0) to true
+            return null to false
+        }
+
+        private fun firstToken(o: JsonObject): Pair<Double?, Boolean> =
+            o.double("firstTokenMedianMs")?.let { it to false } ?: (o.double("estFirstTokenMedianMs") to (o.double("estFirstTokenMedianMs") != null))
+
+        private fun row(o: JsonObject, key: String, label: String, app: String?): UsageBreakdownRow {
+            val (tps, est) = speed(o)
+            val (ft, ftEst) = firstToken(o)
+            return UsageBreakdownRow(
+                key, label, o.long("requestCount", "requests") ?: 0, o.long("totalTokens") ?: 0,
+                o.double("totalCost", "costUsd"), o.double("successRate"), app, o.double("avgCostPerRequest"),
+                tps, est, ft, ftEst,
+            )
+        }
+
         fun parseModels(e: JsonElement): List<UsageBreakdownRow> = e.listOfObjects("models", "stats").map { o ->
             val model = o.str("model", "modelId", "name") ?: "?"
-            UsageBreakdownRow(model, model, o.long("requestCount", "requests") ?: 0, o.long("totalTokens") ?: 0,
-                o.double("totalCost", "costUsd"), o.double("successRate"))
+            row(o, model, model, null)
         }
 
         fun parseProviders(e: JsonElement): List<UsageBreakdownRow> = e.listOfObjects("providers", "stats").map { o ->
             val id = o.str("providerId", "id") ?: "?"
             val app = o.str("appType", "app")
             val name = o.str("providerName", "name") ?: id
-            UsageBreakdownRow(if (app != null) "$app/$id" else id, if (app != null) "$name · $app" else name,
-                o.long("requestCount", "requests") ?: 0, o.long("totalTokens") ?: 0,
-                o.double("totalCost", "costUsd"), o.double("successRate"))
+            row(o, if (app != null) "$app/$id" else id, name, app)
         }
     }
 }

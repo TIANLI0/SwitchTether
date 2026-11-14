@@ -22,42 +22,66 @@ sealed interface Route {
     data object DesktopInfo : Route
 }
 
+/** One screen in the navigation: a tab root ([route] null) or a detail route [depth] deep in that tab. */
+data class NavEntry(val tab: Tab, val route: Route?, val depth: Int) {
+    /** Stable per back-stack position: keys saved UI state (scroll, fields) of that screen. */
+    val key: String get() = "${tab.name}/$depth/$route"
+}
+
 /**
- * Minimal typed navigation: one selected tab + a stack of detail routes. Held in a ViewModel so it
- * survives configuration changes (rotation, window resize). No navigation library needed.
+ * Typed navigation: the selected tab plus one back stack PER TAB, so switching tabs keeps each
+ * tab's place (Sessions → a session → Home → Sessions returns to that session). Back pops the
+ * current tab's stack, then returns to Home, then leaves the app (system "back to home"
+ * animation). Held in a ViewModel so it survives configuration changes.
  */
 class NavViewModel : ViewModel() {
     var tab by mutableStateOf(Tab.HOME)
         private set
-    val stack = mutableStateListOf<Route>()
+    private val stacks: Map<Tab, androidx.compose.runtime.snapshots.SnapshotStateList<Route>> = Tab.entries.associateWith { mutableStateListOf() }
+
+    /** The current tab's back stack. */
+    val stack: List<Route> get() = stacks.getValue(tab)
 
     val top: Route? get() = stack.lastOrNull()
 
+    val current: NavEntry get() = NavEntry(tab, top, stack.size)
+
+    /** Where back goes from here, or null when back leaves the app. */
+    val previous: NavEntry?
+        get() = when {
+            stack.isNotEmpty() -> NavEntry(tab, stack.getOrNull(stack.size - 2), stack.size - 1)
+            tab != Tab.HOME -> stacks.getValue(Tab.HOME).let { NavEntry(Tab.HOME, it.lastOrNull(), it.size) }
+            else -> null
+        }
+
+    /** Selecting the current tab again returns to its root. */
     fun select(t: Tab) {
-        if (t == tab) stack.clear()
-        tab = t
-        stack.clear()
+        if (t == tab) stacks.getValue(t).clear() else tab = t
     }
 
     fun push(r: Route) {
-        if (stack.lastOrNull() != r) stack.add(r)
+        val s = stacks.getValue(tab)
+        if (s.lastOrNull() != r) s.add(r)
     }
 
     /** @return false when there is nothing to pop (let the system handle back). */
-    fun back(): Boolean = when {
-        stack.isNotEmpty() -> {
-            stack.removeAt(stack.lastIndex)
-            true
+    fun back(): Boolean {
+        val s = stacks.getValue(tab)
+        return when {
+            s.isNotEmpty() -> {
+                s.removeAt(s.lastIndex)
+                true
+            }
+            tab != Tab.HOME -> {
+                tab = Tab.HOME
+                true
+            }
+            else -> false
         }
-        tab != Tab.HOME -> {
-            tab = Tab.HOME
-            true
-        }
-        else -> false
     }
 
     fun reset() {
-        stack.clear()
+        stacks.values.forEach { it.clear() }
         tab = Tab.HOME
     }
 }

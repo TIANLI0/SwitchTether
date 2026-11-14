@@ -260,6 +260,9 @@ class RemoteApi(
 
     suspend fun quota(tool: String): JsonElement = getJson(url("v1/usage/quota", tool))
 
+    /** `GET /v1/relay` (RELAY.md §5): the desktop's relay settings incl. token and key. 404 on older desktops. */
+    suspend fun relay(): RelaySettings = get("v1/relay")
+
     /** `GET /v1/settings` (whitelisted subset). */
     suspend fun settings(): JsonElement = getJson("v1/settings")
 
@@ -551,4 +554,15 @@ class RemoteApi(
             return PayloadChunk(text, requestedOffset, null, text.isEmpty())
         }
     }
+}
+
+/** `GET /v1/relay`. [token] and [key] are secrets (never logged; [toString] redacts them). */
+@kotlinx.serialization.Serializable
+data class RelaySettings(
+    val enabled: Boolean = false,
+    val url: String? = null,
+    val token: String? = null,
+    val key: String? = null,
+) {
+    override fun toString(): String = "RelaySettings(enabled=$enabled, url=$url, token=<redacted>, key=<redacted>)"
 }

@@ -250,7 +250,8 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
                     softWrap = false,
                     maxLines = 1,
                     modifier = Modifier.heightIn(min = with(density) { cell.size.height.toDp() })
-                        .combinedClickable(onClick = {}, onLongClick = { onCopyLine(line.text.trimEnd()) }),
+                        // Long-press copies the line; no press highlight over the terminal grid.
+                        .combinedClickable(interactionSource = null, indication = null, onClick = {}, onLongClick = { onCopyLine(line.text.trimEnd()) }),
                 )
             }
         }

@@ -327,7 +327,7 @@ private fun DirectoryBrowser(listing: Loadable<FsListing>, busy: Boolean, onBrow
 private fun DirRow(name: String, sensitive: Boolean, onClick: () -> Unit) {
     val dev = LocalDevColors.current
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("▸ ", style = DevType.code, color = dev.gutter)

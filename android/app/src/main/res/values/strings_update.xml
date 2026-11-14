@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_check">Check for updates</string>
+    <string name="update_beta">Beta versions</string>
+    <string name="update_beta_summary">Also offer pre-releases</string>
+    <string name="update_current">Current version %1$s</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_up_to_date">Up to date (%1$s)</string>
+    <string name="update_no_releases">No release has been published yet</string>
+    <string name="update_available_title">New version available</string>
+    <string name="update_available_body">SwitchTether %1$s is available</string>
+    <string name="update_channel">App updates</string>
+    <string name="update_sheet_title">New version %1$s</string>
+    <string name="update_no_notes">No release notes.</string>
+    <string name="update_checks_note">Before installing, SwitchTether checks the download against the release\'s SHA256SUMS.txt and makes sure it is signed with the same certificate as this app.</string>
+    <string name="update_download">Download and install</string>
+    <string name="update_downloading">Downloading…</string>
+    <string name="update_progress">%1$s of %2$s</string>
+    <string name="update_verifying">Verifying checksum and signature…</string>
+    <string name="update_ready">Verified, ready to install</string>
+    <string name="update_install">Install</string>
+    <string name="update_installing">Installing…</string>
+    <string name="update_grant">Allow installing updates</string>
+    <string name="update_grant_hint">Android asks you once to allow SwitchTether to install apps. Turn on “Allow from this source”, then come back.</string>
+    <string name="update_retry">Try again</string>
+    <string name="update_err_network">Couldn\'t reach GitHub</string>
+    <string name="update_err_no_apk">This release has no Android APK</string>
+    <string name="update_err_no_checksum">The release has no checksum for the APK, so it was not installed</string>
+    <string name="update_err_checksum">Checksum mismatch: the download was deleted and not installed</string>
+    <string name="update_err_signature">The APK is not signed with this app\'s certificate: it was deleted and not installed</string>
+    <string name="update_err_not_apk">The download is not a valid APK</string>
+    <string name="update_err_install">Installation did not complete</string>
+</resources>
