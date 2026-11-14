@@ -40,10 +40,7 @@ pub fn routes() -> Router<Arc<ApiContext>> {
 }
 
 fn validate_ident(s: &str, what: &str) -> ApiResult<()> {
-    if s.is_empty()
-        || s.len() > 200
-        || s.chars().any(|c| c.is_control() || c == '/' || c == '\\')
-    {
+    if s.is_empty() || s.len() > 200 || s.chars().any(|c| c.is_control() || c == '/' || c == '\\') {
         return Err(ApiError::validation(format!("invalid {what}")));
     }
     Ok(())
@@ -95,20 +92,33 @@ async fn switch_provider(
     Json(body): Json<CmdBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "provider.switch", || async move {
-        validate_ident(&app, "app")?;
-        validate_ident(&id, "provider id")?;
-        let r = c
-            .backend
-            .switch_provider(&app, &id)
-            .await
-            .map_err(|e| backend_err(&c, e))?;
-        c.registry
-            .audit(Some(dev.id()), "provider.switch", Some(&format!("{app}/{id}")), "ok", None);
-        c.events
-            .publish("provider.switched", json!({ "app": app, "providerId": id, "by": "remote" }));
-        Ok(redacted(r))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "provider.switch",
+        || async move {
+            validate_ident(&app, "app")?;
+            validate_ident(&id, "provider id")?;
+            let r = c
+                .backend
+                .switch_provider(&app, &id)
+                .await
+                .map_err(|e| backend_err(&c, e))?;
+            c.registry.audit(
+                Some(dev.id()),
+                "provider.switch",
+                Some(&format!("{app}/{id}")),
+                "ok",
+                None,
+            );
+            c.events.publish(
+                "provider.switched",
+                json!({ "app": app, "providerId": id, "by": "remote" }),
+            );
+            Ok(redacted(r))
+        },
+    )
     .await
 }
 
@@ -119,16 +129,22 @@ async fn test_provider(
     Json(body): Json<CmdBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "provider.test", || async move {
-        validate_ident(&app, "app")?;
-        validate_ident(&id, "provider id")?;
-        let r = c
-            .backend
-            .test_provider(&app, &id)
-            .await
-            .map_err(|e| backend_err(&c, e))?;
-        Ok(redacted(r))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "provider.test",
+        || async move {
+            validate_ident(&app, "app")?;
+            validate_ident(&id, "provider id")?;
+            let r = c
+                .backend
+                .test_provider(&app, &id)
+                .await
+                .map_err(|e| backend_err(&c, e))?;
+            Ok(redacted(r))
+        },
+    )
     .await
 }
 
@@ -155,28 +171,34 @@ async fn set_credential(
         field,
         value,
     } = body;
-    idempotent(&ctx, dev.id().to_string(), command_id, "provider.credential", || async move {
-        validate_ident(&app, "app")?;
-        validate_ident(&id, "provider id")?;
-        validate_ident(&field, "field")?;
-        if value.len() > 8192 || value.chars().any(|c| c == '\n' || c == '\r' || c == '\0') {
-            return Err(ApiError::validation("invalid credential value"));
-        }
-        let r = c
-            .backend
-            .set_provider_credential(&app, &id, &field, &value)
-            .await
-            .map_err(|e| backend_err(&c, e))?;
-        // The value itself is never logged or audited.
-        c.registry.audit(
-            Some(dev.id()),
-            "provider.credential.update",
-            Some(&format!("{app}/{id}:{field}")),
-            "ok",
-            None,
-        );
-        Ok(redacted(r))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        command_id,
+        "provider.credential",
+        || async move {
+            validate_ident(&app, "app")?;
+            validate_ident(&id, "provider id")?;
+            validate_ident(&field, "field")?;
+            if value.len() > 8192 || value.chars().any(|c| c == '\n' || c == '\r' || c == '\0') {
+                return Err(ApiError::validation("invalid credential value"));
+            }
+            let r = c
+                .backend
+                .set_provider_credential(&app, &id, &field, &value)
+                .await
+                .map_err(|e| backend_err(&c, e))?;
+            // The value itself is never logged or audited.
+            c.registry.audit(
+                Some(dev.id()),
+                "provider.credential.update",
+                Some(&format!("{app}/{id}:{field}")),
+                "ok",
+                None,
+            );
+            Ok(redacted(r))
+        },
+    )
     .await
 }
 
@@ -265,23 +287,29 @@ async fn mcp_toggle(
     Json(body): Json<ToggleBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "mcp.toggle", || async move {
-        validate_ident(&id, "server id")?;
-        validate_ident(&body.app, "app")?;
-        let r = c
-            .backend
-            .mcp_toggle(&id, &body.app, body.enabled)
-            .await
-            .map_err(|e| backend_err(&c, e))?;
-        c.registry.audit(
-            Some(dev.id()),
-            "mcp.toggle",
-            Some(&format!("{id}@{}={}", body.app, body.enabled)),
-            "ok",
-            None,
-        );
-        Ok(redacted(r))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "mcp.toggle",
+        || async move {
+            validate_ident(&id, "server id")?;
+            validate_ident(&body.app, "app")?;
+            let r = c
+                .backend
+                .mcp_toggle(&id, &body.app, body.enabled)
+                .await
+                .map_err(|e| backend_err(&c, e))?;
+            c.registry.audit(
+                Some(dev.id()),
+                "mcp.toggle",
+                Some(&format!("{id}@{}={}", body.app, body.enabled)),
+                "ok",
+                None,
+            );
+            Ok(redacted(r))
+        },
+    )
     .await
 }
 
@@ -300,23 +328,29 @@ async fn skill_toggle(
     Json(body): Json<ToggleBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "skill.toggle", || async move {
-        validate_ident(&id, "skill id")?;
-        validate_ident(&body.app, "app")?;
-        let r = c
-            .backend
-            .skill_toggle(&id, &body.app, body.enabled)
-            .await
-            .map_err(|e| backend_err(&c, e))?;
-        c.registry.audit(
-            Some(dev.id()),
-            "skill.toggle",
-            Some(&format!("{id}@{}={}", body.app, body.enabled)),
-            "ok",
-            None,
-        );
-        Ok(r)
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "skill.toggle",
+        || async move {
+            validate_ident(&id, "skill id")?;
+            validate_ident(&body.app, "app")?;
+            let r = c
+                .backend
+                .skill_toggle(&id, &body.app, body.enabled)
+                .await
+                .map_err(|e| backend_err(&c, e))?;
+            c.registry.audit(
+                Some(dev.id()),
+                "skill.toggle",
+                Some(&format!("{id}@{}={}", body.app, body.enabled)),
+                "ok",
+                None,
+            );
+            Ok(r)
+        },
+    )
     .await
 }
 
@@ -341,18 +375,29 @@ async fn prompt_enable(
     Json(body): Json<CmdBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "prompt.enable", || async move {
-        validate_ident(&app, "app")?;
-        validate_ident(&id, "prompt id")?;
-        let r = c
-            .backend
-            .prompt_enable(&app, &id)
-            .await
-            .map_err(|e| backend_err(&c, e))?;
-        c.registry
-            .audit(Some(dev.id()), "prompt.enable", Some(&format!("{app}/{id}")), "ok", None);
-        Ok(r)
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "prompt.enable",
+        || async move {
+            validate_ident(&app, "app")?;
+            validate_ident(&id, "prompt id")?;
+            let r = c
+                .backend
+                .prompt_enable(&app, &id)
+                .await
+                .map_err(|e| backend_err(&c, e))?;
+            c.registry.audit(
+                Some(dev.id()),
+                "prompt.enable",
+                Some(&format!("{app}/{id}")),
+                "ok",
+                None,
+            );
+            Ok(r)
+        },
+    )
     .await
 }
 
@@ -364,7 +409,10 @@ async fn settings(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> ApiResu
         .map_err(|e| backend_err(&ctx, e))
 }
 
-async fn proxy_status(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> ApiResult<Json<Value>> {
+async fn proxy_status(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+) -> ApiResult<Json<Value>> {
     ctx.backend
         .proxy_status()
         .await
@@ -373,7 +421,11 @@ async fn proxy_status(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> Api
 }
 
 async fn health(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> ApiResult<Json<Value>> {
-    let backend = ctx.backend.health().await.unwrap_or_else(|e| json!({ "error": e }));
+    let backend = ctx
+        .backend
+        .health()
+        .await
+        .unwrap_or_else(|e| json!({ "error": e }));
     Ok(Json(json!({
         "backendAvailable": ctx.backend.available(),
         "backend": redacted(backend),

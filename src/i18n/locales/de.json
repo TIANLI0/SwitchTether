@@ -1161,7 +1161,8 @@
       "routing": "Lokales Routing",
       "network": "Netzwerk",
       "data": "Daten",
-      "about": "Über"
+      "about": "Über",
+      "remote": "Fernzugriff (Handy)"
     },
     "appConfig": {
       "configDir": "Konfigurationsverzeichnis"
@@ -5382,5 +5383,79 @@
       "managedHint": "Dieses Konto wird in der Kontoverwaltung verwaltet; die Karte verschwindet nach der Abmeldung."
     },
     "deleteSessionHint": "Löschen Sie diese Sitzung in DeepSeek Harness, damit der Verlauf konsistent bleibt."
+  },
+  "remote": {
+    "title": "Fernzugriff",
+    "help": "Ermöglicht der SwitchTether-Android-App, sich mit diesem Computer zu koppeln und Agenten, Terminals und Dateien zu überwachen oder zu steuern. Verbindungen nutzen TLS 1.3 mit gegenseitiger Zertifikatsauthentifizierung; das Desktop-Zertifikat wird über den QR-Code fixiert. Ohne die Auswahl „Alle Netzwerke“ ist nichts aus dem Internet erreichbar.",
+    "refresh": "Aktualisieren",
+    "initializing": "Der Remote-Dienst wird gestartet…",
+    "enable": "Fernzugriff aktivieren",
+    "runningOn": "Läuft auf Port {{port}}",
+    "failed": "Start fehlgeschlagen: {{error}}",
+    "stopped": "Gestoppt",
+    "network": {
+      "label": "Erlaubte Netzwerke",
+      "help": "Verbindungen von anderen Adressen werden vor TLS verworfen. Im selben Netzwerk zu sein reicht nie aus: Jedes Handy muss gekoppelt sein.",
+      "lan": "LAN + Tailscale",
+      "tailscale": "Nur Tailscale",
+      "localhost": "Nur dieser PC",
+      "any": "Alle Netzwerke",
+      "anyWarning": "Öffentliche Adressen können den Remote-Port erreichen. Kopplung und gegenseitiges TLS gelten weiterhin, nutzen Sie dies aber nur hinter einer Firewall, die Sie kontrollieren."
+    },
+    "port": "Port",
+    "apply": "Übernehmen",
+    "desktopName": "Computername",
+    "fingerprint": "Desktop-Fingerabdruck",
+    "fingerprintHelp": "SHA-256 des Zertifikats dieses Computers. Das Handy fixiert ihn beim Koppeln; er ändert sich nur, wenn die Identität zurückgesetzt wird, und dann müssen alle Handys neu gekoppelt werden.",
+    "keyStorage": "Speicherort des privaten Schlüssels",
+    "secretBackend": {
+      "os_keychain": "System-Schlüsselbund",
+      "file": "Nur für den Besitzer lesbare Datei (kein System-Schlüsselbund verfügbar)",
+      "memory": "Arbeitsspeicher (nur Tests)"
+    },
+    "addresses": "Adressen im QR-Code",
+    "noAddresses": "Keine nutzbare Netzwerkadresse",
+    "pair": {
+      "title": "Handy koppeln",
+      "description": "Zeigt einen einmaligen QR-Code, der 5 Minuten gültig ist.",
+      "button": "QR-Code anzeigen",
+      "scan": "Scannen Sie diesen Code in der SwitchTether-App (Einstellungen → Computer koppeln). Jeder, der ihn innerhalb von 5 Minuten scannt, kann koppeln – teilen Sie ihn also nicht.",
+      "expiresIn": "Läuft in {{seconds}} s ab",
+      "expired": "Abgelaufen",
+      "copyLink": "Kopplungslink kopieren",
+      "copied": "Kopplungslink kopiert",
+      "privacy": "Der Link enthält ein einmaliges Geheimnis. Nach einer erfolgreichen Kopplung oder nach Ablauf ist er nutzlos.",
+      "success": "Handy gekoppelt",
+      "pairedWith": "Mit {{name}} gekoppelt.",
+      "verify": "Prüfcode (sollte mit dem Handy übereinstimmen):",
+      "newCode": "Neuer Code"
+    },
+    "devices": {
+      "title": "Gekoppelte Handys",
+      "empty": "Noch kein Handy gekoppelt.",
+      "online": "Online",
+      "offline": "Offline",
+      "stepUp": "Biometrische Bestätigung verfügbar",
+      "lastSeen": "zuletzt gesehen {{time}}",
+      "revoke": "Widerrufen",
+      "revoked": "{{name}} wurde widerrufen",
+      "revokedAt": "Widerrufen {{time}}",
+      "forget": "Entfernen",
+      "revokeTitle": "{{name}} widerrufen?",
+      "revokeBody": "Das Handy wird sofort getrennt und sein Zertifikat ab jetzt abgelehnt. Von ihm geöffnete Terminals werden beendet. Bereits auf dem Handy gespeicherte Daten können nicht aus der Ferne gelöscht werden."
+    },
+    "terminals": {
+      "title": "Remote-Terminals",
+      "help": "Vom Handy geöffnete Shells laufen mit den Rechten Ihres Benutzerkontos auf diesem Computer. Sie laufen weiter, wenn das Handy die Verbindung trennt, und enden, wenn SwitchTether beendet wird.",
+      "empty": "Kein Remote-Terminal aktiv.",
+      "end": "Beenden"
+    },
+    "audit": {
+      "title": "Sicherheitsprotokoll",
+      "help": "Kopplung, Widerruf sowie Terminal-, Datei- und Konfigurationsaktionen von Handys. Terminaleingaben und geheime Werte werden nie aufgezeichnet.",
+      "empty": "Noch keine Ereignisse."
+    },
+    "close": "Schließen",
+    "cancel": "Abbrechen"
   }
 }

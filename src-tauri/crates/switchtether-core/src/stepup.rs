@@ -152,7 +152,8 @@ impl StepUpManager {
                 created: Instant::now(),
             },
         );
-        let expires = chrono::Utc::now() + chrono::Duration::from_std(CHALLENGE_TTL).unwrap_or_default();
+        let expires =
+            chrono::Utc::now() + chrono::Duration::from_std(CHALLENGE_TTL).unwrap_or_default();
         Challenge {
             challenge_id: id,
             nonce,
@@ -171,7 +172,8 @@ impl StepUpManager {
         let pending = {
             let mut map = self.challenges.lock();
             map.retain(|_, c| c.created.elapsed() < CHALLENGE_TTL);
-            map.remove(challenge_id).ok_or(VerifyError::UnknownChallenge)?
+            map.remove(challenge_id)
+                .ok_or(VerifyError::UnknownChallenge)?
         };
         if pending.device_id != device_id {
             return Err(VerifyError::WrongDevice);
@@ -181,7 +183,8 @@ impl StepUpManager {
         if !verify_p256_spki(key, &msg, signature_der) {
             return Err(VerifyError::BadSignature);
         }
-        let wall = chrono::Utc::now() + chrono::Duration::from_std(self.grant_ttl).unwrap_or_default();
+        let wall =
+            chrono::Utc::now() + chrono::Duration::from_std(self.grant_ttl).unwrap_or_default();
         self.grants.lock().insert(
             (device_id.to_string(), pending.scope),
             Grant {
@@ -215,7 +218,9 @@ impl StepUpManager {
             .filter(|((d, _), g)| d == device_id && g.expires > now)
             .map(|((_, s), g)| GrantView {
                 scope: *s,
-                expires_at: g.expires_wall.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                expires_at: g
+                    .expires_wall
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             })
             .collect()
     }
@@ -223,7 +228,9 @@ impl StepUpManager {
     /// Drop every grant and challenge of a device (revocation, re-pairing).
     pub fn clear_device(&self, device_id: &str) {
         self.grants.lock().retain(|(d, _), _| d != device_id);
-        self.challenges.lock().retain(|_, c| c.device_id != device_id);
+        self.challenges
+            .lock()
+            .retain(|_, c| c.device_id != device_id);
     }
 
     pub fn revoke_grant(&self, device_id: &str, scope: Scope) {
@@ -242,8 +249,8 @@ pub(crate) mod tests {
     pub(crate) fn test_key() -> (EcdsaKeyPair, Vec<u8>) {
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
-        let kp =
-            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng).unwrap();
+        let kp = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
+            .unwrap();
         let point = kp.public_key().as_ref().to_vec();
         let mut spki = vec![
             0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06,
@@ -254,7 +261,10 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn sign(kp: &EcdsaKeyPair, msg: &[u8]) -> Vec<u8> {
-        kp.sign(&SystemRandom::new(), msg).unwrap().as_ref().to_vec()
+        kp.sign(&SystemRandom::new(), msg)
+            .unwrap()
+            .as_ref()
+            .to_vec()
     }
 
     #[test]
@@ -263,7 +273,10 @@ pub(crate) mod tests {
         let m = StepUpManager::default();
         assert!(!m.has_grant("d1", Scope::Terminal));
         let c = m.challenge("d1", Scope::Terminal);
-        let sig = sign(&kp, &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::Terminal));
+        let sig = sign(
+            &kp,
+            &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::Terminal),
+        );
         let g = m.verify("d1", Some(&spki), &c.challenge_id, &sig).unwrap();
         assert_eq!(g.scope, Scope::Terminal);
         assert!(m.has_grant("d1", Scope::Terminal));
@@ -271,7 +284,8 @@ pub(crate) mod tests {
         assert!(!m.has_grant("d2", Scope::Terminal));
         // replay of the same challenge is rejected
         assert_eq!(
-            m.verify("d1", Some(&spki), &c.challenge_id, &sig).unwrap_err(),
+            m.verify("d1", Some(&spki), &c.challenge_id, &sig)
+                .unwrap_err(),
             VerifyError::UnknownChallenge
         );
         m.clear_device("d1");
@@ -285,25 +299,37 @@ pub(crate) mod tests {
         let m = StepUpManager::default();
 
         let c = m.challenge("d1", Scope::Terminal);
-        let sig = sign(&other, &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::Terminal));
+        let sig = sign(
+            &other,
+            &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::Terminal),
+        );
         assert_eq!(
-            m.verify("d1", Some(&spki), &c.challenge_id, &sig).unwrap_err(),
+            m.verify("d1", Some(&spki), &c.challenge_id, &sig)
+                .unwrap_err(),
             VerifyError::BadSignature
         );
 
         // signature over a different scope does not upgrade
         let c = m.challenge("d1", Scope::Terminal);
-        let sig = sign(&kp, &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::FilesWrite));
+        let sig = sign(
+            &kp,
+            &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::FilesWrite),
+        );
         assert_eq!(
-            m.verify("d1", Some(&spki), &c.challenge_id, &sig).unwrap_err(),
+            m.verify("d1", Some(&spki), &c.challenge_id, &sig)
+                .unwrap_err(),
             VerifyError::BadSignature
         );
 
         // another device cannot redeem my challenge
         let c = m.challenge("d1", Scope::Terminal);
-        let sig = sign(&kp, &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::Terminal));
+        let sig = sign(
+            &kp,
+            &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::Terminal),
+        );
         assert_eq!(
-            m.verify("d2", Some(&spki), &c.challenge_id, &sig).unwrap_err(),
+            m.verify("d2", Some(&spki), &c.challenge_id, &sig)
+                .unwrap_err(),
             VerifyError::WrongDevice
         );
 
@@ -319,7 +345,10 @@ pub(crate) mod tests {
         let (kp, spki) = test_key();
         let m = StepUpManager::new(Duration::from_millis(30));
         let c = m.challenge("d1", Scope::FilesWrite);
-        let sig = sign(&kp, &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::FilesWrite));
+        let sig = sign(
+            &kp,
+            &signing_payload("d1", &c.challenge_id, &c.nonce, Scope::FilesWrite),
+        );
         m.verify("d1", Some(&spki), &c.challenge_id, &sig).unwrap();
         assert!(m.has_grant("d1", Scope::FilesWrite));
         std::thread::sleep(Duration::from_millis(60));

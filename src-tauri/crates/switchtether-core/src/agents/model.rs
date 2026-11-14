@@ -106,7 +106,12 @@ pub struct EventDraft {
 }
 
 impl EventDraft {
-    pub fn new(id: impl Into<String>, kind: &'static str, ts: impl Into<String>, data: Value) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        kind: &'static str,
+        ts: impl Into<String>,
+        data: Value,
+    ) -> Self {
         Self {
             id: id.into(),
             turn_id: None,
@@ -140,8 +145,8 @@ pub fn tool_category(name: &str) -> &'static str {
         return "mcp";
     }
     match name {
-        "Bash" | "BashOutput" | "KillShell" | "KillBash" | "shell" | "local_shell" | "exec_command"
-        | "PowerShell" | "unified_exec" | "write_stdin" => "shell",
+        "Bash" | "BashOutput" | "KillShell" | "KillBash" | "shell" | "local_shell"
+        | "exec_command" | "PowerShell" | "unified_exec" | "write_stdin" => "shell",
         "Edit" | "MultiEdit" | "NotebookEdit" | "apply_patch" => "edit",
         "Write" => "write",
         "Read" | "view_image" => "read",
@@ -160,7 +165,9 @@ pub fn tool_title(name: &str, input: &Value) -> String {
     let s = |k: &str| input.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
     let t = match name {
         "Bash" | "PowerShell" => s("description").or_else(|| s("command")),
-        "Edit" | "MultiEdit" | "Write" | "Read" | "NotebookEdit" => s("file_path").or_else(|| s("notebook_path")),
+        "Edit" | "MultiEdit" | "Write" | "Read" | "NotebookEdit" => {
+            s("file_path").or_else(|| s("notebook_path"))
+        }
         "Grep" => s("pattern").map(|p| format!("grep {p}")),
         "Glob" => s("pattern"),
         "WebFetch" => s("url"),
@@ -169,7 +176,11 @@ pub fn tool_title(name: &str, input: &Value) -> String {
         "shell" | "exec_command" | "local_shell" => input
             .get("command")
             .map(|c| match c {
-                Value::Array(a) => a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(" "),
+                Value::Array(a) => a
+                    .iter()
+                    .filter_map(|x| x.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 Value::String(s) => s.clone(),
                 _ => String::new(),
             })
@@ -243,9 +254,18 @@ mod tests {
     fn categories_and_titles() {
         assert_eq!(tool_category("Bash"), "shell");
         assert_eq!(tool_category("mcp__github__create_issue"), "mcp");
-        assert_eq!(tool_title("mcp__github__create_issue", &json!({})), "github · create_issue");
-        assert_eq!(tool_title("Bash", &json!({"command":"ls -la\npwd"})), "ls -la");
-        assert_eq!(tool_title("shell", &json!({"command":["bash","-lc","ls"]})), "bash -lc ls");
+        assert_eq!(
+            tool_title("mcp__github__create_issue", &json!({})),
+            "github · create_issue"
+        );
+        assert_eq!(
+            tool_title("Bash", &json!({"command":"ls -la\npwd"})),
+            "ls -la"
+        );
+        assert_eq!(
+            tool_title("shell", &json!({"command":["bash","-lc","ls"]})),
+            "bash -lc ls"
+        );
     }
 
     #[test]

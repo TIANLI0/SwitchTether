@@ -11,6 +11,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod managed;
 pub mod model;
 pub mod store;
 
@@ -32,7 +33,9 @@ use crate::protocol::CapStatus;
 use claude::managed::{ManagedClaude, ManagedClaudeOptions};
 use claude::transcript::ClaudeParser;
 use claude::ClaudeObserver;
+use codex::managed::{ManagedCodex, ManagedCodexOptions};
 use codex::rollout::CodexParser;
+use managed::ManagedSession;
 use model::{Capabilities, Control, EventDraft, Liveness, Origin, SessionSummary};
 use store::SessionLog;
 
@@ -94,7 +97,8 @@ pub struct AgentHub {
     bus: Arc<EventBus>,
     backend: Arc<dyn CcSwitchBackend>,
     pub claude: ClaudeObserver,
-    managed: RwLock<HashMap<String, Arc<ManagedClaude>>>,
+    managed: RwLock<HashMap<String, Arc<dyn ManagedSession>>>,
+    codex_bin: Option<PathBuf>,
     loaded: Mutex<HashMap<String, Loaded>>,
     index_cache: Mutex<Option<(Instant, Arc<Vec<IndexedSession>>)>>,
 }
@@ -106,17 +110,18 @@ fn agent_of_provider(provider_id: &str) -> String {
     }
 }
 
-fn ts_to_ms(ts: Option<&str>) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(ts?).ok().map(|d| d.timestamp_millis())
-}
-
 impl AgentHub {
-    pub fn new(bus: Arc<EventBus>, backend: Arc<dyn CcSwitchBackend>, claude: ClaudeObserver) -> Arc<Self> {
+    pub fn new(
+        bus: Arc<EventBus>,
+        backend: Arc<dyn CcSwitchBackend>,
+        claude: ClaudeObserver,
+    ) -> Arc<Self> {
         Arc::new(Self {
             bus,
             backend,
             claude,
             managed: RwLock::new(HashMap::new()),
+            codex_bin: codex::managed::find_codex_bin(),
             loaded: Mutex::new(HashMap::new()),
             index_cache: Mutex::new(None),
         })
@@ -128,7 +133,8 @@ impl AgentHub {
             { "agent": "claude_code", "origin": "cli", "capabilities": observed_caps("claude_code"), "notes": "Live sessions discovered via `claude agents --json`; transcript tailed read-only. No supported interface to send messages, approve or interrupt an externally started session." },
             { "agent": "claude_code", "origin": "vscode", "capabilities": observed_caps("claude_code"), "notes": "The extension drives claude over private stdio pipes; no public extension API. Observation only." },
             { "agent": "claude_code", "origin": "managed", "capabilities": managed_caps(), "notes": "New sessions started by SwitchTether via the Agent SDK stream-json protocol with the user's normal settings, plugins, MCP and hooks." },
-            { "agent": "codex", "origin": "cli", "capabilities": observed_caps("codex"), "notes": "Rollout files tailed read-only. See AGENT_COMPATIBILITY.md for the app-server findings." },
+            { "agent": "codex", "origin": "cli", "capabilities": observed_caps("codex"), "notes": "Rollout files tailed read-only. A second app-server cannot attach to a live thread (Codex enforces a single writer)." },
+            { "agent": "codex", "origin": "managed", "capabilities": managed_caps(), "notes": "New threads on SwitchTether's own codex app-server (stdio), using the normal Codex config and login." },
             { "agent": "codex", "origin": "desktop_app", "capabilities": observed_caps("codex"), "notes": "Codex Desktop runs its own app-server; no external attach. Observation of rollouts only." },
         ])
     }
@@ -139,6 +145,7 @@ impl AgentHub {
             "claudeDir": self.claude.claude_dir.exists(),
             "codexHome": codex::codex_home().exists(),
             "managedSessions": self.managed.read().len(),
+            "codexBin": self.codex_bin.as_ref().map(|p| p.to_string_lossy().into_owned()),
             "loadedSessions": self.loaded.lock().len(),
         })
     }
@@ -154,11 +161,11 @@ impl AgentHub {
         v
     }
 
-    fn managed_summary(&self, id: &str, m: &ManagedClaude) -> SessionSummary {
-        let cwd = m.options.cwd.to_string_lossy().into_owned();
+    fn managed_summary(&self, id: &str, m: &dyn ManagedSession) -> SessionSummary {
+        let cwd = m.cwd().to_string_lossy().into_owned();
         SessionSummary {
             id: id.to_string(),
-            agent: "claude_code".into(),
+            agent: m.agent().into(),
             origin: Origin::Managed,
             native_id: m.native_session_id().unwrap_or_default(),
             title: m.title(),
@@ -166,8 +173,16 @@ impl AgentHub {
             cwd: Some(cwd),
             liveness: m.liveness(),
             status: m.status().into(),
-            waiting_for: if m.pending_request_ids().is_empty() { None } else { Some("permission prompt".into()) },
-            control: if m.liveness() == Liveness::Live { Control::Full } else { Control::History },
+            waiting_for: if m.has_pending_requests() {
+                Some("permission prompt".into())
+            } else {
+                None
+            },
+            control: if m.liveness() == Liveness::Live {
+                Control::Full
+            } else {
+                Control::History
+            },
             created_at_ms: Some(m.created_at_ms()),
             last_active_at_ms: Some(m.last_active_at_ms()),
             model: m.model(),
@@ -180,11 +195,18 @@ impl AgentHub {
 
     pub async fn list(&self, q: &SessionQuery) -> (Vec<SessionSummary>, Option<String>) {
         let mut out: Vec<SessionSummary> = Vec::new();
-        let managed: Vec<(String, Arc<ManagedClaude>)> =
-            self.managed.read().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let managed_native: Vec<String> = managed.iter().filter_map(|(_, m)| m.native_session_id()).collect();
+        let managed: Vec<(String, Arc<dyn ManagedSession>)> = self
+            .managed
+            .read()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let managed_native: Vec<String> = managed
+            .iter()
+            .filter_map(|(_, m)| m.native_session_id())
+            .collect();
         for (id, m) in &managed {
-            out.push(self.managed_summary(id, m));
+            out.push(self.managed_summary(id, m.as_ref()));
         }
         let live = self.claude.live_sessions().await;
         let mut live_ids = std::collections::HashSet::new();
@@ -217,17 +239,26 @@ impl AgentHub {
         }
         for s in self.index().await.iter() {
             let agent = agent_of_provider(&s.provider_id);
-            if agent == "claude_code" && (live_ids.contains(&s.session_id) || managed_native.contains(&s.session_id)) {
+            if (agent == "claude_code" && live_ids.contains(&s.session_id))
+                || managed_native.contains(&s.session_id)
+            {
                 continue;
             }
-            let prefix = if agent == "claude_code" { "claude" } else { s.provider_id.as_str() };
+            let prefix = if agent == "claude_code" {
+                "claude"
+            } else {
+                s.provider_id.as_str()
+            };
             out.push(SessionSummary {
                 id: format!("{prefix}:{}", s.session_id),
                 agent,
                 origin: Origin::Unknown,
                 native_id: s.session_id.clone(),
                 title: s.title.clone().or(s.summary.clone()),
-                project: s.project_dir.as_deref().and_then(SessionSummary::project_from_cwd),
+                project: s
+                    .project_dir
+                    .as_deref()
+                    .and_then(SessionSummary::project_from_cwd),
                 cwd: s.project_dir.clone(),
                 liveness: Liveness::Ended,
                 status: "ended".into(),
@@ -243,10 +274,15 @@ impl AgentHub {
             });
         }
         // Filters
-        let needle = q.q.as_deref().map(|s| s.to_lowercase()).filter(|s| !s.is_empty());
+        let needle =
+            q.q.as_deref()
+                .map(|s| s.to_lowercase())
+                .filter(|s| !s.is_empty());
         out.retain(|s| {
             q.agent.as_deref().is_none_or(|a| s.agent == a)
-                && q.project.as_deref().is_none_or(|p| s.project.as_deref() == Some(p) || s.cwd.as_deref() == Some(p))
+                && q.project
+                    .as_deref()
+                    .is_none_or(|p| s.project.as_deref() == Some(p) || s.cwd.as_deref() == Some(p))
                 && (!q.live_only.unwrap_or(false) || s.liveness == Liveness::Live)
                 && needle.as_ref().is_none_or(|n| {
                     s.title.as_deref().unwrap_or("").to_lowercase().contains(n)
@@ -257,9 +293,17 @@ impl AgentHub {
         out.sort_by(|a, b| {
             (b.liveness == Liveness::Live)
                 .cmp(&(a.liveness == Liveness::Live))
-                .then(b.last_active_at_ms.unwrap_or(0).cmp(&a.last_active_at_ms.unwrap_or(0)))
+                .then(
+                    b.last_active_at_ms
+                        .unwrap_or(0)
+                        .cmp(&a.last_active_at_ms.unwrap_or(0)),
+                )
         });
-        let offset: usize = q.cursor.as_deref().and_then(|c| c.parse().ok()).unwrap_or(0);
+        let offset: usize = q
+            .cursor
+            .as_deref()
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0);
         let limit = q.limit.unwrap_or(50).clamp(1, 200);
         let next = (offset + limit < out.len()).then(|| (offset + limit).to_string());
         let page = out.into_iter().skip(offset).take(limit).collect();
@@ -268,13 +312,19 @@ impl AgentHub {
 
     pub async fn summary(&self, id: &str) -> Option<SessionSummary> {
         if let Some(m) = self.managed.read().get(id).cloned() {
-            return Some(self.managed_summary(id, &m));
+            return Some(self.managed_summary(id, m.as_ref()));
         }
-        let q = SessionQuery { limit: Some(200), ..Default::default() };
+        let q = SessionQuery {
+            limit: Some(200),
+            ..Default::default()
+        };
         let mut cursor = None;
         loop {
             let (page, next) = self
-                .list(&SessionQuery { cursor: cursor.clone(), ..q.clone() })
+                .list(&SessionQuery {
+                    cursor: cursor.clone(),
+                    ..q.clone()
+                })
                 .await;
             if let Some(s) = page.into_iter().find(|s| s.id == id) {
                 return Some(s);
@@ -294,7 +344,8 @@ impl AgentHub {
                 c.approve = Some(CapStatus::Blocked);
                 c.interrupt = Some(CapStatus::Blocked);
                 c.answer_question = Some(CapStatus::Blocked);
-                c.reason = Some("The managed process has exited; start a new session to continue.".into());
+                c.reason =
+                    Some("The managed process has exited; start a new session to continue.".into());
             }
             return c;
         }
@@ -308,13 +359,16 @@ impl AgentHub {
     /// Ensure the session log is loaded (parsing its transcript if needed).
     async fn ensure_loaded(&self, s: &SessionSummary) -> ApiResult<Arc<Mutex<SessionLog>>> {
         if let Some(m) = self.managed.read().get(&s.id) {
-            return Ok(m.log.clone());
+            return Ok(m.log());
         }
         if let Some(l) = self.loaded.lock().get_mut(&s.id) {
             l.last_access = Instant::now();
             return Ok(l.log.clone());
         }
-        let log = Arc::new(Mutex::new(SessionLog::new(s.id.clone(), Some(self.bus.clone()))));
+        let log = Arc::new(Mutex::new(SessionLog::new(
+            s.id.clone(),
+            Some(self.bus.clone()),
+        )));
         let tail = match s.agent.as_str() {
             "claude_code" => {
                 let path = s
@@ -340,15 +394,44 @@ impl AgentHub {
             // Plain transcript through CC Switch's own session parser.
             if let Some(src) = &s.source_path {
                 let provider = s.id.split(':').next().unwrap_or("");
-                let provider = if provider == "claude" { "claude" } else { provider };
+                let provider = if provider == "claude" {
+                    "claude"
+                } else {
+                    provider
+                };
                 if let Ok(v) = self.backend.session_messages(provider, src).await {
                     let mut lg = log.lock();
                     for (i, m) in v.as_array().cloned().unwrap_or_default().iter().enumerate() {
-                        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("assistant");
-                        let text = m.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
-                        let kind = if role == "user" { "user_message" } else if role == "tool" { "tool_result" } else { "assistant_message" };
-                        let ts = m.get("ts").and_then(|t| t.as_i64()).map(crate::util::ms_to_rfc3339).unwrap_or_default();
-                        lg.upsert(EventDraft::new(format!("m{i}"), kind, ts, json!({ "text": text, "source": "unknown" })), false);
+                        let role = m
+                            .get("role")
+                            .and_then(|r| r.as_str())
+                            .unwrap_or("assistant");
+                        let text = m
+                            .get("content")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let kind = if role == "user" {
+                            "user_message"
+                        } else if role == "tool" {
+                            "tool_result"
+                        } else {
+                            "assistant_message"
+                        };
+                        let ts = m
+                            .get("ts")
+                            .and_then(|t| t.as_i64())
+                            .map(crate::util::ms_to_rfc3339)
+                            .unwrap_or_default();
+                        lg.upsert(
+                            EventDraft::new(
+                                format!("m{i}"),
+                                kind,
+                                ts,
+                                json!({ "text": text, "source": "unknown" }),
+                            ),
+                            false,
+                        );
                     }
                 }
             }
@@ -376,12 +459,18 @@ impl AgentHub {
     }
 
     pub async fn detail(&self, id: &str) -> ApiResult<Value> {
-        let s = self.summary(id).await.ok_or_else(|| ApiError::not_found("unknown session"))?;
+        let s = self
+            .summary(id)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown session"))?;
         let log = self.ensure_loaded(&s).await?;
         let pending: Vec<Value> = {
             let lg = log.lock();
             lg.iter()
-                .filter(|e| (e.kind == "approval_request" || e.kind == "question") && e.data["resolved"] == json!(false))
+                .filter(|e| {
+                    (e.kind == "approval_request" || e.kind == "question")
+                        && e.data["resolved"] == json!(false)
+                })
                 .map(|e| json!(e))
                 .collect()
         };
@@ -392,16 +481,34 @@ impl AgentHub {
         Ok(v)
     }
 
-    pub async fn events(&self, id: &str, before: Option<u64>, after: Option<u64>, limit: usize) -> ApiResult<Value> {
-        let s = self.summary(id).await.ok_or_else(|| ApiError::not_found("unknown session"))?;
+    pub async fn events(
+        &self,
+        id: &str,
+        before: Option<u64>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> ApiResult<Value> {
+        let s = self
+            .summary(id)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown session"))?;
         let log = self.ensure_loaded(&s).await?;
         let lg = log.lock();
         let (events, more) = lg.page(before, after, limit);
         Ok(json!({ "sessionId": id, "events": events, "hasMore": more, "lastSeq": lg.last_seq() }))
     }
 
-    pub async fn payload(&self, id: &str, event_id: &str, offset: usize, limit: usize) -> ApiResult<Value> {
-        let s = self.summary(id).await.ok_or_else(|| ApiError::not_found("unknown session"))?;
+    pub async fn payload(
+        &self,
+        id: &str,
+        event_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> ApiResult<Value> {
+        let s = self
+            .summary(id)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown session"))?;
         let log = self.ensure_loaded(&s).await?;
         let lg = log.lock();
         let text = lg
@@ -416,69 +523,113 @@ impl AgentHub {
         while !text.is_char_boundary(end) {
             end -= 1;
         }
-        Ok(json!({ "eventId": event_id, "offset": start, "text": &text[start..end], "total": text.len(), "done": end >= text.len() }))
+        Ok(
+            json!({ "eventId": event_id, "offset": start, "text": &text[start..end], "total": text.len(), "done": end >= text.len() }),
+        )
     }
 
     pub async fn create_managed(&self, req: CreateSession) -> ApiResult<SessionSummary> {
-        if req.agent != "claude_code" {
-            return Err(ApiError::unavailable_capability(
-                "UNTESTED",
-                "managed sessions are currently available for Claude Code only",
-            ));
-        }
-        let bin = self
-            .claude
-            .claude_bin
-            .clone()
-            .ok_or_else(|| ApiError::validation("Claude Code (`claude`) was not found on this computer"))?;
         let cwd = PathBuf::from(&req.cwd);
         if !cwd.is_absolute() || !cwd.is_dir() {
-            return Err(ApiError::validation("cwd must be an existing absolute directory"));
+            return Err(ApiError::validation(
+                "cwd must be an existing absolute directory",
+            ));
         }
         if crate::files::policy::classify(&cwd) == crate::files::Classification::Denied {
             return Err(ApiError::forbidden("this directory is blocked by policy"));
         }
-        let permission_mode = match req.permission_mode.as_deref() {
-            None | Some("default") => None,
-            Some(m @ ("acceptEdits" | "plan")) => Some(m.to_string()),
-            Some(_) => return Err(ApiError::validation("permissionMode must be default, acceptEdits or plan")),
-        };
-        let resume_from = match req.resume_from.as_deref() {
-            Some(r) => {
-                let native = r.strip_prefix("claude:").ok_or_else(|| ApiError::validation("resumeFrom must be a claude session"))?;
-                if self.claude.live_sessions().await.iter().any(|l| l.session_id == native) {
-                    // Still forked (never two writers), but tell the user explicitly.
-                    log::info!("[agents] forking history of a live session {native}");
-                }
-                Some(native.to_string())
-            }
-            None => None,
-        };
         let id = format!("managed:{}", crate::util::new_id());
-        let log = Arc::new(Mutex::new(SessionLog::new(id.clone(), Some(self.bus.clone()))));
-        let m = ManagedClaude::spawn(
+        let log = Arc::new(Mutex::new(SessionLog::new(
             id.clone(),
-            ManagedClaudeOptions {
-                claude_bin: bin,
-                cwd,
-                model: req.model.clone(),
-                permission_mode,
-                resume_from,
-            },
-            log,
-        )
-        .await
-        .map_err(|e| ApiError::internal("start claude", e))?;
-        self.managed.write().insert(id.clone(), m.clone());
+            Some(self.bus.clone()),
+        )));
+        let session: Arc<dyn ManagedSession> = match req.agent.as_str() {
+            "claude_code" => {
+                let bin = self.claude.claude_bin.clone().ok_or_else(|| {
+                    ApiError::validation("Claude Code (`claude`) was not found on this computer")
+                })?;
+                let permission_mode = match req.permission_mode.as_deref() {
+                    None | Some("default") => None,
+                    Some(m @ ("acceptEdits" | "plan")) => Some(m.to_string()),
+                    Some(_) => {
+                        return Err(ApiError::validation(
+                            "permissionMode must be default, acceptEdits or plan",
+                        ))
+                    }
+                };
+                let resume_from = match req.resume_from.as_deref() {
+                    Some(r) => Some(
+                        r.strip_prefix("claude:")
+                            .ok_or_else(|| {
+                                ApiError::validation("resumeFrom must be a claude session")
+                            })?
+                            .to_string(),
+                    ),
+                    None => None,
+                };
+                ManagedClaude::spawn(
+                    id.clone(),
+                    ManagedClaudeOptions {
+                        claude_bin: bin,
+                        cwd,
+                        model: req.model.clone(),
+                        permission_mode,
+                        resume_from,
+                    },
+                    log,
+                )
+                .await
+                .map_err(|e| ApiError::internal("start claude", e))?
+            }
+            "codex" => {
+                if req.resume_from.is_some() {
+                    return Err(ApiError::unavailable_capability(
+                        "BLOCKED",
+                        "Continuing an existing Codex thread from SwitchTether is disabled: Codex refuses a second writer for a thread that is open elsewhere, and taking it over would lock the original client out.",
+                    ));
+                }
+                let bin = self.codex_bin.clone().ok_or_else(|| {
+                    ApiError::validation("Codex (`codex`) was not found on this computer")
+                })?;
+                let approval_policy = match req.permission_mode.as_deref() {
+                    None | Some("default") | Some("on-request") => "on-request",
+                    Some("untrusted") => "untrusted",
+                    Some(_) => {
+                        return Err(ApiError::validation(
+                            "permissionMode for codex must be default, on-request or untrusted",
+                        ))
+                    }
+                };
+                ManagedCodex::spawn(
+                    id.clone(),
+                    ManagedCodexOptions {
+                        codex_bin: bin,
+                        cwd,
+                        model: req.model.clone(),
+                        approval_policy: approval_policy.into(),
+                    },
+                    log,
+                )
+                .await
+                .map_err(|e| ApiError::internal("start codex", e))?
+            }
+            other => {
+                return Err(ApiError::unavailable_capability(
+                    "UNTESTED",
+                    format!("managed sessions are not available for '{other}'"),
+                ))
+            }
+        };
+        self.managed.write().insert(id.clone(), session.clone());
         if let Some(p) = req.prompt.as_deref().filter(|p| !p.trim().is_empty()) {
-            m.send_message(p).await?;
+            session.send_message(p).await?;
         }
-        let summary = self.managed_summary(&id, &m);
+        let summary = self.managed_summary(&id, session.as_ref());
         self.bus.publish("session.upserted", json!(summary));
         Ok(summary)
     }
 
-    fn managed_or_blocked(&self, id: &str) -> ApiResult<Arc<ManagedClaude>> {
+    fn managed_or_blocked(&self, id: &str) -> ApiResult<Arc<dyn ManagedSession>> {
         if let Some(m) = self.managed.read().get(id).cloned() {
             return Ok(m);
         }
@@ -503,6 +654,7 @@ impl AgentHub {
         Ok(json!({ "interrupted": true }))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn respond(
         &self,
         id: &str,
@@ -514,7 +666,8 @@ impl AgentHub {
         by: &str,
     ) -> ApiResult<Value> {
         let m = self.managed_or_blocked(id)?;
-        m.respond(request_id, decision, message, updated_input, answers, by).await
+        m.respond(request_id, decision, message, updated_input, answers, by)
+            .await
     }
 
     /// Stop a managed session's process (history stays readable).
@@ -605,8 +758,13 @@ fn managed_caps() -> Capabilities {
     }
 }
 
-fn load_file(path: &Path, parser: Box<dyn LineParser>, log: &Arc<Mutex<SessionLog>>) -> ApiResult<Tail> {
-    let meta = std::fs::metadata(path).map_err(|_| ApiError::not_found("transcript file not found"))?;
+fn load_file(
+    path: &Path,
+    parser: Box<dyn LineParser>,
+    log: &Arc<Mutex<SessionLog>>,
+) -> ApiResult<Tail> {
+    let meta =
+        std::fs::metadata(path).map_err(|_| ApiError::not_found("transcript file not found"))?;
     let start = meta.len().saturating_sub(MAX_TRANSCRIPT_BYTES);
     let mut t = Tail {
         path: path.to_path_buf(),
@@ -674,7 +832,10 @@ mod tests {
         assert_eq!(log.lock().len(), 1);
         // complete the partial line + append a new one
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         f.write_all(b"llo\"}]}}\n").unwrap();
         tail_file(&mut t, &log, true).unwrap();
         assert_eq!(log.lock().len(), 2);

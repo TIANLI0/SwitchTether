@@ -113,7 +113,11 @@ impl ConnectionTracker {
     }
 
     pub fn fingerprints(&self) -> Vec<String> {
-        self.conns.lock().values().map(|c| c.fingerprint.clone()).collect()
+        self.conns
+            .lock()
+            .values()
+            .map(|c| c.fingerprint.clone())
+            .collect()
     }
 
     pub fn list(&self, registry: &crate::registry::Registry) -> Vec<ConnectionView> {
@@ -142,7 +146,9 @@ pub struct RemoteServerHandle {
 impl RemoteServerHandle {
     /// Stop accepting, close all connections and wait (bounded) for tasks.
     pub async fn shutdown(self) {
-        self.ctx.events.publish("server.shutdown", serde_json::json!({}));
+        self.ctx
+            .events
+            .publish("server.shutdown", serde_json::json!({}));
         // Give WebSocket writers a moment to flush the shutdown event.
         tokio::time::sleep(Duration::from_millis(100)).await;
         self.shutdown.cancel();
@@ -182,7 +188,10 @@ impl RemoteServer {
             .iter()
             .filter_map(|l| l.local_addr().ok())
             .collect::<Vec<_>>();
-        log::info!("[remote] listening on {local_addrs:?} (mode {:?})", cfg.network_mode);
+        log::info!(
+            "[remote] listening on {local_addrs:?} (mode {:?})",
+            cfg.network_mode
+        );
 
         let router = api::router(ctx.clone());
         let mut tasks = Vec::new();
@@ -195,7 +204,10 @@ impl RemoteServer {
                 shutdown.clone(),
             )));
         }
-        tasks.push(tokio::spawn(maintenance_loop(ctx.clone(), shutdown.clone())));
+        tasks.push(tokio::spawn(maintenance_loop(
+            ctx.clone(),
+            shutdown.clone(),
+        )));
 
         Ok(RemoteServerHandle {
             ctx,
@@ -306,7 +318,9 @@ async fn serve_connection(
     }
 
     let cancel = shutdown.child_token();
-    let conn_id = ctx.connections.add(fingerprint.clone(), addr, cancel.clone());
+    let conn_id = ctx
+        .connections
+        .add(fingerprint.clone(), addr, cancel.clone());
     let peer = PeerInfo {
         conn_id,
         fingerprint,

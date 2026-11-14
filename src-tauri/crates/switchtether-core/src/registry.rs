@@ -172,9 +172,11 @@ impl Registry {
              );",
         )?;
         let version: Option<String> = conn
-            .query_row("SELECT value FROM meta WHERE key='schema_version'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .optional()?;
         match version.as_deref().map(str::parse::<i64>) {
             None => {
@@ -281,8 +283,12 @@ impl Registry {
 
     pub fn device(&self, id: &str) -> anyhow::Result<Option<DeviceRecord>> {
         let c = self.conn.lock();
-        Ok(c.query_row("SELECT * FROM devices WHERE id=?1", params![id], Self::row_to_device)
-            .optional()?)
+        Ok(c.query_row(
+            "SELECT * FROM devices WHERE id=?1",
+            params![id],
+            Self::row_to_device,
+        )
+        .optional()?)
     }
 
     /// Register (or re-register) the device bound to `cert_fingerprint`.
@@ -351,9 +357,10 @@ impl Registry {
         if name.is_empty() {
             anyhow::bail!("name must not be empty");
         }
-        self.conn
-            .lock()
-            .execute("UPDATE devices SET name=?2 WHERE id=?1", params![device_id, name])?;
+        self.conn.lock().execute(
+            "UPDATE devices SET name=?2 WHERE id=?1",
+            params![device_id, name],
+        )?;
         self.reload_cache()
     }
 
@@ -371,7 +378,10 @@ impl Registry {
             if changed == 0 {
                 return Ok(None);
             }
-            c.execute("DELETE FROM commands WHERE device_id=?1", params![device_id])?;
+            c.execute(
+                "DELETE FROM commands WHERE device_id=?1",
+                params![device_id],
+            )?;
             c.query_row(
                 "SELECT * FROM devices WHERE id=?1",
                 params![device_id],
@@ -418,7 +428,11 @@ impl Registry {
         }
     }
 
-    pub fn audit_entries(&self, limit: usize, before_id: Option<i64>) -> anyhow::Result<Vec<AuditEntry>> {
+    pub fn audit_entries(
+        &self,
+        limit: usize,
+        before_id: Option<i64>,
+    ) -> anyhow::Result<Vec<AuditEntry>> {
         let c = self.conn.lock();
         let mut st = c.prepare(
             "SELECT id,ts,device_id,action,target,outcome,detail FROM audit_log
@@ -457,7 +471,11 @@ impl Registry {
         })
     }
 
-    pub fn command(&self, device_id: &str, command_id: &str) -> anyhow::Result<Option<CommandRecord>> {
+    pub fn command(
+        &self,
+        device_id: &str,
+        command_id: &str,
+    ) -> anyhow::Result<Option<CommandRecord>> {
         let c = self.conn.lock();
         Ok(c.query_row(
             "SELECT * FROM commands WHERE device_id=?1 AND command_id=?2",
@@ -578,7 +596,8 @@ mod tests {
             r.begin_command("d", "c1", "provider.switch").unwrap(),
             CommandBegin::InProgress(_)
         ));
-        r.complete_command("d", "c1", Ok(&json!({"ok": true}))).unwrap();
+        r.complete_command("d", "c1", Ok(&json!({"ok": true})))
+            .unwrap();
         match r.begin_command("d", "c1", "provider.switch").unwrap() {
             CommandBegin::Done(rec) => {
                 assert_eq!(rec.status, CommandStatus::Succeeded);
@@ -613,7 +632,13 @@ mod tests {
     #[test]
     fn audit_is_redacted() {
         let r = Registry::open_in_memory().unwrap();
-        r.audit(Some("d"), "provider.credential", Some("token=supersecret"), "ok", None);
+        r.audit(
+            Some("d"),
+            "provider.credential",
+            Some("token=supersecret"),
+            "ok",
+            None,
+        );
         let e = r.audit_entries(10, None).unwrap();
         assert_eq!(e.len(), 1);
         assert!(!e[0].target.as_deref().unwrap().contains("supersecret"));

@@ -354,7 +354,18 @@ impl FileService {
         }
         if let Some(h) = dirs::home_dir() {
             add(h.clone(), Some("Home"));
-            for d in ["Desktop", "Documents", "Downloads", "Projects", "projects", "code", "src", "dev", "repos", "workspace"] {
+            for d in [
+                "Desktop",
+                "Documents",
+                "Downloads",
+                "Projects",
+                "projects",
+                "code",
+                "src",
+                "dev",
+                "repos",
+                "workspace",
+            ] {
                 add(h.join(d), Some(d));
             }
         }
@@ -382,7 +393,9 @@ impl FileService {
             let Ok(e) = e else { continue };
             let name = e.file_name().to_string_lossy().into_owned();
             let path = e.path();
-            let Ok(lmeta) = std::fs::symlink_metadata(&path) else { continue };
+            let Ok(lmeta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
             let symlink = lmeta.file_type().is_symlink();
             let meta = if symlink {
                 std::fs::metadata(&path).unwrap_or(lmeta.clone())
@@ -410,7 +423,13 @@ impl FileService {
                 break;
             }
             entries.push(Entry {
-                kind: if meta.is_dir() { "dir" } else if meta.is_file() { "file" } else { "other" },
+                kind: if meta.is_dir() {
+                    "dir"
+                } else if meta.is_file() {
+                    "file"
+                } else {
+                    "other"
+                },
                 size: if meta.is_file() { meta.len() } else { 0 },
                 modified_ms: mtime_ms(&meta),
                 hidden,
@@ -501,9 +520,11 @@ impl FileService {
         let base = req.base_sha256.clone();
         let create_only = req.create_only || base.is_none();
         let bytes = encode_text(&req.text, req.encoding.as_deref(), req.bom)?;
-        tokio::task::spawn_blocking(move || write_checked(&p2, &bytes, base.as_deref(), create_only))
-            .await
-            .map_err(|e| FsError::Io(std::io::Error::other(e)))?
+        tokio::task::spawn_blocking(move || {
+            write_checked(&p2, &bytes, base.as_deref(), create_only)
+        })
+        .await
+        .map_err(|e| FsError::Io(std::io::Error::other(e)))?
     }
 
     pub fn mkdir(&self, raw: &str) -> Result<String, FsError> {
@@ -544,7 +565,13 @@ impl FileService {
         trash::delete(&path).map_err(|e| FsError::Io(std::io::Error::other(e.to_string())))
     }
 
-    pub fn search(&self, root: &str, query: &str, content: bool, limit: usize) -> Result<Vec<serde_json::Value>, FsError> {
+    pub fn search(
+        &self,
+        root: &str,
+        query: &str,
+        content: bool,
+        limit: usize,
+    ) -> Result<Vec<serde_json::Value>, FsError> {
         let (root, _) = policy::resolve_existing(root)?;
         let q = query.to_lowercase();
         if q.trim().is_empty() {
@@ -554,12 +581,27 @@ impl FileService {
         let deadline = Instant::now() + Duration::from_secs(4);
         let mut out = Vec::new();
         let mut stack = vec![(root, 0usize)];
-        const SKIP: &[&str] = &[".git", "node_modules", "target", "build", "dist", ".gradle", ".idea", "__pycache__", ".venv", "venv", ".next", "Pods"];
+        const SKIP: &[&str] = &[
+            ".git",
+            "node_modules",
+            "target",
+            "build",
+            "dist",
+            ".gradle",
+            ".idea",
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".next",
+            "Pods",
+        ];
         while let Some((dir, depth)) = stack.pop() {
             if out.len() >= limit || Instant::now() > deadline {
                 break;
             }
-            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            let Ok(rd) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
                 let path = e.path();
@@ -793,7 +835,9 @@ fn write_checked(
             suggested_copy: conflict_copy_name(path),
         });
     }
-    let dir = path.parent().ok_or_else(|| FsError::Invalid("no parent".into()))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| FsError::Invalid("no parent".into()))?;
     let tmp = dir.join(format!(
         ".{}.switchtether-{}.tmp",
         path.file_name().unwrap_or_default().to_string_lossy(),
@@ -842,7 +886,14 @@ mod tests {
         let path = p(tmp.path(), "a.txt");
         // create
         let w = fs
-            .write(WriteRequest { path: path.clone(), text: "hello\n".into(), base_sha256: None, encoding: None, bom: false, create_only: true })
+            .write(WriteRequest {
+                path: path.clone(),
+                text: "hello\n".into(),
+                base_sha256: None,
+                encoding: None,
+                bom: false,
+                create_only: true,
+            })
             .await
             .unwrap();
         assert!(w.created);
@@ -852,11 +903,22 @@ mod tests {
         // desktop edits the file behind our back
         std::fs::write(&path, "desktop edit\n").unwrap();
         let err = fs
-            .write(WriteRequest { path: path.clone(), text: "phone edit\n".into(), base_sha256: Some(r.sha256.clone()), encoding: None, bom: false, create_only: false })
+            .write(WriteRequest {
+                path: path.clone(),
+                text: "phone edit\n".into(),
+                base_sha256: Some(r.sha256.clone()),
+                encoding: None,
+                bom: false,
+                create_only: false,
+            })
             .await
             .unwrap_err();
         match err {
-            FsError::Conflict { current_text, suggested_copy, current_sha256 } => {
+            FsError::Conflict {
+                current_text,
+                suggested_copy,
+                current_sha256,
+            } => {
                 assert_eq!(current_text.as_deref(), Some("desktop edit\n"));
                 assert!(suggested_copy.contains("(phone "));
                 assert!(current_sha256.is_some());
@@ -867,9 +929,16 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "desktop edit\n");
         // write with the right base succeeds
         let cur = fs.read(&path, None, false, None).unwrap();
-        fs.write(WriteRequest { path: path.clone(), text: "merged\n".into(), base_sha256: Some(cur.sha256), encoding: None, bom: false, create_only: false })
-            .await
-            .unwrap();
+        fs.write(WriteRequest {
+            path: path.clone(),
+            text: "merged\n".into(),
+            base_sha256: Some(cur.sha256),
+            encoding: None,
+            bom: false,
+            create_only: false,
+        })
+        .await
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "merged\n");
     }
 
@@ -880,7 +949,15 @@ mod tests {
         let path = p(tmp.path(), "b.txt");
         std::fs::write(&path, "x").unwrap();
         assert!(matches!(
-            fs.write(WriteRequest { path: path.clone(), text: "y".into(), base_sha256: None, encoding: None, bom: false, create_only: true }).await,
+            fs.write(WriteRequest {
+                path: path.clone(),
+                text: "y".into(),
+                base_sha256: None,
+                encoding: None,
+                bom: false,
+                create_only: true
+            })
+            .await,
             Err(FsError::Conflict { .. })
         ));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "x");
@@ -892,7 +969,15 @@ mod tests {
         let fs = FileService::new();
         let path = p(tmp.path(), "gone.txt");
         assert!(matches!(
-            fs.write(WriteRequest { path, text: "y".into(), base_sha256: Some("00".into()), encoding: None, bom: false, create_only: false }).await,
+            fs.write(WriteRequest {
+                path,
+                text: "y".into(),
+                base_sha256: Some("00".into()),
+                encoding: None,
+                bom: false,
+                create_only: false
+            })
+            .await,
             Err(FsError::Conflict { .. })
         ));
     }
@@ -901,7 +986,10 @@ mod tests {
     fn encodings_roundtrip() {
         let utf16 = encode_text("héllo 中文", Some("utf-16le"), true).unwrap();
         let (enc, bom, text) = decode_text(&utf16, None).unwrap();
-        assert_eq!((enc.as_str(), bom, text.as_str()), ("utf-16le", true, "héllo 中文"));
+        assert_eq!(
+            (enc.as_str(), bom, text.as_str()),
+            ("utf-16le", true, "héllo 中文")
+        );
         let gbk = encode_text("中文", Some("gbk"), false).unwrap();
         assert!(decode_text(&gbk, None).is_none()); // not valid UTF-8 → binary unless hinted
         let (_, _, t) = decode_text(&gbk, Some("gbk")).unwrap();
@@ -929,7 +1017,9 @@ mod tests {
         assert!(fs.read(&env.path, None, false, None).is_err());
         assert!(fs.read(&env.path, None, true, None).is_ok());
         // denied file is never readable
-        assert!(fs.read(&p(tmp.path(), "id_ed25519"), None, true, None).is_err());
+        assert!(fs
+            .read(&p(tmp.path(), "id_ed25519"), None, true, None)
+            .is_err());
     }
 
     #[test]
@@ -939,12 +1029,18 @@ mod tests {
         let path = p(tmp.path(), "up.bin");
         let data = b"0123456789abcdef".repeat(100);
         let sha = crate::util::sha256_hex(&data);
-        let u = fs.begin_upload("d", &path, data.len() as u64, Some(sha), false).unwrap();
+        let u = fs
+            .begin_upload("d", &path, data.len() as u64, Some(sha), false)
+            .unwrap();
         let v = fs.upload_chunk("d", &u.upload_id, 0, &data[..800]).unwrap();
         assert!(!v.complete);
-        assert!(fs.upload_chunk("other", &u.upload_id, 800, &data[800..]).is_err());
+        assert!(fs
+            .upload_chunk("other", &u.upload_id, 800, &data[800..])
+            .is_err());
         assert!(fs.upload_chunk("d", &u.upload_id, 0, &data[800..]).is_err());
-        let v = fs.upload_chunk("d", &u.upload_id, 800, &data[800..]).unwrap();
+        let v = fs
+            .upload_chunk("d", &u.upload_id, 800, &data[800..])
+            .unwrap();
         assert!(v.complete);
         assert_eq!(std::fs::read(&path).unwrap(), data);
     }

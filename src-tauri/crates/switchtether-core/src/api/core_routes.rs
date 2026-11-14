@@ -81,13 +81,20 @@ async fn pair(
             ));
         }
         PairingCheck::WrongSecret => {
-            ctx.registry
-                .audit(None, "pair", Some(&peer.ip().to_string()), "wrong_secret", None);
+            ctx.registry.audit(
+                None,
+                "pair",
+                Some(&peer.ip().to_string()),
+                "wrong_secret",
+                None,
+            );
             return Err(ApiError::forbidden("pairing secret mismatch"));
         }
         PairingCheck::RateLimited { retry_after_ms } => {
-            return Err(ApiError::new(ErrorCode::RateLimited, "too many pairing attempts")
-                .with_details(json!({ "retryAfterMs": retry_after_ms })));
+            return Err(
+                ApiError::new(ErrorCode::RateLimited, "too many pairing attempts")
+                    .with_details(json!({ "retryAfterMs": retry_after_ms })),
+            );
         }
     }
 
@@ -108,7 +115,11 @@ async fn pair(
     let name = clean_text(&req.device_name, 64);
     let rec = DeviceRecord {
         id: crate::util::new_id(),
-        name: if name.is_empty() { "Android".into() } else { name },
+        name: if name.is_empty() {
+            "Android".into()
+        } else {
+            name
+        },
         platform: clean_text(&req.platform, 16),
         os_version: req.os_version.as_deref().map(|s| clean_text(s, 32)),
         app_version: req.app_version.as_deref().map(|s| clean_text(s, 32)),
@@ -127,8 +138,13 @@ async fn pair(
     // A re-pair replaces any previous grants of this device.
     ctx.stepup.clear_device(&rec.id);
     let code = crate::util::verification_code(&ctx.identity.fingerprint, &peer.fingerprint);
-    ctx.registry
-        .audit(Some(&rec.id), "pair", Some(&rec.name), "ok", Some(&peer.ip().to_string()));
+    ctx.registry.audit(
+        Some(&rec.id),
+        "pair",
+        Some(&rec.name),
+        "ok",
+        Some(&peer.ip().to_string()),
+    );
     ctx.events.publish(
         "device.paired",
         json!({ "deviceId": rec.id, "name": rec.name, "verificationCode": code }),
@@ -208,10 +224,9 @@ async fn step_up_challenge(
         )
         .with_details(json!({ "reason": "no_step_up_key" })));
     }
-    Ok(Json(serde_json::to_value(
-        ctx.stepup.challenge(dev.id(), req.scope),
-    )
-    .unwrap_or_default()))
+    Ok(Json(
+        serde_json::to_value(ctx.stepup.challenge(dev.id(), req.scope)).unwrap_or_default(),
+    ))
 }
 
 #[derive(Deserialize)]

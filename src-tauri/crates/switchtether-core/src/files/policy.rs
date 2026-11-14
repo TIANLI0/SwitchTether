@@ -100,8 +100,17 @@ const DENIED_NAMES: &[&str] = &[
 ];
 
 /// File names / extensions that are sensitive (warn, require opt-in).
-const SENSITIVE_NAMES: &[&str] = &[".env", ".npmrc", ".yarnrc.yml", "credentials", "secrets.json", ".envrc"];
-const SENSITIVE_EXTS: &[&str] = &["pem", "key", "p12", "pfx", "jks", "keystore", "kdbx", "ppk", "asc", "gpg"];
+const SENSITIVE_NAMES: &[&str] = &[
+    ".env",
+    ".npmrc",
+    ".yarnrc.yml",
+    "credentials",
+    "secrets.json",
+    ".envrc",
+];
+const SENSITIVE_EXTS: &[&str] = &[
+    "pem", "key", "p12", "pfx", "jks", "keystore", "kdbx", "ppk", "asc", "gpg",
+];
 
 fn rel_matches(path: &Path, base: &Path, rel: &str) -> bool {
     let target = normalize_case(&base.join(rel));
@@ -112,7 +121,9 @@ pub fn classify(canonical: &Path) -> Classification {
     let p = normalize_case(canonical);
     if let Some(h) = home() {
         if DENIED_HOME_DIRS.iter().any(|d| rel_matches(&p, &h, d))
-            || DENIED_HOME_FILES.iter().any(|f| p == normalize_case(&h.join(f)))
+            || DENIED_HOME_FILES
+                .iter()
+                .any(|f| p == normalize_case(&h.join(f)))
         {
             return Classification::Denied;
         }
@@ -223,25 +234,55 @@ mod tests {
     #[test]
     fn denies_credentials() {
         let h = dirs::home_dir().unwrap();
-        assert_eq!(classify(&h.join(".ssh").join("config")), Classification::Denied);
-        assert_eq!(classify(&h.join(".codex").join("auth.json")), Classification::Denied);
-        assert_eq!(classify(&h.join(".switchtether").join("x")), Classification::Denied);
-        assert_eq!(classify(&h.join("proj").join("id_ed25519")), Classification::Denied);
-        assert_eq!(classify(&h.join(".codex").join("config.toml")), Classification::Normal);
+        assert_eq!(
+            classify(&h.join(".ssh").join("config")),
+            Classification::Denied
+        );
+        assert_eq!(
+            classify(&h.join(".codex").join("auth.json")),
+            Classification::Denied
+        );
+        assert_eq!(
+            classify(&h.join(".switchtether").join("x")),
+            Classification::Denied
+        );
+        assert_eq!(
+            classify(&h.join("proj").join("id_ed25519")),
+            Classification::Denied
+        );
+        assert_eq!(
+            classify(&h.join(".codex").join("config.toml")),
+            Classification::Normal
+        );
     }
 
     #[test]
     fn sensitive_files() {
         let h = dirs::home_dir().unwrap();
-        assert_eq!(classify(&h.join("p").join(".env")), Classification::Sensitive);
-        assert_eq!(classify(&h.join("p").join(".env.local")), Classification::Sensitive);
-        assert_eq!(classify(&h.join("p").join("server.pem")), Classification::Sensitive);
-        assert_eq!(classify(&h.join("p").join("main.rs")), Classification::Normal);
+        assert_eq!(
+            classify(&h.join("p").join(".env")),
+            Classification::Sensitive
+        );
+        assert_eq!(
+            classify(&h.join("p").join(".env.local")),
+            Classification::Sensitive
+        );
+        assert_eq!(
+            classify(&h.join("p").join("server.pem")),
+            Classification::Sensitive
+        );
+        assert_eq!(
+            classify(&h.join("p").join("main.rs")),
+            Classification::Normal
+        );
     }
 
     #[test]
     fn rejects_relative_and_traversal() {
-        assert!(matches!(resolve_existing("relative/path"), Err(PathError::NotAbsolute)));
+        assert!(matches!(
+            resolve_existing("relative/path"),
+            Err(PathError::NotAbsolute)
+        ));
         let tmp = tempfile::tempdir().unwrap();
         let trav = format!("{}/../x", tmp.path().display());
         assert!(matches!(resolve_existing(&trav), Err(PathError::Invalid)));

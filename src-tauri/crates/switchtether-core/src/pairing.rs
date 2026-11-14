@@ -48,7 +48,9 @@ pub enum PairingCheck {
     /// Unknown, expired, used or destroyed after too many failures.
     Expired,
     WrongSecret,
-    RateLimited { retry_after_ms: u64 },
+    RateLimited {
+        retry_after_ms: u64,
+    },
 }
 
 #[derive(Default)]
@@ -96,13 +98,26 @@ impl PairingManager {
                 failures: 0,
             },
         );
-        let expires_at = chrono::Utc::now()
-            + chrono::Duration::from_std(PAIRING_TTL).unwrap_or_default();
+        let expires_at =
+            chrono::Utc::now() + chrono::Duration::from_std(PAIRING_TTL).unwrap_or_default();
         // Encode only what is unsafe inside a query value; keep hosts readable.
         const QUERY_VALUE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
-            .add(b' ').add(b'"').add(b'#').add(b'%').add(b'&').add(b'+').add(b'<')
-            .add(b'>').add(b'=').add(b'?').add(b'`').add(b'{').add(b'}').add(b'|')
-            .add(b'\\').add(b'^');
+            .add(b' ')
+            .add(b'"')
+            .add(b'#')
+            .add(b'%')
+            .add(b'&')
+            .add(b'+')
+            .add(b'<')
+            .add(b'>')
+            .add(b'=')
+            .add(b'?')
+            .add(b'`')
+            .add(b'{')
+            .add(b'}')
+            .add(b'|')
+            .add(b'\\')
+            .add(b'^');
         let enc = |s: &str| percent_encoding::utf8_percent_encode(s, QUERY_VALUE).to_string();
         let uri = format!(
             "switchtether://pair?v={}&h={}&p={}&fp={}&id={}&s={}&n={}",
@@ -193,8 +208,13 @@ mod tests {
     fn single_use() {
         let m = PairingManager::new();
         let o = m.create(vec!["10.0.0.2".into()], 47615, "fp", "Desk");
-        assert!(o.uri.starts_with("switchtether://pair?v=1&h=10.0.0.2&p=47615&fp=fp&id="));
-        assert_eq!(m.verify_and_consume(ip(1), &o.pairing_id, &o.secret), PairingCheck::Ok);
+        assert!(o
+            .uri
+            .starts_with("switchtether://pair?v=1&h=10.0.0.2&p=47615&fp=fp&id="));
+        assert_eq!(
+            m.verify_and_consume(ip(1), &o.pairing_id, &o.secret),
+            PairingCheck::Ok
+        );
         assert_eq!(
             m.verify_and_consume(ip(1), &o.pairing_id, &o.secret),
             PairingCheck::Expired
@@ -222,14 +242,20 @@ mod tests {
     fn ip_rate_limit() {
         let m = PairingManager::new();
         for _ in 0..MAX_ATTEMPTS_PER_IP_PER_MIN {
-            assert_eq!(m.verify_and_consume(ip(3), "nope", "x"), PairingCheck::Expired);
+            assert_eq!(
+                m.verify_and_consume(ip(3), "nope", "x"),
+                PairingCheck::Expired
+            );
         }
         assert!(matches!(
             m.verify_and_consume(ip(3), "nope", "x"),
             PairingCheck::RateLimited { .. }
         ));
         // other IPs are unaffected
-        assert_eq!(m.verify_and_consume(ip(4), "nope", "x"), PairingCheck::Expired);
+        assert_eq!(
+            m.verify_and_consume(ip(4), "nope", "x"),
+            PairingCheck::Expired
+        );
     }
 
     #[test]

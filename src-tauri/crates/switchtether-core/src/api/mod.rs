@@ -93,9 +93,13 @@ impl ApiContext {
         };
         self.stepup.clear_device(device_id);
         self.terminals.release_device(device_id);
-        let closed = self.connections.disconnect_fingerprint(&rec.cert_fingerprint);
-        self.events
-            .publish("device.revoked", serde_json::json!({ "deviceId": device_id }));
+        let closed = self
+            .connections
+            .disconnect_fingerprint(&rec.cert_fingerprint);
+        self.events.publish(
+            "device.revoked",
+            serde_json::json!({ "deviceId": device_id }),
+        );
         self.registry.audit(
             Some(device_id),
             "device.revoke",
@@ -202,7 +206,10 @@ pub fn require_step_up(ctx: &ApiContext, dev: &AuthDevice, scope: Scope) -> ApiR
     } else {
         Err(ApiError::new(
             ErrorCode::StepUpRequired,
-            format!("{} requires biometric confirmation on the phone", scope.as_str()),
+            format!(
+                "{} requires biometric confirmation on the phone",
+                scope.as_str()
+            ),
         )
         .with_details(serde_json::json!({ "scope": scope.as_str() })))
     }
@@ -268,10 +275,9 @@ where
                 let reg = ctx.registry.clone();
                 let (d, c) = (device_id.clone(), command_id.clone());
                 let st = stored.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    reg.complete_command(&d, &c, st.as_ref().map(|v| v).map_err(|e| e))
-                })
-                .await;
+                let _ =
+                    tokio::task::spawn_blocking(move || reg.complete_command(&d, &c, st.as_ref()))
+                        .await;
             }
             ctx.events.publish_to(
                 &device_id,
@@ -287,7 +293,8 @@ where
 }
 
 fn stored_error(err: &Value) -> ApiError {
-    let code: ErrorCode = serde_json::from_value(err["code"].clone()).unwrap_or(ErrorCode::Internal);
+    let code: ErrorCode =
+        serde_json::from_value(err["code"].clone()).unwrap_or(ErrorCode::Internal);
     let mut e = ApiError::new(code, err["message"].as_str().unwrap_or("failed"));
     if !err["details"].is_null() {
         e.details = Some(err["details"].clone());
@@ -298,7 +305,10 @@ fn stored_error(err: &Value) -> ApiError {
 /// Map a backend (CC Switch service) error.
 pub(crate) fn backend_err(ctx: &ApiContext, e: String) -> ApiError {
     if !ctx.backend.available() {
-        return ApiError::new(ErrorCode::BackendUnavailable, "CC Switch backend is not ready");
+        return ApiError::new(
+            ErrorCode::BackendUnavailable,
+            "CC Switch backend is not ready",
+        );
     }
     ApiError::backend(e)
 }

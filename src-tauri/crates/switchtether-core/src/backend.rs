@@ -113,7 +113,13 @@ impl CcSwitchBackend for UnavailableBackend {
     async fn test_provider(&self, _a: &str, _i: &str) -> BackendResult<Value> {
         Err("backend unavailable".into())
     }
-    async fn set_provider_credential(&self, _a: &str, _i: &str, _f: &str, _v: &str) -> BackendResult<Value> {
+    async fn set_provider_credential(
+        &self,
+        _a: &str,
+        _i: &str,
+        _f: &str,
+        _v: &str,
+    ) -> BackendResult<Value> {
         Err("backend unavailable".into())
     }
     async fn usage_summary(&self, _q: UsageQuery) -> BackendResult<Value> {

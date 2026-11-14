@@ -28,7 +28,9 @@ pub fn routes() -> Router<Arc<ApiContext>> {
 }
 
 async fn list(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> Json<Value> {
-    Json(json!({ "terminals": ctx.terminals.list(), "shells": crate::terminal::available_shells() }))
+    Json(
+        json!({ "terminals": ctx.terminals.list(), "shells": crate::terminal::available_shells() }),
+    )
 }
 
 #[derive(Deserialize)]
@@ -49,22 +51,28 @@ async fn create(
     }
     let c = ctx.clone();
     let req = body.req;
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "terminal.create", || async move {
-        let mgr = c.terminals.clone();
-        let owner = dev.id().to_string();
-        let t = tokio::task::spawn_blocking(move || mgr.create(req, Some(owner)))
-            .await?
-            .map_err(|e| ApiError::validation(e.to_string()))?;
-        let info = t.info();
-        c.registry.audit(
-            Some(dev.id()),
-            "terminal.create",
-            Some(&info.cwd),
-            "ok",
-            Some(&format!("shell={} id={}", info.shell, info.id)),
-        );
-        Ok(json!(info))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "terminal.create",
+        || async move {
+            let mgr = c.terminals.clone();
+            let owner = dev.id().to_string();
+            let t = tokio::task::spawn_blocking(move || mgr.create(req, Some(owner)))
+                .await?
+                .map_err(|e| ApiError::validation(e.to_string()))?;
+            let info = t.info();
+            c.registry.audit(
+                Some(dev.id()),
+                "terminal.create",
+                Some(&info.cwd),
+                "ok",
+                Some(&format!("shell={} id={}", info.shell, info.id)),
+            );
+            Ok(json!(info))
+        },
+    )
     .await
 }
 
@@ -89,8 +97,13 @@ async fn kill(
 ) -> ApiResult<Json<Value>> {
     require_step_up(&ctx, &dev, Scope::Terminal)?;
     let ok = ctx.terminals.remove(&id);
-    ctx.registry
-        .audit(Some(dev.id()), "terminal.kill", Some(&id), if ok { "ok" } else { "not_found" }, None);
+    ctx.registry.audit(
+        Some(dev.id()),
+        "terminal.kill",
+        Some(&id),
+        if ok { "ok" } else { "not_found" },
+        None,
+    );
     Ok(Json(json!({ "removed": ok })))
 }
 
@@ -157,7 +170,12 @@ enum ClientMsg {
     Ping {},
 }
 
-async fn run_stream(ctx: Arc<ApiContext>, dev: AuthDevice, term: Arc<Terminal>, mut socket: WebSocket) {
+async fn run_stream(
+    ctx: Arc<ApiContext>,
+    dev: AuthDevice,
+    term: Arc<Terminal>,
+    mut socket: WebSocket,
+) {
     let mut rx = term.subscribe();
     let snap = term.snapshot();
     let mut last_lines: Vec<Line> = snap.lines.clone();

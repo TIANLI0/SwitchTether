@@ -56,7 +56,9 @@ async fn run(dir: &Path, args: &[&str], limit: usize) -> Result<(String, bool), 
     cmd.args(args);
     let out = match tokio::time::timeout(GIT_TIMEOUT, cmd.output()).await {
         Err(_) => return Err(GitError::Timeout),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => return Err(GitError::NotInstalled),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(GitError::NotInstalled)
+        }
         Ok(Err(e)) => return Err(GitError::Failed(e.to_string())),
         Ok(Ok(o)) => o,
     };
@@ -65,7 +67,9 @@ async fn run(dir: &Path, args: &[&str], limit: usize) -> Result<(String, bool), 
         if err.contains("not a git repository") {
             return Err(GitError::NotARepo);
         }
-        return Err(GitError::Failed(err.lines().next().unwrap_or("").to_string()));
+        return Err(GitError::Failed(
+            err.lines().next().unwrap_or("").to_string(),
+        ));
     }
     let truncated = out.stdout.len() > limit;
     let bytes = &out.stdout[..out.stdout.len().min(limit)];
@@ -202,7 +206,13 @@ pub async fn status(dir: &Path) -> Result<RepoStatus, GitError> {
     let root = repo_root(dir).await?;
     let (raw, _) = run(
         &root,
-        &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"],
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=normal",
+        ],
         4 * 1024 * 1024,
     )
     .await?;
@@ -270,7 +280,11 @@ pub fn parse_log(raw: &str) -> Vec<Commit> {
 pub async fn log(dir: &Path, path: Option<&str>, limit: usize) -> Result<Vec<Commit>, GitError> {
     let root = repo_root(dir).await?;
     let n = format!("--max-count={}", limit.clamp(1, 500));
-    let mut args = vec!["log", n.as_str(), "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%s%x1e"];
+    let mut args = vec![
+        "log",
+        n.as_str(),
+        "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%s%x1e",
+    ];
     if path.is_some() {
         args.push("--follow");
     }
@@ -289,7 +303,12 @@ pub async fn show_file(dir: &Path, rev: &str, path: &str) -> Result<Option<Strin
     }
     let root = repo_root(dir).await?;
     let spec = format!("{rev}:{path}");
-    let (out, _) = run(&root, &["show", "--no-textconv", &spec], crate::files::DEFAULT_READ_LIMIT as usize).await?;
+    let (out, _) = run(
+        &root,
+        &["show", "--no-textconv", &spec],
+        crate::files::DEFAULT_READ_LIMIT as usize,
+    )
+    .await?;
     Ok(crate::files::decode_text(out.as_bytes(), None).map(|(_, _, t)| t))
 }
 
@@ -350,7 +369,10 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
         std::fs::write(d.join("b.txt"), "new\n").unwrap();
 
         let st = status(d).await.unwrap();
-        assert!(st.entries.iter().any(|e| e.path == "a.txt" && e.worktree == 'M'));
+        assert!(st
+            .entries
+            .iter()
+            .any(|e| e.path == "a.txt" && e.worktree == 'M'));
         assert!(st.entries.iter().any(|e| e.path == "b.txt" && e.untracked));
         let df = diff(d, Some("a.txt"), false).await.unwrap();
         assert!(df.diff.contains("+two"));
@@ -359,6 +381,9 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
         assert_eq!(lg[0].subject, "first");
         let shown = show_file(d, &lg[0].hash, "a.txt").await.unwrap();
         assert_eq!(shown.as_deref(), Some("one\n"));
-        assert!(matches!(status(&d.join("..")).await, Err(GitError::NotARepo) | Ok(_)));
+        assert!(matches!(
+            status(&d.join("..")).await,
+            Err(GitError::NotARepo) | Ok(_)
+        ));
     }
 }

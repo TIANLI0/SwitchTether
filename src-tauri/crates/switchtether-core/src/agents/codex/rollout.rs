@@ -65,7 +65,10 @@ pub fn apply_patch_to_diffs(patch: &str) -> Vec<(String, &'static str, String)> 
             ("*** Delete File: ", "delete"),
         ]
         .iter()
-        .find_map(|(p, k)| line.strip_prefix(p).map(|rest| (rest.trim().to_string(), *k)));
+        .find_map(|(p, k)| {
+            line.strip_prefix(p)
+                .map(|rest| (rest.trim().to_string(), *k))
+        });
         if let Some((path, kind)) = header {
             if let Some(c) = cur.take() {
                 out.push(c);
@@ -85,7 +88,10 @@ pub fn apply_patch_to_diffs(patch: &str) -> Vec<(String, &'static str, String)> 
             }
             continue;
         }
-        if line.starts_with("*** Begin Patch") || line.starts_with("*** End Patch") || line.starts_with("*** End of File") {
+        if line.starts_with("*** Begin Patch")
+            || line.starts_with("*** End Patch")
+            || line.starts_with("*** End of File")
+        {
             continue;
         }
         if let Some(c) = cur.as_mut() {
@@ -144,7 +150,12 @@ impl CodexParser {
             Some("event_msg") => self.event_msg(&payload, &ts),
             Some("compacted") => {
                 let id = self.next_id("cx-compact-");
-                vec![EventDraft::new(id, "system", ts, json!({ "subtype": "compacted", "text": "Conversation compacted" }))]
+                vec![EventDraft::new(
+                    id,
+                    "system",
+                    ts,
+                    json!({ "subtype": "compacted", "text": "Conversation compacted" }),
+                )]
             }
             _ => vec![],
         }
@@ -165,7 +176,12 @@ impl CodexParser {
         let id = self.next_id("cx-u-");
         self.current_turn = Some(id.clone());
         let (p, truncated) = preview(&text, 64 * 1024);
-        let mut d = EventDraft::new(id.clone(), "user_message", ts, json!({ "text": p, "images": 0, "source": "unknown", "truncated": truncated }));
+        let mut d = EventDraft::new(
+            id.clone(),
+            "user_message",
+            ts,
+            json!({ "text": p, "images": 0, "source": "unknown", "truncated": truncated }),
+        );
         d.turn_id = Some(id);
         vec![d]
     }
@@ -174,14 +190,22 @@ impl CodexParser {
         let turn = self.current_turn.clone();
         let mut out = match p.get("type").and_then(|t| t.as_str()) {
             Some("message") => match p.get("role").and_then(|r| r.as_str()) {
-                Some("user") => return self.user_message(message_text(p.get("content").unwrap_or(&Value::Null)), ts),
+                Some("user") => {
+                    return self
+                        .user_message(message_text(p.get("content").unwrap_or(&Value::Null)), ts)
+                }
                 Some("assistant") => {
                     let text = message_text(p.get("content").unwrap_or(&Value::Null));
                     if text.trim().is_empty() {
                         return vec![];
                     }
                     let id = self.next_id("cx-a-");
-                    vec![EventDraft::new(id, "assistant_message", ts, json!({ "text": text, "model": self.model }))]
+                    vec![EventDraft::new(
+                        id,
+                        "assistant_message",
+                        ts,
+                        json!({ "text": text, "model": self.model }),
+                    )]
                 }
                 _ => vec![],
             },
@@ -205,17 +229,34 @@ impl CodexParser {
                     return vec![];
                 }
                 let id = self.next_id("cx-r-");
-                vec![EventDraft::new(id, "reasoning", ts, json!({ "text": text, "summary": is_summary }))]
+                vec![EventDraft::new(
+                    id,
+                    "reasoning",
+                    ts,
+                    json!({ "text": text, "summary": is_summary }),
+                )]
             }
-            Some("function_call") | Some("custom_tool_call") | Some("local_shell_call") => self.tool_call(p, ts),
-            Some("function_call_output") | Some("custom_tool_call_output") => self.tool_output(p, ts),
+            Some("function_call") | Some("custom_tool_call") | Some("local_shell_call") => {
+                self.tool_call(p, ts)
+            }
+            Some("function_call_output") | Some("custom_tool_call_output") => {
+                self.tool_output(p, ts)
+            }
             Some("web_search_call") => {
                 let id = self.next_id("cx-w-");
-                let q = p.get("action").and_then(|a| s(a, "query")).unwrap_or_else(|| "web search".into());
-                vec![EventDraft::new(id, "tool_call", ts, json!({
-                    "callId": null, "name": "web_search", "title": q, "category": "web",
-                    "input": p.get("action"), "status": s(p, "status").unwrap_or_else(|| "completed".into()),
-                }))]
+                let q = p
+                    .get("action")
+                    .and_then(|a| s(a, "query"))
+                    .unwrap_or_else(|| "web search".into());
+                vec![EventDraft::new(
+                    id,
+                    "tool_call",
+                    ts,
+                    json!({
+                        "callId": null, "name": "web_search", "title": q, "category": "web",
+                        "input": p.get("action"), "status": s(p, "status").unwrap_or_else(|| "completed".into()),
+                    }),
+                )]
             }
             _ => vec![],
         };
@@ -229,7 +270,9 @@ impl CodexParser {
 
     fn tool_call(&mut self, p: &Value, ts: &str) -> Vec<EventDraft> {
         let ty = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        let call_id = s(p, "call_id").or_else(|| s(p, "id")).unwrap_or_else(|| self.next_id("cx-call-"));
+        let call_id = s(p, "call_id")
+            .or_else(|| s(p, "id"))
+            .unwrap_or_else(|| self.next_id("cx-call-"));
         let (name, input) = match ty {
             "local_shell_call" => (
                 "local_shell".to_string(),
@@ -254,7 +297,10 @@ impl CodexParser {
             "callId": call_id, "name": name, "title": tool_title(&name, &input),
             "category": tool_category(&name), "input": input, "status": "running",
         });
-        self.calls.insert(call_id.clone(), (event_id.clone(), data.clone(), ts.to_string()));
+        self.calls.insert(
+            call_id.clone(),
+            (event_id.clone(), data.clone(), ts.to_string()),
+        );
         out.push(EventDraft::new(event_id, "tool_call", ts, data));
 
         if name == "update_plan" {
@@ -263,7 +309,12 @@ impl CodexParser {
                     .iter()
                     .map(|i| json!({ "text": i.get("step"), "status": i.get("status").cloned().unwrap_or(json!("pending")) }))
                     .collect();
-                out.push(EventDraft::new(format!("cx-plan-{call_id}"), "plan", ts, json!({ "items": items })));
+                out.push(EventDraft::new(
+                    format!("cx-plan-{call_id}"),
+                    "plan",
+                    ts,
+                    json!({ "items": items }),
+                ));
             }
         }
         if name == "apply_patch" {
@@ -275,10 +326,15 @@ impl CodexParser {
             for (i, (path, kind, diff)) in apply_patch_to_diffs(patch).into_iter().enumerate() {
                 let (a, d) = diff_stats(&diff);
                 let (dp, trunc) = preview(&diff, 256 * 1024);
-                out.push(EventDraft::new(format!("cx-fc-{call_id}-{i}"), "file_change", ts, json!({
-                    "callId": call_id, "path": path, "change": kind, "diff": dp,
-                    "additions": a, "deletions": d, "truncated": trunc,
-                })));
+                out.push(EventDraft::new(
+                    format!("cx-fc-{call_id}-{i}"),
+                    "file_change",
+                    ts,
+                    json!({
+                        "callId": call_id, "path": path, "change": kind, "diff": dp,
+                        "additions": a, "deletions": d, "truncated": trunc,
+                    }),
+                ));
             }
         }
         out
@@ -292,7 +348,9 @@ impl CodexParser {
             Value::String(st) => match serde_json::from_str::<Value>(st) {
                 Ok(v) if v.get("output").is_some() => (
                     s(&v, "output").unwrap_or_default(),
-                    v.get("metadata").and_then(|m| m.get("exit_code")).and_then(|c| c.as_i64()),
+                    v.get("metadata")
+                        .and_then(|m| m.get("exit_code"))
+                        .and_then(|c| c.as_i64()),
                     None,
                 ),
                 _ => (st.clone(), None, None),
@@ -311,10 +369,15 @@ impl CodexParser {
             out.push(EventDraft::new(eid, "tool_call", cts, data));
         }
         let (pv, truncated) = preview(&text, PREVIEW_LIMIT);
-        let mut d = EventDraft::new(format!("cx-res-{call_id}"), "tool_result", ts, json!({
-            "callId": call_id, "isError": is_error, "text": pv, "truncated": truncated,
-            "bytes": text.len(), "exitCode": exit_code,
-        }));
+        let mut d = EventDraft::new(
+            format!("cx-res-{call_id}"),
+            "tool_result",
+            ts,
+            json!({
+                "callId": call_id, "isError": is_error, "text": pv, "truncated": truncated,
+                "bytes": text.len(), "exitCode": exit_code,
+            }),
+        );
         if truncated {
             d.payload = Some(text);
         }
@@ -326,22 +389,39 @@ impl CodexParser {
         match p.get("type").and_then(|t| t.as_str()) {
             Some("user_message") => self.user_message(s(p, "message").unwrap_or_default(), ts),
             Some("token_count") => {
-                let Some(info) = p.get("info").filter(|i| !i.is_null()) else { return vec![] };
+                let Some(info) = p.get("info").filter(|i| !i.is_null()) else {
+                    return vec![];
+                };
                 let last = info.get("last_token_usage").cloned().unwrap_or(Value::Null);
                 let id = format!("cx-usage-{}", self.current_turn.clone().unwrap_or_default());
-                vec![EventDraft::new(id, "usage", ts, json!({
-                    "inputTokens": last.get("input_tokens"), "outputTokens": last.get("output_tokens"),
-                    "cacheReadTokens": last.get("cached_input_tokens"), "cacheWriteTokens": null,
-                    "totalTokens": info.get("total_token_usage").and_then(|t| t.get("total_tokens")),
-                }))]
+                vec![EventDraft::new(
+                    id,
+                    "usage",
+                    ts,
+                    json!({
+                        "inputTokens": last.get("input_tokens"), "outputTokens": last.get("output_tokens"),
+                        "cacheReadTokens": last.get("cached_input_tokens"), "cacheWriteTokens": null,
+                        "totalTokens": info.get("total_token_usage").and_then(|t| t.get("total_tokens")),
+                    }),
+                )]
             }
             Some("turn_aborted") => {
                 let id = self.next_id("cx-abort-");
-                vec![EventDraft::new(id, "status", ts, json!({ "state": "interrupted", "detail": s(p, "reason") }))]
+                vec![EventDraft::new(
+                    id,
+                    "status",
+                    ts,
+                    json!({ "state": "interrupted", "detail": s(p, "reason") }),
+                )]
             }
             Some("error") | Some("stream_error") => {
                 let id = self.next_id("cx-err-");
-                vec![EventDraft::new(id, "error", ts, json!({ "message": s(p, "message").unwrap_or_default() }))]
+                vec![EventDraft::new(
+                    id,
+                    "error",
+                    ts,
+                    json!({ "message": s(p, "message").unwrap_or_default() }),
+                )]
             }
             _ => vec![],
         }
@@ -368,7 +448,17 @@ mod tests {
         ];
         let ev: Vec<_> = lines.iter().flat_map(|l| p.feed(l)).collect();
         let kinds: Vec<_> = ev.iter().map(|e| e.kind).collect();
-        assert_eq!(kinds, vec!["user_message", "tool_call", "tool_call", "tool_result", "assistant_message", "usage"]);
+        assert_eq!(
+            kinds,
+            vec![
+                "user_message",
+                "tool_call",
+                "tool_call",
+                "tool_result",
+                "assistant_message",
+                "usage"
+            ]
+        );
         assert_eq!(ev[1].data["title"], "ls");
         assert_eq!(ev[2].data["status"], "completed");
         assert_eq!(ev[3].data["text"], "a\nb");

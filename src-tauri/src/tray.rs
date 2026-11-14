@@ -3337,7 +3337,8 @@ pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
         }
         "quit" => {
             log::info!("退出应用");
-            app.exit(0);
+            // SwitchTether: confirm when remote terminals/sessions would end.
+            crate::switchtether::request_quit(app);
         }
         crate::tray_panel::OPEN_PANEL_ID => crate::tray_panel::show_at_cursor(app),
         _ => {

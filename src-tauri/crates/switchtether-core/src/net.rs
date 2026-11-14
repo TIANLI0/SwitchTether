@@ -62,9 +62,7 @@ fn is_v6_link_local(v6: Ipv6Addr) -> bool {
 /// Non-public address (never routed on the public Internet).
 pub fn is_private(ip: IpAddr) -> bool {
     match canonical(ip) {
-        IpAddr::V4(v4) => {
-            v4.is_loopback() || v4.is_private() || v4.is_link_local() || is_cgnat(v4)
-        }
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local() || is_cgnat(v4),
         IpAddr::V6(v6) => v6.is_loopback() || is_ula(v6) || is_v6_link_local(v6),
     }
 }
@@ -146,10 +144,29 @@ mod tests {
 
     #[test]
     fn private_detection() {
-        for a in ["10.1.2.3", "172.16.0.1", "192.168.1.1", "127.0.0.1", "169.254.1.1", "100.100.1.1", "::1", "fd00::1", "fe80::1", "::ffff:192.168.1.5", "fd7a:115c:a1e0::1"] {
+        for a in [
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.1.1",
+            "127.0.0.1",
+            "169.254.1.1",
+            "100.100.1.1",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:192.168.1.5",
+            "fd7a:115c:a1e0::1",
+        ] {
             assert!(is_private(ip(a)), "{a}");
         }
-        for a in ["8.8.8.8", "1.1.1.1", "100.128.0.1", "2001:4860::8888", "::ffff:8.8.8.8", "172.32.0.1"] {
+        for a in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "100.128.0.1",
+            "2001:4860::8888",
+            "::ffff:8.8.8.8",
+            "172.32.0.1",
+        ] {
             assert!(!is_private(ip(a)), "{a}");
         }
     }
@@ -159,7 +176,10 @@ mod tests {
         assert!(peer_allowed(NetworkMode::Lan, ip("192.168.0.9")));
         assert!(!peer_allowed(NetworkMode::Lan, ip("8.8.8.8")));
         assert!(peer_allowed(NetworkMode::TailscaleOnly, ip("100.101.1.2")));
-        assert!(peer_allowed(NetworkMode::TailscaleOnly, ip("fd7a:115c:a1e0::5")));
+        assert!(peer_allowed(
+            NetworkMode::TailscaleOnly,
+            ip("fd7a:115c:a1e0::5")
+        ));
         assert!(!peer_allowed(NetworkMode::TailscaleOnly, ip("192.168.0.9")));
         assert!(peer_allowed(NetworkMode::LocalhostOnly, ip("127.0.0.1")));
         assert!(!peer_allowed(NetworkMode::LocalhostOnly, ip("192.168.0.9")));

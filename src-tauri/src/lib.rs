@@ -586,7 +586,8 @@ pub fn run() {
                 } else {
                     api.prevent_close();
                     log::info!("关闭请求已处理：退出应用");
-                    window.app_handle().exit(0);
+                    // SwitchTether: confirm when remote terminals/sessions would end.
+                    crate::switchtether::request_quit(window.app_handle());
                 }
             }
         })
@@ -1341,6 +1342,9 @@ pub fn run() {
             );
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
+            // SwitchTether: Remote Core (server starts only if enabled by the user).
+            crate::switchtether::setup_remote(app);
+            crate::switchtether::warn_if_upstream_running(app.handle());
             app.manage(services::kimi_oauth::KimiOAuthManager::default());
 
             // 初始化 SkillService
@@ -1609,6 +1613,18 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            switchtether::commands::remote_status,
+            switchtether::commands::remote_set_config,
+            switchtether::commands::remote_create_pairing,
+            switchtether::commands::remote_cancel_pairing,
+            switchtether::commands::remote_list_devices,
+            switchtether::commands::remote_revoke_device,
+            switchtether::commands::remote_forget_device,
+            switchtether::commands::remote_rename_device,
+            switchtether::commands::remote_list_terminals,
+            switchtether::commands::remote_kill_terminal,
+            switchtether::commands::remote_audit_log,
+            switchtether::commands::remote_quit_impact,
             commands::get_providers,
             commands::get_current_provider,
             commands::add_provider,
@@ -2160,6 +2176,7 @@ pub fn run() {
 /// 把接上代理的客户端都指回直连（模式和代理路由保留，下次启动再接上），再停止代理。
 /// 客户端不能一直指着代理：开机自启默认关闭，CC Switch 一关客户端就连不上了。
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
+    crate::switchtether::on_exit(app_handle).await;
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         crate::mode::controller::detach_all(state.inner()).await;
         log::info!("退出清理完成：客户端已指回直连，代理已停止");

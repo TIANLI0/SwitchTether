@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::watch;
 
-pub use screen::{Cursor, Line, Run, ScreenSnapshot};
 use screen::{new_parser, nz, size_of, VtParser};
+pub use screen::{Cursor, Line, Run, ScreenSnapshot};
 
 use crate::events::EventBus;
 
@@ -86,7 +86,12 @@ pub fn available_shells() -> Vec<ShellInfo> {
                 push(&name.clone(), &name, sh);
             }
         }
-        for (id, p) in [("zsh", "/bin/zsh"), ("bash", "/bin/bash"), ("fish", "/usr/bin/fish"), ("sh", "/bin/sh")] {
+        for (id, p) in [
+            ("zsh", "/bin/zsh"),
+            ("bash", "/bin/bash"),
+            ("fish", "/usr/bin/fish"),
+            ("sh", "/bin/sh"),
+        ] {
             let pb = PathBuf::from(p);
             if pb.is_file() {
                 push(id, id, pb);
@@ -186,7 +191,12 @@ impl Terminal {
 
     pub fn snapshot(&self) -> ScreenSnapshot {
         let st = self.state.lock();
-        screen::snapshot(&st.parser, *self.version_tx.borrow(), st.exited, st.exit_code)
+        screen::snapshot(
+            &st.parser,
+            *self.version_tx.borrow(),
+            st.exited,
+            st.exit_code,
+        )
     }
 
     /// Lines from the scrollback, `offset` lines above the top of the screen.
@@ -197,12 +207,15 @@ impl Terminal {
 
     pub fn write_input(&self, data: &[u8]) -> std::io::Result<()> {
         if self.state.lock().exited {
-            return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "terminal exited"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "terminal exited",
+            ));
         }
         let mut w = self.writer.lock();
-        let w = w
-            .as_mut()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "terminal exited"))?;
+        let w = w.as_mut().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "terminal exited")
+        })?;
         w.write_all(data)?;
         w.flush()
     }
@@ -251,7 +264,11 @@ impl TerminalManager {
     }
 
     pub fn count(&self) -> usize {
-        self.terms.read().values().filter(|t| !t.state.lock().exited).count()
+        self.terms
+            .read()
+            .values()
+            .filter(|t| !t.state.lock().exited)
+            .count()
     }
 
     pub fn list(&self) -> Vec<TerminalInfo> {
@@ -376,7 +393,8 @@ impl TerminalManager {
                 t3.master.lock().take();
                 t3.bump();
                 if let Some(m) = mgr.upgrade() {
-                    m.events.publish("terminal.exited", json!({ "id": t3.id, "exitCode": code }));
+                    m.events
+                        .publish("terminal.exited", json!({ "id": t3.id, "exitCode": code }));
                 }
             })?;
 
@@ -509,7 +527,9 @@ impl TermLog {
 }
 
 fn cleanup_logs(dir: &Path, days: i64) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     let cutoff = std::time::SystemTime::now()
         - std::time::Duration::from_secs((days.max(0) as u64) * 86_400);
     for e in rd.flatten() {
@@ -575,7 +595,11 @@ mod tests {
         assert!(
             wait_for(&t, "SWITCHTETHER_OK_", Duration::from_secs(20)),
             "output not seen: {:?}",
-            t.snapshot().lines.iter().map(|l| l.text()).collect::<Vec<_>>()
+            t.snapshot()
+                .lines
+                .iter()
+                .map(|l| l.text())
+                .collect::<Vec<_>>()
         );
         t.resize(120, 40).unwrap();
         assert_eq!(t.info().cols, 120);

@@ -330,8 +330,7 @@ pub const UPSTREAM_APP_DIR_NAME: &str = ".cc-switch";
 /// exercise the production name under a test home (see `switchtether_paths`
 /// tests). End users never set either variable.
 pub fn app_dir_name() -> &'static str {
-    if test_home_override().is_some() && std::env::var_os("SWITCHTETHER_TEST_APP_DIR").is_none()
-    {
+    if test_home_override().is_some() && std::env::var_os("SWITCHTETHER_TEST_APP_DIR").is_none() {
         UPSTREAM_APP_DIR_NAME
     } else {
         APP_DIR_NAME

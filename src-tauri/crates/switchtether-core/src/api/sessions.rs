@@ -75,7 +75,12 @@ async fn payload(
     Query(q): Query<PayloadQuery>,
 ) -> ApiResult<Json<Value>> {
     ctx.agents
-        .payload(&id, &event_id, q.offset.unwrap_or(0), q.limit.unwrap_or(64 * 1024))
+        .payload(
+            &id,
+            &event_id,
+            q.offset.unwrap_or(0),
+            q.limit.unwrap_or(64 * 1024),
+        )
         .await
         .map(Json)
 }
@@ -95,13 +100,24 @@ async fn create(
 ) -> Response {
     let c = ctx.clone();
     let req = body.req;
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "session.create", || async move {
-        let cwd = req.cwd.clone();
-        let s = c.agents.create_managed(req).await?;
-        c.registry
-            .audit(Some(dev.id()), "session.create", Some(&cwd), "ok", Some(&s.id));
-        Ok(json!(s))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "session.create",
+        || async move {
+            let cwd = req.cwd.clone();
+            let s = c.agents.create_managed(req).await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "session.create",
+                Some(&cwd),
+                "ok",
+                Some(&s.id),
+            );
+            Ok(json!(s))
+        },
+    )
     .await
 }
 
@@ -119,17 +135,23 @@ async fn send_message(
     Json(body): Json<MessageBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "session.message", || async move {
-        let r = c.agents.send_message(&id, &body.text).await?;
-        c.registry.audit(
-            Some(dev.id()),
-            "session.message",
-            Some(&id),
-            "ok",
-            Some(&format!("{} chars", body.text.chars().count())),
-        );
-        Ok(r)
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "session.message",
+        || async move {
+            let r = c.agents.send_message(&id, &body.text).await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "session.message",
+                Some(&id),
+                "ok",
+                Some(&format!("{} chars", body.text.chars().count())),
+            );
+            Ok(r)
+        },
+    )
     .await
 }
 
@@ -146,12 +168,18 @@ async fn interrupt(
     Json(body): Json<CmdBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "session.interrupt", || async move {
-        let r = c.agents.interrupt(&id).await?;
-        c.registry
-            .audit(Some(dev.id()), "session.interrupt", Some(&id), "ok", None);
-        Ok(r)
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "session.interrupt",
+        || async move {
+            let r = c.agents.interrupt(&id).await?;
+            c.registry
+                .audit(Some(dev.id()), "session.interrupt", Some(&id), "ok", None);
+            Ok(r)
+        },
+    )
     .await
 }
 
@@ -162,11 +190,18 @@ async fn stop(
     Json(body): Json<CmdBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "session.stop", || async move {
-        let r = c.agents.stop(&id).await?;
-        c.registry.audit(Some(dev.id()), "session.stop", Some(&id), "ok", None);
-        Ok(r)
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "session.stop",
+        || async move {
+            let r = c.agents.stop(&id).await?;
+            c.registry
+                .audit(Some(dev.id()), "session.stop", Some(&id), "ok", None);
+            Ok(r)
+        },
+    )
     .await
 }
 
@@ -221,14 +256,33 @@ async fn answer(
     Json(body): Json<AnswerBody>,
 ) -> Response {
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "session.answer", || async move {
-        let r = c
-            .agents
-            .respond(&id, &request_id, "answer", None, None, Some(body.answers), "phone")
-            .await?;
-        c.registry
-            .audit(Some(dev.id()), "session.answer", Some(&id), "ok", Some(&request_id));
-        Ok(r)
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "session.answer",
+        || async move {
+            let r = c
+                .agents
+                .respond(
+                    &id,
+                    &request_id,
+                    "answer",
+                    None,
+                    None,
+                    Some(body.answers),
+                    "phone",
+                )
+                .await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "session.answer",
+                Some(&id),
+                "ok",
+                Some(&request_id),
+            );
+            Ok(r)
+        },
+    )
     .await
 }

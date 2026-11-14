@@ -46,7 +46,22 @@ impl ClaudeObserver {
                 sessions = live::agents_json(bin).await;
             }
         }
-        let sessions = sessions.unwrap_or_else(|| live::read_registry(&self.claude_dir));
+        let registry = live::read_registry(&self.claude_dir);
+        let sessions = match sessions {
+            // `agents --json` omits `entrypoint`; take it from the registry.
+            Some(mut v) => {
+                for s in &mut v {
+                    if s.entrypoint.is_none() {
+                        s.entrypoint = registry
+                            .iter()
+                            .find(|r| r.session_id == s.session_id)
+                            .and_then(|r| r.entrypoint.clone());
+                    }
+                }
+                v
+            }
+            None => registry,
+        };
         *self.cache.lock() = Some((Instant::now(), sessions.clone()));
         sessions
     }

@@ -44,7 +44,10 @@ impl KeyringStore {
     }
 
     fn entry(&self, name: &str) -> anyhow::Result<keyring::Entry> {
-        Ok(keyring::Entry::new(SERVICE, &format!("{}{}", self.prefix, name))?)
+        Ok(keyring::Entry::new(
+            SERVICE,
+            &format!("{}{}", self.prefix, name),
+        )?)
     }
 
     /// Round-trip probe: returns true only when the keychain really works.
@@ -95,7 +98,13 @@ impl FileStore {
     fn path(&self, name: &str) -> PathBuf {
         let safe: String = name
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         self.dir.join(format!("{safe}.secret"))
     }

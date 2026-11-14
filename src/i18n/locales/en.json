@@ -1161,7 +1161,8 @@
       "routing": "Local routing",
       "network": "Network",
       "data": "Data",
-      "about": "About"
+      "about": "About",
+      "remote": "Remote (phone)"
     },
     "appConfig": {
       "configDir": "Config directory"
@@ -5382,5 +5383,79 @@
       "managedHint": "This account is managed in the Auth Center; the card disappears after you sign out."
     },
     "deleteSessionHint": "Delete this session in DeepSeek Harness to keep its history consistent."
+  },
+  "remote": {
+    "title": "Remote access",
+    "help": "Lets the SwitchTether Android app pair with this computer and monitor or control agents, terminals and files. Connections use TLS 1.3 with mutual certificate authentication; the desktop certificate is pinned through the QR code. Nothing is exposed to the Internet unless you choose \"All networks\".",
+    "refresh": "Refresh",
+    "initializing": "The remote service is starting…",
+    "enable": "Enable remote access",
+    "runningOn": "Running on port {{port}}",
+    "failed": "Failed to start: {{error}}",
+    "stopped": "Stopped",
+    "network": {
+      "label": "Allowed networks",
+      "help": "Connections from other addresses are dropped before TLS. Being on the same network is never enough: every phone must be paired.",
+      "lan": "LAN + Tailscale",
+      "tailscale": "Tailscale only",
+      "localhost": "This PC only",
+      "any": "All networks",
+      "anyWarning": "Public addresses can reach the remote port. Pairing and mutual TLS still apply, but only use this behind a firewall you control."
+    },
+    "port": "Port",
+    "apply": "Apply",
+    "desktopName": "Desktop name",
+    "fingerprint": "Desktop fingerprint",
+    "fingerprintHelp": "SHA-256 of this computer's certificate. The phone pins it during pairing; it changes only if the identity is reset, which requires re-pairing every phone.",
+    "keyStorage": "Private key storage",
+    "secretBackend": {
+      "os_keychain": "System keychain",
+      "file": "Owner-only file (no system keychain available)",
+      "memory": "Memory (test only)"
+    },
+    "addresses": "Addresses in the QR code",
+    "noAddresses": "No usable network address",
+    "pair": {
+      "title": "Pair a phone",
+      "description": "Shows a one-time QR code valid for 5 minutes.",
+      "button": "Show QR code",
+      "scan": "Scan this code in the SwitchTether app (Settings → Pair a computer). Anyone who scans it within 5 minutes can pair, so don't share it.",
+      "expiresIn": "Expires in {{seconds}} s",
+      "expired": "Expired",
+      "copyLink": "Copy pairing link",
+      "copied": "Pairing link copied",
+      "privacy": "The link contains a one-time secret. It is useless after one successful pairing or after it expires.",
+      "success": "Phone paired",
+      "pairedWith": "Paired with {{name}}.",
+      "verify": "Verification code (should match the phone):",
+      "newCode": "New code"
+    },
+    "devices": {
+      "title": "Paired phones",
+      "empty": "No phone paired yet.",
+      "online": "Online",
+      "offline": "Offline",
+      "stepUp": "Biometric confirmation available",
+      "lastSeen": "last seen {{time}}",
+      "revoke": "Revoke",
+      "revoked": "{{name}} was revoked",
+      "revokedAt": "Revoked {{time}}",
+      "forget": "Forget",
+      "revokeTitle": "Revoke {{name}}?",
+      "revokeBody": "The phone is disconnected immediately and its certificate is rejected from now on. Terminals it opened are ended. Data already stored on the phone cannot be wiped remotely."
+    },
+    "terminals": {
+      "title": "Remote terminals",
+      "help": "Shells opened from the phone run with your user account's permissions on this computer. They keep running when the phone disconnects and end when SwitchTether quits.",
+      "empty": "No remote terminal is running.",
+      "end": "End"
+    },
+    "audit": {
+      "title": "Security log",
+      "help": "Pairing, revocation, terminal, file and configuration actions from phones. Terminal input and secret values are never recorded.",
+      "empty": "No events yet."
+    },
+    "close": "Close",
+    "cancel": "Cancel"
   }
 }

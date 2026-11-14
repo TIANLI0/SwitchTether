@@ -16,6 +16,7 @@ import {
   Loader2,
   Route,
   SlidersHorizontal,
+  Smartphone,
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "react-i18next";
@@ -42,6 +43,7 @@ import { GlobalProxySettings } from "@/components/settings/GlobalProxySettings";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { GeneralSection } from "@/components/settings/sections/GeneralSection";
 import { AppConfigSection } from "@/components/settings/sections/AppConfigSection";
+import { RemoteSection } from "@/components/settings/sections/RemoteSection";
 import {
   SettingsBlock,
   SettingsBody,
@@ -61,6 +63,7 @@ const SECTION_ICON: Record<
   appConfig: Folder,
   routing: Route,
   network: Globe,
+  remote: Smartphone,
   data: Database,
   about: Info,
 };
@@ -392,6 +395,8 @@ export function SettingsPage({
         );
       case "routing":
         return <RoutingSection onOpenApp={onOpenApp} />;
+      case "remote":
+        return <RemoteSection />;
       case "network":
         return (
           <SettingsBlock

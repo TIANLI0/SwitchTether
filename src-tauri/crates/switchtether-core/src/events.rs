@@ -39,7 +39,10 @@ impl EventFrame {
 pub enum Replay {
     Events(Vec<Arc<EventFrame>>),
     /// The client must refetch state; `head_seq` is the current head.
-    Resync { head_seq: u64, reason: &'static str },
+    Resync {
+        head_seq: u64,
+        reason: &'static str,
+    },
 }
 
 struct Inner {
@@ -171,7 +174,10 @@ mod tests {
         assert!(matches!(bus.replay(5, Some(&epoch)), Replay::Events(v) if v.is_empty()));
         assert!(matches!(
             bus.replay(2, Some("other")),
-            Replay::Resync { reason: "epoch_changed", .. }
+            Replay::Resync {
+                reason: "epoch_changed",
+                ..
+            }
         ));
         // fresh client (since=0, no epoch) gets the retained backlog
         assert!(matches!(bus.replay(0, None), Replay::Events(v) if v.len() == 5));
@@ -186,7 +192,10 @@ mod tests {
         }
         assert!(matches!(
             bus.replay(3, Some(&epoch)),
-            Replay::Resync { reason: "gap", head_seq: 40 }
+            Replay::Resync {
+                reason: "gap",
+                head_seq: 40
+            }
         ));
         assert!(matches!(bus.replay(30, Some(&epoch)), Replay::Events(v) if v.len() == 10));
     }
@@ -195,7 +204,9 @@ mod tests {
     fn device_scoped_events() {
         let bus = EventBus::new(16);
         bus.publish_to("a", "cmd", json!(1));
-        let Replay::Events(ev) = bus.replay(0, None) else { panic!() };
+        let Replay::Events(ev) = bus.replay(0, None) else {
+            panic!()
+        };
         assert!(ev[0].visible_to("a"));
         assert!(!ev[0].visible_to("b"));
     }

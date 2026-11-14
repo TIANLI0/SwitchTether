@@ -66,7 +66,9 @@ pub(crate) fn fs_err(e: FsError) -> ApiError {
     }
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, FsError> + Send + 'static) -> ApiResult<T> {
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, FsError> + Send + 'static,
+) -> ApiResult<T> {
     tokio::task::spawn_blocking(f).await?.map_err(fs_err)
 }
 
@@ -74,7 +76,10 @@ async fn roots(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> Json<Value
     // Suggest the working directories of known sessions first.
     let (sessions, _) = ctx
         .agents
-        .list(&crate::agents::SessionQuery { limit: Some(20), ..Default::default() })
+        .list(&crate::agents::SessionQuery {
+            limit: Some(20),
+            ..Default::default()
+        })
         .await;
     let mut extra: Vec<String> = sessions.into_iter().filter_map(|s| s.cwd).collect();
     extra.dedup();
@@ -89,9 +94,15 @@ struct ListQuery {
     show_hidden: bool,
 }
 
-async fn list(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice, Query(q): Query<ListQuery>) -> ApiResult<Json<Value>> {
+async fn list(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<ListQuery>,
+) -> ApiResult<Json<Value>> {
     let c = ctx.clone();
-    blocking(move || c.files.list(&q.path, q.show_hidden).map(|l| json!(l))).await.map(Json)
+    blocking(move || c.files.list(&q.path, q.show_hidden).map(|l| json!(l)))
+        .await
+        .map(Json)
 }
 
 #[derive(Deserialize)]
@@ -104,12 +115,27 @@ struct ReadQuery {
     encoding: Option<String>,
 }
 
-async fn read(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice, Query(q): Query<ReadQuery>) -> ApiResult<Json<Value>> {
+async fn read(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Query(q): Query<ReadQuery>,
+) -> ApiResult<Json<Value>> {
     let c = ctx.clone();
     let path = q.path.clone();
-    let r = blocking(move || c.files.read(&q.path, q.max_bytes, q.allow_sensitive, q.encoding.as_deref()).map(|r| json!(r))).await;
+    let r = blocking(move || {
+        c.files
+            .read(
+                &q.path,
+                q.max_bytes,
+                q.allow_sensitive,
+                q.encoding.as_deref(),
+            )
+            .map(|r| json!(r))
+    })
+    .await;
     if r.as_ref().is_ok_and(|v| v["sensitive"] == json!(true)) {
-        ctx.registry.audit(Some(dev.id()), "fs.read_sensitive", Some(&path), "ok", None);
+        ctx.registry
+            .audit(Some(dev.id()), "fs.read_sensitive", Some(&path), "ok", None);
     }
     r.map(Json)
 }
@@ -124,9 +150,19 @@ struct SearchQuery {
     limit: Option<usize>,
 }
 
-async fn search(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice, Query(q): Query<SearchQuery>) -> ApiResult<Json<Value>> {
+async fn search(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<SearchQuery>,
+) -> ApiResult<Json<Value>> {
     let c = ctx.clone();
-    blocking(move || c.files.search(&q.root, &q.q, q.content, q.limit.unwrap_or(100)).map(|r| json!({ "results": r }))).await.map(Json)
+    blocking(move || {
+        c.files
+            .search(&q.root, &q.q, q.content, q.limit.unwrap_or(100))
+            .map(|r| json!({ "results": r }))
+    })
+    .await
+    .map(Json)
 }
 
 #[derive(Deserialize)]
@@ -143,7 +179,9 @@ async fn download(
     let res = (|| -> Result<(PathBuf, u64), FsError> {
         let (p, class) = crate::files::policy::resolve_existing(&q.path)?;
         if class == crate::files::Classification::Sensitive {
-            return Err(FsError::Path(PathError::Io("sensitive files cannot be downloaded".into())));
+            return Err(FsError::Path(PathError::Io(
+                "sensitive files cannot be downloaded".into(),
+            )));
         }
         let m = std::fs::metadata(&p)?;
         if !m.is_file() {
@@ -163,15 +201,28 @@ async fn download(
         .and_then(|r| {
             let (a, b) = r.split_once('-')?;
             let start: u64 = a.parse().ok()?;
-            let end: u64 = if b.is_empty() { size.saturating_sub(1) } else { b.parse().ok()? };
+            let end: u64 = if b.is_empty() {
+                size.saturating_sub(1)
+            } else {
+                b.parse().ok()?
+            };
             (start <= end && end < size).then_some((start, end))
         });
     let file = match tokio::fs::File::open(&path).await {
         Ok(f) => f,
         Err(e) => return fs_err(FsError::Io(e)).into_response(),
     };
-    ctx.registry.audit(Some(dev.id()), "fs.download", Some(&q.path), "ok", Some(&format!("{size} bytes")));
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    ctx.registry.audit(
+        Some(dev.id()),
+        "fs.download",
+        Some(&q.path),
+        "ok",
+        Some(&format!("{size} bytes")),
+    );
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let disposition = format!(
         "attachment; filename*=UTF-8''{}",
         percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC)
@@ -213,17 +264,33 @@ struct WriteBody {
     req: WriteRequest,
 }
 
-async fn write(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice, Json(body): Json<WriteBody>) -> Response {
+async fn write(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Json(body): Json<WriteBody>,
+) -> Response {
     if let Err(e) = require_step_up(&ctx, &dev, Scope::FilesWrite) {
         return e.into_response();
     }
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), body.command_id, "fs.write", || async move {
-        let path = body.req.path.clone();
-        let r = c.files.write(body.req).await;
-        c.registry.audit(Some(dev.id()), "fs.write", Some(&path), if r.is_ok() { "ok" } else { "error" }, None);
-        r.map(|o| json!(o)).map_err(fs_err)
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "fs.write",
+        || async move {
+            let path = body.req.path.clone();
+            let r = c.files.write(body.req).await;
+            c.registry.audit(
+                Some(dev.id()),
+                "fs.write",
+                Some(&path),
+                if r.is_ok() { "ok" } else { "error" },
+                None,
+            );
+            r.map(|o| json!(o)).map_err(fs_err)
+        },
+    )
     .await
 }
 
@@ -235,18 +302,29 @@ struct PathBody {
     base_sha256: Option<String>,
 }
 
-async fn mkdir(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice, Json(b): Json<PathBody>) -> Response {
+async fn mkdir(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Json(b): Json<PathBody>,
+) -> Response {
     if let Err(e) = require_step_up(&ctx, &dev, Scope::FilesWrite) {
         return e.into_response();
     }
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), b.command_id, "fs.mkdir", || async move {
-        let c2 = c.clone();
-        let p = b.path.clone();
-        let r = blocking(move || c2.files.mkdir(&p)).await?;
-        c.registry.audit(Some(dev.id()), "fs.mkdir", Some(&b.path), "ok", None);
-        Ok(json!({ "path": r }))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        b.command_id,
+        "fs.mkdir",
+        || async move {
+            let c2 = c.clone();
+            let p = b.path.clone();
+            let r = blocking(move || c2.files.mkdir(&p)).await?;
+            c.registry
+                .audit(Some(dev.id()), "fs.mkdir", Some(&b.path), "ok", None);
+            Ok(json!({ "path": r }))
+        },
+    )
     .await
 }
 
@@ -260,33 +338,65 @@ struct RenameBody {
     overwrite: bool,
 }
 
-async fn rename(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice, Json(b): Json<RenameBody>) -> Response {
+async fn rename(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Json(b): Json<RenameBody>,
+) -> Response {
     if let Err(e) = require_step_up(&ctx, &dev, Scope::FilesWrite) {
         return e.into_response();
     }
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), b.command_id, "fs.rename", || async move {
-        let c2 = c.clone();
-        let (from, to) = (b.from.clone(), b.to.clone());
-        let r = blocking(move || c2.files.rename(&from, &to, b.overwrite)).await?;
-        c.registry.audit(Some(dev.id()), "fs.rename", Some(&format!("{} -> {}", b.from, b.to)), "ok", None);
-        Ok(json!({ "path": r }))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        b.command_id,
+        "fs.rename",
+        || async move {
+            let c2 = c.clone();
+            let (from, to) = (b.from.clone(), b.to.clone());
+            let r = blocking(move || c2.files.rename(&from, &to, b.overwrite)).await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "fs.rename",
+                Some(&format!("{} -> {}", b.from, b.to)),
+                "ok",
+                None,
+            );
+            Ok(json!({ "path": r }))
+        },
+    )
     .await
 }
 
-async fn delete(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice, Json(b): Json<PathBody>) -> Response {
+async fn delete(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Json(b): Json<PathBody>,
+) -> Response {
     if let Err(e) = require_step_up(&ctx, &dev, Scope::FilesWrite) {
         return e.into_response();
     }
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), b.command_id, "fs.delete", || async move {
-        let c2 = c.clone();
-        let (p, base) = (b.path.clone(), b.base_sha256.clone());
-        blocking(move || c2.files.delete(&p, base.as_deref())).await?;
-        c.registry.audit(Some(dev.id()), "fs.delete", Some(&b.path), "ok", Some("moved to trash"));
-        Ok(json!({ "trashed": true }))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        b.command_id,
+        "fs.delete",
+        || async move {
+            let c2 = c.clone();
+            let (p, base) = (b.path.clone(), b.base_sha256.clone());
+            blocking(move || c2.files.delete(&p, base.as_deref())).await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "fs.delete",
+                Some(&b.path),
+                "ok",
+                Some("moved to trash"),
+            );
+            Ok(json!({ "trashed": true }))
+        },
+    )
     .await
 }
 
@@ -301,19 +411,36 @@ struct BeginUpload {
     overwrite: bool,
 }
 
-async fn begin_upload(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice, Json(b): Json<BeginUpload>) -> Response {
+async fn begin_upload(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Json(b): Json<BeginUpload>,
+) -> Response {
     if let Err(e) = require_step_up(&ctx, &dev, Scope::FilesWrite) {
         return e.into_response();
     }
     let c = ctx.clone();
-    idempotent(&ctx, dev.id().to_string(), b.command_id, "fs.upload", || async move {
-        let c2 = c.clone();
-        let id = dev.id().to_string();
-        let (p, sha) = (b.path.clone(), b.sha256.clone());
-        let v = blocking(move || c2.files.begin_upload(&id, &p, b.size, sha, b.overwrite)).await?;
-        c.registry.audit(Some(dev.id()), "fs.upload", Some(&b.path), "started", Some(&format!("{} bytes", b.size)));
-        Ok(json!(v))
-    })
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        b.command_id,
+        "fs.upload",
+        || async move {
+            let c2 = c.clone();
+            let id = dev.id().to_string();
+            let (p, sha) = (b.path.clone(), b.sha256.clone());
+            let v =
+                blocking(move || c2.files.begin_upload(&id, &p, b.size, sha, b.overwrite)).await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "fs.upload",
+                Some(&b.path),
+                "started",
+                Some(&format!("{} bytes", b.size)),
+            );
+            Ok(json!(v))
+        },
+    )
     .await
 }
 
@@ -337,12 +464,22 @@ async fn upload_chunk(
     let dev_id = dev.id().to_string();
     let v = blocking(move || c.files.upload_chunk(&dev_id, &id, q.offset, &body)).await?;
     if v.complete {
-        ctx.registry.audit(Some(dev.id()), "fs.upload", Some(&v.path), "completed", None);
+        ctx.registry.audit(
+            Some(dev.id()),
+            "fs.upload",
+            Some(&v.path),
+            "completed",
+            None,
+        );
     }
     Ok(Json(json!(v)))
 }
 
-async fn cancel_upload(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice, Path(id): Path<String>) -> Json<Value> {
+async fn cancel_upload(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Path(id): Path<String>,
+) -> Json<Value> {
     ctx.files.cancel_upload(dev.id(), &id);
     Json(json!({ "cancelled": true }))
 }
@@ -359,14 +496,17 @@ struct GitQuery {
 }
 
 fn git_dir(raw: &str) -> ApiResult<PathBuf> {
-    let (p, _) = crate::files::policy::resolve_existing(raw).map_err(|e| fs_err(FsError::Path(e)))?;
+    let (p, _) =
+        crate::files::policy::resolve_existing(raw).map_err(|e| fs_err(FsError::Path(e)))?;
     Ok(p)
 }
 
 fn git_err(e: crate::git::GitError) -> ApiError {
     match e {
         crate::git::GitError::NotARepo => ApiError::not_found("not a git repository"),
-        crate::git::GitError::NotInstalled => ApiError::validation("git is not installed on the desktop"),
+        crate::git::GitError::NotInstalled => {
+            ApiError::validation("git is not installed on the desktop")
+        }
         crate::git::GitError::Timeout => ApiError::internal("git", "timeout"),
         crate::git::GitError::Failed(m) => ApiError::bad_request(crate::redact::redact_text(&m)),
     }
@@ -381,18 +521,36 @@ fn safe_rel(p: &Option<String>) -> ApiResult<()> {
     Ok(())
 }
 
-async fn git_status(State(_c): State<Arc<ApiContext>>, _d: AuthDevice, Query(q): Query<GitQuery>) -> ApiResult<Json<Value>> {
+async fn git_status(
+    State(_c): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<GitQuery>,
+) -> ApiResult<Json<Value>> {
     let dir = git_dir(&q.repo)?;
-    crate::git::status(&dir).await.map(|s| Json(json!(s))).map_err(git_err)
+    crate::git::status(&dir)
+        .await
+        .map(|s| Json(json!(s)))
+        .map_err(git_err)
 }
 
-async fn git_diff(State(_c): State<Arc<ApiContext>>, _d: AuthDevice, Query(q): Query<GitQuery>) -> ApiResult<Json<Value>> {
+async fn git_diff(
+    State(_c): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<GitQuery>,
+) -> ApiResult<Json<Value>> {
     safe_rel(&q.path)?;
     let dir = git_dir(&q.repo)?;
-    crate::git::diff(&dir, q.path.as_deref(), q.staged).await.map(|s| Json(json!(s))).map_err(git_err)
+    crate::git::diff(&dir, q.path.as_deref(), q.staged)
+        .await
+        .map(|s| Json(json!(s)))
+        .map_err(git_err)
 }
 
-async fn git_log(State(_c): State<Arc<ApiContext>>, _d: AuthDevice, Query(q): Query<GitQuery>) -> ApiResult<Json<Value>> {
+async fn git_log(
+    State(_c): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<GitQuery>,
+) -> ApiResult<Json<Value>> {
     safe_rel(&q.path)?;
     let dir = git_dir(&q.repo)?;
     crate::git::log(&dir, q.path.as_deref(), q.limit.unwrap_or(50))
@@ -401,11 +559,19 @@ async fn git_log(State(_c): State<Arc<ApiContext>>, _d: AuthDevice, Query(q): Qu
         .map_err(git_err)
 }
 
-async fn git_show(State(_c): State<Arc<ApiContext>>, _d: AuthDevice, Query(q): Query<GitQuery>) -> ApiResult<Json<Value>> {
+async fn git_show(
+    State(_c): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<GitQuery>,
+) -> ApiResult<Json<Value>> {
     safe_rel(&q.path)?;
     let dir = git_dir(&q.repo)?;
-    let rev = q.rev.ok_or_else(|| ApiError::validation("rev is required"))?;
-    let path = q.path.ok_or_else(|| ApiError::validation("path is required"))?;
+    let rev = q
+        .rev
+        .ok_or_else(|| ApiError::validation("rev is required"))?;
+    let path = q
+        .path
+        .ok_or_else(|| ApiError::validation("path is required"))?;
     crate::git::show_file(&dir, &rev, &path)
         .await
         .map(|t| Json(json!({ "text": t, "binary": t.is_none() })))

@@ -133,12 +133,8 @@ impl ServerIdentity {
         let Ok(ee) = webpki_end_entity(&cert) else {
             return false;
         };
-        ee.verify_signature(
-            webpki::ring::ECDSA_P256_SHA256,
-            msg,
-            sig.as_ref(),
-        )
-        .is_ok()
+        ee.verify_signature(webpki::ring::ECDSA_P256_SHA256, msg, sig.as_ref())
+            .is_ok()
     }
 }
 

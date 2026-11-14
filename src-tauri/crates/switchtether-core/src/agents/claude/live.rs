@@ -112,13 +112,20 @@ pub fn read_registry(claude_dir: &Path) -> Vec<LiveClaudeSession> {
     let mut out = Vec::new();
     for e in rd.flatten() {
         let p = e.path();
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         // `<pid>.json` only; `<pid>.<hash>.key` files hold secrets and are never read.
         if !name.ends_with(".json") || name.matches('.').count() != 1 {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&p) else { continue };
-        let Ok(raw) = serde_json::from_str::<RawEntry>(&text) else { continue };
+        let Ok(text) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        let Ok(raw) = serde_json::from_str::<RawEntry>(&text) else {
+            continue;
+        };
         if let Some(s) = from_raw(raw) {
             if s.pid.is_none_or(pid_alive) {
                 out.push(s);
@@ -193,7 +200,10 @@ pub fn find_claude_bin() -> Option<PathBuf> {
     let candidates = if cfg!(windows) {
         vec![
             home.join(".local").join("bin").join("claude.exe"),
-            home.join("AppData").join("Roaming").join("npm").join("claude.cmd"),
+            home.join("AppData")
+                .join("Roaming")
+                .join("npm")
+                .join("claude.cmd"),
         ]
     } else {
         vec![
@@ -226,9 +236,23 @@ mod tests {
         let s = tmp.path().join("sessions");
         std::fs::create_dir_all(&s).unwrap();
         let me = std::process::id();
-        std::fs::write(s.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"live","entrypoint":"claude-vscode","status":"busy"}}"#)).unwrap();
-        std::fs::write(s.join("999999.json"), r#"{"pid":4294967000,"sessionId":"dead"}"#).unwrap();
-        std::fs::write(s.join(format!("{me}.abcdef.key")), r#"{"peerToken":"secret"}"#).unwrap();
+        std::fs::write(
+            s.join(format!("{me}.json")),
+            format!(
+                r#"{{"pid":{me},"sessionId":"live","entrypoint":"claude-vscode","status":"busy"}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            s.join("999999.json"),
+            r#"{"pid":4294967000,"sessionId":"dead"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            s.join(format!("{me}.abcdef.key")),
+            r#"{"peerToken":"secret"}"#,
+        )
+        .unwrap();
         let v = read_registry(tmp.path());
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].session_id, "live");

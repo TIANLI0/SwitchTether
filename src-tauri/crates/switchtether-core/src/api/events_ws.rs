@@ -16,7 +16,6 @@ use super::{ApiContext, AuthDevice};
 use crate::events::Replay;
 
 pub const PING_TIMEOUT: Duration = Duration::from_secs(60);
-pub const CLOSE_UNPAIRED: u16 = 4401;
 pub const CLOSE_REVOKED: u16 = 4403;
 pub const CLOSE_IDLE: u16 = 4408;
 
@@ -149,7 +148,11 @@ async fn run(ctx: Arc<ApiContext>, dev: AuthDevice, q: EventsQuery, mut socket: 
         }
         // Defense in depth: a revoked device must not keep receiving events
         // even if the cancellation signal was missed.
-        if ctx.registry.device_by_fingerprint(&dev.peer.fingerprint).is_none() {
+        if ctx
+            .registry
+            .device_by_fingerprint(&dev.peer.fingerprint)
+            .is_none()
+        {
             close(&mut socket, CLOSE_REVOKED, "device revoked").await;
             return;
         }

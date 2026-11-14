@@ -91,7 +91,11 @@ impl ManagedClaude {
         self.state.lock().last_active_at_ms
     }
     pub fn model(&self) -> Option<String> {
-        self.parser.lock().model.clone().or(self.options.model.clone())
+        self.parser
+            .lock()
+            .model
+            .clone()
+            .or(self.options.model.clone())
     }
     pub fn title(&self) -> Option<String> {
         self.parser.lock().title.clone()
@@ -151,7 +155,10 @@ impl ManagedClaude {
         }
         let mut child = cmd.spawn()?;
         let stdin = child.stdin.take();
-        let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("no stdout"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
         let stderr = child.stderr.take();
         let now = crate::util::now_ms();
         let me = Arc::new(Self {
@@ -202,7 +209,10 @@ impl ManagedClaude {
 
         // Initialize the control protocol (no hooks / SDK MCP servers registered).
         let init = me
-            .control_request(json!({ "subtype": "initialize", "hooks": null }), Duration::from_secs(60))
+            .control_request(
+                json!({ "subtype": "initialize", "hooks": null }),
+                Duration::from_secs(60),
+            )
             .await;
         if let Err(e) = init {
             me.kill();
@@ -222,23 +232,31 @@ impl ManagedClaude {
             .write_all(s.as_bytes())
             .await
             .map_err(|e| ApiError::internal("claude stdin", e))?;
-        stdin.flush().await.map_err(|e| ApiError::internal("claude stdin", e))
+        stdin
+            .flush()
+            .await
+            .map_err(|e| ApiError::internal("claude stdin", e))
     }
 
     async fn control_request(&self, request: Value, timeout: Duration) -> ApiResult<Value> {
         let rid = format!(
             "st_{}",
-            self.next_req.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            self.next_req
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
         let (tx, rx) = oneshot::channel();
         self.replies.lock().insert(rid.clone(), tx);
-        self.write_line(&json!({ "type": "control_request", "request_id": rid, "request": request }))
-            .await?;
+        self.write_line(
+            &json!({ "type": "control_request", "request_id": rid, "request": request }),
+        )
+        .await?;
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(v)) => {
                 if v.get("subtype").and_then(|s| s.as_str()) == Some("error") {
                     Err(ApiError::bad_request(
-                        v.get("error").and_then(|e| e.as_str()).unwrap_or("control request failed"),
+                        v.get("error")
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("control request failed"),
                     ))
                 } else {
                     Ok(v)
@@ -299,7 +317,9 @@ impl ManagedClaude {
                 }
             }
         };
-        self.resolved.lock().insert(request_id.to_string(), by.to_string());
+        self.resolved
+            .lock()
+            .insert(request_id.to_string(), by.to_string());
         let response = match decision {
             "allow" | "allow_session" | "answer" => {
                 let mut input = updated_input.unwrap_or_else(|| pending.input.clone());
@@ -386,7 +406,11 @@ impl ManagedClaude {
             }
             Some(_) => {
                 let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                if let Some(sid) = v.get("session_id").and_then(|s| s.as_str()).filter(|s| !s.is_empty()) {
+                if let Some(sid) = v
+                    .get("session_id")
+                    .and_then(|s| s.as_str())
+                    .filter(|s| !s.is_empty())
+                {
                     self.state.lock().native_session_id = Some(sid.to_string());
                 }
                 let drafts = self.parser.lock().feed(&v);
@@ -406,10 +430,8 @@ impl ManagedClaude {
                         self.set_status("idle");
                         self.publish_status("idle", None);
                     }
-                    "assistant" | "stream_event" => {
-                        if self.status() != "waiting" {
-                            self.set_status("busy");
-                        }
+                    "assistant" | "stream_event" if self.status() != "waiting" => {
+                        self.set_status("busy");
                     }
                     _ => {}
                 }
@@ -419,13 +441,24 @@ impl ManagedClaude {
     }
 
     async fn on_control_request(&self, v: Value) {
-        let rid = v.get("request_id").and_then(|r| r.as_str()).unwrap_or("").to_string();
+        let rid = v
+            .get("request_id")
+            .and_then(|r| r.as_str())
+            .unwrap_or("")
+            .to_string();
         let req = v.get("request").cloned().unwrap_or(Value::Null);
         match req.get("subtype").and_then(|s| s.as_str()) {
             Some("can_use_tool") => {
-                let tool = req.get("tool_name").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                let tool = req
+                    .get("tool_name")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let input = req.get("input").cloned().unwrap_or(Value::Null);
-                let suggestions = req.get("permission_suggestions").cloned().unwrap_or(Value::Null);
+                let suggestions = req
+                    .get("permission_suggestions")
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 let ts = crate::util::now_rfc3339();
                 let event_id = format!("req:{rid}");
                 let draft = if tool == "AskUserQuestion" {
@@ -443,9 +476,14 @@ impl ManagedClaude {
                             "options": q.get("options").cloned().unwrap_or(json!([])),
                         }))
                         .collect();
-                    EventDraft::new(&event_id, "question", ts, json!({
-                        "requestId": rid, "questions": questions, "resolved": false,
-                    }))
+                    EventDraft::new(
+                        &event_id,
+                        "question",
+                        ts,
+                        json!({
+                            "requestId": rid, "questions": questions, "resolved": false,
+                        }),
+                    )
                 } else {
                     let category = crate::agents::model::tool_category(&tool);
                     let kind = match category {
@@ -460,13 +498,18 @@ impl ManagedClaude {
                         options.push(json!({ "id": "allow_session", "label": "Always allow" }));
                     }
                     options.push(json!({ "id": "deny", "label": "Deny" }));
-                    EventDraft::new(&event_id, "approval_request", ts, json!({
-                        "requestId": rid, "kind": kind, "title": title, "toolName": tool,
-                        "detail": req.get("decision_reason").or(req.get("blocked_path")),
-                        "command": input.get("command"), "cwd": self.options.cwd.to_string_lossy(),
-                        "input": input, "options": options, "resolved": false,
-                        "toolUseId": req.get("tool_use_id"),
-                    }))
+                    EventDraft::new(
+                        &event_id,
+                        "approval_request",
+                        ts,
+                        json!({
+                            "requestId": rid, "kind": kind, "title": title, "toolName": tool,
+                            "detail": req.get("decision_reason").or(req.get("blocked_path")),
+                            "command": input.get("command"), "cwd": self.options.cwd.to_string_lossy(),
+                            "input": input, "options": options, "resolved": false,
+                            "toolUseId": req.get("tool_use_id"),
+                        }),
+                    )
                 };
                 self.pending.lock().insert(
                     rid,

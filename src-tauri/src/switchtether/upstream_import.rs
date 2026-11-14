@@ -72,7 +72,11 @@ pub fn import_if_first_run(source_dir: &Path, target_dir: &Path) -> Option<Impor
     if !source_db.is_file() {
         return None;
     }
-    let receipt = run_import(source_dir, target_dir, crate::database::SCHEMA_VERSION as i64);
+    let receipt = run_import(
+        source_dir,
+        target_dir,
+        crate::database::SCHEMA_VERSION as i64,
+    );
     if let Err(e) = write_receipt(target_dir, &receipt) {
         log::warn!("[switchtether] failed to write import receipt: {e}");
     }

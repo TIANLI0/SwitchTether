@@ -187,7 +187,7 @@ pub async fn remove_provider_from_live_config(
     .map_err(|e| format!("供应商从应用移除任务失败: {e}"))?
 }
 
-fn switch_provider_internal(
+pub(crate) fn switch_provider_internal(
     state: &AppState,
     app_type: AppType,
     id: &str,

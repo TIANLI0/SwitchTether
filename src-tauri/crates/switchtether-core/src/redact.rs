@@ -91,8 +91,21 @@ fn looks_like_secret(token: &str) -> bool {
     let t = token.trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == ';');
     // Bearer-style/known prefixes
     const PREFIXES: &[&str] = &[
-        "sk-", "sk_", "pk-", "rk-", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-",
-        "AKIA", "AIza", "eyJ", "cr_", "glpat-",
+        "sk-",
+        "sk_",
+        "pk-",
+        "rk-",
+        "ghp_",
+        "gho_",
+        "ghs_",
+        "github_pat_",
+        "xoxb-",
+        "xoxp-",
+        "AKIA",
+        "AIza",
+        "eyJ",
+        "cr_",
+        "glpat-",
     ];
     if PREFIXES.iter().any(|p| t.starts_with(p)) && t.len() >= 12 {
         return true;
@@ -104,9 +117,15 @@ fn looks_like_secret(token: &str) -> bool {
     }
     // Long opaque high-entropy tokens
     if t.len() >= 32
-        && t
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/' || c == '+' || c == '=')
+        && t.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || c == '-'
+                || c == '_'
+                || c == '.'
+                || c == '/'
+                || c == '+'
+                || c == '='
+        })
         && t.chars().any(|c| c.is_ascii_digit())
         && t.chars().any(|c| c.is_ascii_alphabetic())
         && !t.contains('/')
@@ -145,11 +164,9 @@ pub fn redact_json(value: &mut serde_json::Value) {
             }
         }
         Value::Array(items) => items.iter_mut().for_each(redact_json),
-        Value::String(s) => {
-            // Inline TOML/ENV blobs (e.g. Codex `config` string) may contain secrets.
-            if s.contains('\n') && (s.contains('=') || s.contains(':')) {
-                *s = redact_config_text(s);
-            }
+        // Inline TOML/ENV blobs (e.g. Codex `config` string) may contain secrets.
+        Value::String(s) if s.contains('\n') && (s.contains('=') || s.contains(':')) => {
+            *s = redact_config_text(s);
         }
         _ => {}
     }
@@ -163,10 +180,7 @@ pub fn redact_config_text(text: &str) -> String {
             for sep in ['=', ':'] {
                 if let Some((k, _v)) = trimmed.split_once(sep) {
                     let key = k.trim().trim_matches('"');
-                    if !key.is_empty()
-                        && !key.contains(' ')
-                        && is_sensitive_key(key)
-                    {
+                    if !key.is_empty() && !key.contains(' ') && is_sensitive_key(key) {
                         let indent = &line[..line.len() - trimmed.len()];
                         return format!("{indent}{} {sep} \"[REDACTED]\"", k.trim());
                     }
@@ -231,6 +245,9 @@ mod tests {
     fn mask() {
         assert_eq!(mask_secret("  "), None);
         assert_eq!(mask_secret("abc").as_deref(), Some("…"));
-        assert_eq!(mask_secret("0123456789abcdefWXYZ").as_deref(), Some("…WXYZ"));
+        assert_eq!(
+            mask_secret("0123456789abcdefWXYZ").as_deref(),
+            Some("…WXYZ")
+        );
     }
 }

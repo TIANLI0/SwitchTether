@@ -16,8 +16,7 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 
 use crate::agents::model::{
-    preview, structured_patch_to_diff, tool_category, tool_title, EventDraft,
-    PREVIEW_LIMIT,
+    preview, structured_patch_to_diff, tool_category, tool_title, EventDraft, PREVIEW_LIMIT,
 };
 
 #[derive(Default)]
@@ -78,7 +77,10 @@ fn content_text(content: &Value) -> String {
         Value::Array(items) => items
             .iter()
             .filter_map(|b| match b.get("type").and_then(|t| t.as_str()) {
-                Some("text") => b.get("text").and_then(|t| t.as_str()).map(|t| t.to_string()),
+                Some("text") => b
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|t| t.to_string()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -93,7 +95,11 @@ fn tool_result_text(content: &Value) -> String {
         Value::Array(items) => items
             .iter()
             .map(|b| match b.get("type").and_then(|t| t.as_str()) {
-                Some("text") => b.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                Some("text") => b
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 Some("image") => "[image]".to_string(),
                 Some(other) => format!("[{other}]"),
                 None => String::new(),
@@ -295,7 +301,12 @@ impl ClaudeParser {
                 } else {
                     "completed"
                 });
-                let mut d = EventDraft::new(tc.event_id.clone(), "tool_call", tc.ts.clone(), tc.data.clone());
+                let mut d = EventDraft::new(
+                    tc.event_id.clone(),
+                    "tool_call",
+                    tc.ts.clone(),
+                    tc.data.clone(),
+                );
                 d.turn_id = tc.turn_id.clone();
                 out.push(d);
                 (tc.name.clone(), tc.turn_id.clone())
@@ -307,7 +318,10 @@ impl ClaudeParser {
         let mut body = text.to_string();
         let mut exit_code = None;
         if let Some(st) = structured.filter(|v| v.is_object()) {
-            if let (Some(out_s), err_s) = (st.get("stdout").and_then(|v| v.as_str()), st.get("stderr").and_then(|v| v.as_str())) {
+            if let (Some(out_s), err_s) = (
+                st.get("stdout").and_then(|v| v.as_str()),
+                st.get("stderr").and_then(|v| v.as_str()),
+            ) {
                 body = match err_s {
                     Some(e) if !e.is_empty() => format!("{out_s}\n{e}"),
                     _ => out_s.to_string(),
@@ -334,13 +348,21 @@ impl ClaudeParser {
         // File changes from Edit / Write / MultiEdit structured results.
         if let Some(st) = structured.filter(|v| v.is_object()) {
             if let (Some(path), Some(patch)) = (s(st, "filePath"), st.get("structuredPatch")) {
-                if patch.as_array().is_some_and(|a| !a.is_empty()) || st.get("type").and_then(|t| t.as_str()) == Some("create") {
+                if patch.as_array().is_some_and(|a| !a.is_empty())
+                    || st.get("type").and_then(|t| t.as_str()) == Some("create")
+                {
                     let created = st.get("type").and_then(|t| t.as_str()) == Some("create");
-                    let (diff, add, del) = if created && patch.as_array().is_none_or(|a| a.is_empty()) {
+                    let (diff, add, del) = if created
+                        && patch.as_array().is_none_or(|a| a.is_empty())
+                    {
                         let content = s(st, "content").unwrap_or_default();
                         let lines: Vec<String> = content.lines().map(|l| format!("+{l}")).collect();
                         (
-                            format!("--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@\n{}\n", lines.len(), lines.join("\n")),
+                            format!(
+                                "--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@\n{}\n",
+                                lines.len(),
+                                lines.join("\n")
+                            ),
                             lines.len() as u32,
                             0,
                         )
@@ -393,7 +415,12 @@ impl ClaudeParser {
         let turn = self.current_turn.clone();
         if rec.get("isApiErrorMessage").and_then(|v| v.as_bool()) == Some(true) {
             let text = content_text(msg.get("content").unwrap_or(&Value::Null));
-            out.push(EventDraft::new(format!("{msg_id}:err"), "error", ts, json!({ "message": text })));
+            out.push(EventDraft::new(
+                format!("{msg_id}:err"),
+                "error",
+                ts,
+                json!({ "message": text }),
+            ));
             return out;
         }
         if let Some(Value::Array(blocks)) = msg.get("content") {
@@ -406,14 +433,24 @@ impl ClaudeParser {
                         if text.trim().is_empty() {
                             continue;
                         }
-                        EventDraft::new(id, "assistant_message", ts, json!({ "text": text, "model": self.model }))
+                        EventDraft::new(
+                            id,
+                            "assistant_message",
+                            ts,
+                            json!({ "text": text, "model": self.model }),
+                        )
                     }
                     Some("thinking") => {
                         let text = s(b, "thinking").unwrap_or_default();
                         if text.trim().is_empty() {
                             continue;
                         }
-                        EventDraft::new(id, "reasoning", ts, json!({ "text": text, "summary": false }))
+                        EventDraft::new(
+                            id,
+                            "reasoning",
+                            ts,
+                            json!({ "text": text, "summary": false }),
+                        )
                     }
                     Some("redacted_thinking") => continue,
                     Some("tool_use") => {
@@ -430,13 +467,21 @@ impl ClaudeParser {
                                         "status": t.get("status").cloned().unwrap_or(json!("pending")),
                                     }))
                                     .collect();
-                                extra.push(EventDraft::new(format!("plan:{call_id}"), "plan", ts, json!({ "items": items })));
+                                extra.push(EventDraft::new(
+                                    format!("plan:{call_id}"),
+                                    "plan",
+                                    ts,
+                                    json!({ "items": items }),
+                                ));
                             }
                         }
                         let (server, tool) = match name.strip_prefix("mcp__") {
                             Some(rest) => {
                                 let mut it = rest.splitn(2, "__");
-                                (it.next().map(|x| x.to_string()), it.next().map(|x| x.to_string()))
+                                (
+                                    it.next().map(|x| x.to_string()),
+                                    it.next().map(|x| x.to_string()),
+                                )
                             }
                             None => (None, None),
                         };
@@ -471,7 +516,12 @@ impl ClaudeParser {
                         }
                         continue;
                     }
-                    Some(other) => EventDraft::new(id, "system", ts, json!({ "subtype": other, "text": format!("[{other}]") })),
+                    Some(other) => EventDraft::new(
+                        id,
+                        "system",
+                        ts,
+                        json!({ "subtype": other, "text": format!("[{other}]") }),
+                    ),
                     None => continue,
                 };
                 d.turn_id = turn.clone();
@@ -510,19 +560,30 @@ impl ClaudeParser {
                 }
                 format!(
                     "Session started{}",
-                    self.model.as_deref().map(|m| format!(" · {m}")).unwrap_or_default()
+                    self.model
+                        .as_deref()
+                        .map(|m| format!(" · {m}"))
+                        .unwrap_or_default()
                 )
             }
             "compact_boundary" => "Conversation compacted".to_string(),
             "api_error" => {
-                let attempt = rec.get("retryAttempt").and_then(|v| v.as_i64()).unwrap_or(0);
+                let attempt = rec
+                    .get("retryAttempt")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 let max = rec.get("maxRetries").and_then(|v| v.as_i64()).unwrap_or(0);
                 format!("API error, retrying ({attempt}/{max})")
             }
             _ => s(rec, "content").unwrap_or_else(|| subtype.clone()),
         };
         let (p, _) = preview(&text, PREVIEW_LIMIT);
-        vec![EventDraft::new(uuid, "system", ts, json!({ "subtype": subtype, "text": p }))]
+        vec![EventDraft::new(
+            uuid,
+            "system",
+            ts,
+            json!({ "subtype": subtype, "text": p }),
+        )]
     }
 
     fn stream_event(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
@@ -534,10 +595,17 @@ impl ClaudeParser {
                 vec![]
             }
             Some("content_block_start") => {
-                let (Some(mid), Some(idx)) = (self.stream_msg_id.clone(), ev.get("index").and_then(|i| i.as_u64())) else {
+                let (Some(mid), Some(idx)) = (
+                    self.stream_msg_id.clone(),
+                    ev.get("index").and_then(|i| i.as_u64()),
+                ) else {
                     return vec![];
                 };
-                let kind = match ev.get("content_block").and_then(|b| b.get("type")).and_then(|t| t.as_str()) {
+                let kind = match ev
+                    .get("content_block")
+                    .and_then(|b| b.get("type"))
+                    .and_then(|t| t.as_str())
+                {
                     Some("text") => "assistant_message",
                     Some("thinking") => "reasoning",
                     _ => return vec![],
@@ -549,7 +617,9 @@ impl ClaudeParser {
             Some("content_block_delta") => {
                 let idx = ev.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
                 let delta = ev.get("delta").cloned().unwrap_or(Value::Null);
-                let piece = s(&delta, "text").or_else(|| s(&delta, "thinking")).unwrap_or_default();
+                let piece = s(&delta, "text")
+                    .or_else(|| s(&delta, "thinking"))
+                    .unwrap_or_default();
                 let Some((id, kind, text)) = self.stream_blocks.get_mut(&idx) else {
                     return vec![];
                 };
@@ -570,7 +640,10 @@ impl ClaudeParser {
 
     fn result(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
         self.result_count += 1;
-        let is_error = rec.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+        let is_error = rec
+            .get("is_error")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let subtype = s(rec, "subtype").unwrap_or_default();
         if let Some(c) = rec.get("total_cost_usd").and_then(|v| v.as_f64()) {
             self.cost_usd = Some(c);
@@ -588,7 +661,15 @@ impl ClaudeParser {
                 "durationMs": rec.get("duration_ms"),
             }),
         )];
-        if is_error {
+        if is_error && subtype == "error_during_execution" {
+            // How Claude Code reports a turn that was interrupted mid-way.
+            out.push(EventDraft::new(
+                format!("result:{}:stopped", self.result_count),
+                "system",
+                ts,
+                json!({ "subtype": "turn_stopped", "text": "Turn stopped before completion" }),
+            ));
+        } else if is_error {
             out.push(EventDraft::new(
                 format!("result:{}:err", self.result_count),
                 "error",
@@ -611,16 +692,31 @@ mod tests {
     #[test]
     fn user_assistant_tool_cycle() {
         let mut p = ClaudeParser::new();
-        let ev = feed_all(&mut p, &[
-            json!({"type":"user","uuid":"u1","timestamp":"2026-11-14T00:00:00Z","sessionId":"s1","cwd":"/p","message":{"role":"user","content":"Fix it<system-reminder>noise</system-reminder>"}}),
-            json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-14T00:00:01Z","message":{"id":"m1","model":"claude-x","content":[{"type":"thinking","thinking":"hmm"}]}}),
-            json!({"type":"assistant","uuid":"a2","timestamp":"2026-11-14T00:00:02Z","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/p/a.rs","old_string":"a","new_string":"b"}}]}}),
-            json!({"type":"user","uuid":"u2","timestamp":"2026-11-14T00:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},
+        let ev = feed_all(
+            &mut p,
+            &[
+                json!({"type":"user","uuid":"u1","timestamp":"2026-11-14T00:00:00Z","sessionId":"s1","cwd":"/p","message":{"role":"user","content":"Fix it<system-reminder>noise</system-reminder>"}}),
+                json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-14T00:00:01Z","message":{"id":"m1","model":"claude-x","content":[{"type":"thinking","thinking":"hmm"}]}}),
+                json!({"type":"assistant","uuid":"a2","timestamp":"2026-11-14T00:00:02Z","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/p/a.rs","old_string":"a","new_string":"b"}}]}}),
+                json!({"type":"user","uuid":"u2","timestamp":"2026-11-14T00:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},
                    "toolUseResult":{"filePath":"/p/a.rs","structuredPatch":[{"oldStart":1,"oldLines":1,"newStart":1,"newLines":1,"lines":["-a","+b"]}]}}),
-            json!({"type":"assistant","uuid":"a3","timestamp":"2026-11-14T00:00:04Z","message":{"id":"m2","content":[{"type":"text","text":"Done."}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}),
-        ]);
+                json!({"type":"assistant","uuid":"a3","timestamp":"2026-11-14T00:00:04Z","message":{"id":"m2","content":[{"type":"text","text":"Done."}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}),
+            ],
+        );
         let kinds: Vec<_> = ev.iter().map(|e| e.kind).collect();
-        assert_eq!(kinds, vec!["user_message", "reasoning", "tool_call", "tool_call", "tool_result", "file_change", "assistant_message", "usage"]);
+        assert_eq!(
+            kinds,
+            vec![
+                "user_message",
+                "reasoning",
+                "tool_call",
+                "tool_call",
+                "tool_result",
+                "file_change",
+                "assistant_message",
+                "usage"
+            ]
+        );
         assert_eq!(ev[0].data["text"], "Fix it");
         assert_eq!(ev[2].id, "m1:1");
         assert_eq!(ev[2].data["category"], "edit");
@@ -638,11 +734,21 @@ mod tests {
     #[test]
     fn denied_and_large_results() {
         let mut p = ClaudeParser::new();
-        feed_all(&mut p, &[json!({"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"t","name":"Bash","input":{"command":"rm -rf x"}}]}})]);
+        feed_all(
+            &mut p,
+            &[
+                json!({"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"t","name":"Bash","input":{"command":"rm -rf x"}}]}}),
+            ],
+        );
         let big = "x".repeat(PREVIEW_LIMIT + 10);
         let ev = p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","is_error":true,"content":"The user doesn't want to proceed with this tool use."}]}}));
         assert_eq!(ev[0].data["status"], "denied");
-        feed_all(&mut p, &[json!({"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"cat big"}}]}})]);
+        feed_all(
+            &mut p,
+            &[
+                json!({"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"cat big"}}]}}),
+            ],
+        );
         let ev = p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ignored"}]},"toolUseResult":{"stdout":big,"stderr":"","interrupted":false}}));
         let res = ev.iter().find(|e| e.kind == "tool_result").unwrap();
         assert_eq!(res.data["truncated"], true);
@@ -660,7 +766,9 @@ mod tests {
     #[test]
     fn streaming_deltas_then_final() {
         let mut p = ClaudeParser::new();
-        p.feed(&json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"m9"}}}));
+        p.feed(
+            &json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"m9"}}}),
+        );
         p.feed(&json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}));
         let d1 = p.feed(&json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}}));
         let d2 = p.feed(&json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}}));
@@ -675,7 +783,9 @@ mod tests {
     #[test]
     fn meta_and_commands() {
         let mut p = ClaudeParser::new();
-        assert!(p.feed(&json!({"type":"user","isMeta":true,"message":{"content":"x"}})).is_empty());
+        assert!(p
+            .feed(&json!({"type":"user","isMeta":true,"message":{"content":"x"}}))
+            .is_empty());
         let ev = p.feed(&json!({"type":"user","uuid":"c","message":{"content":"<command-name>/clear</command-name>"}}));
         assert_eq!(ev[0].kind, "system");
         assert!(p.feed(&json!({"type":"garbage"})).is_empty());

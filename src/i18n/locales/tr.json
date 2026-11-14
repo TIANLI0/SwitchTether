@@ -1161,7 +1161,8 @@
       "routing": "Yerel yönlendirme",
       "network": "Ağ",
       "data": "Veri",
-      "about": "Hakkında"
+      "about": "Hakkında",
+      "remote": "Uzaktan (telefon)"
     },
     "appConfig": {
       "configDir": "Yapılandırma dizini"
@@ -5382,5 +5383,79 @@
       "expiryShowAll": "Her kredi grubunun son kullanma tarihini göster",
       "inTime": "{{time}}'de"
     }
+  },
+  "remote": {
+    "title": "Uzaktan erişim",
+    "help": "SwitchTether Android uygulamasının bu bilgisayarla eşleşmesine ve ajanları, terminalleri ve dosyaları izlemesine veya yönetmesine izin verir. Bağlantılar karşılıklı sertifika doğrulamalı TLS 1.3 kullanır; masaüstü sertifikası QR kod ile sabitlenir. \"Tüm ağlar\" seçilmedikçe hiçbir şey İnternet'e açılmaz.",
+    "refresh": "Yenile",
+    "initializing": "Uzak hizmet başlatılıyor…",
+    "enable": "Uzaktan erişimi etkinleştir",
+    "runningOn": "{{port}} numaralı bağlantı noktasında çalışıyor",
+    "failed": "Başlatılamadı: {{error}}",
+    "stopped": "Durduruldu",
+    "network": {
+      "label": "İzin verilen ağlar",
+      "help": "Diğer adreslerden gelen bağlantılar TLS'ten önce düşürülür. Aynı ağda olmak asla yeterli değildir: her telefon eşleştirilmelidir.",
+      "lan": "LAN + Tailscale",
+      "tailscale": "Yalnızca Tailscale",
+      "localhost": "Yalnızca bu bilgisayar",
+      "any": "Tüm ağlar",
+      "anyWarning": "Genel adresler uzak bağlantı noktasına ulaşabilir. Eşleştirme ve karşılıklı TLS geçerli kalır, ancak bunu yalnızca kontrol ettiğiniz bir güvenlik duvarının arkasında kullanın."
+    },
+    "port": "Bağlantı noktası",
+    "apply": "Uygula",
+    "desktopName": "Masaüstü adı",
+    "fingerprint": "Masaüstü parmak izi",
+    "fingerprintHelp": "Bu bilgisayarın sertifikasının SHA-256 değeri. Telefon eşleştirme sırasında bunu sabitler; yalnızca kimlik sıfırlanırsa değişir ve bu durumda tüm telefonların yeniden eşleştirilmesi gerekir.",
+    "keyStorage": "Özel anahtar depolama",
+    "secretBackend": {
+      "os_keychain": "Sistem anahtarlığı",
+      "file": "Yalnızca sahibin okuyabildiği dosya (sistem anahtarlığı yok)",
+      "memory": "Bellek (yalnızca test)"
+    },
+    "addresses": "QR koddaki adresler",
+    "noAddresses": "Kullanılabilir ağ adresi yok",
+    "pair": {
+      "title": "Telefon eşleştir",
+      "description": "5 dakika geçerli tek kullanımlık bir QR kod gösterir.",
+      "button": "QR kodu göster",
+      "scan": "Bu kodu SwitchTether uygulamasında tarayın (Ayarlar → Bilgisayar eşleştir). 5 dakika içinde tarayan herkes eşleşebilir, bu yüzden paylaşmayın.",
+      "expiresIn": "{{seconds}} sn içinde sona erer",
+      "expired": "Süresi doldu",
+      "copyLink": "Eşleştirme bağlantısını kopyala",
+      "copied": "Eşleştirme bağlantısı kopyalandı",
+      "privacy": "Bağlantı tek kullanımlık bir gizli anahtar içerir. Bir başarılı eşleştirmeden veya süresi dolduktan sonra işe yaramaz.",
+      "success": "Telefon eşleştirildi",
+      "pairedWith": "{{name}} ile eşleştirildi.",
+      "verify": "Doğrulama kodu (telefondakiyle aynı olmalı):",
+      "newCode": "Yeni kod"
+    },
+    "devices": {
+      "title": "Eşleştirilmiş telefonlar",
+      "empty": "Henüz eşleştirilmiş telefon yok.",
+      "online": "Çevrimiçi",
+      "offline": "Çevrimdışı",
+      "stepUp": "Biyometrik onay kullanılabilir",
+      "lastSeen": "son görülme {{time}}",
+      "revoke": "İptal et",
+      "revoked": "{{name}} iptal edildi",
+      "revokedAt": "{{time}} tarihinde iptal edildi",
+      "forget": "Kaldır",
+      "revokeTitle": "{{name}} iptal edilsin mi?",
+      "revokeBody": "Telefonun bağlantısı hemen kesilir ve sertifikası bundan sonra reddedilir. Açtığı terminaller sonlandırılır. Telefonda zaten depolanan veriler uzaktan silinemez."
+    },
+    "terminals": {
+      "title": "Uzak terminaller",
+      "help": "Telefondan açılan kabuklar bu bilgisayardaki kullanıcı hesabınızın izinleriyle çalışır. Telefon bağlantıyı kesse de çalışmaya devam eder ve SwitchTether kapandığında sona erer.",
+      "empty": "Çalışan uzak terminal yok.",
+      "end": "Sonlandır"
+    },
+    "audit": {
+      "title": "Güvenlik günlüğü",
+      "help": "Telefonlardan yapılan eşleştirme, iptal, terminal, dosya ve yapılandırma işlemleri. Terminal girdisi ve gizli değerler asla kaydedilmez.",
+      "empty": "Henüz olay yok."
+    },
+    "close": "Kapat",
+    "cancel": "İptal"
   }
 }

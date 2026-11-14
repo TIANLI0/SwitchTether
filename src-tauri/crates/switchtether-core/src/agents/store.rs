@@ -87,7 +87,12 @@ impl SessionLog {
     }
 
     /// Mutate an existing event's data in place.
-    pub fn update<F: FnOnce(&mut AgentEvent)>(&mut self, id: &str, publish: bool, f: F) -> Option<AgentEvent> {
+    pub fn update<F: FnOnce(&mut AgentEvent)>(
+        &mut self,
+        id: &str,
+        publish: bool,
+        f: F,
+    ) -> Option<AgentEvent> {
         let i = *self.index.get(id)?;
         f(&mut self.events[i]);
         let ev = self.events[i].clone();
@@ -119,7 +124,12 @@ impl SessionLog {
 
     /// Page of events. `before`/`after` are exclusive seq bounds; default is
     /// the newest `limit` events. Returned oldest-first.
-    pub fn page(&self, before: Option<u64>, after: Option<u64>, limit: usize) -> (Vec<AgentEvent>, bool) {
+    pub fn page(
+        &self,
+        before: Option<u64>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> (Vec<AgentEvent>, bool) {
         let limit = limit.clamp(1, 500);
         if let Some(a) = after {
             let start = self.events.partition_point(|e| e.seq <= a);

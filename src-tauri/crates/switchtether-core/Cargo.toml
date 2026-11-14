@@ -29,10 +29,10 @@ dirs = "5.0"
 percent-encoding = "2.3"
 encoding_rs = "0.8"
 
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process", "fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process", "fs", "signal"] }
 tokio-util = { version = "0.7", features = ["rt", "io"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
-hyper = { version = "1", features = ["server", "http1"] }
+hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "http1", "service"] }
 tower = { version = "0.4", features = ["util"] }
 http = "1"

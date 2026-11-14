@@ -68,12 +68,11 @@ mod tests {
 
     #[test]
     fn fixtures_parse() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../protocol/fixtures");
-        let pair: PairRequest = serde_json::from_str(
-            &std::fs::read_to_string(root.join("pair_request.json")).unwrap(),
-        )
-        .unwrap();
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../protocol/fixtures");
+        let pair: PairRequest =
+            serde_json::from_str(&std::fs::read_to_string(root.join("pair_request.json")).unwrap())
+                .unwrap();
         assert_eq!(pair.platform, "android");
         let hello: Hello =
             serde_json::from_str(&std::fs::read_to_string(root.join("hello.json")).unwrap())
@@ -88,7 +87,13 @@ mod tests {
 
     #[test]
     fn cap_status_wire_format() {
-        assert_eq!(serde_json::to_string(&CapStatus::Verified).unwrap(), "\"VERIFIED\"");
-        assert_eq!(serde_json::to_string(&CapStatus::Blocked).unwrap(), "\"BLOCKED\"");
+        assert_eq!(
+            serde_json::to_string(&CapStatus::Verified).unwrap(),
+            "\"VERIFIED\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CapStatus::Blocked).unwrap(),
+            "\"BLOCKED\""
+        );
     }
 }

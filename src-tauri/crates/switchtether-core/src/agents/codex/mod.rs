@@ -1,5 +1,6 @@
 //! Codex adapter: rollout observation (read-only).
 
+pub mod managed;
 pub mod rollout;
 
 use std::path::PathBuf;

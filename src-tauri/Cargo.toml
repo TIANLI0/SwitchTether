@@ -101,6 +101,11 @@ subtle = "2.6"
 json5 = "0.4"
 json-five = "0.3.1"
 sys-locale = "0.3"
+# SwitchTether desktop integration
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+tokio-util = { version = "0.7", features = ["rt"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
