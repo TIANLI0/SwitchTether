@@ -202,9 +202,16 @@ jobs:
         with:
           tool: cargo-nextest
 
-      - name: Create frontend dist placeholder
+      - name: Create frontend dist and sidecar placeholders
         shell: bash
-        run: mkdir -p dist
+        run: |
+          mkdir -p dist
+          # tauri-build requires the switchtether-shim sidecar (externalBin) to exist; release
+          # builds compile it with scripts/build-shim.mjs, checks and tests only need the file.
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          ext=""; case "$triple" in *windows*) ext=".exe";; esac
+          mkdir -p src-tauri/binaries
+          touch "src-tauri/binaries/switchtether-shim-$triple$ext"
 
       - name: Clippy
         # --workspace: also lints the SwitchTether Remote Core crate (all targets).
@@ -258,9 +265,16 @@ jobs:
           shared-key: backend
           save-if: false
 
-      - name: Create frontend dist placeholder
+      - name: Create frontend dist and sidecar placeholders
         shell: bash
-        run: mkdir -p dist
+        run: |
+          mkdir -p dist
+          # tauri-build requires the switchtether-shim sidecar (externalBin) to exist; release
+          # builds compile it with scripts/build-shim.mjs, checks and tests only need the file.
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          ext=""; case "$triple" in *windows*) ext=".exe";; esac
+          mkdir -p src-tauri/binaries
+          touch "src-tauri/binaries/switchtether-shim-$triple$ext"
 
       - name: Prepare WSL2-backed test environment
         shell: pwsh

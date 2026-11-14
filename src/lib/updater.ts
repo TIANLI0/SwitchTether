@@ -32,9 +32,7 @@ interface InstallerCheck {
 }
 
 async function checkWithInstaller(): Promise<
-  | { status: "up-to-date" }
-  | { status: "available"; info: UpdateInfo }
-  | null
+  { status: "up-to-date" } | { status: "available"; info: UpdateInfo } | null
 > {
   let r: InstallerCheck;
   try {

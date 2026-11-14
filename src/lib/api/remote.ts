@@ -97,10 +97,23 @@ export interface TakeoverStatus {
   vscode: {
     available: boolean;
     enabled: boolean;
-    editors: { editor: string; enabled: boolean; foreignWrapper?: string | null }[];
+    editors: {
+      editor: string;
+      enabled: boolean;
+      foreignWrapper?: string | null;
+    }[];
   };
-  codexDesktop: { available: boolean; enabled: boolean; foreignValue?: string | null };
-  cli: { available: boolean; enabled: boolean; binDir: string; pathAdded: boolean };
+  codexDesktop: {
+    available: boolean;
+    enabled: boolean;
+    foreignValue?: string | null;
+  };
+  cli: {
+    available: boolean;
+    enabled: boolean;
+    binDir: string;
+    pathAdded: boolean;
+  };
 }
 
 export interface AuditEntry {

@@ -42,7 +42,8 @@ jobs:
         include:
           - name: windows-x64
             os: windows-latest
-            args: "--bundles msi,nsis"
+            # Packaged by FluentSetup below (SwitchTether-<version>-Setup.exe, replaces CC Switch).
+            args: "--no-bundle"
           - name: macos-universal
             os: macos-15
             args: "--target universal-apple-darwin --bundles app,dmg"
@@ -104,10 +105,20 @@ jobs:
           fi
           pnpm tauri build ${{ matrix.args }} $extra
 
+      - name: Install FluentSetup
+        if: runner.os == 'Windows'
+        uses: TIANLI0/FluentSetup@v1.3.0
+
+      - name: Package Windows installer (FluentSetup)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: node scripts/package-windows.mjs --skip-build
+
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p dist-release
+          if [ -d target-win/dist ]; then cp target-win/dist/*-Setup.exe dist-release/; fi
           find src-tauri/target -path '*/release/bundle/*' -type f \
             \( -name '*.msi' -o -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \
                -o -name '*.rpm' -o -name '*.sig' -o -name '*.tar.gz' -o -name '*.zip' \) \
@@ -154,7 +165,7 @@ jobs:
       - name: Name and verify release APK
         shell: bash
         run: |
-          ver="$(sed -nE 's/^ *versionName = "([^"]+)".*//p' android/app/build.gradle.kts)"
+          ver="$(sed -nE 's/^ *versionName = "([^"]+)".*/\1/p' android/app/build.gradle.kts)"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then ver="${GITHUB_REF_NAME#v}"; fi
           mkdir -p dist-android
           signed=android/app/build/outputs/apk/release/app-release.apk

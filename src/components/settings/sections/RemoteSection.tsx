@@ -363,7 +363,10 @@ export function RemoteSection() {
       {status && (
         <SettingsBlock
           title={t("remote.relay.title")}
-          help={{ title: t("remote.relay.title"), body: t("remote.relay.help") }}
+          help={{
+            title: t("remote.relay.title"),
+            body: t("remote.relay.help"),
+          }}
         >
           <SettingsCard>
             <SettingsRow
@@ -794,7 +797,9 @@ export function RemoteSection() {
               <p className="text-body text-fg-1">
                 {t("remote.pair.pairedWith", { name: paired.name })}
               </p>
-              <p className="text-caption text-fg-2">{t("remote.pair.verify")}</p>
+              <p className="text-caption text-fg-2">
+                {t("remote.pair.verify")}
+              </p>
               <div className="flex gap-1.5" data-testid="pair-code">
                 {paired.code.split("").map((c, i) => (
                   <span
