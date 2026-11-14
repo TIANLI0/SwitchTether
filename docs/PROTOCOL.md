@@ -28,7 +28,7 @@ Successful responses return the resource JSON directly (no wrapper).
 Errors always use:
 
 ```json
-{ "error": { "code": "device_revoked", "message": "human readable", "requestId": "01J…", "retryable": false, "details": {} } }
+{ "error": { "code": "device_revoked", "message": "human readable", "retryable": false, "details": {} } }
 ```
 
 | HTTP | `code` | Meaning |
@@ -48,8 +48,8 @@ Errors always use:
 | 500 | `internal` | Message is sanitized (no paths/secrets) |
 | 503 | `backend_unavailable` | CC Switch backend not initialised (e.g. DB migration screen) |
 
-Every response carries `X-Request-Id`. Clients may send `X-Request-Id` (ULID/UUID) to
-correlate; the server echoes it.
+Every response carries an `X-Request-Id` header. Clients may send `X-Request-Id`
+(≤ 64 chars, `[A-Za-z0-9-]`) to correlate; the server echoes it.
 
 ## 3. Pairing (unpaired client certificate)
 
@@ -122,7 +122,8 @@ the JSON body or as header `Idempotency-Key`.
 - Same `commandId` + same device, completed → the stored result is returned with header
   `X-Command-Replayed: true`. **The side effect is not executed twice.**
 - Same `commandId` still running → `409 command_in_progress`.
-- `GET /v1/commands/{commandId}` → `{ "commandId", "status": "pending|succeeded|failed", "result"?, "error"? , "createdAt", "completedAt"? }`
+- `GET /v1/commands/{commandId}` → `{ "commandId", "kind", "status": "pending|succeeded|failed|unknown", "result"?, "error"?, "createdAtMs", "completedAtMs"? }`
+  (`unknown` = the desktop restarted while the command was running.)
   Clients that timed out MUST query this before offering a retry, and must offer the user
   the choice rather than auto-retrying side-effecting operations.
 - Command records are kept 24 h.
@@ -137,7 +138,8 @@ the JSON body or as header `Idempotency-Key`.
 { "type": "pong", "ts": "…" }
 ```
 
-Client → server: `{ "type": "ping" }` (every 20 s), `{ "type": "subscribe", "topics": ["session.event:<sessionId>", …] }`.
+Client → server: `{ "type": "ping" }` (every 20 s; the server answers `pong`). All topics are
+delivered to every device; `command.completed` only to the device that issued the command.
 
 - `seq` is a server-global, strictly increasing u64 within an `epoch` (random per desktop
   process start). The server retains the last 10 000 events in memory.
@@ -155,8 +157,9 @@ Topics: `session.upserted`, `session.removed`, `session.event`, `approval.reques
 ## 7. Resources (all require a paired, non-revoked device)
 
 ### 7.1 Status
-- `GET /v1/status` → server info, capabilities, active connections count, terminal count, backend availability.
-- `GET /v1/capabilities` → per-agent capability matrix (see §8).
+- `GET /v1/status` → server info, epoch/headSeq, network mode, connections, terminals, backend availability, active step-up grants.
+- `GET /v1/capabilities` → per-agent capability matrix (see §8) and available terminal shells.
+- `GET /v1/device` → this device's record · `DELETE /v1/device` → the phone unpairs itself (same effect as revocation).
 
 ### 7.2 Providers (CC Switch)
 - `GET /v1/providers?app=claude|codex|gemini|…` → `{ "app", "currentId", "providers": [ProviderView] }`
@@ -182,7 +185,7 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `GET /v1/settings` (whitelisted subset) · `GET /v1/proxy/status` · `GET /v1/health`
 
 ### 7.5 Sessions & agents
-- `GET /v1/sessions?agent=&project=&q=&cursor=&limit=` → `{ items: [SessionSummary], nextCursor }`
+- `GET /v1/sessions?agent=&project=&q=&liveOnly=&cursor=&limit=` → `{ items: [SessionSummary], nextCursor }` (live first, then most recent)
 - `GET /v1/sessions/{sessionId}` → `SessionDetail` (includes `liveness`, `control`, `capabilities`)
 - `GET /v1/sessions/{sessionId}/events?before=<eventSeq>&after=<eventSeq>&limit=` → paged `AgentEvent`s
 - `GET /v1/sessions/{sessionId}/events/{eventId}/payload?offset&limit` → large tool output chunks
@@ -192,7 +195,7 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `POST /v1/sessions/{id}/approvals/{requestId}` `{commandId, decision: "allow"|"allow_session"|"deny"|"abort", message?, updatedInput?}`
   - `409 conflict` with `details.resolvedBy` if the request was already answered (by the desktop or another device).
 - `POST /v1/sessions/{id}/answers/{requestId}` `{commandId, answers}` — Agent questions.
-- `POST /v1/sessions/{id}/archive`.
+- `POST /v1/sessions/{id}/stop` `{commandId}` — stops a managed session's process (history stays readable).
 
 Control endpoints return `422 capability_unavailable` with `details.status` =
 `BLOCKED|UNTESTED` and `details.reason` when the session cannot be controlled
@@ -200,8 +203,8 @@ Control endpoints return `422 capability_unavailable` with `details.status` =
 `docs/AGENT_COMPATIBILITY.md`.
 
 ### 7.6 Terminals (step-up `terminal`)
-- `GET /v1/terminals` · `POST /v1/terminals` `{commandId, shell?: "pwsh"|"powershell"|"cmd"|"bash"|"zsh"|"sh"|<path>, cwd?, cols, rows, persistLog?}`
-- `DELETE /v1/terminals/{id}` (kill) · `POST /v1/terminals/{id}/resize` `{cols, rows}`
+- `GET /v1/terminals` → `{ terminals, shells }` · `POST /v1/terminals` `{commandId, shell?, cwd?, cols, rows, persistLog?, title?}` — `shell` is an id from `shells` (`pwsh`, `powershell`, `cmd`, `wsl`, `zsh`, `bash`, `fish`, `sh`, …); never an arbitrary path
+- `GET /v1/terminals/{id}` · `DELETE /v1/terminals/{id}` (kill + remove) · `POST /v1/terminals/{id}/resize` `{cols, rows}`
 - `GET /v1/terminals/{id}/stream?sinceVersion=` → WebSocket:
   - server → client: `{ "type":"snapshot", "version", "cols","rows","cursor":{x,y,visible}, "lines":[Line], "scrollbackLines": n, "title", "altScreen" }`,
     `{ "type":"patch", "version", "lines": [{ "y", "line": Line }], "cursor":… }`, `{ "type":"exit", "code" }`
@@ -215,12 +218,12 @@ The desktop runs the terminal emulator (vt100 state machine) and streams screen 
 ### 7.7 Files & Git
 - `GET /v1/fs/roots` → suggested roots (session cwd, projects, home)
 - `GET /v1/fs/list?path=&showHidden=` → entries with `kind`, `size`, `modifiedMs`, `hidden`, `sensitive`
-- `GET /v1/fs/stat?path=` · `GET /v1/fs/search?root=&q=&limit=`
-- `GET /v1/fs/read?path=&maxBytes=` → `{ path, encoding: "utf-8"|"utf-16le"|"binary", text?, sha256, size, truncated, modifiedMs, lineEnding }`
-- `PUT /v1/fs/write` *(files_write)* `{commandId, path, text, baseSha256|null, encoding, createOnly?}` → `200 {sha256}` or `409 conflict {currentSha256, currentText?}`
-- `POST /v1/fs/rename` · `POST /v1/fs/delete` · `POST /v1/fs/mkdir` *(files_write)*
-- `GET /v1/fs/download?path=` (streamed, Range supported) · `POST /v1/fs/upload` + `PUT /v1/fs/upload/{id}?offset=` chunks *(files_write)*
-- `GET /v1/git/status?repo=` · `GET /v1/git/diff?repo=&path=&staged=` · `GET /v1/git/log?repo=&path=&limit=`
+- `GET /v1/fs/search?root=&q=&content=&limit=` → `{ results: [{path, kind, name, line?, preview?}] }`
+- `GET /v1/fs/read?path=&maxBytes=&allowSensitive=&encoding=` → `{ path, encoding, bom, text|null (binary), sha256 (of the whole file), size, truncated, modifiedMs, lineEnding, sensitive, language }`
+- `PUT /v1/fs/write` *(files_write)* `{commandId, path, text, baseSha256|null, encoding?, bom?, createOnly?}` → `200 {path, sha256, size, created}` or `409 conflict` with `details {currentSha256, currentText?, suggestedCopyPath}`
+- `POST /v1/fs/rename` `{commandId, from, to, overwrite?}` · `POST /v1/fs/delete` `{commandId, path, baseSha256?}` (moves to the OS trash) · `POST /v1/fs/mkdir` `{commandId, path}` *(files_write)*
+- `GET /v1/fs/download?path=` (streamed, single `Range` supported; sensitive files refused) · `POST /v1/fs/upload` `{commandId, path, size, sha256?, overwrite?}` → `{uploadId}`, then `PUT /v1/fs/upload/{id}?offset=` raw chunks ≤ 8 MiB, `DELETE /v1/fs/upload/{id}` cancels *(files_write)*
+- `GET /v1/git/status?repo=` · `GET /v1/git/diff?repo=&path=&staged=` · `GET /v1/git/log?repo=&path=&limit=` · `GET /v1/git/show?repo=&rev=&path=` (file at a commit)
 
 ## 8. Capability negotiation
 
@@ -238,7 +241,7 @@ The desktop runs the terminal emulator (vt100 state machine) and streams screen 
 Session-level `capabilities` override the agent defaults (e.g. a managed session has
 `sendMessage: "VERIFIED"`).
 
-## 10. Sessions and the Agent Event Schema
+## 9. Sessions and the Agent Event Schema
 
 ### 10.1 SessionSummary
 
@@ -300,7 +303,7 @@ Session ids are opaque; the prefix is informative only.
 
 Approval `options[].id` values are what `POST …/approvals/{requestId}` accepts as `decision`.
 
-## 9. Versioning rules
+## 10. Versioning rules
 
 - `protocolVersion` integer. Additive changes (new fields, new topics, new event kinds)
   do not bump it; clients must ignore unknown fields and render unknown `AgentEvent.kind`

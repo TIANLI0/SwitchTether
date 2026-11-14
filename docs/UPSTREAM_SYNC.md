@@ -77,3 +77,13 @@ SwitchTether's own copy in `~/.switchtether` (migrated by upstream code at start
 upstream's own backups). If a user's CC Switch is newer than SwitchTether's base, the first-run
 import is skipped (receipt records `skippedSourceSchemaTooNew`) and SwitchTether starts fresh;
 updating SwitchTether and deleting `~/.switchtether/upstream-import.json` allows a retry.
+
+## Trial merge record
+
+2026-11-14: `upstream/main` (6 commits after v4.0.31, `8c76bfe1`) was trial-merged into
+SwitchTether `main` (`40d09bb6`) in a throwaway worktree. Conflicts: `src-tauri/src/lib.rs`
+(module list — keep both `mod switchtether;` and upstream's new `mod sync_utils;`),
+`.github/workflows/ci.yml` (keep both appended jobs), `.github/CODEOWNERS` (deleted in
+SwitchTether — keep deleted), `src-tauri/Cargo.lock` (take upstream, let cargo re-resolve).
+After resolution `cargo check --workspace` succeeded. All conflicts were at the documented
+hot spots above.

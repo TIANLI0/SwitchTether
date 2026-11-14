@@ -125,19 +125,22 @@ export const switchTetherBrand = {
   },
 };
 
-i18n.use(initReactI18next).use(switchTetherBrand).init({
-  postProcess: ["switchtetherBrand"],
-  resources,
-  lng: getInitialLanguage(), // 根据本地存储或系统语言选择默认语言
-  fallbackLng: "en", // 如果缺少中文翻译则退回英文
+i18n
+  .use(initReactI18next)
+  .use(switchTetherBrand)
+  .init({
+    postProcess: ["switchtetherBrand"],
+    resources,
+    lng: getInitialLanguage(), // 根据本地存储或系统语言选择默认语言
+    fallbackLng: "en", // 如果缺少中文翻译则退回英文
 
-  interpolation: {
-    escapeValue: false, // React 已经默认转义
-  },
+    interpolation: {
+      escapeValue: false, // React 已经默认转义
+    },
 
-  // 开发模式下显示调试信息
-  debug: false,
-});
+    // 开发模式下显示调试信息
+    debug: false,
+  });
 
 /**
  * 用后端 settings.json 里保存的语言校正界面语言。
