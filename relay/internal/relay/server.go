@@ -13,13 +13,15 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // Server is a relay instance. Connections from any transport are handed to ServeConn.
 type Server struct {
-	cfg Config
-	log *slog.Logger
+	cfg  Config
+	log  *slog.Logger
+	keys atomic.Pointer[keyRing]
 
 	// baseCtx lives until the server is hard-closed; WebSocket connections derive from it.
 	baseCtx    context.Context
@@ -90,8 +92,11 @@ func NewServer(cfg Config, log *slog.Logger) (*Server, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
+	if len(cfg.Keys) == 0 {
+		log.Warn("RUNNING WITHOUT A RELAY KEY (-insecure-open): anyone can use this relay. Use only for local testing.")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{
+	s := &Server{
 		cfg:        cfg,
 		log:        log,
 		baseCtx:    ctx,
@@ -102,7 +107,38 @@ func NewServer(cfg Config, log *slog.Logger) (*Server, error) {
 		byFP:       make(map[string]map[string]*pendingConn),
 		tunnels:    make(map[string]int),
 		conns:      make(map[net.Conn]connKind),
-	}, nil
+	}
+	s.keys.Store(newKeyRing(cfg.Keys))
+	return s, nil
+}
+
+func newKeyRing(keys [][]byte) *keyRing {
+	r := &keyRing{}
+	for _, k := range keys {
+		r.keys = append(r.keys, append([]byte(nil), k...))
+	}
+	return r
+}
+
+// SetKeys replaces the relay keys (e.g. after the keys file was edited). Established
+// connections are not affected; new handshakes use the new keys. An empty set is only
+// accepted when the server was started with InsecureOpen.
+func (s *Server) SetKeys(keys [][]byte) error {
+	if err := validateKeys(keys, s.cfg.InsecureOpen); err != nil {
+		return err
+	}
+	s.keys.Store(newKeyRing(keys))
+	return nil
+}
+
+// checkMAC verifies a relay-key MAC. With no key configured (only possible with
+// InsecureOpen) every syntactically valid MAC is accepted.
+func (s *Server) checkMAC(role, nonce, fp, mac string) (keyIndex int, ok bool) {
+	ring := s.keys.Load()
+	if len(ring.keys) == 0 {
+		return 0, s.cfg.InsecureOpen
+	}
+	return ring.verify(role, nonce, fp, mac)
 }
 
 // Config returns the server's configuration.
@@ -193,7 +229,7 @@ func (s *Server) ServeConn(c net.Conn, remote string) {
 	case KindAccept:
 		s.serveAccept(c, br, h)
 	case KindConnect:
-		s.servePhone(c, br, h)
+		s.servePhone(c, br, h, remote)
 	}
 }
 
@@ -249,9 +285,15 @@ func (s *Server) serveControl(c net.Conn, br *bufio.Reader, fp, remote string) {
 		s.failHandshake(c, remote, err)
 		return
 	}
-	certDER, sig, err := ParseAuth(line)
+	certDER, sig, mac, err := ParseAuth(line)
 	if err != nil {
 		s.failHandshake(c, remote, err)
+		return
+	}
+	keyIndex, ok := s.checkMAC(RoleListen, nonce, fp, mac)
+	if !ok {
+		log.Info("desktop refused: wrong relay key", "remote", remote)
+		s.sendErr(c, protoErr(CodeAuthFailed, ""))
 		return
 	}
 	if err := VerifyAuth(fp, nonce, certDER, sig); err != nil {
@@ -278,9 +320,9 @@ func (s *Server) serveControl(c net.Conn, br *bufio.Reader, fp, remote string) {
 	s.mu.Unlock()
 	if old != nil {
 		old.close()
-		log.Info("desktop control connection replaced")
+		log.Info("desktop control connection replaced", "key", keyIndex)
 	} else {
-		log.Info("desktop online")
+		log.Info("desktop online", "key", keyIndex)
 	}
 	defer s.desktopGone(d, log)
 
@@ -412,8 +454,34 @@ func (s *Server) takePending(p *pendingConn) bool {
 // ---------------------------------------------------------------------------------------
 // Phone connection (§2.3)
 
-func (s *Server) servePhone(c net.Conn, cbr *bufio.Reader, h Hello) {
+func (s *Server) servePhone(c net.Conn, cbr *bufio.Reader, h Hello, remote string) {
 	log := s.log.With("fp", ShortFP(h.FP))
+
+	// Relay key first: an unauthenticated client learns nothing (not even whether the
+	// desktop is online) and is never announced to the desktop.
+	nonce, err := NewNonce()
+	if err != nil {
+		log.Error("nonce generation failed", "err", err)
+		return
+	}
+	if err := writeLine(c, "CHALLENGE "+nonce, s.cfg.WriteTimeout); err != nil {
+		return
+	}
+	line, err := ReadLine(cbr)
+	if err != nil {
+		s.failHandshake(c, remote, err)
+		return
+	}
+	mac, err := ParseKeyLine(line)
+	if err != nil {
+		s.failHandshake(c, remote, err)
+		return
+	}
+	if _, ok := s.checkMAC(RoleConnect, nonce, h.FP, mac); !ok {
+		log.Info("phone refused: wrong relay key", "remote", remote)
+		s.sendErr(c, protoErr(CodeAuthFailed, ""))
+		return
+	}
 	_ = c.SetDeadline(time.Time{})
 
 	id, err := NewConnID()

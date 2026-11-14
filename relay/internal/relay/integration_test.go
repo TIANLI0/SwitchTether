@@ -52,11 +52,27 @@ type testRelay struct {
 	httpURL string
 }
 
+// testKey is the relay key every test client uses unless a test says otherwise.
+var testKey = newKey()
+
+func newKey() []byte {
+	s, err := relay.GenerateKey()
+	if err != nil {
+		panic(err)
+	}
+	k, err := relay.ParseKey(s)
+	if err != nil {
+		panic(err)
+	}
+	return k
+}
+
 func fastConfig() relay.Config {
 	c := relay.DefaultConfig()
 	c.HandshakeTimeout = 5 * time.Second
 	c.AcceptTimeout = 5 * time.Second
 	c.WriteTimeout = 5 * time.Second
+	c.Keys = [][]byte{testKey}
 	return c
 }
 
@@ -261,6 +277,7 @@ type fakeDesktop struct {
 	ctl           *lineConn
 	dataTransport string
 	token         string           // expected relay token; others are rejected
+	key           []byte           // relay key; nil means testKey
 	decide        func() decision  // for a correct token; default accept
 	handle        func(c net.Conn) // raw stream after OK; default: TLS echo server
 	phoneFP       string           // pinned client certificate for the default handler
@@ -294,7 +311,11 @@ func (d *fakeDesktop) listen(transport string) (*lineConn, string) {
 		t.Fatalf("expected CHALLENGE, got %q (%v)", line, err)
 	}
 	nonce := strings.TrimPrefix(line, "CHALLENGE ")
-	c.send(t, "AUTH "+b64(d.id.der)+" "+b64(d.id.sign(t, nonce, d.id.fp)))
+	key := d.key
+	if key == nil {
+		key = testKey
+	}
+	c.send(t, "AUTH "+b64(d.id.der)+" "+b64(d.id.sign(t, nonce, d.id.fp))+" "+relay.ComputeMAC(key, relay.RoleListen, nonce, d.id.fp))
 	ans, _ := c.readLine()
 	return c, ans
 }
@@ -433,8 +454,17 @@ func (d *fakeDesktop) tlsEcho(c net.Conn) {
 // ---------------------------------------------------------------------------------------
 // fake phone
 
-// connect sends CONNECT and returns the connection and the relay's answer.
+// connect sends CONNECT, answers the CHALLENGE with the test relay key and returns the
+// connection and the relay's final answer.
 func connect(t *testing.T, r *testRelay, transport, fp, token string) (*lineConn, string) {
+	t.Helper()
+	return connectWith(t, r, transport, fp, token, func(nonce string) string {
+		return "KEY " + relay.ComputeMAC(testKey, relay.RoleConnect, nonce, fp)
+	})
+}
+
+// connectWith is connect with a custom answer to CHALLENGE (keyLine returns the full line).
+func connectWith(t *testing.T, r *testRelay, transport, fp, token string, keyLine func(nonce string) string) (*lineConn, string) {
 	t.Helper()
 	c := r.dial(t, transport)
 	line := "ST-RELAY/1 CONNECT " + fp
@@ -442,6 +472,12 @@ func connect(t *testing.T, r *testRelay, transport, fp, token string) (*lineConn
 		line += " " + token
 	}
 	c.send(t, line)
+	ch, _ := c.readLine()
+	nonce, ok := strings.CutPrefix(ch, "CHALLENGE ")
+	if !ok {
+		return c, ch // an ERR before the challenge (e.g. bad_request)
+	}
+	c.send(t, keyLine(nonce))
 	ans, _ := c.readLine()
 	return c, ans
 }
@@ -579,8 +615,15 @@ func TestPipelinedBytesAfterConnect(t *testing.T) {
 	}
 	d.start(tcpT)
 	c := r.dial(t, tcpT)
-	// CONNECT and the first stream bytes in one write: the relay must not lose them.
-	if _, err := c.Write([]byte("ST-RELAY/1 CONNECT " + d.id.fp + " " + d.token + "\nearly")); err != nil {
+	c.send(t, "ST-RELAY/1 CONNECT "+d.id.fp+" "+d.token)
+	ch, _ := c.readLine()
+	nonce, ok := strings.CutPrefix(ch, "CHALLENGE ")
+	if !ok {
+		t.Fatalf("expected CHALLENGE, got %q", ch)
+	}
+	// KEY and the first stream bytes in one write: the relay must not lose them.
+	mac := relay.ComputeMAC(testKey, relay.RoleConnect, nonce, d.id.fp)
+	if _, err := c.Write([]byte("KEY " + mac + "\nearly")); err != nil {
 		t.Fatal(err)
 	}
 	c.expect(t, "OK")
@@ -646,22 +689,46 @@ func TestAuthFailures(t *testing.T) {
 	other := newIdentity(t, elliptic.P256(), "other")
 	p384 := newIdentity(t, elliptic.P384(), "p384")
 
+	mac := func(key []byte, role, n, fp string) string { return " " + relay.ComputeMAC(key, role, n, fp) }
+	goodAuth := func(n string) string {
+		return "AUTH " + b64(good.der) + " " + b64(good.sign(t, n, good.fp))
+	}
 	cases := []struct {
 		name     string
 		listenFP string
 		auth     func(nonce string) string
 	}{
 		{"wrong signature", good.fp, func(n string) string {
-			return "AUTH " + b64(good.der) + " " + b64(other.sign(t, n, good.fp))
+			return "AUTH " + b64(good.der) + " " + b64(other.sign(t, n, good.fp)) + mac(testKey, relay.RoleListen, n, good.fp)
 		}},
-		{"signature over wrong nonce", good.fp, func(string) string {
-			return "AUTH " + b64(good.der) + " " + b64(good.sign(t, "bm90LXRoZS1ub25jZQ", good.fp))
+		{"signature over wrong nonce", good.fp, func(n string) string {
+			return "AUTH " + b64(good.der) + " " + b64(good.sign(t, "bm90LXRoZS1ub25jZQ", good.fp)) + mac(testKey, relay.RoleListen, n, good.fp)
 		}},
 		{"fingerprint mismatch", good.fp, func(n string) string {
-			return "AUTH " + b64(other.der) + " " + b64(other.sign(t, n, good.fp))
+			return "AUTH " + b64(other.der) + " " + b64(other.sign(t, n, good.fp)) + mac(testKey, relay.RoleListen, n, good.fp)
 		}},
 		{"not P-256", p384.fp, func(n string) string {
-			return "AUTH " + b64(p384.der) + " " + b64(p384.sign(t, n, p384.fp))
+			return "AUTH " + b64(p384.der) + " " + b64(p384.sign(t, n, p384.fp)) + mac(testKey, relay.RoleListen, n, p384.fp)
+		}},
+		// Relay key (docs/RELAY.md 2.0): a valid desktop signature is not enough.
+		{"missing relay key MAC", good.fp, goodAuth},
+		{"MAC with an unknown relay key", good.fp, func(n string) string {
+			return goodAuth(n) + mac(newKey(), relay.RoleListen, n, good.fp)
+		}},
+		{"MAC for the connect role", good.fp, func(n string) string {
+			return goodAuth(n) + mac(testKey, relay.RoleConnect, n, good.fp)
+		}},
+		{"MAC over another nonce", good.fp, func(n string) string {
+			return goodAuth(n) + mac(testKey, relay.RoleListen, "bm90LXRoZS1ub25jZQ", good.fp)
+		}},
+		{"MAC over another fingerprint", good.fp, func(n string) string {
+			return goodAuth(n) + mac(testKey, relay.RoleListen, n, other.fp)
+		}},
+		{"relay key sent instead of a MAC", good.fp, func(n string) string {
+			return goodAuth(n) + " " + b64(testKey)
+		}},
+		{"malformed MAC", good.fp, func(n string) string {
+			return goodAuth(n) + " not+base64"
 		}},
 	}
 	for _, tc := range cases {
@@ -693,7 +760,7 @@ func TestAuthFailures(t *testing.T) {
 			t.Fatalf("got %q", line)
 		}
 		c.send(t, "AUTH only-one-field")
-		c.expect(t, "ERR bad_request expected AUTH <cert> <sig>")
+		c.expect(t, "ERR bad_request expected AUTH <cert> <sig> <mac>")
 	})
 
 	t.Run("nonce is fresh per connection", func(t *testing.T) {
@@ -852,9 +919,11 @@ func TestMalformedHandshake(t *testing.T) {
 			c.send(t, strings.Repeat("A", 257))
 			c.expect(t, "ERR bad_request line too long")
 
-			c = r.dial(t, tr)
-			c.send(t, "ST-RELAY/1 CONNECT "+fp+" "+strings.Repeat("a", 128))
-			c.expect(t, "ERR offline")
+			// The longest valid token is accepted; offline is only reported after the key.
+			_, ans := connect(t, r, tr, fp, strings.Repeat("a", 128))
+			if ans != "ERR offline" {
+				t.Fatalf("CONNECT with a 128-char token answered %q", ans)
+			}
 
 			c = r.dial(t, tr)
 			c.send(t, "ST-RELAY/2 CONNECT "+fp+" tok")
@@ -1263,8 +1332,17 @@ func TestLogsContainNoSecrets(t *testing.T) {
 	bad.send(t, "ST-RELAY/1 LISTEN "+d.id.fp)
 	line, _ := bad.readLine()
 	nonce := strings.TrimPrefix(line, "CHALLENGE ")
-	bad.send(t, "AUTH "+b64(other.der)+" "+b64(other.sign(t, nonce, d.id.fp)))
+	goodMAC := relay.ComputeMAC(testKey, relay.RoleListen, nonce, d.id.fp)
+	bad.send(t, "AUTH "+b64(other.der)+" "+b64(other.sign(t, nonce, d.id.fp))+" "+goodMAC)
 	bad.expect(t, "ERR auth_failed")
+	// A phone with a wrong relay key.
+	var wrongMAC string
+	if _, ans := connectWith(t, r, tcpT, d.id.fp, d.token, func(n string) string {
+		wrongMAC = relay.ComputeMAC(newKey(), relay.RoleConnect, n, d.id.fp)
+		return "KEY " + wrongMAC
+	}); ans != "ERR auth_failed" {
+		t.Fatal(ans)
+	}
 
 	waitFor(t, func() bool { return strings.Contains(logs.String(), "tunnel closed") })
 	out := logs.String()
@@ -1274,6 +1352,7 @@ func TestLogsContainNoSecrets(t *testing.T) {
 	for name, secret := range map[string]string{
 		"token": d.token, "wrong token": "a-wrong-token-value", "full fingerprint": d.id.fp,
 		"phone fingerprint": phone.fp, "conn id": conn, "nonce": nonce,
+		"relay key": b64(testKey), "relay key MAC": goodMAC, "wrong MAC": wrongMAC,
 	} {
 		if strings.Contains(out, secret) {
 			t.Errorf("logs contain the %s:\n%s", name, out)

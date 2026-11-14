@@ -36,14 +36,29 @@ type options struct {
 	logLevel      string
 	logFormat     string
 	shutdownGrace time.Duration
+	keys          string // comma-separated relay keys (-keys)
+	keysFile      string // one key per line (-keys-file)
 	cfg           relay.Config
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "genkey" {
+		if len(args) > 1 {
+			fmt.Fprintln(stderr, "usage: switchtether-relay genkey")
+			return 2
+		}
+		key, err := relay.GenerateKey()
+		if err != nil {
+			fmt.Fprintln(stderr, "switchtether-relay:", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, key)
+		return 0
+	}
 	fs := flag.NewFlagSet("switchtether-relay", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	opts, healthcheck, showVersion, err := parseFlags(fs, args, os.LookupEnv)
@@ -95,6 +110,16 @@ func parseFlags(fs *flag.FlagSet, args []string, lookup func(string) (string, bo
 		}
 		return def
 	}
+	boolean := func(name string) bool {
+		if v, ok := lookup(envName(name)); ok {
+			b, err := strconv.ParseBool(v)
+			if err != nil && envErr == nil {
+				envErr = fmt.Errorf("%s: %w", envName(name), err)
+			}
+			return b
+		}
+		return false
+	}
 	num := func(name string, def int64) int64 {
 		if v, ok := lookup(envName(name)); ok {
 			n, err := strconv.ParseInt(v, 10, 64)
@@ -112,6 +137,9 @@ func parseFlags(fs *flag.FlagSet, args []string, lookup func(string) (string, bo
 	fs.StringVar(&opts.tlsKey, "tls-key", str("tls-key", ""), "PEM private key for -tls-cert")
 	fs.StringVar(&opts.logLevel, "log-level", str("log-level", "info"), "debug, info, warn or error")
 	fs.StringVar(&opts.logFormat, "log-format", str("log-format", "text"), "text or json")
+	fs.StringVar(&opts.keys, "keys", str("keys", ""), "comma-separated relay keys (32 bytes base64url each; see `genkey`)")
+	fs.StringVar(&opts.keysFile, "keys-file", str("keys-file", ""), "file with one relay key per line (# comments allowed); re-read on SIGHUP")
+	fs.BoolVar(&opts.cfg.InsecureOpen, "insecure-open", boolean("insecure-open"), "allow running without a relay key: ANYONE can use the relay (local testing only)")
 	fs.DurationVar(&opts.shutdownGrace, "shutdown-grace", dur("shutdown-grace", 10*time.Second), "how long running tunnels may drain on SIGINT/SIGTERM")
 
 	var maxLine, maxPending, maxTunnels, maxDesktops int64
@@ -152,6 +180,9 @@ func parseFlags(fs *flag.FlagSet, args []string, lookup func(string) (string, bo
 	if healthcheck || showVersion {
 		return opts, healthcheck, showVersion, nil
 	}
+	if c.Keys, err = loadKeys(opts.keys, opts.keysFile); err != nil {
+		return opts, false, false, err
+	}
 	if err := c.Validate(); err != nil {
 		return opts, false, false, err
 	}
@@ -165,6 +196,43 @@ func parseFlags(fs *flag.FlagSet, args []string, lookup func(string) (string, bo
 		return opts, false, false, errors.New("-shutdown-grace must not be negative")
 	}
 	return opts, false, false, nil
+}
+
+// loadKeys collects the relay keys from -keys and -keys-file. Errors name the source and
+// position of a bad key but never its value.
+func loadKeys(list, file string) ([][]byte, error) {
+	var keys [][]byte
+	for i, k := range strings.Split(list, ",") {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		b, err := relay.ParseKey(k)
+		if err != nil {
+			return nil, fmt.Errorf("key #%d in -keys/%s: %w", i+1, envName("keys"), err)
+		}
+		keys = append(keys, b)
+	}
+	if file == "" {
+		return keys, nil
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("keys file: %w", err)
+	}
+	for n, line := range strings.Split(string(raw), "\n") {
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		b, err := relay.ParseKey(line)
+		if err != nil {
+			return nil, fmt.Errorf("keys file %s, line %d: %w", file, n+1, err)
+		}
+		keys = append(keys, b)
+	}
+	return keys, nil
 }
 
 func envName(flagName string) string {
@@ -190,6 +258,13 @@ func serve(opts options, log *slog.Logger) error {
 	srv, err := relay.NewServer(opts.cfg, log)
 	if err != nil {
 		return err
+	}
+	if n := len(opts.cfg.Keys); n > 0 {
+		log.Info("relay keys loaded", "count", n)
+	}
+	if opts.keysFile != "" {
+		stopReload := watchKeyReload(func() { reloadKeys(srv, opts, log) })
+		defer stopReload()
 	}
 
 	var (
@@ -273,6 +348,20 @@ func serve(opts options, log *slog.Logger) error {
 	wg.Wait()
 	log.Info("stopped")
 	return runErr
+}
+
+// reloadKeys re-reads -keys-file (plus -keys) and swaps the key set. On any error the old
+// keys stay active.
+func reloadKeys(srv *relay.Server, opts options, log *slog.Logger) {
+	keys, err := loadKeys(opts.keys, opts.keysFile)
+	if err == nil {
+		err = srv.SetKeys(keys)
+	}
+	if err != nil {
+		log.Error("relay keys not reloaded; keeping the previous keys", "err", err)
+		return
+	}
+	log.Info("relay keys reloaded", "count", len(keys))
 }
 
 // runHealthcheck probes the local HTTP listener. It needs no shell or curl, so it works in

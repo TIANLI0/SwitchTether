@@ -80,16 +80,47 @@ func TestParseControlLine(t *testing.T) {
 }
 
 func TestParseAuth(t *testing.T) {
-	cert, sig, err := ParseAuth("AUTH AQID BAUG")
-	if err != nil || string(cert) != "\x01\x02\x03" || string(sig) != "\x04\x05\x06" {
-		t.Fatalf("ParseAuth = %x %x %v", cert, sig, err)
+	cert, sig, mac, err := ParseAuth("AUTH AQID BAUG bWFj")
+	if err != nil || string(cert) != "\x01\x02\x03" || string(sig) != "\x04\x05\x06" || mac != "bWFj" {
+		t.Fatalf("ParseAuth = %x %x %q %v", cert, sig, mac, err)
 	}
-	if _, _, err := ParseAuth("AUTH AQI= BAU="); err != nil {
+	if _, _, _, err := ParseAuth("AUTH AQI= BAU= bWE="); err != nil {
 		t.Errorf("padded base64url rejected: %v", err)
 	}
-	for _, bad := range []string{"AUTH", "AUTH AQID", "AUTH AQID BAUG x", "auth AQID BAUG", "AUTH AQ+D BAUG", "AUTH AQID  BAUG", "AUTH  BAUG"} {
-		if _, _, err := ParseAuth(bad); err == nil {
+	for _, bad := range []string{"AUTH", "AUTH AQID", "AUTH AQID BAUG x y", "auth AQID BAUG x", "AUTH AQ+D BAUG x", "AUTH AQID  BAUG", "AUTH  BAUG x"} {
+		if _, _, _, err := ParseAuth(bad); err == nil {
 			t.Errorf("ParseAuth(%q) accepted", bad)
+		}
+	}
+	// A missing or malformed MAC is auth_failed, not bad_request (docs/RELAY.md §2.0).
+	for _, noMAC := range []string{"AUTH AQID BAUG", "AUTH AQID BAUG ", "AUTH AQID BAUG m+c", "AUTH AQID BAUG " + strings.Repeat("a", 65)} {
+		_, _, _, err := ParseAuth(noMAC)
+		var pe *ProtoError
+		if !errors.As(err, &pe) || pe.Code != CodeAuthFailed {
+			t.Errorf("ParseAuth(%q) error = %v, want auth_failed", noMAC, err)
+		}
+	}
+}
+
+func TestParseKeyLine(t *testing.T) {
+	if mac, err := ParseKeyLine("KEY abc_-DEF"); err != nil || mac != "abc_-DEF" {
+		t.Fatalf("ParseKeyLine = %q %v", mac, err)
+	}
+	for line, code := range map[string]string{
+		"KEY":           CodeAuthFailed,
+		"KEY ":          CodeAuthFailed,
+		"KEY a/b":       CodeAuthFailed,
+		"KEY a b":       CodeBadRequest,
+		"key abc":       CodeBadRequest,
+		"AUTH abc":      CodeBadRequest,
+		"":              CodeBadRequest,
+		"KEYabc":        CodeBadRequest,
+		"KEY abc extra": CodeBadRequest,
+	} {
+		_, err := ParseKeyLine(line)
+		var pe *ProtoError
+		if !errors.As(err, &pe) || pe.Code != code {
+			t.Errorf("ParseKeyLine(%q) error = %v, want %s", line, err, code)
 		}
 	}
 }

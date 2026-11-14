@@ -14,6 +14,9 @@ export class RelayContainer extends Container<Env> {
     SWITCHTETHER_RELAY_TCP_LISTEN: "",
     SWITCHTETHER_RELAY_HTTP_LISTEN: ":8080",
     SWITCHTETHER_RELAY_LOG_LEVEL: "info",
+    // Worker secret (`wrangler secret put SWITCHTETHER_RELAY_KEYS`). Without it the relay
+    // refuses to start; it never runs open on Cloudflare.
+    SWITCHTETHER_RELAY_KEYS: this.env.SWITCHTETHER_RELAY_KEYS,
   };
 }
 

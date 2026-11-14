@@ -426,16 +426,26 @@ jobs:
 
       - name: Smoke-test the image
         run: |
-          docker run -d --name relay-smoke -p 127.0.0.1:47700:47700 -p 127.0.0.1:8080:8080 switchtether-relay:ci
+          # Without a relay key the relay must refuse to start (exit code 2).
+          set +e; timeout 20 docker run --rm switchtether-relay:ci; code=$?; set -e
+          echo "exit code without a key: $code"
+          test "$code" = 2
+          key=$(docker run --rm switchtether-relay:ci genkey)
+          docker run -d --name relay-smoke -e SWITCHTETHER_RELAY_KEYS="$key" \
+            -p 127.0.0.1:47700:47700 -p 127.0.0.1:8080:8080 switchtether-relay:ci
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 0.5; done
           curl -fsS http://127.0.0.1:8080/healthz
-          # Raw TCP transport: a phone asking for an unknown desktop gets "ERR offline".
+          # Raw TCP transport: CONNECT gets a CHALLENGE; a wrong relay-key MAC is refused.
           exec 3<>/dev/tcp/127.0.0.1/47700
           printf 'ST-RELAY/1 CONNECT %064d\n' 0 >&3
+          read -r -t 5 challenge <&3 || true
+          echo "CONNECT answered: $challenge"
+          case "$challenge" in "CHALLENGE "*) ;; *) exit 1 ;; esac
+          printf 'KEY not-the-right-mac\n' >&3
           read -r -t 5 answer <&3 || true
           exec 3<&-
-          echo "CONNECT answered: $answer"
-          test "$answer" = "ERR offline"
+          echo "KEY answered: $answer"
+          test "$answer" = "ERR auth_failed"
           docker exec relay-smoke /switchtether-relay -healthcheck
           docker stop relay-smoke
           docker logs relay-smoke

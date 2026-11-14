@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -31,6 +32,26 @@ type Config struct {
 	DesktopTimeout time.Duration
 	// WriteTimeout bounds a single line write (handshake answers, INCOMING, PING).
 	WriteTimeout time.Duration
+	// Keys are the relay keys (32 bytes each, docs/RELAY.md §2.0); a client must MAC its
+	// challenge with one of them. They can be replaced at runtime with Server.SetKeys.
+	Keys [][]byte
+	// InsecureOpen allows running without any key; MACs are then not checked. Testing only.
+	InsecureOpen bool
+}
+
+// ErrNoKeys is returned when no relay key is configured and InsecureOpen is not set.
+var ErrNoKeys = errors.New("no relay key configured: set -keys / -keys-file (create one with `switchtether-relay genkey`), or pass -insecure-open for local testing")
+
+func validateKeys(keys [][]byte, insecureOpen bool) error {
+	if len(keys) == 0 && !insecureOpen {
+		return ErrNoKeys
+	}
+	for _, k := range keys {
+		if len(k) != KeySize {
+			return ErrBadKey
+		}
+	}
+	return nil
 }
 
 // DefaultConfig returns the defaults from docs/RELAY.md §4.
@@ -65,5 +86,5 @@ func (c Config) Validate() error {
 	case c.BandwidthBytesPerSec < 0:
 		return fmt.Errorf("bandwidth must not be negative")
 	}
-	return nil
+	return validateKeys(c.Keys, c.InsecureOpen)
 }

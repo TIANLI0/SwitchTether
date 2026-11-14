@@ -4,3 +4,8 @@ cloudflare/
 **/*_test.go
 *.md
 docker-compose.yml
+
+# Never send relay keys to the build context.
+.env
+*.keys
+relay-keys.txt

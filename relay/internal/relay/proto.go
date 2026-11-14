@@ -154,21 +154,53 @@ func ParseHello(line string) (Hello, error) {
 	return h, nil
 }
 
-// ParseAuth parses `AUTH <cert> <sig>` and returns the decoded certificate DER and signature.
-func ParseAuth(line string) (certDER, sig []byte, err error) {
+// ParseAuth parses `AUTH <cert> <sig> <mac>` and returns the decoded certificate DER, the
+// signature and the (still encoded) relay-key MAC. A missing or malformed MAC is
+// auth_failed (docs/RELAY.md §2.0); other malformations are bad_request.
+func ParseAuth(line string) (certDER, sig []byte, mac string, err error) {
 	f := strings.Split(line, " ")
-	if len(f) != 3 || f[0] != "AUTH" {
-		return nil, nil, protoErr(CodeBadRequest, "expected AUTH <cert> <sig>")
+	if len(f) < 3 || len(f) > 4 || f[0] != "AUTH" {
+		return nil, nil, "", protoErr(CodeBadRequest, "expected AUTH <cert> <sig> <mac>")
 	}
 	certDER, err = decodeB64URL(f[1])
 	if err != nil || len(certDER) == 0 {
-		return nil, nil, protoErr(CodeBadRequest, "malformed certificate encoding")
+		return nil, nil, "", protoErr(CodeBadRequest, "malformed certificate encoding")
 	}
 	sig, err = decodeB64URL(f[2])
 	if err != nil || len(sig) == 0 {
-		return nil, nil, protoErr(CodeBadRequest, "malformed signature encoding")
+		return nil, nil, "", protoErr(CodeBadRequest, "malformed signature encoding")
 	}
-	return certDER, sig, nil
+	if len(f) == 3 || !validMACField(f[3]) {
+		return nil, nil, "", protoErr(CodeAuthFailed, "")
+	}
+	return certDER, sig, f[3], nil
+}
+
+// ParseKeyLine parses the phone's `KEY <mac>` answer to CHALLENGE.
+func ParseKeyLine(line string) (mac string, err error) {
+	f := strings.Split(line, " ")
+	if f[0] != "KEY" || len(f) > 2 {
+		return "", protoErr(CodeBadRequest, "expected KEY <mac>")
+	}
+	if len(f) == 1 || !validMACField(f[1]) {
+		return "", protoErr(CodeAuthFailed, "")
+	}
+	return f[1], nil
+}
+
+// validMACField is the syntax check that applies even when MACs are not verified
+// (-insecure-open): 1..64 base64url characters, optional `=` padding.
+func validMACField(s string) bool {
+	s = strings.TrimRight(s, "=")
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !isB64URL(s[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Control-line kinds sent by the desktop after OK.
@@ -242,9 +274,9 @@ func isB64URL(c byte) bool {
 	return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_'
 }
 
-// decodeB64URL decodes base64url, tolerating (but not requiring) `=` padding.
+// decodeB64URL decodes canonical base64url, tolerating (but not requiring) `=` padding.
 func decodeB64URL(s string) ([]byte, error) {
-	return base64.RawURLEncoding.DecodeString(strings.TrimRight(s, "="))
+	return base64.RawURLEncoding.Strict().DecodeString(strings.TrimRight(s, "="))
 }
 
 // ShortFP returns the first 8 hex characters of a fingerprint, the only form that is logged.

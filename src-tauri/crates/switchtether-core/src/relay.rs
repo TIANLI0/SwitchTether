@@ -387,6 +387,27 @@ mod tests {
         assert_ne!(a, key_mac(&raw, "connect", "other", "ab"));
     }
 
+    /// Same MACs as the Go relay (relay/internal/relay/testdata/relay_key_vector.json).
+    #[test]
+    fn relay_key_mac_matches_the_go_relay_vector() {
+        let v: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../relay/internal/relay/testdata/relay_key_vector.json"
+        ))
+        .unwrap();
+        let key = decode_key(v["key"].as_str().unwrap()).unwrap();
+        for c in v["cases"].as_array().unwrap() {
+            assert_eq!(
+                key_mac(
+                    &key,
+                    c["role"].as_str().unwrap(),
+                    v["nonce"].as_str().unwrap(),
+                    v["fp"].as_str().unwrap()
+                ),
+                c["mac"].as_str().unwrap()
+            );
+        }
+    }
+
     #[test]
     fn signature_verifies_with_the_certificate_key() {
         let id = ServerIdentity::generate("t").unwrap();

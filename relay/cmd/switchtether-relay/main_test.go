@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"flag"
 	"io"
 	"strings"
@@ -9,8 +10,21 @@ import (
 	"time"
 )
 
+// testKeyB64 is a syntactically valid relay key used where a test is not about keys.
+var testKeyB64 = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+
+// parse runs parseFlags with env as the environment. Unless env mentions
+// SWITCHTETHER_RELAY_KEYS, a valid key is provided so the test can focus on other options.
 func parse(t *testing.T, args []string, env map[string]string) (options, error) {
 	t.Helper()
+	e := map[string]string{"SWITCHTETHER_RELAY_KEYS": testKeyB64}
+	for k, v := range env {
+		e[k] = v
+	}
+	return parseRaw(args, e)
+}
+
+func parseRaw(args []string, env map[string]string) (options, error) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	opts, _, _, err := parseFlags(fs, args, func(k string) (string, bool) {
@@ -90,11 +104,11 @@ func TestLocalAddr(t *testing.T) {
 
 func TestVersionAndBadLogLevel(t *testing.T) {
 	var out bytes.Buffer
-	if code := run([]string{"-version"}, &out); code != 0 || !strings.Contains(out.String(), "switchtether-relay") {
+	if code := run([]string{"-version"}, io.Discard, &out); code != 0 || !strings.Contains(out.String(), "switchtether-relay") {
 		t.Fatalf("-version: code %d, output %q", code, out.String())
 	}
 	out.Reset()
-	if code := run([]string{"-log-level", "loud"}, &out); code != 2 {
+	if code := run([]string{"-log-level", "loud", "-keys", testKeyB64}, io.Discard, &out); code != 2 {
 		t.Fatalf("bad log level: code %d", code)
 	}
 }
