@@ -75,6 +75,17 @@ fun clientLabel(origin: String, agent: String): String = when (origin) {
     else -> origin
 }
 
+/**
+ * Title shown for a session: its own title, else the project / working-directory name, else
+ * "未命名会话". Raw native ids are only shown in the info sheet.
+ */
+@Composable
+fun sessionDisplayTitle(s: io.github.tianli0.switchtether.remote.protocol.SessionSummary): String =
+    s.title?.takeIf { it.isNotBlank() }
+        ?: s.project?.takeIf { it.isNotBlank() }
+        ?: s.cwd?.trimEnd('/', '\\')?.substringAfterLast('/')?.substringAfterLast('\\')?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.session_unnamed)
+
 /** Badge for a session SwitchTether is attached to through the opt-in wrapper: "已接管 · VS Code". */
 @Composable
 fun attachedLabel(s: io.github.tianli0.switchtether.remote.protocol.SessionSummary): String =

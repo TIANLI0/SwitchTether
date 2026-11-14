@@ -103,4 +103,6 @@
     <string name="attached_badge">已接管 · %1$s</string>
     <string name="client_terminal">终端</string>
     <string name="open_terminal">打开终端</string>
+    <string name="session_unnamed">未命名会话</string>
+    <string name="session_info_id">会话 ID</string>
 </resources>

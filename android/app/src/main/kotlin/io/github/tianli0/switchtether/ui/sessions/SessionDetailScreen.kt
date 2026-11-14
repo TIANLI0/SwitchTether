@@ -232,7 +232,7 @@ fun SessionDetailContent(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     Page(
-        title = summary?.title?.takeIf { it.isNotBlank() } ?: initialTitle ?: stringResource(R.string.session_untitled),
+        title = summary?.let { io.github.tianli0.switchtether.ui.common.sessionDisplayTitle(it) } ?: initialTitle ?: stringResource(R.string.session_unnamed),
         subtitle = summary?.let { listOfNotNull(Formatters.agentLabel(it.agent), it.model).joinToString(" · ") } ?: "",
         onBack = onBack,
         actions = {
@@ -512,6 +512,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
                 s.gitBranch?.let { stringResource(R.string.session_info_branch) to it },
                 s.cwd?.let { stringResource(R.string.session_info_cwd) to it },
                 stringResource(R.string.session_info_last_active) to relativeTime(s.lastActiveAtMs),
+                stringResource(R.string.session_info_id) to listOf(s.id, s.nativeId).filter { it.isNotBlank() }.distinct().joinToString("\n"),
             )
             GroupCard {
                 rows.forEachIndexed { i, (k, v) -> BasicComponent(title = k, summary = v, cardListPosition = cardListPositionOf(i, rows.size)) }

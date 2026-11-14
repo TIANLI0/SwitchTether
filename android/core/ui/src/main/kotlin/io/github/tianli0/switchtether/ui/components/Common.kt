@@ -45,7 +45,7 @@ fun StatusPill(text: String, color: Color, modifier: Modifier = Modifier, conten
             .padding(horizontal = 6.dp, vertical = 2.dp)
             .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
     ) {
-        Text(text = text, color = color, style = DevType.label, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(text = text, color = color, style = COUITheme.textStyles.footnote2, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 

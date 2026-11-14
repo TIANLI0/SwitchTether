@@ -436,6 +436,12 @@ references are gone too. The debug APK grows to ~83 MB because debug builds aren
   4. **更多**: one card with today's usage as a single line, Providers and Desktop info.
 - Removed: the metric hero card, the usage hero card and the long quick-links list.
 
+### 12.2a Session rows
+A session row is at most two lines. Line 1 is the title, line 2 is agent · project · branch, and
+the right column holds the relative time above one small tag. The tag uses the regular UI font, not
+monospace, and is one of 等待审批 / 已接管 · VS Code / SwitchTether. A session without a title shows its
+project or working-directory name, or "未命名会话". Raw ids appear only in the info sheet (会话 ID).
+
 ### 12.3 Agent brand marks
 Session rows (list and Home), assistant message headers and the session header chip row show the
 real agent mark on a softly tinted disc:

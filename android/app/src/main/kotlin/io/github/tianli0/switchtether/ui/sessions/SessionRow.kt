@@ -4,6 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Column
+import io.github.tianli0.switchtether.ui.common.sessionDisplayTitle
+import io.github.tianli0.switchtether.ui.common.attachedLabel
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -36,10 +43,10 @@ fun SessionRow(
 ) {
     val dev = LocalDevColors.current
     val agent = Formatters.agentLabel(session.agent)
+    val title = sessionDisplayTitle(session)
     BasicComponent(
         modifier = modifier,
-        title = session.title?.takeIf { it.isNotBlank() } ?: session.nativeId.ifEmpty { session.id }.take(12),
-        summary = listOfNotNull(agent, session.project, session.gitBranch).joinToString(" · "),
+        title = title,
         startAction = {
             AgentBadge(
                 session.agent,
@@ -48,19 +55,19 @@ fun SessionRow(
                 statusColor = if (session.isLive) sessionStatusColor(session.status) else null,
             )
         },
+        summary = listOfNotNull(agent, session.project?.takeIf { it != title }, session.gitBranch).joinToString(" · "),
+        // Right column: relative time over the small origin / waiting tags, so a row stays two lines.
         endActions = {
-            Text(relativeTime(session.lastActiveAtMs), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
-        },
-        bottomAction = if (session.waitingFor != null || session.managed || session.isAttached) {
-            {
-                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    session.waitingFor?.let { StatusPill(waitingLabel(it), dev.warn) }
-                    if (session.isAttached) StatusPill(io.github.tianli0.switchtether.ui.common.attachedLabel(session), COUITheme.colorScheme.primary)
-                    if (session.managed) StatusPill(stringResource(R.string.session_managed_chip), COUITheme.colorScheme.primary)
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(relativeTime(session.lastActiveAtMs), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                val tag: Pair<String, androidx.compose.ui.graphics.Color>? = when {
+                    session.waitingFor != null -> waitingLabel(session.waitingFor!!) to dev.warn
+                    session.isAttached -> attachedLabel(session) to COUITheme.colorScheme.primary
+                    session.managed -> stringResource(R.string.session_managed_chip) to COUITheme.colorScheme.primary
+                    else -> null
                 }
+                tag?.let { (text, color) -> StatusPill(text, color) }
             }
-        } else {
-            null
         },
         insideMargin = if (compact) androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp) else io.github.suqi8.coui.kmp.basic.BasicComponentDefaults.InsideMargin,
         cardListPosition = position,

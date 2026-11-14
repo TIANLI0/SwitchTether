@@ -106,4 +106,6 @@
     <string name="attached_badge">Attached · %1$s</string>
     <string name="client_terminal">Terminal</string>
     <string name="open_terminal">Open terminal</string>
+    <string name="session_unnamed">Untitled session</string>
+    <string name="session_info_id">Session ID</string>
 </resources>
