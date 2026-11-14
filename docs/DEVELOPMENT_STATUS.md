@@ -44,14 +44,19 @@ in docs/research), **UNTESTED**, **TODO**.
 
 ## Android (`android/`)
 
-| Item | Status |
-|---|---|
-| Gradle project, version catalog, pinned wrapper, coui17 vendored at a51f957 (hidden-API bypass patched out) | DONE |
-| core:remote (protocol models, pairing link, pinned TLS 1.3 mTLS, events, commands) | DONE (38 JVM tests incl. real TLS) |
-| core:security (Keystore identity + step-up keys, BiometricPrompt) | DONE (device-only parts need an emulator/device) |
-| Screens: onboarding/pairing, home, sessions + native agent renderer, new managed session, management, settings | DONE (assembleDebug) |
-| Robolectric UI tests, emulator E2E | IN PROGRESS |
-| Terminal renderer, files/Git UI, notifications/foreground service | TODO (Phase B) |
+| Item | Status | Evidence |
+|---|---|---|
+| Project, pinned toolchain, coui17 vendored at a51f957 (hidden-API bypass patched out) | DONE | builds offline |
+| Pairing (QR / link / deep link), Keystore mTLS identity, pinning | DONE | 49 core:remote tests incl. real TLS; emulator pairing |
+| Home, Sessions, native agent renderer, managed sessions + approvals | DONE | emulator E2E (approvals created files on the PC) |
+| Manage: providers (secretFields, credential update), usage, quota, MCP/skills/prompts | PARTIAL | real backend data displayed; switch/test/credential and toggles not exercised on device |
+| coui17 design pass, blurred BottomFloatingNavigationBar | DONE | screenshots light/dark |
+| Terminal (renderer, keys, step-up) | DONE | emulator: PowerShell `echo hi` |
+| Files & Git (editor, conflict screen, upload/download) | PARTIAL | conflict + keep-copy verified on emulator; upload/download/rename/delete/merge not exercised |
+| Background service + notifications (channels, rules, quiet hours, lock-screen redaction) | DONE | emulator: approval notification while backgrounded |
+| Unit / Robolectric tests | DONE | 73 tests, 0 failures (re-run by lead) |
+| Debug APK | DONE | `android/app/build/outputs/apk/debug/app-debug.apk` |
+| Release APK signing | TODO | needs a release keystore (secrets) |
 
 ## Release engineering
 
