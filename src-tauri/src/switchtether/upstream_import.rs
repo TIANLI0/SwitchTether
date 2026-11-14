@@ -307,6 +307,40 @@ mod tests {
         assert!(!dst.join(DB_FILE).exists());
     }
 
+    /// Opt-in check against a real CC Switch data directory (a COPY):
+    /// `SWITCHTETHER_IMPORT_REAL_SOURCE=<home containing .cc-switch> cargo test --lib real_data_import -- --ignored --nocapture`
+    /// The source is only read. Runs the import into a fresh test home, then
+    /// opens the result with SwitchTether's own database layer.
+    #[test]
+    #[ignore]
+    #[serial_test::serial]
+    fn real_data_import() {
+        let Some(src_home) = std::env::var_os("SWITCHTETHER_IMPORT_REAL_SOURCE") else {
+            return;
+        };
+        let src = std::path::PathBuf::from(src_home).join(".cc-switch");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_SWITCH_TEST_HOME", tmp.path());
+        std::env::set_var("SWITCHTETHER_TEST_APP_DIR", "1");
+        let target = crate::config::get_app_home_dir();
+        let r = run_import(&src, &target, crate::database::SCHEMA_VERSION as i64);
+        println!("receipt: {r:?}");
+        assert_eq!(r.outcome, ImportOutcome::Imported);
+
+        let db = crate::database::Database::init().expect("SwitchTether opens imported db");
+        for app in ["claude", "claude-desktop", "codex", "gemini"] {
+            let p = db.get_all_providers(app).unwrap();
+            println!("providers[{app}] = {} {:?}", p.len(), p.values().map(|x| x.name.clone()).collect::<Vec<_>>());
+        }
+        println!("mcp servers = {}", db.get_all_mcp_servers().unwrap().len());
+        println!("skills = {}", db.get_all_installed_skills().unwrap().len());
+        let s = db.get_usage_summary(None, None, None, None, None).unwrap();
+        println!("usage summary = {}", serde_json::to_string(&s).unwrap());
+        assert!(target.join("settings.json").is_file());
+        std::env::remove_var("CC_SWITCH_TEST_HOME");
+        std::env::remove_var("SWITCHTETHER_TEST_APP_DIR");
+    }
+
     #[cfg(unix)]
     #[test]
     fn skips_symlinks_in_skills() {
