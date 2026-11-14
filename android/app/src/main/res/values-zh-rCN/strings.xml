@@ -320,7 +320,7 @@
     <string name="usage_success_n">成功 %1$s</string>
     <string name="usage_trend_hourly">按小时</string>
     <string name="usage_trend_daily">按天</string>
-    <string name="usage_tz_note">日期与小时按本机时区划分；电脑端按电脑的时区划分。</string>
+    <string name="usage_tz_note">日期与小时按电脑的时区划分，与电脑端一致。</string>
     <string name="usage_unknown_provider">未知供应商</string>
     <string name="usage_session_provider">%1$s · 会话日志</string>
     <string name="usage_session_account_provider">%1$s · 账号（OAuth）</string>
@@ -344,4 +344,24 @@
     <string name="settings_language">语言</string>
     <string name="settings_language_summary">默认跟随系统；可为本应用单独选择语言</string>
     <string name="conn_relay_key_invalid">中转密钥无效：请重新配对，或在电脑上更新中转设置</string>
+    <string name="usage_logs">请求日志</string>
+    <string name="usage_logs_empty">这个时间段没有请求</string>
+    <string name="usage_logs_more">加载更多（%1$d / %2$d）</string>
+    <string name="usage_log_tokens">%1$s Token</string>
+    <string name="usage_log_detail">请求详情</string>
+    <string name="usage_log_time">时间</string>
+    <string name="usage_log_app">应用</string>
+    <string name="usage_log_provider">供应商</string>
+    <string name="usage_log_model">模型</string>
+    <string name="usage_log_status">状态</string>
+    <string name="usage_log_tokens_detail">Token</string>
+    <string name="usage_log_token_split">输入 %1$s · 输出 %2$s · 缓存读取 %3$s · 缓存写入 %4$s</string>
+    <string name="usage_log_cost">费用</string>
+    <string name="usage_log_timing">耗时</string>
+    <string name="usage_log_first_token">首字 %1$s</string>
+    <string name="usage_log_latency">总计 %1$s</string>
+    <string name="usage_log_streaming">流式</string>
+    <string name="usage_log_source">来源</string>
+    <string name="usage_log_id">请求 ID</string>
+    <string name="usage_last_sync">会话日志同步于 %1$s（电脑时间）</string>
 </resources>

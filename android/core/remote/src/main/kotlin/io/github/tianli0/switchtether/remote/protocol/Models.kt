@@ -151,6 +151,9 @@ data class StatusView(
     val epoch: String = "",
     val headSeq: Long = 0,
     val networkMode: String? = null,
+    /** The desktop's IANA time zone (usage "today" / buckets), null when unknown or older desktops. */
+    val timeZone: String? = null,
+    val utcOffsetMinutes: Int? = null,
     val backendAvailable: Boolean = true,
     val connections: Int = 0,
     val terminals: Int = 0,

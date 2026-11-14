@@ -335,7 +335,7 @@
     <string name="usage_success_n">success %1$s</string>
     <string name="usage_trend_hourly">By hour</string>
     <string name="usage_trend_daily">By day</string>
-    <string name="usage_tz_note">Days and hours follow this phone\'s time zone; the computer groups by its own.</string>
+    <string name="usage_tz_note">Days and hours follow the computer\'s time zone, like the desktop app.</string>
     <string name="usage_unknown_provider">Unknown provider</string>
     <string name="usage_session_provider">%1$s · session logs</string>
     <string name="usage_session_account_provider">%1$s · account (OAuth)</string>
@@ -359,4 +359,24 @@
     <string name="settings_language">Language</string>
     <string name="settings_language_summary">Follows the system; choose a different language for this app</string>
     <string name="conn_relay_key_invalid">Relay key invalid: pair again or update the relay settings on the computer</string>
+    <string name="usage_logs">Request log</string>
+    <string name="usage_logs_empty">No requests in this range</string>
+    <string name="usage_logs_more">Load more (%1$d of %2$d)</string>
+    <string name="usage_log_tokens">%1$s tokens</string>
+    <string name="usage_log_detail">Request</string>
+    <string name="usage_log_time">Time</string>
+    <string name="usage_log_app">App</string>
+    <string name="usage_log_provider">Provider</string>
+    <string name="usage_log_model">Model</string>
+    <string name="usage_log_status">Status</string>
+    <string name="usage_log_tokens_detail">Tokens</string>
+    <string name="usage_log_token_split">In %1$s · out %2$s · cache read %3$s · cache write %4$s</string>
+    <string name="usage_log_cost">Cost</string>
+    <string name="usage_log_timing">Timing</string>
+    <string name="usage_log_first_token">first token %1$s</string>
+    <string name="usage_log_latency">total %1$s</string>
+    <string name="usage_log_streaming">streaming</string>
+    <string name="usage_log_source">Source</string>
+    <string name="usage_log_id">Request ID</string>
+    <string name="usage_last_sync">Session logs synced %1$s (computer time)</string>
 </resources>

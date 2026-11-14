@@ -122,8 +122,22 @@ data class UsageState(
     val models: Loadable<List<UsageBreakdownRow>> = Loadable.Loading,
     val providers: Loadable<List<UsageBreakdownRow>> = Loadable.Loading,
     val quotas: List<Pair<String, Loadable<QuotaView>>> = emptyList(),
+    /** Request log rows loaded so far (pages appended); null = the desktop has no log API. */
+    val logs: List<io.github.tianli0.switchtether.remote.protocol.RequestLog>? = emptyList(),
+    val logsTotal: Long = 0,
+    val logsPage: Int = -1,
+    val logsLoading: Boolean = false,
+    /** Request shown in the detail sheet (refreshed from `/v1/usage/logs/{id}`). */
+    val selectedLog: io.github.tianli0.switchtether.remote.protocol.RequestLog? = null,
+    /** Last session-log scan on the computer (epoch ms), null if unknown. */
+    val lastSyncMs: Long? = null,
+    /** Apps the desktop hides (`visibleApps` false) are not offered as filters. */
+    val hiddenApps: Set<String> = emptySet(),
+    /** Zone the ranges and labels use: the desktop's (falls back to the phone's). */
+    val zone: ZoneId = ZoneId.systemDefault(),
 ) {
     val hourly: Boolean get() = isHourlyRange(fromSec, toSec)
+    val logsHaveMore: Boolean get() = logs != null && logs.size < logsTotal
 }
 
 class UsageViewModel(
@@ -152,11 +166,30 @@ class UsageViewModel(
 
     fun setMetric(m: UsageMetric) = _state.update { it.copy(metric = m) }
 
+    /** The desktop's zone from `/v1/status` (older desktops: this phone's zone). */
+    private fun desktopZone(): ZoneId {
+        val status = (conn.state.value as? io.github.tianli0.switchtether.connection.ConnectionState.Online)?.status
+        return io.github.tianli0.switchtether.remote.protocol.desktopZone(status?.timeZone, status?.utcOffsetMinutes, zone)
+    }
+
     fun load() {
+        viewModelScope.launch { loadRange() }
+        viewModelScope.launch {
+            val sync = runCatching { repo.usageLastSyncMs() }.getOrNull()
+            val visible = runCatching { repo.visibleApps() }.getOrDefault(emptyMap())
+            _state.update { it.copy(lastSyncMs = sync, hiddenApps = visible.filterValues { v -> !v }.keys) }
+        }
+    }
+
+    private suspend fun loadRange() {
         val st = _state.value
-        val (from, to) = resolveUsageRange(st.preset, nowMs(), zone)
+        val z = desktopZone()
+        // "全部" starts at the desktop's first usage day (older desktops: the epoch).
+        val first = if (st.preset == UsageRangePreset.ALL) runCatching { repo.usageFirstDateMs(st.app) }.getOrNull() else null
+        val (from, to) = resolveUsageRange(st.preset, nowMs(), z, first)
         val app = st.app
-        _state.update { it.copy(fromSec = from, toSec = to) }
+        _state.update { it.copy(fromSec = from, toSec = to, zone = z, logs = emptyList(), logsTotal = 0, logsPage = -1) }
+        loadMoreLogs()
         viewModelScope.launch { val r = loadable { repo.usageSummary(from, to, app) }; _state.update { it.copy(summary = r) } }
         viewModelScope.launch { val r = loadable { repo.usageTrend(from, to, app) }; _state.update { it.copy(trend = r) } }
         // The desktop sorts both tables by request count (descending) by default.
@@ -166,6 +199,37 @@ class UsageViewModel(
             val tools = listOf("claude", "codex")
             val quotas = tools.map { t -> t to loadable { repo.quota(t) } }
             _state.update { it.copy(quotas = quotas) }
+        }
+    }
+
+    /** Next page of the request log (20 rows); an older desktop without the API hides the section. */
+    fun loadMoreLogs() {
+        val st = _state.value
+        if (st.logs == null || st.logsLoading || (st.logsPage >= 0 && !st.logsHaveMore)) return
+        val page = st.logsPage + 1
+        val (from, to, app) = Triple(st.fromSec, st.toSec, st.app)
+        _state.update { it.copy(logsLoading = true) }
+        viewModelScope.launch {
+            val r = runCatching { repo.usageLogs(from, to, app, page) }
+            _state.update { cur ->
+                if (cur.fromSec != from || cur.app != app) return@update cur.copy(logsLoading = false) // range changed meanwhile
+                r.fold(
+                    onSuccess = { p -> cur.copy(logs = cur.logs.orEmpty() + p.data, logsTotal = p.total, logsPage = page, logsLoading = false) },
+                    onFailure = { e ->
+                        val missing = generateSequence(e) { it.cause }.any { (it as? io.github.tianli0.switchtether.remote.api.ApiException)?.httpStatus == 404 } || e is UnsupportedOperationException
+                        cur.copy(logs = if (missing) null else cur.logs, logsLoading = false)
+                    },
+                )
+            }
+        }
+    }
+
+    fun openLog(log: io.github.tianli0.switchtether.remote.protocol.RequestLog?) {
+        _state.update { it.copy(selectedLog = log) }
+        if (log == null) return
+        viewModelScope.launch {
+            val fresh = runCatching { repo.usageLog(log.requestId) }.getOrNull() ?: return@launch
+            _state.update { if (it.selectedLog?.requestId == log.requestId) it.copy(selectedLog = fresh) else it }
         }
     }
 }

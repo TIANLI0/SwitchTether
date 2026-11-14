@@ -125,7 +125,11 @@ enum class UsageRangePreset { TODAY, LAST_24H, DAYS_7, DAYS_14, DAYS_30, ALL }
  * `resolveUsageRange`: [from, to] in epoch seconds, both inclusive, computed in [zone] (the
  * desktop computes in its own local time zone; pass the same zone for identical numbers).
  */
-fun resolveUsageRange(preset: UsageRangePreset, nowMs: Long, zone: ZoneId): Pair<Long, Long> {
+/**
+ * [zone] is the desktop's zone (GET /v1/status `timeZone`), so "今天" is the computer's day.
+ * [firstDateMs]: the desktop's first usage day (`/v1/usage/first-date`) starts the "全部" range.
+ */
+fun resolveUsageRange(preset: UsageRangePreset, nowMs: Long, zone: ZoneId, firstDateMs: Long? = null): Pair<Long, Long> {
     val end = nowMs / 1000
     val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
     fun daysBack(n: Long): Long = today.minusDays(n - 1).atStartOfDay(zone).toEpochSecond()
@@ -135,7 +139,7 @@ fun resolveUsageRange(preset: UsageRangePreset, nowMs: Long, zone: ZoneId): Pair
         UsageRangePreset.DAYS_7 -> daysBack(7)
         UsageRangePreset.DAYS_14 -> daysBack(14)
         UsageRangePreset.DAYS_30 -> daysBack(30)
-        UsageRangePreset.ALL -> 0L
+        UsageRangePreset.ALL -> firstDateMs?.let { it / 1000 } ?: 0L
     }
     return start to end
 }

@@ -26,6 +26,7 @@ import io.github.tianli0.switchtether.remote.protocol.SessionSummary
 import io.github.tianli0.switchtether.remote.protocol.UsageBreakdownRow
 import io.github.tianli0.switchtether.remote.protocol.UsageSummary
 import io.github.tianli0.switchtether.remote.protocol.parseAppTypes
+import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.str
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
@@ -91,6 +92,17 @@ interface ManagementRepository {
     suspend fun usageModels(fromSec: Long, toSec: Long, app: String? = null): List<UsageBreakdownRow>
     suspend fun usageProviders(fromSec: Long, toSec: Long, app: String? = null): List<UsageBreakdownRow>
     suspend fun quota(tool: String): QuotaView
+
+    // Newer desktops (PROTOCOL.md §7.3); older ones answer 404 and the UI hides the feature.
+    suspend fun usageLogs(fromSec: Long, toSec: Long, app: String?, page: Int, pageSize: Int = 20): io.github.tianli0.switchtether.remote.protocol.RequestLogPage =
+        throw UnsupportedOperationException()
+    suspend fun usageLog(requestId: String): io.github.tianli0.switchtether.remote.protocol.RequestLog = throw UnsupportedOperationException()
+    /** First usage day (desktop-local midnight, epoch ms), null without data. */
+    suspend fun usageFirstDateMs(app: String?): Long? = null
+    /** Last completed session-log scan (epoch ms), null if none since the desktop started. */
+    suspend fun usageLastSyncMs(): Long? = null
+    /** `visibleApps` from the desktop settings: apps switched off there are hidden here too. */
+    suspend fun visibleApps(): Map<String, Boolean> = emptyMap()
     suspend fun mcpServers(): List<AppToggleItem>
     suspend fun toggleMcp(id: String, app: String, enabled: Boolean, commandId: String = newCommandId()): CommandOutcome
     suspend fun skills(): List<AppToggleItem>
@@ -200,6 +212,21 @@ class RemoteManagementRepository(private val conn: ConnectionController) : Manag
     override suspend fun usageModels(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageBreakdownRow.parseModels(it.usage("models", fromSec, toSec, app)) }
     override suspend fun usageProviders(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageBreakdownRow.parseProviders(it.usage("providers", fromSec, toSec, app)) }
     override suspend fun quota(tool: String) = conn.withApi { QuotaView.parse(it.quota(tool), tool) }
+    override suspend fun usageLogs(fromSec: Long, toSec: Long, app: String?, page: Int, pageSize: Int) =
+        conn.withApi { io.github.tianli0.switchtether.remote.protocol.RequestLogPage.parse(it.usageLogs(fromSec, toSec, app, page, pageSize)) }
+    override suspend fun usageLog(requestId: String) =
+        conn.withApi { io.github.tianli0.switchtether.remote.protocol.RequestLog.parse(it.usageLog(requestId) as kotlinx.serialization.json.JsonObject) }
+    override suspend fun usageFirstDateMs(app: String?) = conn.withApi {
+        (it.usageFirstDate(app) as? kotlinx.serialization.json.JsonObject)?.let { o -> o.long("firstDateMs") }
+    }
+    override suspend fun usageLastSyncMs() = conn.withApi {
+        (it.usageLastSync() as? kotlinx.serialization.json.JsonObject)?.let { o -> o.long("lastSyncMs") }
+    }
+    override suspend fun visibleApps() = conn.withApi {
+        ((it.settings() as? kotlinx.serialization.json.JsonObject)?.get("visibleApps") as? kotlinx.serialization.json.JsonObject)
+            ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.let { p -> p.content.toBooleanStrictOrNull()?.let { b -> k to b } } }
+            ?.toMap().orEmpty()
+    }
     override suspend fun mcpServers() = conn.withApi { AppToggleItem.parseList(it.mcpServers(), "servers") }
     override suspend fun toggleMcp(id: String, app: String, enabled: Boolean, commandId: String) = conn.command(commandId) { api, c -> api.mcpToggle(id, app, enabled, c) }
     override suspend fun skills() = conn.withApi { AppToggleItem.parseList(it.skills(), "skills") }

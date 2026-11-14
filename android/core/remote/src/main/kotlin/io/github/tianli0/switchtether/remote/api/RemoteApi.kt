@@ -260,6 +260,28 @@ class RemoteApi(
 
     suspend fun quota(tool: String): JsonElement = getJson(url("v1/usage/quota", tool))
 
+    /** `GET /v1/usage/logs` (page 0-based, pageSize ≤ 100). 404 on older desktops. */
+    suspend fun usageLogs(fromEpochSec: Long?, toEpochSec: Long?, app: String?, page: Int, pageSize: Int): JsonElement {
+        val u = url("v1/usage/logs").newBuilder().apply {
+            fromEpochSec?.let { addQueryParameter("from", it.toString()) }
+            toEpochSec?.let { addQueryParameter("to", it.toString()) }
+            app?.let { addQueryParameter("app", it) }
+            addQueryParameter("page", page.toString())
+            addQueryParameter("pageSize", pageSize.toString())
+        }.build()
+        return getJson(u)
+    }
+
+    /** `GET /v1/usage/logs/{requestId}`. */
+    suspend fun usageLog(requestId: String): JsonElement = getJson(url("v1/usage/logs", requestId))
+
+    /** `GET /v1/usage/first-date?app` → `{ firstDateMs, firstDate }`. */
+    suspend fun usageFirstDate(app: String?): JsonElement =
+        getJson(url("v1/usage/first-date").newBuilder().apply { app?.let { addQueryParameter("app", it) } }.build())
+
+    /** `GET /v1/usage/last-sync` → `{ lastSyncMs }`. */
+    suspend fun usageLastSync(): JsonElement = getJson(url("v1/usage/last-sync"))
+
     /** `GET /v1/relay` (RELAY.md §5): the desktop's relay settings incl. token and key. 404 on older desktops. */
     suspend fun relay(): RelaySettings = get("v1/relay")
 

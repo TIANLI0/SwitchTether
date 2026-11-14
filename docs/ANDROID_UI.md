@@ -519,8 +519,16 @@ same mark as the notification small icon (`ic_stat_notify`). Exports in `android
   `formatMoney…` (same symbols, ¥/₩ digit rules, 2-significant-digit fallback, grouping). Tests
   reuse the desktop's own test cases. The phone never fetches exchange rates.
 - Read from `GET /v1/settings` on connect and when the Usage page opens; the last value is kept
-  per paired computer (display preference only). Until the desktop exposes `usageDisplay` the
-  desktop default (USD) applies (desktop gap, see report).
+  per paired computer (display preference only). Older desktops without `usageDisplay`: USD.
+- Ranges and buckets use the **desktop's time zone** (`/v1/status` `timeZone`, else
+  `utcOffsetMinutes`, else the phone's zone on older desktops), so "今天" is the computer's day;
+  bucket labels come from the desktop-local `date`. "全部" starts at `/v1/usage/first-date`.
+- **请求日志**: `/v1/usage/logs` in pages of 20 ("加载更多"), rows with model · provider, time
+  (desktop clock), tokens, latency, cost (`money(·, 4)`) and a red status for failures; tapping
+  opens the detail sheet (refreshed from `/v1/usage/logs/{id}`; metadata only). Desktops without
+  the endpoint (404) hide the section.
+- "会话日志同步于 …" from `/v1/usage/last-sync`; apps with `visibleApps: false` are not offered
+  as filters.
 
 ### 13.5 LAN discovery
 `NsdDiscovery` browses `_switchtether._tcp` (TXT `v`, `fp`, `id`, `n`) only while needed, with a
@@ -570,10 +578,13 @@ Updates only (no OPPO SDK).
   demoted), 离线 (promoted only while a turn was running), session ended (final card, then the pin
   is removed). Swiping the card away is respected until the state changes.
 - Progress track (one model): one coloured segment per stage, **no points**: 运行 | 待确认 | 完成
-  when the turn asked something, else 运行 | 完成 (segments sum to 100). Running has no known
-  total → **indeterminate** bar, no tracker. Waiting: tracker at the end of 运行; done: full;
-  failed / stopped: at the last stage reached. The tracker is `ic_tracker_claude` /
-  `ic_tracker_codex`, a 24 dp square vector with the mark centred (3 dp padding).
+  when the turn asked something, else 运行 | 完成 (segments sum to 100). **Always determinate**
+  (ColorOS Fluid Cloud draws no bar for an indeterminate style): while running the tracker moves
+  inside 运行 with the step count on an asymptotic curve (15 % → < 90 % of the segment, never the end
+  before completion), inside 完成 once the turn has passed 待确认; waiting sits in the middle of
+  待确认; done is the end; failed / stopped stay where the turn was. The tracker is
+  `ic_tracker_claude` / `ic_tracker_codex`, a 24 dp square vector with the mark centred (3 dp
+  padding).
 - Step text is human, never a tool name: 运行命令 <command>, 编辑 <file>, 读取 <file>, 搜索文件,
   访问网页 <host>, 搜索网页, 子任务, 更新计划, 发送消息, else 处理中; no "第 N 步". Approvals read
   "需要你批准 · tracker.txt" (a bare path shows its file name).

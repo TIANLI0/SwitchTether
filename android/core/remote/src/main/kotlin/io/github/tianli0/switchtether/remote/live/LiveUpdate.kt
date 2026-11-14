@@ -249,18 +249,33 @@ data class LiveUpdateSpec(
     /**
      * Stage track (OPPO "进度可视化"): one coloured segment per stage — 运行 | 待确认 | 完成 when the
      * turn waited for the user, else 运行 | 完成 — summing to 100, with no points. [progressValue] is
-     * the end of the last stage reached; it is only meaningful when [progress] is not INDETERMINATE.
+     * the tracker position inside the current stage (always determinate).
      */
     val progressValue: Int = 0,
     val segments: List<Int> = emptyList(),
     val tone: Tone = Tone.NORMAL,
 ) {
-    /** INDETERMINATE: running with no known total (no tracker position). STAGE: at a stage boundary. */
-    enum class Progress { INDETERMINATE, STAGE, FULL, ERROR, NONE }
+    /**
+     * Never indeterminate: ColorOS Fluid Cloud renders no bar for an indeterminate ProgressStyle.
+     * STAGE: tracker inside the current stage; FULL: done; ERROR: stopped where the turn was.
+     */
+    enum class Progress { STAGE, FULL, ERROR, NONE }
     enum class Tone { NORMAL, WARNING, ERROR }
 }
 
 object LiveUpdateRenderer {
+    /**
+     * Running: inside 运行 (or inside 完成 once the turn has passed 待确认), from 15 % of the segment,
+     * approaching but never reaching 90 % as steps accumulate.
+     */
+    internal fun runningPosition(s: PinnedSessionState, segments: List<Int>): Int {
+        val resumed = s.waitedThisTurn && segments.size == 3
+        val start = if (resumed) segments[0] + segments[1] else 0
+        val len = if (resumed) segments[2] else segments[0]
+        val f = 0.15 + 0.75 * (1 - Math.pow(0.8, s.steps.toDouble()))
+        return start + (len * f).toInt().coerceIn(1, len - 1)
+    }
+
     /** A request title for the one-line card: a bare path → its file name; long text ellipsized. */
     fun shortSubject(title: String): String {
         val t = title.trim()
@@ -324,9 +339,8 @@ object LiveUpdateRenderer {
             chip = chip,
             chronometerBaseMs = if (s.phase == LivePhase.RUNNING && s.turnStartedMs > 0) s.turnStartedMs else null,
             progress = when (s.phase) {
-                LivePhase.RUNNING -> LiveUpdateSpec.Progress.INDETERMINATE
-                LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> LiveUpdateSpec.Progress.STAGE
-                LivePhase.OFFLINE -> if (offlineWhileWaiting) LiveUpdateSpec.Progress.STAGE else LiveUpdateSpec.Progress.INDETERMINATE
+                // Always determinate: ColorOS Fluid Cloud draws no bar for an indeterminate ProgressStyle.
+                LivePhase.RUNNING, LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT, LivePhase.OFFLINE -> LiveUpdateSpec.Progress.STAGE
                 LivePhase.DONE -> LiveUpdateSpec.Progress.FULL
                 LivePhase.FAILED, LivePhase.INTERRUPTED -> LiveUpdateSpec.Progress.ERROR
                 LivePhase.ENDED -> LiveUpdateSpec.Progress.NONE
@@ -336,13 +350,15 @@ object LiveUpdateRenderer {
             requestId = s.pending?.requestId,
             publicText = t.publicText() + " · " + chip,
             alert = waiting && previousPhase != s.phase,
-            // One model: stage index → the end of the last finished stage. 运行 done = first boundary.
+            // One model: the tracker sits INSIDE the current stage's segment. While running it advances
+            // with the step count on an asymptotic curve, so it never reaches the stage end before the
+            // turn really finishes; waiting sits in the middle of 待确认; done is the end.
             progressValue = when (s.phase) {
-                LivePhase.RUNNING -> 0 // indeterminate: no position
-                LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> segments[0]
-                LivePhase.OFFLINE -> if (offlineWhileWaiting) segments[0] else 0
+                LivePhase.RUNNING -> runningPosition(s, segments)
+                LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> segments[0] + segments[1] / 2
+                LivePhase.OFFLINE -> if (offlineWhileWaiting) segments[0] + segments[1] / 2 else runningPosition(s, segments)
                 LivePhase.DONE, LivePhase.ENDED -> 100
-                LivePhase.FAILED, LivePhase.INTERRUPTED -> if (staged) segments[0] + segments[1] else segments[0]
+                LivePhase.FAILED, LivePhase.INTERRUPTED -> runningPosition(s, segments)
             },
             segments = segments,
             tone = when (s.phase) {

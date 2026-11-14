@@ -92,16 +92,10 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
         }
         // Milestone track: 开始 → 运行 → (待确认) → 完成, agent mark as the tracker.
         // Stage track: one coloured segment per stage (sum = 100), no points (a point in the gap
-        // between segments reads as a stray block). Running with no known total is indeterminate:
-        // no tracker, no position. Otherwise the tracker sits at the end of the last stage reached.
-        when (spec.progress) {
-            LiveUpdateSpec.Progress.NONE -> Unit
-            LiveUpdateSpec.Progress.INDETERMINATE -> b.setStyle(
-                NotificationCompat.ProgressStyle()
-                    .setProgressSegments(listOf(NotificationCompat.ProgressStyle.Segment(100).setColor(accent)))
-                    .setProgressIndeterminate(true),
-            )
-            else -> b.setStyle(
+        // between segments reads as a stray block). Always determinate with the tracker at the
+        // current position: ColorOS Fluid Cloud shows no bar at all for an indeterminate style.
+        if (spec.progress != LiveUpdateSpec.Progress.NONE) {
+            b.setStyle(
                 NotificationCompat.ProgressStyle()
                     .setStyledByProgress(true)
                     .setProgressSegments(spec.segments.map { NotificationCompat.ProgressStyle.Segment(it).setColor(accent) })

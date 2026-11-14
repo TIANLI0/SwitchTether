@@ -41,7 +41,7 @@ class LiveUpdateTest {
         assertEquals("Running npm test", spec.text) // human label, no "step N"
         assertEquals("Busy", spec.chip)
         assertEquals(1_000L, spec.chronometerBaseMs)
-        assertEquals(LiveUpdateSpec.Progress.INDETERMINATE, spec.progress)
+        assertEquals(LiveUpdateSpec.Progress.STAGE, spec.progress) // never indeterminate (Fluid Cloud)
         assertTrue(spec.promoted)
         assertEquals(listOf(LiveAction.OPEN, LiveAction.UNPIN), spec.actions)
         assertFalse(spec.alert)
@@ -145,14 +145,28 @@ class LiveUpdateTest {
         val waiting = LiveReducer.onEvent(running, ev("approval_request", """{"requestId":"r1","title":"Run: ls","resolved":false}"""), 2_000)
         val resumed = LiveReducer.onEvent(waiting, ev("approval_request", """{"requestId":"r1","title":"Run: ls","resolved":true}"""), 3_000)
         val done = LiveReducer.onUpsert(resumed, summary.copy(status = "idle"), 4_000)
-        // Running (before or after a question): indeterminate, no position.
-        assertEquals(LiveUpdateSpec.Progress.INDETERMINATE, render(running, 1_000).progress)
-        assertEquals(LiveUpdateSpec.Progress.INDETERMINATE, render(resumed, 3_000).progress)
-        // Waiting: 运行 | 待确认 | 完成, the tracker at the end of 运行.
+        // Never indeterminate (Fluid Cloud draws no bar for it): running sits inside 运行 and
+        // advances with steps without reaching the end; after a question it moves inside 完成.
+        val r0 = render(running, 1_000)
+        assertEquals(LiveUpdateSpec.Progress.STAGE, r0.progress)
+        assertTrue(r0.progressValue in 1 until 50)
+        var st = running
+        var prev = r0.progressValue
+        repeat(30) { k ->
+            st = LiveReducer.onEvent(st, ev("tool_call", """{"status":"running","name":"Bash","input":{"command":"x"}}""", id = "t$k"), 1_100L + k)
+            val v = render(st, 1_100L + k).progressValue
+            assertTrue("monotonic $prev -> $v", v >= prev)
+            assertTrue("never reaches the stage end: $v", v < 50)
+            prev = v
+        }
+        val after = render(resumed, 3_000)
+        assertEquals(LiveUpdateSpec.Progress.STAGE, after.progress)
+        assertTrue(after.progressValue in 67 until 100)
+        // Waiting: 运行 | 待确认 | 完成, the tracker in the middle of 待确认.
         val w = render(waiting, 2_000)
         assertEquals(LiveUpdateSpec.Progress.STAGE, w.progress)
         assertEquals(listOf(33, 33, 34), w.segments)
-        assertEquals(33, w.progressValue)
+        assertEquals(49, w.progressValue)
         // Done: full; a turn without questions has two stages.
         assertEquals(100, render(done, 4_000).progressValue)
         val plain = render(LiveReducer.onUpsert(running, summary.copy(status = "idle"), 5_000), 5_000)

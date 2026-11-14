@@ -259,7 +259,8 @@ fun UsageScreen(onBack: () -> Unit) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
             modifier = Modifier.padding(vertical = 4.dp).testTag("usage-range"),
         )
-        val apps = listOf<String?>(null) + DEFAULT_APPS
+        // Apps switched off on the desktop (`visibleApps`) are not offered here either.
+        val apps = listOf<String?>(null) + DEFAULT_APPS.filter { it !in state.hiddenApps }
         io.github.suqi8.coui.kmp.basic.ChipTabGroup(
             tabs = apps.map { io.github.suqi8.coui.kmp.basic.ChipTabData(if (it == null) stringResource(R.string.usage_all_apps) else Formatters.agentLabel(it).let { l -> if (it == "claude") "Claude" else l }) },
             selectedIndex = apps.indexOf(state.app).coerceAtLeast(0),
@@ -267,8 +268,9 @@ fun UsageScreen(onBack: () -> Unit) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
             modifier = Modifier.padding(vertical = 2.dp),
         )
-        UsageContent(state, vm::load, vm::setMetric)
+        UsageContent(state, vm::load, vm::setMetric, onMoreLogs = vm::loadMoreLogs, onOpenLog = vm::openLog)
     }
+    RequestLogSheet(state.selectedLog, state.zone, onDismiss = { vm.openLog(null) })
 }
 
 @Composable
@@ -284,7 +286,13 @@ private fun presetLabel(p: io.github.tianli0.switchtether.remote.usage.UsageRang
 )
 
 @Composable
-fun UsageContent(state: UsageState, onRetry: () -> Unit, onMetric: (UsageMetric) -> Unit = {}) {
+fun UsageContent(
+    state: UsageState,
+    onRetry: () -> Unit,
+    onMetric: (UsageMetric) -> Unit = {},
+    onMoreLogs: () -> Unit = {},
+    onOpenLog: (io.github.tianli0.switchtether.remote.protocol.RequestLog) -> Unit = {},
+) {
     // One honest page-level error instead of repeating it on every card (e.g. 503 from CC Switch).
     (state.summary as? Loadable.Failed)?.let { failed ->
         LoadableContent(failed, onRetry = onRetry) {}
@@ -292,6 +300,7 @@ fun UsageContent(state: UsageState, onRetry: () -> Unit, onMetric: (UsageMetric)
     }
     LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
         item { PageCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
+        item { SyncNote(state.lastSyncMs, state.zone) }
         item { SectionHeader(stringResource(if (state.hourly) R.string.usage_trend_hourly else R.string.usage_trend_daily)) }
         item {
             PageCard {
@@ -305,6 +314,39 @@ fun UsageContent(state: UsageState, onRetry: () -> Unit, onMetric: (UsageMetric)
         item { SectionHeader(stringResource(R.string.usage_quota)) }
         items(state.quotas, key = { it.first }) { (_, q) ->
             PageCard { SmallLoadable(q, onRetry) { QuotaCard(it) } }
+        }
+        // Request log (newer desktops; an older one without the API hides the section).
+        state.logs?.let { logs ->
+            item { SectionHeader(stringResource(R.string.usage_logs)) }
+            if (logs.isEmpty()) {
+                item {
+                    PageCard {
+                        Text(
+                            stringResource(if (state.logsLoading || state.logsPage < 0) R.string.state_loading else R.string.usage_logs_empty),
+                            style = COUITheme.textStyles.body2,
+                            color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                }
+            } else {
+                item(key = "logs") {
+                    io.github.tianli0.switchtether.ui.common.GroupCard {
+                        logs.forEachIndexed { i, l ->
+                            RequestLogRow(l, state.zone, io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, logs.size), onClick = { onOpenLog(l) })
+                        }
+                    }
+                }
+                if (state.logsHaveMore) {
+                    item {
+                        TextButton(
+                            text = if (state.logsLoading) stringResource(R.string.state_loading) else stringResource(R.string.usage_logs_more, logs.size, state.logsTotal),
+                            onClick = onMoreLogs,
+                            modifier = Modifier.fillMaxWidth().testTag("logs-more"),
+                        )
+                    }
+                }
+            }
         }
         item {
             Text(stringResource(R.string.usage_tz_note), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
