@@ -182,8 +182,8 @@ the accent is the brand blue `#1F6BFF` (dark: `#4A86FF`) fed into `lightColorSch
 
 Screenshots (emulator API 36, captured over adb only): `android/docs/screenshots/light/*.png` and
 `android/docs/screenshots/dark/*.png` — 01-home, 02-sessions, 03-session-managed,
-- Observed external session screenshot omitted from the repository (it showed a private live transcript).
-10-settings.
+05-new-session, 06-manage, 07-providers-503, 08-usage-503, 09-workspace, 10-settings.
+(04-session-observed was captured but is not committed: it showed a private live transcript.)
 
 Launcher icon: adaptive icon, `#1F6BFF` background + vector foreground converted from
 `src/assets/icons/switchtether-logo.svg` (monochrome layer for themed icons).
