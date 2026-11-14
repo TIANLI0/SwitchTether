@@ -1,0 +1,73 @@
+# SwitchTether Android — running dev notes
+
+Living log so work survives context limits. Newest entries at the bottom of each section.
+
+## Toolchain (decided)
+- Gradle wrapper 9.8.2 from services.gradle.org, `distributionSha256Sum=21bd5da2…9607` (official
+  `.sha256`); `gradle-wrapper.jar` sha256 `3b8a2577…8e98` == official `gradle-9.8.2-wrapper.jar.sha256`.
+  Generated in scratch with the local 9.8.2 dist (`gradle wrapper …`), files copied here.
+- AGP 9.3.1, Kotlin 2.4.10, Compose MP 1.11.1 (androidx.compose 1.11.2) — same as coui17 @ a51f957.
+- JDK 21 (`JAVA_HOME="C:\Program Files\Java\jdk-21"` per command). compileSdk 37.0, minSdk 29, targetSdk 36.
+- `local.properties` has `sdk.dir=D:/AndroidSDK` (gitignored).
+- Build: `JAVA_HOME=... ./gradlew :app:assembleDebug testDebugUnitTest :core:remote:test`
+
+## Modules
+- `:core:remote` pure JVM: protocol models, pairing link parser, pinned mTLS OkHttp factory, RemoteApi,
+  event-stream reducer/client, agent-event log reducer, command outcome helper, step-up payload.
+- `:core:security` Android lib: Keystore identity (TLS client cert) + step-up key + BiometricPrompt.
+- `:core:ui` Android lib: theme over COUITheme, markdown/diff/code renderers, charts, state views.
+- `:app`: screens, ViewModels, ConnectionManager, DataStore, DI container (manual).
+- `third_party/coui17/*`: vendored KMP (android-only) modules, see UPSTREAM.md / PATCHES.md.
+
+## Decisions
+- coui17 vendored at a51f957 via `third_party/coui17/sync_coui17.py` (git archive, LF forced with
+  `-c core.autocrlf=false -c core.eol=lf`; patches re-applied from `patches/`).
+- Patch 0001 removes `org.lsposed.hiddenapibypass` (AOSP API 36 `View.setBackdropRenderEffect`
+  path). Non-OPPO devices fall back to the Compose blur engine (same as API < 36).
+- App theme provides `LocalPlatformAppBarMaterialEnabled/LocalPlatformBottomBarMaterialEnabled = false`
+  so the Oplus private-framework reflection paths are not exercised.
+- No navigation library: a small typed back stack held in a ViewModel (tabs + detail stack).
+- Manual DI (`AppContainer`) instead of Hilt to keep the build small.
+- Identity key authorizes DIGEST_NONE in addition to SHA-256: Conscrypt's TLS client-auth upcall
+  signs the pre-hashed handshake digest with `NONEwithECDSA`; without it mTLS fails.
+- HostnameVerifier accepts any host: exact leaf-cert pin is the trust anchor (IPs / MagicDNS not in cert).
+- `retryOnConnectionFailure(false)`: OkHttp must never silently replay a side-effecting request.
+- Verification code is computed locally too (same formula as desktop `util::verification_code`) and
+  compared with the server's; mismatch is shown as a warning.
+
+## Server facts (from lead, 2026-11-14)
+- Dev server: `cargo build -p switchtether-core --example dev_server` then
+  `target\debug\examples\dev_server.exe --port 47615 --data-dir <scratch>`; prints a pairing link with
+  `h=10.0.2.2,...` (emulator → host loopback). `pair` + Enter on stdin prints a new link.
+- CC Switch endpoints return 503 `backend_unavailable` on the headless dev server (expected).
+- `GET /v1/sessions/{id}/events?limit=` → `{events:[…], hasMore, lastSeq}`.
+- Approval/question events are UPDATED IN PLACE (`data.resolved=true, decision, by`); no separate
+  approval_resolved event. Rolling status event has id `status:current`.
+- Hosts in the link may be bracketed IPv6 (`[fd62:…]`), `n` percent-encoded.
+- Command record fields are `createdAtMs/completedAtMs` (doc says createdAt) — both accepted.
+
+## Status log
+- [x] Wrapper + catalog + vendored coui17 compile (`:coui-preference:compileAndroidMain` OK).
+- [x] core:remote + tests (38 JVM tests incl. real TLS1.3 mTLS)
+- [x] core:security
+- [x] core:ui
+- [x] app screens (+ New managed session flow) — assembleDebug OK
+- [x] Robolectric UI tests (app: 19 tests; total unit tests 61 green)
+- [x] emulator E2E against dev server (AVD st_e2e_api36 in scratch ANDROID_AVD_HOME, port 5580; PIN 1234)
+  - pairing via pasted link (7 host candidates incl. bracketed IPv6) -> mTLS with Keystore key OK, code 905119 matched desktop
+  - Home: live sessions, usage 503 shown honestly; Sessions list; History empty (dev server has no CC Switch index)
+  - session detail of real VS Code session: BLOCKED caps shown, transcript rendered
+  - step-up (Settings): BiometricPrompt device-credential PIN -> grant config_write OK
+  - New managed session (haiku) -> live events, send message, approval Allow from phone -> file written (approved.txt, second.txt)
+  - fixed during E2E: NetworkOnMainThread (body read on main), stale keep-alive (pool 20s < server 30s; GET-only retry client),
+    noisy system rows hidden, approval confirm dialog, glass blur disabled (LocalBlurEnabled=false, translucent on emulator)
+- [x] coui17 adoption pass: Scaffold+collapsing TopAppBar, group cards+cardListPosition, BottomFloatingNavigationBar, TabRowWithContour, ChipTabGroup, PullToRefresh, EmptyState, FAB, Switch/RadioButtonPreference, WindowDialog; brand #1F6BFF; adaptive logo icon; blur off; screenshots in docs/screenshots
+
+## Emulator / E2E how-to (2026-11-14)
+- AVD `st_e2e_api36` lives in the scratch `ANDROID_AVD_HOME` (…/scratchpad/avd); start with
+  `emulator -avd st_e2e_api36 -gpu host -port 5580` (with `-gpu swiftshader_indirect` RenderEffect blur
+  is NOT rendered, so the glass capsule only looks translucent). Lock-screen PIN 1234 (needed for step-up).
+- Drive only via adb: `uiautomator dump`, `input tap/text`, `exec-out screencap -p`
+  (scratch helpers tools/ui.py, tools/capture.sh). Pairing links also open via
+  `adb shell am start -a android.intent.action.VIEW -d '<switchtether://pair?...>'`.
+- Screenshots: android/docs/screenshots/{light,dark}/01..10.

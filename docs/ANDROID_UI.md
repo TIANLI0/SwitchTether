@@ -152,6 +152,42 @@ fetched). Links require a confirmation dialog before opening. Code: lightweight 
   connection changes, headings, chart summary for TalkBack, font scaling respected (sp).
 - Strings in English and Simplified Chinese (`values`, `values-zh-rCN`).
 
+## 7a. coui17 / ColorOS 17 adoption (per screen)
+
+Page structure follows the coui17 gallery (`example/shared` @ a51f957): coui `Scaffold` on
+`AppBarBlurOverlayDefaults.containerColor()` (the ColorOS page colour), a large collapsing
+`TopAppBar` + `COUIScrollBehavior` (nested scroll + `overScrollVertical`) on top-level pages,
+`SmallTopAppBar` on detail pages, and `LazyColumn`s of `SmallTitle` + group `Card`s
+(`CardDefaults.GroupCornerRadius/GroupWeight`) whose rows carry `cardListPositionOf(...)`.
+Glass blur is used only for the floating navigation capsule: the shell records page content into a
+`rememberLayerBackdrop` layer (sibling of the bar, as in the gallery) and provides `LocalBackdrop` +
+`LocalBlurEnabled = true` to the bar only; pages/dialogs get `LocalBlurEnabled = false` and keep opaque
+COUI fills. Verified blurred on the API 36 emulator with `-gpu host` (with `swiftshader` the
+RenderEffect blur is not rendered and the capsule looks merely translucent);
+the accent is the brand blue `#1F6BFF` (dark: `#4A86FF`) fed into `lightColorScheme/darkColorScheme`.
+
+| Screen | coui17 components |
+| :--- | :--- |
+| Shell | `BottomFloatingNavigationBar` (floating glass capsule over a `LayerBackdrop` of the page, `expansion` "+" melt-ball on the Sessions tab → New session, hidden with animation on detail pages) + `BottomFloatingNavigationBarItem`; `NavigationRail` + `NavigationRailItem` (≥ 600 dp); `COUIIcons` |
+| Home | `Scaffold`, `TopAppBar` (large, subtitle = desktop), `Card` groups, `BasicComponent` (connection, session rows, states), `ArrowPreference` + icons (quick links), `SmallTitle`, `TextButton` |
+| Sessions | `TopAppBar`, `TextField`, `TabRowWithContour` (Live/History/All), `ChipTabGroup` (agents), `PullToRefresh`, `BasicComponent` rows in group cards, `EmptyState` (New session = capsule expansion) |
+| Session detail | `SmallTopAppBar`, `IconButton`s, `Card` surfaces for tool/approval/diff cards, `Button`/`TextButton`, `Checkbox`/`RadioButton` (questions), `LinearProgressIndicator`, `WindowDialog` (approval confirm), `WindowAlertDialog` (commands, links, interrupt), `TextField` composer — the timeline/code/diff/tool output stay monospace and dense |
+| New session | `SmallTopAppBar`, `TabRow`, `RadioButtonPreference` (permission mode), `TextField`, `Button`, group cards, `WindowAlertDialog` |
+| Manage | `TopAppBar`, `ArrowPreference` with icons in group cards |
+| Providers / Usage | `SmallTopAppBar`, `TabRow`, group cards, `TextButton`, `LinearProgressIndicator`, page-level error state |
+| MCP / Skills / Prompts | `SwitchPreference` / `RadioButtonPreference` rows with `cardListPosition`, `WindowAlertDialog` confirms |
+| Settings | `TopAppBar`, `ArrowPreference`, `RadioButtonPreference` (theme), `SwitchPreference`, `KeyValue` rows in group cards |
+| Workspace | `TopAppBar`, `EmptyState` in a group card |
+| Onboarding | coui `Card`, `Button`, `TextButton`, `TextField`, `InfiniteProgressIndicator` |
+
+Screenshots (emulator API 36, captured over adb only): `android/docs/screenshots/light/*.png` and
+`android/docs/screenshots/dark/*.png` — 01-home, 02-sessions, 03-session-managed,
+- Observed external session screenshot omitted from the repository (it showed a private live transcript).
+10-settings.
+
+Launcher icon: adaptive icon, `#1F6BFF` background + vector foreground converted from
+`src/assets/icons/switchtether-logo.svg` (monochrome layer for themed icons).
+
 ## 8. coui17 integration
 
 Vendored source at a pinned SHA (no SNAPSHOT/JitPack), Android-only KMP modules with our build

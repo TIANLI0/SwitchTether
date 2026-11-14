@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">SwitchTether</string>
+
+    <!-- Generic actions / states -->
+    <string name="action_back">Back</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_ok">OK</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_load_more">Load more</string>
+    <string name="state_loading">Loading…</string>
+
+    <!-- Tabs -->
+    <string name="tab_home">Home</string>
+    <string name="tab_sessions">Sessions</string>
+    <string name="tab_workspace">Workspace</string>
+    <string name="tab_manage">Manage</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Errors -->
+    <string name="error_offline">Not connected to the desktop</string>
+    <string name="error_backend_unavailable">CC Switch is not available</string>
+    <string name="error_backend_unavailable_detail">The desktop is reachable, but its CC Switch backend is not ready (503 backend_unavailable). Open CC Switch on the computer and try again.</string>
+    <string name="error_not_found">Not found</string>
+    <string name="error_forbidden">Not allowed</string>
+    <string name="error_rate_limited">Too many requests — try again in a moment</string>
+    <string name="error_server">The desktop reported an error</string>
+    <string name="error_network">Network error</string>
+
+    <!-- Onboarding / pairing -->
+    <string name="onboarding_subtitle">Pair with one computer running SwitchTether to monitor and control your coding agents.</string>
+    <string name="onboarding_security_title">How this connection is protected</string>
+    <string name="onboarding_security_tls">TLS 1.3 only. The QR code carries the computer\'s certificate fingerprint, so the app talks to that computer and nothing else.</string>
+    <string name="onboarding_security_keys">This phone gets its own key in the Android Keystore. It never leaves the device and is deleted when you unpair.</string>
+    <string name="onboarding_security_stepup">Risky actions (terminal, file writes, config changes) need a biometric or screen-lock confirmation every time.</string>
+    <string name="onboarding_security_local">The connection is direct over your LAN or Tailscale. No cloud relay is involved.</string>
+    <string name="onboarding_no_lock_screen">This phone has no secure lock screen. You can pair, but terminal and file writes will be unavailable until you set one and pair again.</string>
+    <string name="onboarding_scan">Scan pairing QR code</string>
+    <string name="onboarding_paste_label">Or paste the pairing link shown on the desktop</string>
+    <string name="onboarding_use_link">Use this link</string>
+    <string name="onboarding_revoked">%1$s no longer accepts this phone (%2$s). Pair again to reconnect.</string>
+    <string name="scan_title">Scan QR code</string>
+    <string name="scan_hint">Desktop: Settings → Remote → Pair phone</string>
+    <string name="scan_permission_rationale">The camera is used only to read the pairing QR code. Nothing is recorded.</string>
+    <string name="scan_permission_denied">Camera permission was denied. You can paste the pairing link instead.</string>
+    <string name="scan_grant">Allow camera</string>
+    <string name="confirm_title">Pair with this computer?</string>
+    <string name="confirm_subtitle">Check that the name matches the computer showing the QR code.</string>
+    <string name="confirm_fingerprint_hint">The certificate fingerprint is pinned: if anything else answers on these addresses, pairing fails.</string>
+    <string name="confirm_pair">Pair</string>
+    <string name="field_desktop">Computer</string>
+    <string name="field_addresses">Addresses</string>
+    <string name="field_fingerprint">Certificate fingerprint (SHA-256)</string>
+    <string name="field_status">Status</string>
+    <string name="field_last_host">Last address</string>
+    <string name="field_device_id">Device id</string>
+    <string name="field_paired_at">Paired</string>
+    <string name="field_step_up">Biometric confirmation</string>
+    <string name="field_key_storage">Key storage</string>
+    <string name="field_server_version">Desktop version</string>
+    <string name="pairing_title">Pairing…</string>
+    <string name="pairing_progress">Trying %1$s</string>
+    <string name="pair_invalid_title">Not a valid pairing link</string>
+    <string name="pair_failed_title">Pairing failed</string>
+    <string name="link_not_pairing">This is not a SwitchTether pairing link.</string>
+    <string name="link_unsupported_version">This pairing link uses a newer format. Update the app.</string>
+    <string name="link_invalid">The pairing link is damaged (field \"%1$s\"). Show a new QR code on the desktop.</string>
+    <string name="pair_err_unreachable">None of the computer\'s addresses could be reached. Make sure both devices are on the same network (or Tailscale) and the desktop server is running.</string>
+    <string name="pair_err_cert_mismatch">The computer presented a different certificate than the QR code. Pairing was stopped for your safety.</string>
+    <string name="pair_err_expired">The pairing code expired or was already used. Show a new QR code on the desktop.</string>
+    <string name="pair_err_wrong_secret">The desktop rejected the pairing secret. Show a new QR code.</string>
+    <string name="pair_err_rate_limited">Too many pairing attempts. Wait a minute and try again.</string>
+    <string name="pair_err_revoked">This phone identity was revoked on the desktop.</string>
+    <string name="pair_err_desktop_old">The desktop app is too old for this version of SwitchTether. Update it.</string>
+    <string name="pair_err_app_old">This app is too old for the desktop. Update SwitchTether on the phone.</string>
+    <string name="pair_err_failed">Something went wrong while pairing.</string>
+    <string name="verify_title">Paired with %1$s</string>
+    <string name="verify_subtitle">The computer shows the same 6-digit code. Compare them before you continue.</string>
+    <string name="verify_match">Codes match</string>
+    <string name="verify_no_match">Codes differ — unpair</string>
+    <string name="verify_mismatch">The code reported by the desktop differs from the one this phone computed. Do not use this pairing.</string>
+    <string name="verify_no_stepup">Biometric confirmation is not set up for this pairing, so terminal and file writes will be unavailable.</string>
+
+    <!-- Connection -->
+    <string name="conn_online">Connected to %1$s via %2$s</string>
+    <string name="conn_connecting">Connecting to %1$s…</string>
+    <string name="conn_offline">Offline</string>
+    <string name="conn_offline_retry">Offline · retrying in %1$d s</string>
+    <string name="conn_revoked">This phone was unpaired: %1$s</string>
+    <string name="conn_desktop_too_old">The desktop (%1$s) is too old for this app.</string>
+    <string name="conn_app_too_old">The desktop (%1$s) needs a newer app version.</string>
+    <string name="conn_unpaired">Not paired</string>
+
+    <!-- Home -->
+    <string name="home_live_sessions">Live sessions</string>
+    <string name="home_waiting">Waiting for you</string>
+    <string name="home_usage">Usage</string>
+    <string name="home_no_live">No agent is running right now.</string>
+    <string name="home_recent">Recent sessions</string>
+    <string name="home_quick_links">Quick links</string>
+
+    <!-- Sessions -->
+    <string name="sessions_search">Search sessions</string>
+    <string name="sessions_live">Live</string>
+    <string name="sessions_history">History</string>
+    <string name="sessions_all">All</string>
+    <string name="sessions_all_agents">All agents</string>
+    <string name="sessions_empty">No sessions.</string>
+    <string name="sessions_empty_live">No live sessions. Start Claude Code or Codex on the computer.</string>
+    <string name="sessions_empty_history">No past sessions found.</string>
+    <string name="badge_live">LIVE</string>
+    <string name="badge_ended">ENDED</string>
+    <string name="badge_managed">MANAGED</string>
+    <string name="control_full">FULL CONTROL</string>
+    <string name="control_observe">OBSERVE</string>
+    <string name="control_history">HISTORY</string>
+    <string name="status_busy">busy</string>
+    <string name="status_idle">idle</string>
+    <string name="status_waiting">waiting</string>
+    <string name="status_completed">completed</string>
+    <string name="status_error">error</string>
+    <string name="cap_send">send</string>
+    <string name="cap_approve">approve</string>
+    <string name="cap_answer">answer</string>
+    <string name="cap_interrupt">interrupt</string>
+    <string name="session_untitled">Session</string>
+    <string name="session_send">Send</string>
+    <string name="session_interrupt">Interrupt</string>
+    <string name="session_interrupt_confirm">Ask the agent to stop the current turn?</string>
+    <string name="session_load_older">Load older events</string>
+    <string name="session_start">Start of session</string>
+    <string name="session_no_events">No events yet.</string>
+    <string name="composer_hint">Message the agent</string>
+    <string name="composer_draft_hint">Draft (kept on this phone, not sent)</string>
+    <string name="composer_offline">Offline — drafts are kept on this phone and never sent automatically.</string>
+    <string name="composer_unavailable">Sending messages to this session is not possible (%1$s). Sessions started outside SwitchTether can only be observed.</string>
+    <string name="approval_confirm_title">Answer this request?</string>
+    <string name="approval_confirm_body">Send \"%1$s\" to the agent on the computer.</string>
+    <string name="link_open_title">Open link?</string>
+    <string name="link_open">Open</string>
+
+    <!-- Renderers -->
+    <string name="render_you">You</string>
+    <string name="render_assistant">Assistant</string>
+    <string name="render_streaming">streaming</string>
+    <string name="render_reasoning">Thinking</string>
+    <string name="render_reasoning_summary">Thinking (summary)</string>
+    <string name="render_toggle">Expand or collapse</string>
+    <string name="render_images">%1$d image(s) attached (not shown)</string>
+    <string name="render_tool_result">Tool output</string>
+    <string name="render_error">Error</string>
+    <string name="render_show_all">Show all</string>
+    <string name="render_load_full">Load full output %1$s</string>
+    <string name="render_show_more_lines">Show %1$d more lines</string>
+    <string name="render_diff_truncated">Diff truncated by the desktop.</string>
+    <string name="render_plan">Plan · %1$d/%2$d done</string>
+    <string name="render_approval">Approval</string>
+    <string name="render_tool">Tool: %1$s</string>
+    <string name="render_resolved">%1$s · by %2$s</string>
+    <string name="render_control_unavailable">Answer on the computer: this control is %1$s for this session.</string>
+    <string name="render_question">Question</string>
+    <string name="render_answered">Answered</string>
+    <string name="render_submit_answer">Submit answer</string>
+    <string name="render_subagent">Sub-agent</string>
+    <string name="render_expand_sub">Show</string>
+    <string name="render_collapse_sub">Hide</string>
+    <string name="render_ui_unsupported">Component %1$s</string>
+    <string name="render_unknown_kind">Unknown event: %1$s</string>
+
+    <!-- Commands -->
+    <string name="cmd_unknown_title">%1$s: result unknown</string>
+    <string name="cmd_unknown_body">The request reached the desktop, but no answer came back. It may or may not have been carried out. It will not be repeated automatically.</string>
+    <string name="cmd_not_sent_title">%1$s: not sent</string>
+    <string name="cmd_not_sent_body">The desktop could not be reached, so nothing was done. You can try again.</string>
+    <string name="cmd_in_progress_title">%1$s: still running</string>
+    <string name="cmd_in_progress_body">The desktop is still working on this request.</string>
+    <string name="cmd_rejected_title">%1$s failed</string>
+    <string name="cmd_rejected_body">The desktop refused the request.</string>
+    <string name="cmd_blocked_title">%1$s is not available</string>
+    <string name="cmd_blocked_body">This session cannot be controlled from the phone. Sessions started outside SwitchTether can only be observed; answer on the computer.</string>
+    <string name="cmd_step_up_title">%1$s needs confirmation</string>
+    <string name="cmd_step_up_body">This action requires biometric confirmation on the phone.</string>
+    <string name="cmd_check_status">Check status</string>
+    <string name="cmd_checking">Checking…</string>
+    <string name="cmd_status_succeeded">Desktop: it was carried out.</string>
+    <string name="cmd_status_failed">Desktop: it failed. You may try again as a new request.</string>
+    <string name="cmd_status_pending">Desktop: still running.</string>
+    <string name="cmd_status_not_found">Desktop: it never arrived. Retrying is safe.</string>
+    <string name="cmd_status_unreachable">The desktop is still unreachable.</string>
+
+    <!-- Manage -->
+    <string name="manage_providers">Providers</string>
+    <string name="manage_providers_summary">Switch and test API providers per app</string>
+    <string name="manage_usage">Usage</string>
+    <string name="manage_usage_summary">Tokens, cost, trends and quota</string>
+    <string name="manage_mcp">MCP servers</string>
+    <string name="manage_skills">Skills</string>
+    <string name="manage_prompts">Prompts</string>
+    <string name="manage_write_note">Every change is confirmed first and sent with a command id, so it is never applied twice. Secrets are never shown or sent to the phone.</string>
+    <string name="provider_current">CURRENT</string>
+    <string name="provider_switch">Switch</string>
+    <string name="provider_test">Test</string>
+    <string name="provider_switch_title">Switch provider?</string>
+    <string name="provider_switch_body">Use %1$s for %2$s on the computer. Running agents pick it up on their next start.</string>
+    <string name="provider_secret_set">set (%1$s)</string>
+    <string name="provider_secret_unset">not set</string>
+    <string name="provider_empty">No providers configured for this app.</string>
+    <string name="usage_today">Today</string>
+    <string name="usage_month">This month</string>
+    <string name="usage_7d">7 days</string>
+    <string name="usage_30d">30 days</string>
+    <string name="usage_tokens">%1$s tokens</string>
+    <string name="usage_unavailable">Usage unavailable</string>
+    <string name="usage_summary">Summary</string>
+    <string name="usage_trend">Daily trend</string>
+    <string name="usage_tokens_per_day">Tokens per day</string>
+    <string name="usage_trend_a11y">Daily token usage for %1$d days.</string>
+    <string name="usage_by_model">By model</string>
+    <string name="usage_by_provider">By provider</string>
+    <string name="usage_quota">Subscription quota</string>
+    <string name="usage_cost">Cost</string>
+    <string name="usage_tokens_label">Tokens</string>
+    <string name="usage_requests">Requests</string>
+    <string name="usage_success">Success rate</string>
+    <string name="usage_no_data">No data for this period.</string>
+    <string name="quota_unavailable">UNAVAILABLE</string>
+    <string name="quota_no_reason">The desktop did not report a reason.</string>
+    <string name="toggle_enable">Enable</string>
+    <string name="toggle_disable">Disable</string>
+    <string name="toggle_confirm_body">%1$s for %2$s on the computer.</string>
+    <string name="toggle_empty">Nothing configured.</string>
+
+    <!-- Settings -->
+    <string name="settings_desktop">Paired computer</string>
+    <string name="settings_unpair">Unpair</string>
+    <string name="settings_unpair_summary">Revoke this phone on the computer and delete its keys</string>
+    <string name="settings_unpair_confirm">Unpair from %1$s? The computer revokes this phone (if reachable) and all keys on this phone are deleted.</string>
+    <string name="settings_security">Security</string>
+    <string name="settings_stepup_test">Verify biometric confirmation</string>
+    <string name="settings_stepup_summary">Runs a real step-up challenge with the computer</string>
+    <string name="settings_stepup_disabled">Not available: paired without a secure lock screen</string>
+    <string name="stepup_prompt_title">Confirm it\'s you</string>
+    <string name="stepup_prompt_subtitle">SwitchTether needs your confirmation for a sensitive action</string>
+    <string name="stepup_ok">Granted %1$s until %2$s</string>
+    <string name="stepup_failed">Failed: %1$s</string>
+    <string name="stepup_enabled">enabled</string>
+    <string name="stepup_disabled">not available</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="theme_system">Follow system</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_connection">Connection</string>
+    <string name="settings_background">Stay connected in background</string>
+    <string name="settings_background_summary">Coming in the next version. For now the app disconnects when it is not visible.</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_notifications_summary">Choose which events notify you</string>
+    <string name="notifications_phase_b">Notification delivery arrives with background connection in the next version. Your choices are saved now.</string>
+    <string name="notif_approval">Approval requested</string>
+    <string name="notif_waiting">Session waiting for input</string>
+    <string name="notif_finished">Session finished</string>
+    <string name="notif_error">Session error</string>
+    <string name="notif_connection">Connection lost</string>
+    <string name="settings_storage">Storage</string>
+    <string name="settings_clear_cache">Clear cache</string>
+    <string name="settings_clear_cache_summary">Drop cached session data and unsent drafts</string>
+    <string name="settings_clear_cache_confirm">Cached data in memory and unsent drafts on this phone will be deleted.</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_protocol">Protocol</string>
+    <string name="settings_licenses">Open source licenses</string>
+    <string name="licenses_intro">SwitchTether is built with these open source projects. Full texts: android/THIRD_PARTY_LICENSES.md in the source repository.</string>
+    <string name="desktop_info_note">Compare the fingerprint with the one shown on the computer (Settings → Remote). Only this certificate is trusted.</string>
+
+    <!-- Workspace -->
+    <string name="workspace_coming">Terminal, files and git</string>
+    <string name="workspace_coming_detail">Arriving in the next version.</string>
+    <string name="workspace_security">Terminal access and file writes will always ask for biometric confirmation.</string>
+
+    <!-- New managed session -->
+    <string name="new_session_title">New session</string>
+    <string name="new_session_subtitle">New SwitchTether-managed session</string>
+    <string name="new_session_explainer">Starts a NEW agent process on the computer that SwitchTether manages: you can send messages, answer approvals and interrupt it from the phone. It does not take over sessions you started in a terminal or VS Code.</string>
+    <string name="new_session_agent">Agent</string>
+    <string name="new_session_cwd">Working directory</string>
+    <string name="new_session_cwd_none">Pick a folder below</string>
+    <string name="new_session_use_folder">Use this folder</string>
+    <string name="new_session_no_subdirs">No sub-folders.</string>
+    <string name="new_session_listing_note">Some entries are not shown (%1$d blocked by the desktop\'s file policy).</string>
+    <string name="new_session_sensitive">SENSITIVE</string>
+    <string name="new_session_prompt">First message (optional)</string>
+    <string name="new_session_prompt_hint">What should the agent do?</string>
+    <string name="new_session_model">Model (optional)</string>
+    <string name="new_session_model_hint">Leave empty for the agent\'s default</string>
+    <string name="new_session_permission">Permission mode</string>
+    <string name="perm_default">Ask before tools that need approval</string>
+    <string name="perm_accept_edits">Auto-accept file edits, ask for the rest</string>
+    <string name="perm_plan">Plan only, no changes</string>
+    <string name="new_session_start">Start session</string>
+    <string name="new_session_confirm_title">Start a managed session?</string>
+    <string name="new_session_confirm_body">Start %1$s in %2$s on the computer.</string>
+</resources>
