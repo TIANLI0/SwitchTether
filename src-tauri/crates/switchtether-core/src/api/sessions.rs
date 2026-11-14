@@ -135,13 +135,17 @@ async fn send_message(
     Json(body): Json<MessageBody>,
 ) -> Response {
     let c = ctx.clone();
+    let client_id = body.command_id.clone();
     idempotent(
         &ctx,
         dev.id().to_string(),
         body.command_id,
         "session.message",
         || async move {
-            let r = c.agents.send_message(&id, &body.text).await?;
+            let r = c
+                .agents
+                .send_message(&id, &body.text, client_id.as_deref())
+                .await?;
             c.registry.audit(
                 Some(dev.id()),
                 "session.message",

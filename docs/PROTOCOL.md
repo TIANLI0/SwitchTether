@@ -195,7 +195,7 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
   while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
   Session capabilities advertise this as `continueSession: "PARTIAL"`.
-- `POST /v1/sessions/{id}/messages` `{commandId, text}`
+- `POST /v1/sessions/{id}/messages` `{commandId, text}` (the `commandId` comes back as `clientId` on the resulting `user_message` event)
 - `POST /v1/sessions/{id}/interrupt` `{commandId}`
 - `POST /v1/sessions/{id}/approvals/{requestId}` `{commandId, decision: "allow"|"allow_session"|"deny"|"abort", message?, updatedInput?}`
   - `409 conflict` with `details.resolvedBy` if the request was already answered (by the desktop or another device).
@@ -291,7 +291,7 @@ Session ids are opaque; the prefix is informative only.
 
 | kind | data |
 |---|---|
-| `user_message` | `{ text, images, source: "desktop"|"phone"|"unknown" }` |
+| `user_message` | `{ text, images, source: "desktop"|"phone"|"unknown", clientId? }` — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
 | `assistant_message` | `{ text (Markdown), model? }` |
 | `reasoning` | `{ text, summary: bool }` — only when the agent actually exposes it |
 | `tool_call` | `{ callId, name, title, category, input, status, server?, tool? }` — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted` |

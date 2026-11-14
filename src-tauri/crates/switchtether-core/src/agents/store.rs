@@ -20,6 +20,14 @@ pub struct SessionLog {
     payloads: HashMap<String, String>,
     payload_bytes: usize,
     bus: Option<Arc<EventBus>>,
+    /// Messages sent from a phone, waiting for their `user_message` event:
+    /// (normalized text, client id). The event gets `data.clientId` so the
+    /// phone can replace its optimistic bubble exactly.
+    expected: Vec<(String, String, std::time::Instant)>,
+}
+
+fn normalize(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 impl SessionLog {
@@ -31,6 +39,30 @@ impl SessionLog {
             payloads: HashMap::new(),
             payload_bytes: 0,
             bus,
+            expected: Vec::new(),
+        }
+    }
+
+    /// Remember that `text` was just sent with `client_id` (the command id).
+    pub fn expect_user_message(&mut self, text: &str, client_id: &str) {
+        self.expected
+            .retain(|(_, _, at)| at.elapsed() < std::time::Duration::from_secs(600));
+        self.expected.push((
+            normalize(text),
+            client_id.to_string(),
+            std::time::Instant::now(),
+        ));
+    }
+
+    fn tag_client_id(&mut self, d: &mut EventDraft) {
+        if d.kind != "user_message" || self.expected.is_empty() || d.data.get("clientId").is_some()
+        {
+            return;
+        }
+        let text = normalize(d.data.get("text").and_then(|t| t.as_str()).unwrap_or(""));
+        if let Some(i) = self.expected.iter().position(|(t, _, _)| *t == text) {
+            let (_, id, _) = self.expected.remove(i);
+            d.data["clientId"] = json!(id);
         }
     }
 
@@ -48,7 +80,10 @@ impl SessionLog {
 
     /// Insert a new event or replace the existing one with the same id
     /// (keeping its seq). Returns the stored event.
-    pub fn upsert(&mut self, d: EventDraft, publish: bool) -> AgentEvent {
+    pub fn upsert(&mut self, mut d: EventDraft, publish: bool) -> AgentEvent {
+        if !self.index.contains_key(&d.id) {
+            self.tag_client_id(&mut d);
+        }
         if let Some(p) = d.payload.clone() {
             self.store_payload(&d.id, p);
         }

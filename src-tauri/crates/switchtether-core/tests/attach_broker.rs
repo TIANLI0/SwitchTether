@@ -188,10 +188,23 @@ async fn claude_stream_session_is_controllable() {
     assert_eq!(serde_json::to_value(err.code).unwrap(), "conflict");
 
     // A message from the phone is injected as a stream-json user message.
-    env.hub.send_message(&id, "hello from phone").await.unwrap();
+    env.hub
+        .send_message(&id, "hello  from phone", Some("cmd-42"))
+        .await
+        .unwrap();
     let inject = shim.recv().await.unwrap();
     let line: Value = serde_json::from_str(inject["line"].as_str().unwrap()).unwrap();
     assert_eq!(line["type"], "user");
+    // The phone's command id is echoed on the user_message event (optimistic UI).
+    let page = env.hub.events(&id, None, None, 500).await.unwrap();
+    let um = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "user_message")
+        .cloned()
+        .unwrap();
+    assert_eq!(um["data"]["clientId"], "cmd-42");
 
     // The IDE closes: the session ends, nothing is killed.
     shim.send(json!({ "t": "exit", "code": 0 })).await;
@@ -247,8 +260,12 @@ async fn tty_is_mirrored_as_external_terminal() {
     let s = items.into_iter().find(|s| s.terminal_id.is_some()).unwrap();
     assert_eq!(s.terminal_id.as_deref(), Some(info.id.as_str()));
     assert_eq!(serde_json::to_value(s.origin).unwrap(), "cli");
-    assert!(env.hub.send_message(&s.id, "!rm -rf /").await.is_err());
-    env.hub.send_message(&s.id, "hi").await.unwrap();
+    assert!(env
+        .hub
+        .send_message(&s.id, "!rm -rf /", None)
+        .await
+        .is_err());
+    env.hub.send_message(&s.id, "hi", None).await.unwrap();
     let mut typed = Vec::new();
     for _ in 0..2 {
         let f = shim.recv().await.unwrap();

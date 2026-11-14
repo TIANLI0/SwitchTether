@@ -998,10 +998,20 @@ impl AgentHub {
         ))
     }
 
-    pub async fn send_message(&self, id: &str, text: &str) -> ApiResult<Value> {
+    /// `client_id` (the phone's command id) is echoed as `data.clientId` on the
+    /// resulting `user_message` event (optimistic UI on the phone).
+    pub async fn send_message(
+        &self,
+        id: &str,
+        text: &str,
+        client_id: Option<&str>,
+    ) -> ApiResult<Value> {
         let m = self.managed_or_blocked(id)?;
         if text.trim().is_empty() || text.len() > 200_000 {
             return Err(ApiError::validation("message must be 1..200000 bytes"));
+        }
+        if let Some(c) = client_id.filter(|c| !c.is_empty() && c.len() <= 128) {
+            m.log().lock().expect_user_message(text, c);
         }
         m.send_message(text).await?;
         Ok(json!({ "accepted": true }))
@@ -1366,7 +1376,10 @@ mod tests {
             Arc::new(UnavailableBackend),
             ClaudeObserver::new(PathBuf::from("/nonexistent"), None),
         );
-        let e = hub.send_message("claude:abc", "hi").await.unwrap_err();
+        let e = hub
+            .send_message("claude:abc", "hi", None)
+            .await
+            .unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::CapabilityUnavailable);
         assert_eq!(e.details.unwrap()["status"], "BLOCKED");
         assert!(hub.interrupt("codex:x").await.is_err());
