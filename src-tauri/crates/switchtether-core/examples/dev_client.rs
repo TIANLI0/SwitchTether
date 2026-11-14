@@ -31,12 +31,44 @@ async fn main() -> anyhow::Result<()> {
             let host = uri["h"].split(',').next().unwrap().to_string();
             let target = serde_json::json!({ "host": host, "port": uri["p"], "fp": uri["fp"] });
             std::fs::write(state.join("target.json"), target.to_string())?;
+            let (_, spki) = step_up_key(&state)?;
+            use base64::Engine as _;
             let body = json!({
                 "pairingId": uri["id"], "secret": uri["s"], "deviceName": "dev-client",
-                "platform": "cli", "protocolVersion": 1
+                "platform": "cli", "protocolVersion": 1,
+                "stepUpPublicKey": base64::engine::general_purpose::STANDARD.encode(spki),
             });
             let (s, v) = call(&me, &state, "POST", "/v1/pair", Some(body)).await?;
             println!("{s} {}", serde_json::to_string_pretty(&v)?);
+        }
+        Some("stepup") => {
+            // Test-only equivalent of the phone's biometric-gated Keystore signature.
+            let scope = args.get(1).map(|s| s.as_str()).unwrap_or("terminal");
+            let (s1, dev) = call(&me, &state, "GET", "/v1/device", None).await?;
+            anyhow::ensure!(s1 == 200, "not paired: {dev}");
+            let (_, ch) = call(
+                &me,
+                &state,
+                "POST",
+                "/v1/auth/step-up/challenge",
+                Some(json!({ "scope": scope })),
+            )
+            .await?;
+            let payload = format!(
+                "switchtether-stepup-v1\n{}\n{}\n{}\n{scope}",
+                dev["id"].as_str().unwrap_or(""),
+                ch["challengeId"].as_str().unwrap_or(""),
+                ch["nonce"].as_str().unwrap_or("")
+            );
+            let (kp, _) = step_up_key(&state)?;
+            let sig = kp
+                .sign(&ring::rand::SystemRandom::new(), payload.as_bytes())
+                .map_err(|_| anyhow::anyhow!("sign"))?;
+            use base64::Engine as _;
+            let (s2, v) = call(&me, &state, "POST", "/v1/auth/step-up/verify", Some(json!({
+                "challengeId": ch["challengeId"], "signature": base64::engine::general_purpose::STANDARD.encode(sig.as_ref())
+            }))).await?;
+            println!("{s2} {}", serde_json::to_string_pretty(&v)?);
         }
         Some(m @ ("get" | "post" | "put" | "delete")) => {
             let path = args.get(1).expect("path");
@@ -44,9 +76,37 @@ async fn main() -> anyhow::Result<()> {
             let (s, v) = call(&me, &state, &m.to_uppercase(), path, body).await?;
             println!("{s} {}", serde_json::to_string_pretty(&v)?);
         }
-        _ => eprintln!("usage: dev_client pair <uri> | get <path> | post <path> <json>"),
+        _ => eprintln!(
+            "usage: dev_client pair <uri> | stepup <scope> | get <path> | post <path> <json>"
+        ),
     }
     Ok(())
+}
+
+/// File-backed P-256 step-up key (the phone uses a biometric-gated Keystore key).
+fn step_up_key(
+    state: &std::path::Path,
+) -> anyhow::Result<(ring::signature::EcdsaKeyPair, Vec<u8>)> {
+    use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+    let rng = ring::rand::SystemRandom::new();
+    let path = state.join("stepup.pk8");
+    let pkcs8 = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(_) => {
+            let doc = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
+                .map_err(|_| anyhow::anyhow!("keygen"))?;
+            std::fs::write(&path, doc.as_ref())?;
+            doc.as_ref().to_vec()
+        }
+    };
+    let kp = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &pkcs8, &rng)
+        .map_err(|_| anyhow::anyhow!("bad key"))?;
+    let mut spki = vec![
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+        0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+    spki.extend_from_slice(kp.public_key().as_ref());
+    Ok((kp, spki))
 }
 
 fn url_parse(uri: &str) -> std::collections::HashMap<String, String> {
