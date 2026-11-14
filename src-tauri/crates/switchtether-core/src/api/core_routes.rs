@@ -307,7 +307,9 @@ async fn relay_info(
 ) -> axum::Json<serde_json::Value> {
     let relay = ctx.config.read().relay.clone();
     axum::Json(match relay {
-        Some(r) => serde_json::json!({ "enabled": true, "url": r.url, "token": r.token }),
+        Some(r) => {
+            serde_json::json!({ "enabled": true, "url": r.url, "token": r.token, "key": r.key })
+        }
         None => serde_json::json!({ "enabled": false }),
     })
 }

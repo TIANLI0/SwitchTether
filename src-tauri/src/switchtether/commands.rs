@@ -156,3 +156,11 @@ pub async fn remote_reset_relay_token(state: State<'_, RemoteState>) -> Result<V
 pub async fn st_update_check() -> Result<Value, String> {
     Ok(super::update::check().await)
 }
+
+#[tauri::command]
+pub async fn remote_set_relay_key(
+    state: State<'_, RemoteState>,
+    key: String,
+) -> Result<Value, String> {
+    state.get()?.set_relay_key(key).await
+}

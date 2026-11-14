@@ -5506,7 +5506,12 @@
         "connecting": "正在连接中转…",
         "connected": "已连接到中转",
         "error": "中转出错：{{error}}"
-      }
+      },
+      "key": "中转密钥",
+      "keyHint": "必填。向中转服务的运营者索取（switchtether-relay genkey 生成）。保存在系统钥匙串中。",
+      "keySet": "已设置（保存在系统钥匙串中）。输入新的密钥可替换。",
+      "keyPlaceholder": "粘贴中转密钥",
+      "keySaved": "已保存中转密钥。"
     }
   }
 }

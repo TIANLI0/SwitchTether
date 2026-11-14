@@ -151,7 +151,7 @@ async fn call(
     // (docs/RELAY.md §2.3); the TLS session below is unchanged.
     let tcp = match std::env::var("ST_RELAY") {
         Ok(relay) => {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            use tokio::io::AsyncWriteExt;
             let mut s = tokio::net::TcpStream::connect(relay.as_str()).await?;
             let token = std::env::var("ST_RELAY_TOKEN").unwrap_or_else(|_| "-".into());
             s.write_all(
@@ -162,13 +162,31 @@ async fn call(
                 .as_bytes(),
             )
             .await?;
-            let mut line = Vec::new();
-            let mut b = [0u8; 1];
-            while s.read(&mut b).await? == 1 && b[0] != b'\n' {
-                line.push(b[0]);
+            async fn line(s: &mut tokio::net::TcpStream) -> anyhow::Result<String> {
+                use tokio::io::AsyncReadExt;
+                let mut out = Vec::new();
+                let mut b = [0u8; 1];
+                while s.read(&mut b).await? == 1 && b[0] != b'\n' {
+                    out.push(b[0]);
+                }
+                Ok(String::from_utf8_lossy(&out).to_string())
             }
-            let line = String::from_utf8_lossy(&line).to_string();
-            anyhow::ensure!(line == "OK", "relay: {line}");
+            let challenge = line(&mut s).await?;
+            let nonce = challenge
+                .strip_prefix("CHALLENGE ")
+                .ok_or_else(|| anyhow::anyhow!("relay: {challenge}"))?;
+            let key = switchtether_core::relay::decode_key(
+                &std::env::var("ST_RELAY_KEY").unwrap_or_default(),
+            )?;
+            let mac = switchtether_core::relay::key_mac(
+                &key,
+                "connect",
+                nonce,
+                target["fp"].as_str().unwrap(),
+            );
+            s.write_all(format!("KEY {mac}\n").as_bytes()).await?;
+            let ok = line(&mut s).await?;
+            anyhow::ensure!(ok == "OK", "relay: {ok}");
             s
         }
         Err(_) => tokio::net::TcpStream::connect((host.as_str(), port)).await?,

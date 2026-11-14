@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
             relay: arg("--relay-url").map(|url| switchtether_core::relay::RelayConfig {
                 url,
                 token: arg("--relay-token").unwrap_or_else(|| "dev-token".into()),
+                key: arg("--relay-key").unwrap_or_default(),
             }),
         },
         "dev-server".into(),

@@ -201,7 +201,12 @@ pub fn with_relay(uri: &str, relay: &crate::relay::RelayConfig) -> String {
     let enc = |v: &str| {
         percent_encoding::utf8_percent_encode(v, percent_encoding::NON_ALPHANUMERIC).to_string()
     };
-    format!("{uri}&r={}&rt={}", enc(&relay.url), enc(&relay.token))
+    format!(
+        "{uri}&r={}&rt={}&rk={}",
+        enc(&relay.url),
+        enc(&relay.token),
+        enc(&relay.key)
+    )
 }
 
 #[cfg(test)]

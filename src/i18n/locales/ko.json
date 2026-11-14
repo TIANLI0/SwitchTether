@@ -5506,7 +5506,12 @@
         "connecting": "릴레이에 연결 중…",
         "connected": "릴레이에 연결됨",
         "error": "릴레이 오류: {{error}}"
-      }
+      },
+      "key": "릴레이 키",
+      "keyHint": "필수입니다. 릴레이 운영자에게 받으세요(switchtether-relay genkey로 생성). 시스템 키체인에 저장됩니다.",
+      "keySet": "설정됨(시스템 키체인에 저장). 새 키를 입력하면 교체됩니다.",
+      "keyPlaceholder": "릴레이 키 붙여넣기",
+      "keySaved": "릴레이 키를 저장했습니다."
     }
   }
 }

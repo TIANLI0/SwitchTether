@@ -30,6 +30,29 @@ pub struct RelayConfig {
     pub url: String,
     /// Access token phones must present (from the pairing link).
     pub token: String,
+    /// Relay key from the relay operator (base64url, 32 bytes): proves to the
+    /// relay that this desktop may use it (docs/RELAY.md §2.0).
+    pub key: String,
+}
+
+/// Decode and check a relay key (base64url without padding, 32 bytes).
+pub fn decode_key(key: &str) -> anyhow::Result<Vec<u8>> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(key.trim().trim_end_matches('='))
+        .map_err(|_| anyhow::anyhow!("relay key is not valid base64url"))?;
+    anyhow::ensure!(bytes.len() == 32, "relay key must be 32 bytes");
+    Ok(bytes)
+}
+
+/// Relay-key MAC (docs/RELAY.md §2.0).
+pub fn key_mac(key: &[u8], role: &str, nonce: &str, fp: &str) -> String {
+    let k = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, key);
+    let tag = ring::hmac::sign(
+        &k,
+        format!("switchtether-relay-v1 {role}\n{nonce}\n{fp}").as_bytes(),
+    );
+    b64(tag.as_ref())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,7 +232,12 @@ async fn control_session(
         let sig = identity.sign(&auth_message(nonce, fp))?;
         write_line(
             &mut s,
-            &format!("AUTH {} {}", b64(&identity.cert_der), b64(&sig)),
+            &format!(
+                "AUTH {} {} {}",
+                b64(&identity.cert_der),
+                b64(&sig),
+                key_mac(&decode_key(&cfg.key)?, "listen", nonce, fp)
+            ),
         )
         .await?;
         expect_ok(&read_line(&mut s).await?)
@@ -345,6 +373,18 @@ mod tests {
         ));
         assert!(parse_url("http://x").is_err());
         assert!(parse_url("tcp://:80").is_err());
+    }
+
+    #[test]
+    fn relay_keys_and_macs() {
+        assert!(decode_key("short").is_err());
+        let key = b64(&[7u8; 32]);
+        let raw = decode_key(&key).unwrap();
+        assert_eq!(raw.len(), 32);
+        let a = key_mac(&raw, "connect", "bm9uY2U", "ab");
+        assert_eq!(a, key_mac(&raw, "connect", "bm9uY2U", "ab"));
+        assert_ne!(a, key_mac(&raw, "listen", "bm9uY2U", "ab"));
+        assert_ne!(a, key_mac(&raw, "connect", "other", "ab"));
     }
 
     #[test]

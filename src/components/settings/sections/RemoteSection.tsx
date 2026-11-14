@@ -72,6 +72,7 @@ export function RemoteSection() {
   const [portDraft, setPortDraft] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [relayDraft, setRelayDraft] = useState<string | null>(null);
+  const [relayKeyDraft, setRelayKeyDraft] = useState("");
   const [pairing, setPairing] = useState<PairingOffer | null>(null);
   const [paired, setPaired] = useState<{ name: string; code: string } | null>(
     null,
@@ -400,6 +401,48 @@ export function RemoteSection() {
                 </div>
               }
             />
+            <SettingsRow
+              label={t("remote.relay.key")}
+              description={
+                status.relayKeySet
+                  ? t("remote.relay.keySet")
+                  : t("remote.relay.keyHint")
+              }
+              control={
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    className="h-control-sm w-48 font-mono"
+                    placeholder={
+                      status.relayKeySet
+                        ? "••••••••"
+                        : t("remote.relay.keyPlaceholder")
+                    }
+                    value={relayKeyDraft}
+                    onChange={(e) => setRelayKeyDraft(e.target.value)}
+                    aria-label={t("remote.relay.key")}
+                  />
+                  <Button
+                    variant="neutral"
+                    size="compact"
+                    disabled={busy || !relayKeyDraft.trim()}
+                    onClick={() =>
+                      void remoteApi
+                        .setRelayKey(relayKeyDraft)
+                        .then((s) => {
+                          setStatus(s);
+                          setRelayKeyDraft("");
+                          toast.success(t("remote.relay.keySaved"));
+                        })
+                        .catch((e) => toast.error(String(e)))
+                    }
+                  >
+                    {t("remote.apply")}
+                  </Button>
+                </div>
+              }
+            />
             <SettingsSwitchRow
               label={t("remote.relay.enable")}
               description={
@@ -410,7 +453,11 @@ export function RemoteSection() {
                   : t("remote.relay.enableHint")
               }
               checked={Boolean(status.config.relayEnabled)}
-              disabled={busy || !status.config.relayUrl}
+              disabled={
+                busy ||
+                !status.config.relayUrl ||
+                (!status.relayKeySet && !status.config.relayEnabled)
+              }
               onCheckedChange={(v) => void save({ relayEnabled: v })}
             />
             {status.config.relayEnabled && (

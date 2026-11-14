@@ -5506,7 +5506,12 @@
         "connecting": "Verbinde mit dem Relay…",
         "connected": "Mit dem Relay verbunden",
         "error": "Relay-Fehler: {{error}}"
-      }
+      },
+      "key": "Relay-Schlüssel",
+      "keyHint": "Erforderlich. Vom Betreiber des Relays erhalten (switchtether-relay genkey). Wird im Schlüsselbund des Systems gespeichert.",
+      "keySet": "Gesetzt (im Schlüsselbund gespeichert). Gib einen neuen ein, um ihn zu ersetzen.",
+      "keyPlaceholder": "Relay-Schlüssel einfügen",
+      "keySaved": "Relay-Schlüssel gespeichert."
     }
   }
 }

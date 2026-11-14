@@ -47,6 +47,8 @@ export interface RemoteStatus {
   terminals: number;
   managedSessions: number;
   relay?: RelayStatus;
+  /** A relay key is stored (the key itself is never returned). */
+  relayKeySet?: boolean;
 }
 
 export interface PairingOffer {
@@ -150,6 +152,8 @@ export const remoteApi = {
   listTerminals: () => invoke<RemoteTerminal[]>("remote_list_terminals"),
   killTerminal: (id: string) => invoke<boolean>("remote_kill_terminal", { id }),
   auditLog: (limit = 50) => invoke<AuditEntry[]>("remote_audit_log", { limit }),
+  setRelayKey: (key: string) =>
+    invoke<RemoteStatus>("remote_set_relay_key", { key }),
   resetRelayToken: () => invoke<RemoteStatus>("remote_reset_relay_token"),
   takeoverStatus: () => invoke<TakeoverStatus>("remote_takeover_status"),
   setTakeover: (hook: TakeoverHook, enabled: boolean) =>

@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 pub const UI_EVENT: &str = "switchtether-remote-event";
 const RELAY_TOKEN_SECRET: &str = "relay-token";
+const RELAY_KEY_SECRET: &str = "relay-key";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -266,6 +267,9 @@ impl RemoteRuntime {
         if new.relay_enabled {
             let url = new.relay_url.clone().unwrap_or_default();
             switchtether_core::relay::parse_url(&url).map_err(|e| e.to_string())?;
+            if self.relay_key().is_none() {
+                return Err("set the relay key first".into());
+            }
         }
         let restart = old.port != new.port
             || old.network_mode != new.network_mode
@@ -307,7 +311,37 @@ impl RemoteRuntime {
         Some(switchtether_core::relay::RelayConfig {
             url: url.trim().to_string(),
             token: self.relay_token(true)?,
+            key: self.relay_key()?,
         })
+    }
+
+    /// Relay key from the relay operator (OS keychain).
+    fn relay_key(&self) -> Option<String> {
+        let store = switchtether_core::secret_store::default_store(&remote_dir());
+        store
+            .get(RELAY_KEY_SECRET)
+            .ok()
+            .flatten()
+            .filter(|k| !k.is_empty())
+    }
+
+    /// Store (or clear with an empty string) the relay key; restarts the relay link.
+    pub async fn set_relay_key(&self, key: String) -> Result<Value, String> {
+        let key = key.trim().to_string();
+        let store = switchtether_core::secret_store::default_store(&remote_dir());
+        if key.is_empty() {
+            let _ = store.delete(RELAY_KEY_SECRET);
+        } else {
+            switchtether_core::relay::decode_key(&key).map_err(|e| e.to_string())?;
+            store
+                .set(RELAY_KEY_SECRET, &key)
+                .map_err(|e| e.to_string())?;
+        }
+        if self.running_port().await.is_some() {
+            self.stop().await;
+            self.start().await?;
+        }
+        Ok(self.status().await)
     }
 
     /// New relay token: phones must re-pair (or fetch it again while connected).
@@ -347,6 +381,7 @@ impl RemoteRuntime {
             "terminals": self.ctx.terminals.count(),
             "managedSessions": self.ctx.agents.managed_count(),
             "relay": self.ctx.relay_status.lock().clone(),
+            "relayKeySet": self.relay_key().is_some(),
         })
     }
 

@@ -5506,7 +5506,12 @@
         "connecting": "正在連線中繼…",
         "connected": "已連線到中繼",
         "error": "中繼錯誤：{{error}}"
-      }
+      },
+      "key": "中繼金鑰",
+      "keyHint": "必填。向中繼服務的營運者索取（switchtether-relay genkey 產生）。儲存在系統鑰匙圈中。",
+      "keySet": "已設定（儲存在系統鑰匙圈中）。輸入新的金鑰可取代。",
+      "keyPlaceholder": "貼上中繼金鑰",
+      "keySaved": "已儲存中繼金鑰。"
     }
   }
 }

@@ -5506,7 +5506,12 @@
         "connecting": "Röleye bağlanılıyor…",
         "connected": "Röleye bağlı",
         "error": "Röle hatası: {{error}}"
-      }
+      },
+      "key": "Röle anahtarı",
+      "keyHint": "Gerekli. Rölenin işletmecisinden al (switchtether-relay genkey). Sistem anahtar zincirinde saklanır.",
+      "keySet": "Ayarlandı (sistem anahtar zincirinde saklanıyor). Değiştirmek için yenisini gir.",
+      "keyPlaceholder": "Röle anahtarını yapıştır",
+      "keySaved": "Röle anahtarı kaydedildi."
     }
   }
 }

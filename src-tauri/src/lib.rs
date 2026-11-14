@@ -1633,6 +1633,7 @@ pub fn run() {
             switchtether::commands::remote_takeover_status,
             switchtether::commands::remote_set_takeover,
             switchtether::commands::remote_reset_relay_token,
+            switchtether::commands::remote_set_relay_key,
             switchtether::commands::st_update_check,
             commands::get_providers,
             commands::get_current_provider,

@@ -5506,7 +5506,12 @@
         "connecting": "Connecting to the relay…",
         "connected": "Connected to the relay",
         "error": "Relay error: {{error}}"
-      }
+      },
+      "key": "Relay key",
+      "keyHint": "Required. Ask the relay's operator for it (switchtether-relay genkey). Stored in the system keychain.",
+      "keySet": "Set (stored in the system keychain). Enter a new one to replace it.",
+      "keyPlaceholder": "Paste the relay key",
+      "keySaved": "Relay key saved."
     }
   }
 }
