@@ -184,6 +184,10 @@ pub fn warn_if_upstream_running(app: &tauri::AppHandle) {
             return;
         }
         log::warn!("[switchtether] upstream CC Switch is running at the same time");
+        // Sandboxed test runs never touch the real agent configs; no dialog there.
+        if std::env::var_os("CC_SWITCH_TEST_HOME").is_some() {
+            return;
+        }
         use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
         let (title, body) = if zh() {
             (
