@@ -67,6 +67,212 @@ pub struct ManagedCodex {
     resolved: Mutex<HashMap<String, String>>,
     output: Mutex<HashMap<String, String>>,
     state: Mutex<State>,
+    /// Attached mode: the thread lives in a Codex process the user started
+    /// (Codex Desktop via switchtether-shim); requests go through `conn`.
+    remote: Option<Arc<CodexConn>>,
+}
+
+/// Canonical JSON-RPC id key (numbers and strings never collide).
+pub fn rpc_id_key(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => Some(format!("s:{s}")),
+        Value::Number(n) => Some(format!("n:{n}")),
+        _ => None,
+    }
+}
+
+/// One shim connection in front of a user-started `codex app-server`
+/// (Codex Desktop). Several threads can be loaded on it at once.
+pub struct CodexConn {
+    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    tag: String,
+    next: AtomicU64,
+    replies: Mutex<HashMap<String, oneshot::Sender<Result<Value, Value>>>>,
+    verdicts: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    pub threads: Mutex<HashMap<String, Arc<ManagedCodex>>>,
+    pub origin: &'static str,
+    pub cwd: PathBuf,
+}
+
+impl CodexConn {
+    pub fn new(
+        tx: tokio::sync::mpsc::UnboundedSender<String>,
+        origin: &'static str,
+        cwd: PathBuf,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            tx,
+            tag: crate::util::new_id().chars().take(8).collect(),
+            next: AtomicU64::new(1),
+            replies: Mutex::new(HashMap::new()),
+            verdicts: Mutex::new(HashMap::new()),
+            threads: Mutex::new(HashMap::new()),
+            origin,
+            cwd,
+        })
+    }
+
+    fn inject(&self, v: &Value) -> ApiResult<()> {
+        self.tx
+            .send(json!({ "t": "inject", "line": v.to_string() }).to_string())
+            .map_err(|_| ApiError::conflict("the attached Codex process has disconnected"))
+    }
+
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> ApiResult<Value> {
+        let id = format!(
+            "st-{}-{}",
+            self.tag,
+            self.next.fetch_add(1, Ordering::Relaxed)
+        );
+        let (tx, rx) = oneshot::channel();
+        self.replies.lock().insert(id.clone(), tx);
+        self.inject(&json!({ "id": id, "method": method, "params": params }))?;
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(Ok(v))) => Ok(v),
+            Ok(Ok(Err(e))) => Err(ApiError::bad_request(
+                e.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("codex request failed")
+                    .to_string(),
+            )),
+            _ => {
+                self.replies.lock().remove(&id);
+                Err(ApiError::internal(
+                    "codex request",
+                    format!("{method} timed out"),
+                ))
+            }
+        }
+    }
+
+    fn parse(frame: &Value) -> Option<Value> {
+        frame
+            .get("line")
+            .and_then(|l| l.as_str())
+            .and_then(|l| serde_json::from_str::<Value>(l).ok())
+    }
+
+    /// Threads that a frame reveals: `(threadId, cwd)`.
+    pub fn discover(&self, frame: &Value) -> Vec<(String, Option<String>)> {
+        if frame.get("t").and_then(|t| t.as_str()) != Some("out") {
+            return vec![];
+        }
+        let Some(v) = Self::parse(frame) else {
+            return vec![];
+        };
+        let known = |id: &str| self.threads.lock().contains_key(id);
+        let mut out = Vec::new();
+        // Replies to thread/start | thread/resume | thread/fork (host or ours).
+        if let Some(t) = v.pointer("/result/thread") {
+            if let Some(id) = s(t, "id") {
+                if !known(&id) {
+                    out.push((id, s(t, "cwd").or(s(v.get("result").unwrap(), "cwd"))));
+                }
+            }
+        }
+        if s(&v, "method").as_deref() == Some("thread/started") {
+            if let Some(t) = v.pointer("/params/thread") {
+                if let Some(id) = s(t, "id") {
+                    if !known(&id) {
+                        out.push((id, s(t, "cwd")));
+                    }
+                }
+            }
+        } else if let Some(id) = v.pointer("/params/threadId").and_then(|x| x.as_str()) {
+            if !known(id) && !out.iter().any(|(t, _)| t == id) {
+                out.push((id.to_string(), None));
+            }
+        }
+        out
+    }
+
+    fn thread_of(&self, v: &Value) -> Option<Arc<ManagedCodex>> {
+        let id = v.pointer("/params/threadId").and_then(|x| x.as_str())?;
+        self.threads.lock().get(id).cloned()
+    }
+
+    pub async fn on_frame(&self, frame: Value) {
+        match frame.get("t").and_then(|t| t.as_str()) {
+            Some("out") => {
+                let Some(v) = Self::parse(&frame) else { return };
+                let method = s(&v, "method");
+                match (v.get("id"), method) {
+                    (Some(id), None) => {
+                        // Reply to one of our requests.
+                        if let Some(id) = id.as_str() {
+                            if let Some(tx) = self.replies.lock().remove(id) {
+                                let r = match v.get("error") {
+                                    Some(e) => Err(e.clone()),
+                                    None => Ok(v.get("result").cloned().unwrap_or(Value::Null)),
+                                };
+                                let _ = tx.send(r);
+                            }
+                        }
+                    }
+                    (Some(id), Some(m)) => {
+                        if let Some(t) = self.thread_of(&v) {
+                            t.on_server_request(
+                                id.clone(),
+                                &m,
+                                v.get("params").cloned().unwrap_or(Value::Null),
+                            )
+                            .await;
+                        }
+                    }
+                    (None, Some(m)) => {
+                        if let Some(t) = self.thread_of(&v) {
+                            t.on_notification(&m, v.get("params").cloned().unwrap_or(Value::Null));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some("in") => {
+                // Codex Desktop answered an approval itself.
+                let Some(v) = Self::parse(&frame) else { return };
+                if v.get("method").is_none()
+                    && (v.get("result").is_some() || v.get("error").is_some())
+                {
+                    if let Some(id) = v.get("id") {
+                        let rid = format!(
+                            "cx-{}",
+                            match id {
+                                Value::String(x) => x.clone(),
+                                other => other.to_string(),
+                            }
+                        );
+                        let threads: Vec<_> = self.threads.lock().values().cloned().collect();
+                        for t in threads {
+                            t.resolved_elsewhere(&rid, "desktop");
+                        }
+                    }
+                }
+            }
+            Some(kind @ ("accepted" | "rejected")) => {
+                if let Some(key) =
+                    Self::parse(&frame).and_then(|v| v.get("id").and_then(rpc_id_key))
+                {
+                    if let Some(tx) = self.verdicts.lock().remove(&key) {
+                        let _ = tx.send(kind == "accepted");
+                    }
+                }
+            }
+            Some("exit") => self.on_disconnect(),
+            _ => {}
+        }
+    }
+
+    pub fn on_disconnect(&self) {
+        let threads: Vec<_> = self.threads.lock().values().cloned().collect();
+        for t in threads {
+            if t.liveness() == Liveness::Live {
+                t.on_exit();
+            }
+        }
+        for (_, tx) in self.replies.lock().drain() {
+            let _ = tx.send(Err(json!({ "message": "process exited" })));
+        }
+    }
 }
 
 fn s(v: &Value, k: &str) -> Option<String> {
@@ -118,6 +324,7 @@ impl ManagedCodex {
                 last_active_at_ms: now,
             }),
             options,
+            remote: None,
         });
         let reader = me.clone();
         tokio::spawn(async move {
@@ -184,6 +391,66 @@ impl ManagedCodex {
         Ok(me)
     }
 
+    /// A thread loaded in a user-started Codex process (attached mode).
+    pub fn attached(
+        id: String,
+        conn: Arc<CodexConn>,
+        thread_id: String,
+        cwd: PathBuf,
+        log: Arc<Mutex<SessionLog>>,
+    ) -> Arc<Self> {
+        let now = crate::util::now_ms();
+        Arc::new(Self {
+            id,
+            options: ManagedCodexOptions {
+                codex_bin: PathBuf::new(),
+                cwd,
+                model: None,
+                approval_policy: String::new(),
+                resume_thread: None,
+            },
+            log,
+            stdin: tokio::sync::Mutex::new(None),
+            child: Mutex::new(None),
+            next_id: AtomicU64::new(1),
+            replies: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
+            resolved: Mutex::new(HashMap::new()),
+            output: Mutex::new(HashMap::new()),
+            state: Mutex::new(State {
+                status: "idle",
+                liveness: Liveness::Live,
+                thread_id: Some(thread_id),
+                turn_id: None,
+                model: None,
+                title: None,
+                created_at_ms: now,
+                last_active_at_ms: now,
+            }),
+            remote: Some(conn),
+        })
+    }
+
+    pub fn origin_name(&self) -> &'static str {
+        self.remote.as_ref().map(|c| c.origin).unwrap_or("managed")
+    }
+
+    /// A pending request was answered by another client.
+    fn resolved_elsewhere(&self, rid: &str, by: &str) {
+        let removed = self.pending.lock().remove(rid);
+        if let Some(pa) = removed {
+            self.resolved.lock().insert(rid.to_string(), by.into());
+            self.log.lock().update(&pa.event_id, true, |e| {
+                e.data["resolved"] = json!(true);
+                e.data["by"] = json!(by);
+            });
+            if self.pending.lock().is_empty() {
+                self.set_status("busy");
+                self.publish_status("running", None);
+            }
+        }
+    }
+
     fn system(&self, text: &str) {
         self.log.lock().upsert(
             EventDraft::new(
@@ -214,6 +481,9 @@ impl ManagedCodex {
     }
 
     async fn write(&self, v: &Value) -> ApiResult<()> {
+        if let Some(c) = &self.remote {
+            return c.inject(v);
+        }
         let mut g = self.stdin.lock().await;
         let Some(stdin) = g.as_mut() else {
             return Err(ApiError::conflict("codex app-server has exited"));
@@ -239,6 +509,9 @@ impl ManagedCodex {
     }
 
     async fn request(&self, method: &str, params: Value, timeout: Duration) -> ApiResult<Value> {
+        if let Some(c) = &self.remote {
+            return c.request(method, params, timeout).await;
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.replies.lock().insert(id, tx);
@@ -299,7 +572,7 @@ impl ManagedCodex {
         }
     }
 
-    async fn on_server_request(&self, rpc_id: Value, method: &str, params: Value) {
+    pub(crate) async fn on_server_request(&self, rpc_id: Value, method: &str, params: Value) {
         let ts = crate::util::now_rfc3339();
         let request_id = format!(
             "cx-{}",
@@ -344,6 +617,10 @@ impl ManagedCodex {
                     "resolved": false,
                 }),
             ),
+            _ if self.remote.is_some() => {
+                // Codex Desktop owns the connection and answers these itself.
+                return;
+            }
             _ => {
                 // Elicitations / permission profiles / dynamic tools are not
                 // supported from the phone yet: answer explicitly so the turn
@@ -599,7 +876,7 @@ impl ManagedCodex {
         out
     }
 
-    fn on_notification(&self, method: &str, p: Value) {
+    pub(crate) fn on_notification(&self, method: &str, p: Value) {
         let turn_id = s(&p, "turnId");
         match method {
             "turn/started" => {
@@ -750,7 +1027,7 @@ impl ManagedCodex {
         }
     }
 
-    fn on_exit(&self) {
+    pub(crate) fn on_exit(&self) {
         {
             let mut st = self.state.lock();
             st.liveness = Liveness::Ended;
@@ -885,8 +1162,28 @@ impl ManagedSession for ManagedCodex {
         self.resolved
             .lock()
             .insert(request_id.to_string(), by.to_string());
+        let verdict = match (&self.remote, rpc_id_key(&pending.rpc_id)) {
+            (Some(c), Some(key)) => {
+                let (tx, rx) = oneshot::channel();
+                c.verdicts.lock().insert(key, tx);
+                Some(rx)
+            }
+            _ => None,
+        };
         self.write(&json!({ "id": pending.rpc_id, "result": { "decision": codex_decision } }))
             .await?;
+        if let Some(rx) = verdict {
+            // Codex Desktop may have answered at the same moment: the shim decides.
+            if let Ok(Ok(false)) = tokio::time::timeout(Duration::from_secs(5), rx).await {
+                self.resolved
+                    .lock()
+                    .insert(request_id.to_string(), "desktop".into());
+                return Err(ApiError::conflict(
+                    "this request was already answered on the computer",
+                )
+                .with_details(json!({ "resolvedBy": "desktop" })));
+            }
+        }
         let _ = (&pending.method, &pending.params);
         let ev = self.log.lock().update(&pending.event_id, true, |e| {
             e.data["resolved"] = json!(true);
@@ -901,9 +1198,16 @@ impl ManagedSession for ManagedCodex {
     }
 
     fn kill(&self) {
+        // Never kill a process the user started.
+        if self.remote.is_some() {
+            return;
+        }
         if let Some(mut c) = self.child.lock().take() {
             let _ = c.start_kill();
         }
+    }
+    fn origin(&self) -> &'static str {
+        self.origin_name()
     }
 }
 

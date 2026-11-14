@@ -1,7 +1,7 @@
 [workspace]
 # SwitchTether: the Remote Core lives in its own crate so upstream CC Switch
 # syncs rarely conflict with it. See docs/ARCHITECTURE.md.
-members = [".", "crates/switchtether-core"]
+members = [".", "crates/switchtether-core", "crates/switchtether-shim"]
 
 [package]
 name = "switchtether"

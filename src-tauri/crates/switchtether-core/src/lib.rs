@@ -21,6 +21,7 @@
 
 pub mod agents;
 pub mod api;
+pub mod attach;
 pub mod backend;
 pub mod error;
 pub mod events;

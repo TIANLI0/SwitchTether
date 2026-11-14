@@ -51,6 +51,9 @@ pub struct SessionSummary {
     pub git_branch: Option<String>,
     pub pid: Option<u32>,
     pub managed: bool,
+    /// Mirrored terminal of a session running in a terminal window (`st-claude`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
     #[serde(skip)]
     pub source_path: Option<String>,
 }

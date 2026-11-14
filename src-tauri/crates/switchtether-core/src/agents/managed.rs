@@ -38,6 +38,15 @@ pub trait ManagedSession: Send + Sync {
         by: &str,
     ) -> ApiResult<Value>;
     fn kill(&self);
+    /// `managed` for sessions SwitchTether started; otherwise the origin of
+    /// the user's own process it is attached to (`vscode`, `desktop_app`, `cli`).
+    fn origin(&self) -> &'static str {
+        "managed"
+    }
+    /// Optional terminal id when control happens through a mirrored TUI.
+    fn terminal_id(&self) -> Option<String> {
+        None
+    }
 }
 
 #[async_trait]
@@ -103,5 +112,8 @@ impl ManagedSession for super::claude::managed::ManagedClaude {
     }
     fn kill(&self) {
         super::claude::managed::ManagedClaude::kill(self)
+    }
+    fn origin(&self) -> &'static str {
+        self.origin
     }
 }

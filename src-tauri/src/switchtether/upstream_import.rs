@@ -330,7 +330,11 @@ mod tests {
         let db = crate::database::Database::init().expect("SwitchTether opens imported db");
         for app in ["claude", "claude-desktop", "codex", "gemini"] {
             let p = db.get_all_providers(app).unwrap();
-            println!("providers[{app}] = {} {:?}", p.len(), p.values().map(|x| x.name.clone()).collect::<Vec<_>>());
+            println!(
+                "providers[{app}] = {} {:?}",
+                p.len(),
+                p.values().map(|x| x.name.clone()).collect::<Vec<_>>()
+            );
         }
         println!("mcp servers = {}", db.get_all_mcp_servers().unwrap().len());
         println!("skills = {}", db.get_all_installed_skills().unwrap().len());

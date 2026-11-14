@@ -128,6 +128,9 @@ pub struct TerminalInfo {
     pub exit_code: Option<i32>,
     pub persist_log: bool,
     pub version: u64,
+    /// A terminal mirrored from the user's own terminal window
+    /// (`st-claude` / `st-codex`); its size follows that window.
+    pub external: bool,
 }
 
 struct TermState {
@@ -151,6 +154,38 @@ pub struct Terminal {
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     version_tx: watch::Sender<u64>,
+    external: bool,
+}
+
+/// Never kills anything: external terminals belong to the user.
+#[derive(Debug)]
+struct NoKill;
+
+impl ChildKiller for NoKill {
+    fn kill(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(NoKill)
+    }
+}
+
+/// Input for an external terminal: forwarded to the shim as frames.
+struct FrameWriter(tokio::sync::mpsc::UnboundedSender<String>);
+
+impl Write for FrameWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use base64::Engine as _;
+        let frame =
+            json!({ "t": "input", "b64": base64::engine::general_purpose::STANDARD.encode(buf) });
+        self.0
+            .send(frame.to_string())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "detached"))?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 impl Terminal {
@@ -182,7 +217,40 @@ impl Terminal {
             exit_code: st.exit_code,
             persist_log: self.persist_log,
             version: *self.version_tx.borrow(),
+            external: self.external,
         }
+    }
+
+    pub fn is_external(&self) -> bool {
+        self.external
+    }
+
+    /// External terminals: output mirrored from the user's terminal.
+    pub fn feed_output(&self, data: &[u8]) {
+        self.state.lock().parser.process(data);
+        self.bump();
+    }
+
+    /// External terminals: the user's window was resized.
+    pub fn set_external_size(&self, cols: u16, rows: u16) {
+        let cols = cols.clamp(10, 500);
+        let rows = rows.clamp(3, 300);
+        self.state.lock().parser.set_size(nz(rows), nz(cols));
+        self.bump();
+    }
+
+    /// External terminals: the program ended (or the mirror disconnected).
+    pub fn mark_exited(&self, code: Option<i32>) {
+        {
+            let mut st = self.state.lock();
+            if st.exited {
+                return;
+            }
+            st.exited = true;
+            st.exit_code = code;
+        }
+        self.writer.lock().take();
+        self.bump();
     }
 
     pub fn subscribe(&self) -> watch::Receiver<u64> {
@@ -221,6 +289,10 @@ impl Terminal {
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> anyhow::Result<()> {
+        if self.external {
+            // The size follows the user's own terminal window.
+            return Ok(());
+        }
         let cols = cols.clamp(10, 500);
         let rows = rows.clamp(3, 300);
         if let Some(m) = self.master.lock().as_ref() {
@@ -267,7 +339,7 @@ impl TerminalManager {
         self.terms
             .read()
             .values()
-            .filter(|t| !t.state.lock().exited)
+            .filter(|t| !t.external && !t.state.lock().exited)
             .count()
     }
 
@@ -290,7 +362,7 @@ impl TerminalManager {
             let mut terms = self.terms.write();
             // Drop exited terminals from the table before enforcing the limit.
             terms.retain(|_, t| !t.state.lock().exited);
-            if terms.len() >= MAX_TERMINALS {
+            if terms.values().filter(|t| !t.external).count() >= MAX_TERMINALS {
                 anyhow::bail!("too many terminals (max {MAX_TERMINALS})");
             }
         }
@@ -362,6 +434,7 @@ impl TerminalManager {
             master: Mutex::new(Some(pair.master)),
             killer: Mutex::new(killer),
             version_tx,
+            external: false,
         });
         self.terms.write().insert(id.clone(), term.clone());
 
@@ -400,6 +473,57 @@ impl TerminalManager {
 
         self.events.publish("terminal.created", json!(term.info()));
         Ok(term)
+    }
+
+    /// Register a terminal mirrored from the user's own terminal window via
+    /// switchtether-shim. Nothing is spawned; input is sent through `input`.
+    pub fn create_external(
+        &self,
+        title: String,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+        input: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Arc<Terminal> {
+        let cols = cols.clamp(10, 500);
+        let rows = rows.clamp(3, 300);
+        let id = crate::util::new_id();
+        let (version_tx, _) = watch::channel(0u64);
+        let term = Arc::new(Terminal {
+            id: id.clone(),
+            shell: "external".into(),
+            cwd,
+            created_at_ms: crate::util::now_ms(),
+            owner_device_id: None,
+            persist_log: false,
+            state: Mutex::new(TermState {
+                parser: new_parser(rows, cols, SCROLLBACK_LINES),
+                exited: false,
+                exit_code: None,
+                custom_title: Some(title.chars().take(80).collect()),
+            }),
+            writer: Mutex::new(Some(Box::new(FrameWriter(input)))),
+            master: Mutex::new(None),
+            killer: Mutex::new(Box::new(NoKill)),
+            version_tx,
+            external: true,
+        });
+        {
+            let mut terms = self.terms.write();
+            terms.retain(|_, t| !t.state.lock().exited || !t.external);
+            terms.insert(id, term.clone());
+        }
+        self.events.publish("terminal.created", json!(term.info()));
+        term
+    }
+
+    /// External mirror ended.
+    pub fn external_exited(&self, id: &str, code: Option<i32>) {
+        if let Some(t) = self.get(id) {
+            t.mark_exited(code);
+            self.events
+                .publish("terminal.exited", json!({ "id": id, "exitCode": code }));
+        }
     }
 
     pub fn kill(&self, id: &str) -> bool {
@@ -443,7 +567,7 @@ impl TerminalManager {
         let terms = self.terms.read();
         let mut n = 0;
         for t in terms.values() {
-            if !t.state.lock().exited {
+            if !t.external && !t.state.lock().exited {
                 t.kill();
                 n += 1;
             }

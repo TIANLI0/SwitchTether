@@ -66,6 +66,17 @@ async fn main() -> anyhow::Result<()> {
     );
     let cancel = tokio_util::sync::CancellationToken::new();
     hub.start_tailer(cancel.clone());
+    let attach_file = std::env::var_os("SWITCHTETHER_ATTACH_FILE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| data_dir.join("attach.json"));
+    let _attach = switchtether_core::attach::AttachBroker::start(
+        hub.clone(),
+        ctx.terminals.clone(),
+        attach_file.clone(),
+        cancel.clone(),
+    )
+    .await?;
+    println!("ATTACH_FILE {}", attach_file.display());
     let handle = RemoteServer::start(ctx.clone()).await?;
 
     let mut hosts: Vec<String> = arg("--host").into_iter().collect();

@@ -65,6 +65,15 @@ pub struct ManagedClaude {
     state: Mutex<State>,
     next_req: std::sync::atomic::AtomicU64,
     stderr_tail: Mutex<Vec<String>>,
+    /// Attached mode: lines are injected through the user's own process via
+    /// switchtether-shim instead of a child spawned by SwitchTether.
+    remote: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// Attached mode: shim verdicts for injected approval answers.
+    verdicts: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    /// Attached mode: user texts already shown (from the IDE or the phone);
+    /// a replayed copy on stdout is skipped.
+    echoed: Mutex<HashSet<String>>,
+    pub origin: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +195,10 @@ impl ManagedClaude {
             }),
             next_req: std::sync::atomic::AtomicU64::new(1),
             stderr_tail: Mutex::new(Vec::new()),
+            remote: None,
+            verdicts: Mutex::new(HashMap::new()),
+            echoed: Mutex::new(HashSet::new()),
+            origin: "managed",
         });
 
         let reader = me.clone();
@@ -226,7 +239,170 @@ impl ManagedClaude {
         Ok(me)
     }
 
+    /// Attach to a Claude Code process the user started (VS Code extension
+    /// with the SwitchTether process wrapper enabled). Nothing is spawned or
+    /// initialised: the IDE already owns the session.
+    pub fn attached(
+        id: String,
+        cwd: PathBuf,
+        log: Arc<Mutex<SessionLog>>,
+        tx: tokio::sync::mpsc::UnboundedSender<String>,
+        origin: &'static str,
+    ) -> Arc<Self> {
+        let now = crate::util::now_ms();
+        Arc::new(Self {
+            id,
+            options: ManagedClaudeOptions {
+                claude_bin: PathBuf::new(),
+                cwd,
+                model: None,
+                permission_mode: None,
+                resume_from: None,
+                fork: false,
+            },
+            log,
+            parser: Mutex::new(ClaudeParser::new()),
+            stdin: tokio::sync::Mutex::new(None),
+            child: Mutex::new(None),
+            pending: Mutex::new(HashMap::new()),
+            resolved: Mutex::new(HashMap::new()),
+            replies: Mutex::new(HashMap::new()),
+            sent_texts: Mutex::new(HashSet::new()),
+            state: Mutex::new(State {
+                status: "idle",
+                liveness: Liveness::Live,
+                native_session_id: None,
+                created_at_ms: now,
+                last_active_at_ms: now,
+            }),
+            next_req: std::sync::atomic::AtomicU64::new(1),
+            stderr_tail: Mutex::new(Vec::new()),
+            remote: Some(tx),
+            verdicts: Mutex::new(HashMap::new()),
+            echoed: Mutex::new(HashSet::new()),
+            origin,
+        })
+    }
+
+    pub fn is_attached(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    /// Frames from switchtether-shim (attached mode).
+    pub async fn on_remote_frame(&self, frame: Value) {
+        let parse = |f: &Value| {
+            f.get("line")
+                .and_then(|l| l.as_str())
+                .and_then(|l| serde_json::from_str::<Value>(l).ok())
+        };
+        match frame.get("t").and_then(|t| t.as_str()) {
+            Some("out") => {
+                if let Some(v) = parse(&frame) {
+                    self.on_message(v).await;
+                }
+            }
+            Some("in") => {
+                let Some(v) = parse(&frame) else { return };
+                if v.get("type").and_then(|t| t.as_str()) == Some("user") {
+                    // A prompt typed in the IDE: show it right away.
+                    self.echo_user(&v, Some("desktop"));
+                    self.set_status("busy");
+                    self.publish_status("running", None);
+                    return;
+                }
+                // The IDE answered a permission request itself.
+                if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
+                    let rid = v
+                        .get("response")
+                        .and_then(|r| r.get("request_id"))
+                        .and_then(|r| r.as_str())
+                        .map(String::from);
+                    if let Some(rid) = rid {
+                        let removed = self.pending.lock().remove(&rid);
+                        if let Some(p) = removed {
+                            self.resolved.lock().insert(rid.clone(), "desktop".into());
+                            let behavior = v
+                                .pointer("/response/response/behavior")
+                                .and_then(|b| b.as_str())
+                                .unwrap_or("answered")
+                                .to_string();
+                            self.log.lock().update(&p.event_id, true, |e| {
+                                e.data["resolved"] = json!(true);
+                                e.data["decision"] = json!(behavior);
+                                e.data["by"] = json!("desktop");
+                            });
+                            if self.pending.lock().is_empty() {
+                                self.set_status("busy");
+                                self.publish_status("running", None);
+                            }
+                        }
+                    }
+                }
+            }
+            Some(kind @ ("accepted" | "rejected")) => {
+                if let Some(rid) = parse(&frame).and_then(|v| {
+                    v.pointer("/response/request_id")
+                        .and_then(|r| r.as_str())
+                        .map(String::from)
+                }) {
+                    if let Some(tx) = self.verdicts.lock().remove(&rid) {
+                        let _ = tx.send(kind == "accepted");
+                    }
+                }
+            }
+            Some("exit") => self.on_exit().await,
+            _ => {}
+        }
+    }
+
+    /// Plain text of a stream-json user message (None for tool results).
+    fn user_text(v: &Value) -> Option<String> {
+        let c = v.pointer("/message/content")?;
+        if let Some(t) = c.as_str() {
+            return Some(t.trim().to_string());
+        }
+        let arr = c.as_array()?;
+        if arr
+            .iter()
+            .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+        {
+            return None;
+        }
+        let t: Vec<&str> = arr
+            .iter()
+            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+            .collect();
+        (!t.is_empty()).then(|| t.join("\n").trim().to_string())
+    }
+
+    /// Attached mode: record a user message that went into the agent.
+    fn echo_user(&self, v: &Value, source: Option<&str>) {
+        let Some(text) = Self::user_text(v) else {
+            return;
+        };
+        self.echoed.lock().insert(text);
+        let mut rec = v.clone();
+        rec["uuid"] = json!(format!("in:{}", crate::util::new_id()));
+        rec["timestamp"] = json!(crate::util::now_rfc3339());
+        let drafts = self.parser.lock().feed(&rec);
+        let mut log = self.log.lock();
+        for mut d in drafts {
+            if let Some(src) = source {
+                if d.kind == "user_message" {
+                    d.data["source"] = json!(src);
+                }
+            }
+            log.upsert(d, true);
+        }
+    }
+
     async fn write_line(&self, v: &Value) -> ApiResult<()> {
+        if let Some(tx) = &self.remote {
+            return tx
+                .send(json!({ "t": "inject", "line": v.to_string() }).to_string())
+                .map_err(|_| ApiError::conflict("the attached session has disconnected"));
+        }
         let mut guard = self.stdin.lock().await;
         let Some(stdin) = guard.as_mut() else {
             return Err(ApiError::conflict("session process has exited"));
@@ -278,14 +454,19 @@ impl ManagedClaude {
         if self.liveness() != Liveness::Live {
             return Err(ApiError::conflict("session process has exited"));
         }
-        self.sent_texts.lock().insert(text.trim().to_string());
-        self.write_line(&json!({
+        let msg = json!({
             "type": "user",
             "session_id": "",
             "parent_tool_use_id": null,
             "message": { "role": "user", "content": [{ "type": "text", "text": text }] },
-        }))
-        .await?;
+        });
+        if self.remote.is_none() {
+            self.sent_texts.lock().insert(text.trim().to_string());
+        }
+        self.write_line(&msg).await?;
+        if self.remote.is_some() {
+            self.echo_user(&msg, Some("phone"));
+        }
         self.set_status("busy");
         self.publish_status("running", None);
         Ok(())
@@ -349,11 +530,31 @@ impl ManagedClaude {
                 return Err(ApiError::validation(format!("unknown decision '{other}'")));
             }
         };
+        let verdict = if self.remote.is_some() {
+            let (tx, rx) = oneshot::channel();
+            self.verdicts.lock().insert(request_id.to_string(), tx);
+            Some(rx)
+        } else {
+            None
+        };
         self.write_line(&json!({
             "type": "control_response",
             "response": { "subtype": "success", "request_id": request_id, "response": response },
         }))
         .await?;
+        if let Some(rx) = verdict {
+            // The IDE may have answered in the same instant: the shim decides.
+            if let Ok(Ok(false)) = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await
+            {
+                self.resolved
+                    .lock()
+                    .insert(request_id.to_string(), "desktop".into());
+                return Err(ApiError::conflict(
+                    "this request was already answered on the computer",
+                )
+                .with_details(json!({ "resolvedBy": "desktop" })));
+            }
+        }
         let ev = self.log.lock().update(&pending.event_id, true, |e| {
             e.data["resolved"] = json!(true);
             e.data["decision"] = json!(decision);
@@ -368,6 +569,10 @@ impl ManagedClaude {
     }
 
     pub fn kill(&self) {
+        // Never kill a process the user started.
+        if self.remote.is_some() {
+            return;
+        }
         if let Some(mut c) = self.child.lock().take() {
             let _ = c.start_kill();
         }
@@ -408,6 +613,12 @@ impl ManagedClaude {
                         });
                     }
                 }
+            }
+            Some("user")
+                if self.remote.is_some()
+                    && Self::user_text(&v).is_some_and(|t| self.echoed.lock().remove(&t)) =>
+            {
+                // Replay of a prompt already shown.
             }
             Some(_) => {
                 let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -528,6 +739,9 @@ impl ManagedClaude {
                 self.log.lock().upsert(draft, true);
                 self.set_status("waiting");
                 self.publish_status("waiting_approval", None);
+            }
+            _ if self.remote.is_some() => {
+                // Hooks / SDK MCP / elicitation belong to the IDE that owns the process.
             }
             _ => {
                 // Unsupported host callbacks (hooks/SDK MCP/elicitation) — we

@@ -9,6 +9,7 @@
 //! - **Managed sessions** explicitly created by SwitchTether (clearly labelled
 //!   `origin: managed`), which are fully controllable.
 
+pub mod attached_tty;
 pub mod claude;
 pub mod codex;
 pub mod managed;
@@ -106,6 +107,17 @@ pub struct AgentHub {
     codex_bin: Option<PathBuf>,
     loaded: Mutex<HashMap<String, Loaded>>,
     index_cache: Mutex<Option<(Instant, Arc<Vec<IndexedSession>>)>>,
+    ttys: RwLock<HashMap<String, Arc<attached_tty::AttachedTty>>>,
+}
+
+fn origin_of(name: &str) -> Origin {
+    match name {
+        "managed" => Origin::Managed,
+        "vscode" => Origin::Vscode,
+        "desktop_app" => Origin::DesktopApp,
+        "cli" => Origin::Cli,
+        _ => Origin::Unknown,
+    }
 }
 
 fn agent_of_provider(provider_id: &str) -> String {
@@ -129,7 +141,177 @@ impl AgentHub {
             codex_bin: codex::managed::find_codex_bin(),
             loaded: Mutex::new(HashMap::new()),
             index_cache: Mutex::new(None),
+            ttys: RwLock::new(HashMap::new()),
         })
+    }
+
+    pub fn bus(&self) -> Arc<EventBus> {
+        self.bus.clone()
+    }
+
+    /// Register a session of a user-started process SwitchTether is attached to
+    /// (switchtether-shim). Ended attached sessions beyond a small history are pruned.
+    pub fn register_attached(&self, id: String, session: Arc<dyn ManagedSession>) {
+        {
+            let mut m = self.managed.write();
+            let mut ended: Vec<(String, i64)> = m
+                .iter()
+                .filter(|(_, s)| s.origin() != "managed" && s.liveness() != Liveness::Live)
+                .map(|(k, s)| (k.clone(), s.last_active_at_ms()))
+                .collect();
+            if ended.len() > 20 {
+                ended.sort_by_key(|(_, t)| *t);
+                for (k, _) in ended.iter().take(ended.len() - 20) {
+                    m.remove(k);
+                    self.ttys.write().remove(k);
+                }
+            }
+            m.insert(id.clone(), session.clone());
+        }
+        self.publish_session(&id);
+    }
+
+    pub fn register_tty(&self, id: String, tty: Arc<attached_tty::AttachedTty>) {
+        self.ttys.write().insert(id.clone(), tty.clone());
+        self.register_attached(id, tty);
+    }
+
+    pub fn publish_session(&self, id: &str) {
+        let m = self.managed.read().get(id).cloned();
+        if let Some(m) = m {
+            let summary = self.managed_summary(id, m.as_ref());
+            self.bus.publish("session.upserted", json!(summary));
+        }
+    }
+
+    /// Load the existing conversation of an attached session (resumed in the
+    /// IDE / opened in Codex Desktop) so the phone sees the whole history.
+    pub async fn preload_history(
+        &self,
+        agent: &str,
+        native_id: &str,
+        cwd: Option<&str>,
+        log: &Arc<Mutex<SessionLog>>,
+    ) -> bool {
+        self.history_tail(agent, native_id, cwd, log)
+            .await
+            .is_some()
+    }
+
+    async fn history_tail(
+        &self,
+        agent: &str,
+        native_id: &str,
+        cwd: Option<&str>,
+        log: &Arc<Mutex<SessionLog>>,
+    ) -> Option<Tail> {
+        let path = match agent {
+            "claude_code" => self.claude.transcript_path(cwd, native_id),
+            "codex" => {
+                *self.index_cache.lock() = None;
+                self.index()
+                    .await
+                    .iter()
+                    .find(|s| s.provider_id == "codex" && s.session_id == native_id)
+                    .and_then(|s| s.source_path.clone())
+                    .map(PathBuf::from)
+                    .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+            }
+            _ => None,
+        }?;
+        let parser: Box<dyn LineParser> = if agent == "codex" {
+            Box::new(CodexParser::new())
+        } else {
+            Box::new(ClaudeParser::new())
+        };
+        match load_file(&path, parser, log) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                log::warn!("[agents] could not preload history: {}", e.message);
+                None
+            }
+        }
+    }
+
+    /// Terminal sessions: find the agent's own session id (Claude: live
+    /// registry by pid, else by cwd/start time; Codex: newest rollout for the
+    /// cwd), then follow its transcript; refresh status from the registry.
+    pub async fn refresh_tty(&self, tty: &attached_tty::AttachedTty) {
+        let cwd = tty.cwd().to_string_lossy().into_owned();
+        if tty.agent() == "claude_code" {
+            let live = self.claude.live_sessions().await;
+            let claimed: Vec<String> = self
+                .managed
+                .read()
+                .iter()
+                .filter(|(k, _)| **k != tty.id)
+                .filter_map(|(_, m)| m.native_session_id())
+                .collect();
+            let mine = live
+                .iter()
+                .find(|l| l.pid.is_some() && l.pid == tty.pid)
+                .or_else(|| {
+                    tty.native_session_id()
+                        .and_then(|n| live.iter().find(|l| l.session_id == n))
+                })
+                .or_else(|| {
+                    if !tty.needs_native_id() {
+                        return None;
+                    }
+                    live.iter().find(|l| {
+                        !claimed.contains(&l.session_id)
+                            && l.cwd.as_deref().map(norm_path) == Some(norm_path(&cwd))
+                            && l.started_at_ms.unwrap_or(0) >= tty.created_at_ms() - 10_000
+                    })
+                });
+            if let Some(l) = mine {
+                if tty.native_session_id().as_deref() != Some(l.session_id.as_str()) {
+                    let tail = self
+                        .history_tail("claude_code", &l.session_id, Some(&cwd), &tty.log())
+                        .await;
+                    tty.set_native(l.session_id.clone(), l.name.clone(), tail);
+                }
+                tty.update_live(l.status.clone(), l.waiting_for.clone());
+            }
+        } else if tty.needs_native_id() {
+            *self.index_cache.lock() = None;
+            let found = self
+                .index()
+                .await
+                .iter()
+                .filter(|s| s.provider_id == "codex")
+                .filter(|s| s.project_dir.as_deref().map(norm_path) == Some(norm_path(&cwd)))
+                .filter(|s| s.created_at_ms.unwrap_or(0) >= tty.created_at_ms() - 10_000)
+                .max_by_key(|s| s.created_at_ms.unwrap_or(0))
+                .map(|s| (s.session_id.clone(), s.title.clone()));
+            if let Some((native, title)) = found {
+                let tail = self
+                    .history_tail("codex", &native, Some(&cwd), &tty.log())
+                    .await;
+                tty.set_native(native, title, tail);
+            }
+        }
+        tty.tail_now();
+    }
+
+    /// Managed or attached session by id; `claude:<id>` / `codex:<id>` also
+    /// resolve to the attached session controlling that conversation.
+    fn find_managed(&self, id: &str) -> Option<(String, Arc<dyn ManagedSession>)> {
+        let m = self.managed.read();
+        if let Some(s) = m.get(id) {
+            return Some((id.to_string(), s.clone()));
+        }
+        let (prefix, native) = id.split_once(':')?;
+        let agent = match prefix {
+            "claude" => "claude_code",
+            "codex" => "codex",
+            _ => return None,
+        };
+        m.iter()
+            .filter(|(_, s)| s.origin() != "managed" && s.agent() == agent)
+            .filter(|(_, s)| s.liveness() == Liveness::Live)
+            .find(|(_, s)| s.native_session_id().as_deref() == Some(native))
+            .map(|(k, s)| (k.clone(), s.clone()))
     }
 
     /// Static capability matrix (docs/AGENT_COMPATIBILITY.md).
@@ -171,7 +353,7 @@ impl AgentHub {
         SessionSummary {
             id: id.to_string(),
             agent: m.agent().into(),
-            origin: Origin::Managed,
+            origin: origin_of(m.origin()),
             native_id: m.native_session_id().unwrap_or_default(),
             title: m.title(),
             project: SessionSummary::project_from_cwd(&cwd),
@@ -179,7 +361,13 @@ impl AgentHub {
             liveness: m.liveness(),
             status: m.status().into(),
             waiting_for: if m.has_pending_requests() {
-                Some("permission prompt".into())
+                Some(
+                    self.ttys
+                        .read()
+                        .get(id)
+                        .and_then(|t| t.waiting_for())
+                        .unwrap_or_else(|| "permission prompt".into()),
+                )
             } else {
                 None
             },
@@ -193,7 +381,8 @@ impl AgentHub {
             model: m.model(),
             git_branch: None,
             pid: None,
-            managed: true,
+            managed: m.origin() == "managed",
+            terminal_id: m.terminal_id(),
             source_path: None,
         }
     }
@@ -239,6 +428,7 @@ impl AgentHub {
                 git_branch: None,
                 pid: l.pid,
                 managed: false,
+                terminal_id: None,
                 source_path: None,
             });
         }
@@ -275,6 +465,7 @@ impl AgentHub {
                 git_branch: None,
                 pid: None,
                 managed: false,
+                terminal_id: None,
                 source_path: s.source_path.clone(),
             });
         }
@@ -365,13 +556,14 @@ impl AgentHub {
             git_branch: parser.git_branch.clone(),
             pid: None,
             managed: false,
+            terminal_id: None,
             source_path: Some(path.to_string_lossy().into_owned()),
         })
     }
 
     pub async fn summary(&self, id: &str) -> Option<SessionSummary> {
-        if let Some(m) = self.managed.read().get(id).cloned() {
-            return Some(self.managed_summary(id, m.as_ref()));
+        if let Some((key, m)) = self.find_managed(id) {
+            return Some(self.managed_summary(&key, m.as_ref()));
         }
         let q = SessionQuery {
             limit: Some(200),
@@ -396,6 +588,9 @@ impl AgentHub {
     }
 
     fn capabilities_for(&self, s: &SessionSummary) -> Capabilities {
+        if !s.managed && s.control == Control::Full {
+            return attached_caps(s);
+        }
         if s.managed {
             let mut c = managed_caps();
             if s.liveness != Liveness::Live {
@@ -417,7 +612,7 @@ impl AgentHub {
 
     /// Ensure the session log is loaded (parsing its transcript if needed).
     async fn ensure_loaded(&self, s: &SessionSummary) -> ApiResult<Arc<Mutex<SessionLog>>> {
-        if let Some(m) = self.managed.read().get(&s.id) {
+        if let Some((_, m)) = self.find_managed(&s.id) {
             return Ok(m.log());
         }
         if let Some(l) = self.loaded.lock().get_mut(&s.id) {
@@ -597,7 +792,7 @@ impl AgentHub {
                 .summary(&target)
                 .await
                 .ok_or_else(|| ApiError::not_found("unknown session to continue"))?;
-            if s.managed {
+            if s.managed || s.control == Control::Full {
                 return Err(ApiError::validation(
                     "this session is already controlled by SwitchTether",
                 ));
@@ -767,7 +962,7 @@ impl AgentHub {
     }
 
     fn managed_or_blocked(&self, id: &str) -> ApiResult<Arc<dyn ManagedSession>> {
-        if let Some(m) = self.managed.read().get(id).cloned() {
+        if let Some((_, m)) = self.find_managed(id) {
             return Ok(m);
         }
         Err(ApiError::unavailable_capability(
@@ -874,10 +1069,11 @@ impl AgentHub {
     }
 
     pub fn managed_count(&self) -> usize {
+        // Attached sessions belong to the user's processes and survive SwitchTether.
         self.managed
             .read()
             .values()
-            .filter(|m| m.liveness() == Liveness::Live)
+            .filter(|m| m.origin() == "managed" && m.liveness() == Liveness::Live)
             .count()
     }
 
@@ -922,6 +1118,11 @@ impl AgentHub {
                 }
             }
         }
+        drop(loaded);
+        let ttys: Vec<_> = self.ttys.read().values().cloned().collect();
+        for t in ttys {
+            t.tail_now();
+        }
     }
 }
 
@@ -940,6 +1141,45 @@ fn observed_caps(agent: &str) -> Capabilities {
             "codex" => "The original Codex process (CLI / Desktop) cannot be controlled from another program. Use \"Continue on phone\": the thread continues on SwitchTether's own app-server, which Codex allows only when the thread is not open elsewhere.".into(),
             _ => "History only.".into(),
         }),
+    }
+}
+
+/// Sessions of user-started processes controlled through switchtether-shim.
+fn attached_caps(s: &SessionSummary) -> Capabilities {
+    let live = s.liveness == Liveness::Live;
+    let on = |c: CapStatus| Some(if live { c } else { CapStatus::Blocked });
+    if s.terminal_id.is_some() {
+        return Capabilities {
+            read_history: Some(CapStatus::Partial),
+            live_events: on(CapStatus::Partial),
+            send_message: on(CapStatus::Partial),
+            approve: Some(CapStatus::Partial),
+            answer_question: Some(CapStatus::Partial),
+            interrupt: on(CapStatus::Partial),
+            continue_session: None,
+            reason: Some(
+                "Runs in a terminal window on the computer: prompts are answered in the mirrored terminal view.".into(),
+            ),
+        };
+    }
+    Capabilities {
+        read_history: Some(CapStatus::Verified),
+        live_events: on(CapStatus::Partial),
+        send_message: on(CapStatus::Partial),
+        approve: on(CapStatus::Partial),
+        answer_question: on(CapStatus::Untested),
+        interrupt: on(CapStatus::Partial),
+        continue_session: None,
+        reason: (!live).then(|| "The process on the computer has exited.".into()),
+    }
+}
+
+fn norm_path(p: &str) -> String {
+    let p = p.trim_end_matches(['/', '\\']).replace('\\', "/");
+    if cfg!(windows) {
+        p.to_lowercase()
+    } else {
+        p
     }
 }
 

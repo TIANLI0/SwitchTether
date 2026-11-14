@@ -95,6 +95,8 @@ pub struct RemoteRuntime {
     handle: tokio::sync::Mutex<Option<RemoteServerHandle>>,
     last_error: Mutex<Option<String>>,
     cancel: CancellationToken,
+    /// Loopback endpoint for switchtether-shim (opt-in takeover hooks).
+    attach: Mutex<Option<switchtether_core::attach::AttachBroker>>,
 }
 
 impl RemoteRuntime {
@@ -136,6 +138,20 @@ impl RemoteRuntime {
         );
         let cancel = CancellationToken::new();
         hub.start_tailer(cancel.clone());
+        let attach = match switchtether_core::attach::AttachBroker::start(
+            hub.clone(),
+            ctx.terminals.clone(),
+            dir.join("attach.json"),
+            cancel.child_token(),
+        )
+        .await
+        {
+            Ok(b) => Some(b),
+            Err(e) => {
+                log::warn!("[switchtether] attach broker unavailable: {e}");
+                None
+            }
+        };
 
         // Forward selected events to the desktop UI.
         let mut rx = bus.subscribe();
@@ -168,6 +184,7 @@ impl RemoteRuntime {
             handle: tokio::sync::Mutex::new(None),
             last_error: Mutex::new(None),
             cancel,
+            attach: Mutex::new(attach),
         });
         if config.enabled {
             if let Err(e) = rt.start().await {
@@ -179,7 +196,10 @@ impl RemoteRuntime {
         #[cfg(debug_assertions)]
         if std::env::var_os("SWITCHTETHER_DEV_LOG_PAIRING").is_some() {
             match rt.create_pairing().await {
-                Ok(v) => log::info!("[switchtether][dev] pairing link: {}", v["uri"].as_str().unwrap_or("")),
+                Ok(v) => log::info!(
+                    "[switchtether][dev] pairing link: {}",
+                    v["uri"].as_str().unwrap_or("")
+                ),
                 Err(e) => log::warn!("[switchtether][dev] pairing link unavailable: {e}"),
             }
         }
@@ -334,6 +354,7 @@ impl RemoteRuntime {
         let n = self.ctx.terminals.kill_all();
         self.ctx.agents.shutdown();
         self.stop().await;
+        self.attach.lock().take();
         self.cancel.cancel();
         log::info!("[switchtether] remote shutdown: ended {n} terminal(s)");
     }
