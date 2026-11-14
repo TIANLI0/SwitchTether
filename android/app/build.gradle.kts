@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeCompiler)
@@ -20,10 +22,46 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release signing: the keystore and its passwords live OUTSIDE the repository. Point to a
+    // properties file (storeFile, storePassword, keyAlias, keyPassword) with
+    // `switchtether.signing.properties=<path>` in local.properties or the
+    // SWITCHTETHER_SIGNING_PROPERTIES environment variable; in CI (release.yml) the
+    // ST_KEYSTORE_FILE / ST_KEYSTORE_PASSWORD / ST_KEY_ALIAS / ST_KEY_PASSWORD variables from
+    // GitHub secrets. Without any of these, release is unsigned.
+    val localProps = Properties().apply {
+        rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+    }
+    val signingProps = (localProps.getProperty("switchtether.signing.properties")
+        ?: System.getenv("SWITCHTETHER_SIGNING_PROPERTIES"))
+        ?.let { file(it) }
+        ?.takeIf { it.isFile }
+        ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+        ?: System.getenv("ST_KEYSTORE_FILE")?.takeIf { it.isNotBlank() && file(it).isFile }?.let { ks ->
+            Properties().apply {
+                setProperty("storeFile", ks)
+                setProperty("storePassword", System.getenv("ST_KEYSTORE_PASSWORD"))
+                setProperty("keyAlias", System.getenv("ST_KEY_ALIAS"))
+                setProperty("keyPassword", System.getenv("ST_KEY_PASSWORD"))
+            }
+        }
+    signingConfigs {
+        if (signingProps != null) {
+            create("release") {
+                storeFile = file(signingProps.getProperty("storeFile"))
+                storePassword = signingProps.getProperty("storePassword")
+                keyAlias = signingProps.getProperty("keyAlias")
+                keyPassword = signingProps.getProperty("keyPassword")
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
