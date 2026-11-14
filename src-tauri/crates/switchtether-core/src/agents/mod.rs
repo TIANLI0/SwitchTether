@@ -677,6 +677,54 @@ impl AgentHub {
         Ok(json!({ "stopped": true }))
     }
 
+    /// Poll live external sessions and publish changes (status, waitingFor,
+    /// appearance/disappearance) so phones can notify about e.g. a terminal
+    /// session waiting for a permission prompt. `active()` gates polling so
+    /// nothing is spawned while no phone is connected.
+    pub fn start_live_watcher(
+        self: &Arc<Self>,
+        cancel: CancellationToken,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) {
+        let hub = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut prev: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+            let mut tick = tokio::time::interval(Duration::from_secs(4));
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tick.tick() => {}
+                }
+                if !active() {
+                    continue;
+                }
+                let Some(hub) = hub.upgrade() else { break };
+                let live = hub.claude.live_sessions().await;
+                let mut now: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+                for l in &live {
+                    let id = format!("claude:{}", l.session_id);
+                    let state = (l.status.clone(), l.waiting_for.clone());
+                    if prev.get(&id) != Some(&state) {
+                        hub.bus.publish(
+                            "session.upserted",
+                            json!({
+                                "id": id, "agent": "claude_code", "origin": l.origin(),
+                                "liveness": "live", "status": l.status, "waitingFor": l.waiting_for,
+                                "cwd": l.cwd, "title": l.name, "control": "observe",
+                            }),
+                        );
+                    }
+                    now.insert(id, state);
+                }
+                for id in prev.keys().filter(|k| !now.contains_key(*k)) {
+                    hub.bus
+                        .publish("session.removed", json!({ "id": id, "liveness": "ended" }));
+                }
+                prev = now;
+            }
+        });
+    }
+
     pub fn managed_count(&self) -> usize {
         self.managed
             .read()

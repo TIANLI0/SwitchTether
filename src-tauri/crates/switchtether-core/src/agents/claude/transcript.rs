@@ -575,7 +575,12 @@ impl ClaudeParser {
                 let max = rec.get("maxRetries").and_then(|v| v.as_i64()).unwrap_or(0);
                 format!("API error, retrying ({attempt}/{max})")
             }
-            _ => s(rec, "content").unwrap_or_else(|| subtype.clone()),
+            // Bookkeeping records (status, thinking_tokens, commands_changed, …)
+            // carry no user-visible text: skip them.
+            _ => match s(rec, "content").filter(|c| !c.trim().is_empty()) {
+                Some(c) => c,
+                None => return vec![],
+            },
         };
         let (p, _) = preview(&text, PREVIEW_LIMIT);
         vec![EventDraft::new(
@@ -778,6 +783,15 @@ mod tests {
         let fin = p.feed(&json!({"type":"assistant","message":{"id":"m9","content":[{"type":"text","text":"Hello!"}]}}));
         assert_eq!(fin[0].id, "m9:0");
         assert!(!fin[0].streaming);
+    }
+
+    #[test]
+    fn bookkeeping_system_records_are_hidden() {
+        let mut p = ClaudeParser::new();
+        assert!(p.feed(&json!({"type":"system","subtype":"thinking_tokens"})).is_empty());
+        assert!(p.feed(&json!({"type":"system","subtype":"status","status":"x"})).is_empty());
+        assert_eq!(p.feed(&json!({"type":"system","subtype":"informational","content":"hi"}))[0].kind, "system");
+        assert_eq!(p.feed(&json!({"type":"system","subtype":"init","model":"m"}))[0].kind, "system");
     }
 
     #[test]

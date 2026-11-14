@@ -32,6 +32,9 @@ TODO list. Each item says what the user experiences.
 
 8. No public relay: the phone must reach the desktop over LAN, Tailscale (your own Tailnet; it
    still uses Tailscale's coordination servers) or a manually configured address.
+8a. No mDNS discovery yet: the QR code carries the candidate addresses (LAN, Tailscale). If
+    the computer's LAN address changes, the phone tries all stored candidates; otherwise
+    re-pair or enter the address manually. Tailscale addresses are stable.
 9. When the desktop sleeps the phone shows "offline"; SwitchTether does not change sleep
    settings. Wake-on-LAN is not implemented.
 10. Android background delivery is best effort: without FCM, notifications depend on the
