@@ -399,6 +399,8 @@ impl CcSwitchBackend for CcSwitchBridge {
             "codexConfigDir",
             "geminiConfigDir",
             "quotaDisplay",
+            // Currency, exchange rates and digits used to show costs (the phone mirrors them).
+            "usageDisplay",
         ];
         let mut out = serde_json::Map::new();
         for k in keys {

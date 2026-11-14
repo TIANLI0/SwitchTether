@@ -1121,8 +1121,51 @@ impl AgentHub {
         }
     }
 
+    /// Status events of managed / attached sessions also refresh their
+    /// summary (`session.upserted`), so lists show busy / waiting / idle live.
+    fn start_status_relay(self: &Arc<Self>, cancel: CancellationToken) {
+        let hub = Arc::downgrade(self);
+        let mut rx = self.bus.subscribe();
+        tokio::spawn(async move {
+            let mut last: HashMap<String, (String, Option<String>)> = HashMap::new();
+            loop {
+                let frame = tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    f = rx.recv() => f,
+                };
+                let frame = match frame {
+                    Ok(f) => f,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                };
+                if frame.topic != "session.event"
+                    || !matches!(
+                        frame.data.get("kind").and_then(|k| k.as_str()),
+                        Some("status" | "approval_request" | "question")
+                    )
+                {
+                    continue;
+                }
+                let Some(id) = frame.data.get("sessionId").and_then(|s| s.as_str()) else {
+                    continue;
+                };
+                let Some(hub) = hub.upgrade() else { break };
+                let m = hub.managed.read().get(id).cloned();
+                if let Some(m) = m {
+                    let summary = hub.managed_summary(id, m.as_ref());
+                    let key = (summary.status.clone(), summary.waiting_for.clone());
+                    if last.get(id) != Some(&key) {
+                        last.insert(id.to_string(), key);
+                        hub.bus.publish("session.upserted", json!(summary));
+                    }
+                }
+            }
+        });
+    }
+
     /// Tail live transcripts in the background.
     pub fn start_tailer(self: &Arc<Self>, cancel: CancellationToken) {
+        self.start_status_relay(cancel.clone());
         let hub = Arc::downgrade(self);
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(TAIL_INTERVAL);
