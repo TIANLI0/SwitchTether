@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
@@ -40,9 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.suqi8.coui.kmp.basic.TabRow
 import io.github.suqi8.coui.kmp.basic.TextButton
-import io.github.suqi8.coui.kmp.icon.COUIIcons
-import io.github.suqi8.coui.kmp.icon.extended.Add
-import io.github.suqi8.coui.kmp.icon.extended.Refresh
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
@@ -90,7 +89,7 @@ fun SessionsContent(
     val refreshing = state.items is Loadable.Ready && (state.items as Loadable.Ready).refreshing
     Page(
         title = stringResource(R.string.tab_sessions),
-        actions = { ToolbarIcon(COUIIcons.Refresh, stringResource(R.string.action_refresh), onReload) },
+        actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), onReload) },
     ) {
         ConnectionBanner(state.connection, onRetryConnection)
         TextInput(

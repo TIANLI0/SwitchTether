@@ -24,4 +24,24 @@
     <string name="notif_battery">电池优化</string>
     <string name="notif_battery_summary">部分手机会停止后台连接。如果通知延迟，请允许 SwitchTether 不受限制地运行。</string>
     <string name="notif_system_settings">各通道的声音与振动</string>
+    <string name="ntf_needs_approval">%1$s 需要审批</string>
+    <string name="ntf_approval_requested">请求审批</string>
+    <string name="ntf_asks_question">%1$s 提了一个问题</string>
+    <string name="ntf_answer_hint">在 SwitchTether 或电脑上回答</string>
+    <string name="ntf_started">%1$s 开始工作</string>
+    <string name="ntf_finished">%1$s 已完成</string>
+    <string name="ntf_failed">%1$s 失败</string>
+    <string name="ntf_interrupted">%1$s 已被中断</string>
+    <string name="ntf_waiting_input">%1$s 正在等待输入</string>
+    <string name="ntf_waiting_for_you">%1$s 正在等你</string>
+    <string name="ntf_tool_call">%1$s：%2$s</string>
+    <string name="ntf_tool">工具</string>
+    <string name="ntf_replied">%1$s 已回复</string>
+    <string name="ntf_still_running">%1$s 仍在运行</string>
+    <string name="ntf_running_for">已运行 %1$d 分钟</string>
+    <string name="ntf_connection_lost">与 %1$s 的连接已断开</string>
+    <string name="ntf_reconnected">已重新连接到 %1$s</string>
+    <string name="ntf_public_approval">有智能体需要你的审批</string>
+    <string name="ntf_public_waiting">有智能体在等你</string>
+    <string name="ntf_public_activity">智能体动态</string>
 </resources>

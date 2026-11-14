@@ -168,10 +168,10 @@ the accent is the brand blue `#1F6BFF` (dark: `#4A86FF`) fed into `lightColorSch
 
 | Screen | coui17 components |
 | :--- | :--- |
-| Shell | `BottomFloatingNavigationBar` (floating glass capsule over a `LayerBackdrop` of the page, `expansion` "+" melt-ball on the Sessions tab → New session, hidden with animation on detail pages) + `BottomFloatingNavigationBarItem`; `NavigationRail` + `NavigationRailItem` (≥ 600 dp); `COUIIcons` |
+| Shell | `BottomFloatingNavigationBar` (floating glass capsule over a `LayerBackdrop` of the page, `expansion` "+" melt-ball on the Sessions tab → New session, hidden with animation on detail pages) + `BottomFloatingNavigationBarItem` (`icon`, plus `selectedIcon` where coui-icons has a Fill glyph); `NavigationRail` + `NavigationRailItem` (≥ 600 dp); `COUIIcons` |
 | Home | `Scaffold`, `TopAppBar` (large, subtitle = desktop), `Card` groups, `BasicComponent` (connection, session rows, states), `ArrowPreference` + icons (quick links), `SmallTitle`, `TextButton` |
 | Sessions | `TopAppBar`, `TextField`, `TabRowWithContour` (Live/History/All), `ChipTabGroup` (agents), `PullToRefresh`, `BasicComponent` rows in group cards, `EmptyState` (New session = capsule expansion) |
-| Session detail | `SmallTopAppBar`, `IconButton`s, `Card` surfaces for tool/approval/diff cards, `Button`/`TextButton`, `Checkbox`/`RadioButton` (questions), `LinearProgressIndicator`, `WindowDialog` (approval confirm), `WindowAlertDialog` (commands, links, interrupt), `TextField` composer — the timeline/code/diff/tool output stay monospace and dense |
+| Session detail | Redesigned in Phase C, see §11 |
 | New session | `SmallTopAppBar`, `TabRow`, `RadioButtonPreference` (permission mode), `TextField`, `Button`, group cards, `WindowAlertDialog` |
 | Manage | `TopAppBar`, `ArrowPreference` with icons in group cards |
 | Providers / Usage | `SmallTopAppBar`, `TabRow`, group cards, `TextButton`, `LinearProgressIndicator`, page-level error state |
@@ -298,6 +298,178 @@ NOTICE + MPL headers kept, MPL source link in the licenses screen. Re-sync with
 
 Screenshots: `android/docs/screenshots/phase-b/` (terminal, file-conflict, notifications).
 
+## 11. Phase C: session UI redesign, continue on phone, zh-CN, icons
+
+### 11.1 Icons: library only (superseded by §12.1)
+All icons come from **coui-icons** (`COUIIcons.*`, package `io.github.suqi8.coui.kmp.icon.extended`)
+and the basic icons shipped in **coui-ui** (`COUIIcons.Basic.*`). Our modules contain no
+hand-written `ImageVector` or path icons: `grep -rE "ImageVector\.Builder|addPathNodes|PathNode|pathData" app core`
+finds nothing (third_party excluded). The only vector XMLs are the launcher foreground (the
+product logo from `src/assets/icons/switchtether-logo.svg`) and the notification small icon, which
+Android requires as drawable resources.
+
+Navigation: Home → `Home`, Sessions → `Messages`, Workspace → `Folder` with `selectedIcon = FolderFill`,
+Manage → `Tune`, Settings → `Settings`. coui-icons has no Fill variant for the other four, so only
+`icon` is passed and the selected tint of `BottomFloatingNavigationBarItem` shows the state.
+Selected is `colorScheme.onSurface` (labelPrimary) and unselected is `labelPrimaryVariant`, as in
+the native COUI bar; the app doesn't override the colour. `NavigationRailItem` has no
+`selectedIcon`, so the app switches to the Fill glyph itself where one exists.
+
+Tool categories: shell `Tasks`, edit/write `Edit`, read `File`, search `Search`, web `Link`,
+mcp `Layers`, task/sub-agent `ContactsCircle`, todo/plan `ListView`, question `Help`, other `Tune`.
+Other icons: thinking `MindMap`, approvals `Lock`, info/error `Info`, done `Basic.Check`,
+send `Send`, interrupt `Pause`.
+
+### 11.2 Session detail
+- Header: `SmallTopAppBar` with the title and agent · model, plus info and refresh actions. Below it
+  is one scrollable row of `InfoChip`s: status dot and status, waiting-for, phone control level,
+  project and branch. While the agent is working, the rolling status also shows there with a
+  spinner. Tapping the chips or the info icon opens a `WindowBottomSheet` **会话信息** with agent,
+  model, status, activity, control, origin, project, branch, cwd, last active, and whether each
+  capability is available (with the reason).
+- Read-only/blocked sessions: a coui `TopTips` explains why (multi-line content slot, can be
+  dismissed). The composer becomes a "手机端只读" bar instead of a dead input field.
+- Pending approvals/questions: a sticky `TopTips` "N 个请求等待你处理 · 查看" scrolls to the oldest.
+- Timeline (`Timeline.kt`, built in the ViewModel, one lazy item per row with a stable key):
+  - User turns are right-aligned bubbles tinted with the accent.
+  - Assistant turns show the agent avatar, name, model and time, then plain Markdown.
+  - Thinking is a subtle collapsible "思考过程" row. It can't be expanded when the agent only
+    reports redacted thinking.
+  - Each tool call is a compact `CollapsibleRow`: category icon, title, name · time, and a status
+    of spinner, check, or labelled pill for failed/denied/interrupted. It expands to show 输入/输出.
+  - Two or more consecutive steps in a turn fold into one "N 个步骤" block, collapsed by default.
+    The header shows the latest step, plus a spinner while running or "N 个失败". When expanded,
+    the steps render as segments of one card.
+  - Approval requests, questions, errors, diffs and plans are never folded.
+- Diffs: a card with file name, directory, +/- counts, change pill and the native `DiffView`.
+  Plans: a checklist card with a progress bar. Done items show a check in a filled circle and the
+  item in progress shows a spinner.
+- Approval and question cards have an accent border while pending and full-width coui buttons.
+  Decision ids are localized (允许 / 本会话内始终允许 / 拒绝 / 停止智能体). Resolved cards read
+  "已允许（在手机上）".
+- Composer: a full-radius input pill with a round accent send button that spins while sending.
+  A round interrupt button appears only while the session is live and not idle. Offline, the
+  composer keeps the local draft and says so.
+
+### 11.3 Session list
+`BasicComponent` rows in group cards. Each row has a 40 dp agent avatar (the agent's initial on a
+disc tinted for that agent), with a status dot for live sessions. Then come the title,
+agent · project · branch, and a localized relative time. Pills appear only for waiting-for and for
+sessions managed by SwitchTether. The live section comes first in "全部".
+
+### 11.4 Continue on phone (接续会话)
+Offered only when `capabilities.continueSession` is present and the phone can't already send. The
+desktop sets it to `PARTIAL` for external Claude Code / Codex sessions. The action is the button in
+the read-only composer bar. It opens a confirm sheet (`WindowBottomSheet`) that says:
+- the conversation continues with the same context in a managed session;
+- the original window on the computer won't show turns sent from the phone;
+- the desktop refuses while the original is busy or waiting, or while a Codex thread is open
+  elsewhere.
+
+The buttons are **接续** (`mode: "continue"`) and, for Claude only, **以副本继续** (`mode: "fork"`).
+The request is `POST /v1/sessions {commandId, agent, resumeFrom: <session id>, mode, cwd?}` and goes
+through `CommandTracker`, so there is no silent retry and a 409/422 shows the desktop's message in
+the command dialog. On success the app opens the returned `managed:` session. The desktop's
+"continued" and "init" system rows are shown in the app language.
+
+Verified on the emulator against the sandbox desktop:
+- An ended `claude -p` session in a scratch dir → 接续 → a new managed session with the original
+  history. Asked for the code word from the first turn, it answered correctly, so the context was
+  kept.
+- A turn with approval-gated Write/Edit plus `ls`/`git status` rendered as a "2 个步骤" block with
+  approval cards.
+- 以副本继续 also opened a new managed session with the history.
+- The 409 path is covered only by a ViewModel test, because no busy external session was safe to use.
+
+### 11.5 Language
+The app is fully translated to Simplified Chinese (`values-zh-rCN`). A script compares the keys and
+flags zh values that contain no CJK characters. Strings that code used to build are now resources:
+relative times, tool/step states, capability states, decision labels, notification texts (a
+`NotifyText` interface injected into `NotificationEngine`), file-operation messages (`UiText`),
+expand/collapse state descriptions, and the terminal/camera content descriptions. coui17's sheet
+close capsule had a hard-coded "关闭". Patch `0002-localizable-sheet-close-label.patch` adds
+`LocalSheetCloseLabel`, and the app provides it from `R.string.action_close`. Data from the desktop
+(tool names, model ids, Markdown, server error messages) is shown as received.
+
+Screenshots (zh-CN, light and dark) are in `android/docs/screenshots/phase-c/{light,dark}/`:
+c02-nav-workspace (FolderFill selected), c03-session-list, c04-session-detail-reply,
+c05-session-detail-steps, c06-session-info, c07-external-readonly, c08-continue-sheet. Every session
+shown is a test session in the scratch directory `android/build/e2e-cwd`.
+
+## 12. Phase D: icons, task-first Home, brand avatars, attached sessions
+
+### 12.1 Icon set: Phosphor (replaces §11.1)
+All app icons are **Phosphor Icons** (phosphoricons.com, MIT) through the Compose port
+`com.adamglin:phosphor-icon:1.0.0` (Maven Central). The app uses Regular weight everywhere and Fill
+weight only for the selected navigation item and the send button. `core/ui/.../icons/AppIcons.kt`
+is the single list of names the app uses; it only references library icons and draws nothing
+itself. Our modules contain no hand-written `ImageVector` or path icons
+(`grep -rE "ImageVector\.Builder|addPathNodes|PathNode|pathData" app core` finds nothing).
+coui components that bring their own glyphs (switch, arrows, sheet close capsule) keep them.
+coui-icons stays a dependency only because coui-ui uses it internally.
+
+| Tab | Unselected (Regular) | Selected (Fill) |
+| :--- | :--- | :--- |
+| 首页 | `House` | `House` |
+| 会话 | `ChatsCircle` | `ChatsCircle` |
+| 工作区 | `FolderOpen` | `FolderOpen` |
+| 管理 | `SlidersHorizontal` | `SlidersHorizontal` |
+| 设置 | `GearSix` | `GearSix` |
+
+Every `BottomFloatingNavigationBarItem` passes both `icon` and `selectedIcon`. The wide-screen
+`NavigationRailItem` swaps the glyph itself. The bar's own tint is unchanged (selected
+labelPrimary, unselected labelPrimaryVariant).
+
+APK size: the release APK (R8 + resource shrinking, already enabled) went from 6,957,361 bytes before
+Phase D to 6,878,289 bytes. Unused icons are stripped, and the coui-icons glyphs the app no longer
+references are gone too. The debug APK grows to ~83 MB because debug builds aren't shrunk.
+
+### 12.2 Home: task-first
+- No "已连接" card. When the connection is healthy, nothing is shown. Connecting, offline, revoked
+  and incompatible states appear as the thin `ConnectionBanner` strip.
+- Small top app bar titled with the desktop's name instead of a large collapsing "首页" header.
+- Order:
+  1. **待处理 · N**: live sessions waiting for an approval, a question or input.
+  2. **运行中 · N**: the other live sessions, in compact rows (32 dp avatar, 10 dp vertical padding).
+     When there are none, a one-line empty row with a "新建会话" button.
+  3. **最近会话**: the 5 most recent ended sessions.
+  4. **更多**: one card with today's usage as a single line, Providers and Desktop info.
+- Removed: the metric hero card, the usage hero card and the long quick-links list.
+
+### 12.3 Agent brand marks
+Session rows (list and Home), assistant message headers and the session header chip row show the
+real agent mark on a softly tinted disc:
+- Claude (`#D97757`) for `claude_code`;
+- the OpenAI mark for `codex`, monochrome and tinted with `onSurface` so it adapts to dark mode;
+- Phosphor `Robot` for any other agent.
+
+The marks are LobeHub Icons (`@lobehub/icons-static-svg` 1.102.0, MIT). The SVG path was copied
+verbatim into `ic_agent_claude.xml` and `ic_agent_openai.xml`. Source, checksum, license and the
+trademark note are in `android/third_party/brand-icons/NOTICE.md`, `THIRD_PARTY_LICENSES.md` and
+Settings → Licenses.
+
+### 12.4 Attached sessions (wire change)
+- `SessionSummary.terminalId: String?` is new. `isAttached` means `control == "full"` while the
+  session is neither managed nor `origin == "managed"`, i.e. the user's own process attached
+  through the opt-in wrapper.
+- Full-control sessions always get the normal composer and approval UI. Sending is still enabled
+  only when `sendMessage` is VERIFIED. The read-only bar, the read-only TopTips and **接续** are
+  never shown for `control == "full"`.
+- Attached sessions get a badge "已接管 · VS Code / Codex Desktop / Claude Desktop / 终端" (from
+  `origin` + `agent`) in the session list, the header chips and the info sheet.
+- When `terminalId` is set, the session toolbar shows **打开终端**. It switches to Workspace →
+  Terminals and attaches to that terminal (`TerminalViewModel.select`) through the usual terminal
+  step-up.
+- Compose tests cover the composer, the badge, that 接续 is absent and the open-terminal callback.
+  Not tested on a device yet: no attached session exists on the sandbox desktop.
+
+Screenshots (zh-CN, light and dark) are in `android/docs/screenshots/phase-d/{light,dark}/`:
+d00-navbar-home / d00-navbar-workspace (bottom bar crops), d01-home (the user's own session titles
+are masked; only test sessions in `android/build/e2e-cwd` are readable), d02-sessions (filtered to
+the scratch directory), d03-codex-session, d04-claude-session, d05-nav-workspace, d06-nav-manage.
+d03 shows a real desktop error: the sandbox's default Codex model `gpt-6.1-sol` is rejected for a
+ChatGPT-account login. That is a desktop/Codex configuration issue, not an app error.
+
 ## 9. Known limitations
 
 - Event-stream `subscribe` frames are not sent (the server currently broadcasts all topics).
@@ -310,7 +482,6 @@ Screenshots: `android/docs/screenshots/phase-b/` (terminal, file-conflict, notif
   the desktop grant is still valid (it could query `GET /v1/auth/step-up`).
 - One approval can notify twice when the desktop also lists the managed process as an observed
   `claude:<id>` live session (its `session.upserted` is not filtered the way the session list is).
-- coui17's `WindowBottomSheet` shows a hard-coded Chinese close label (关闭).
 - Terminal cell width assumes a monospace font; CJK double-width glyphs may drift slightly.
 - Re-pairing while already paired via a deep link is not supported (unpair first).
 - `ui` component registry has only two built-in components.

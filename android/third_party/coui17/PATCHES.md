@@ -20,3 +20,14 @@ All patches live in `patches/` and are re-applied by `sync_coui17.py` in file-na
 - **Verified:** `:coui-ui:compileAndroidMain` and the app build succeed; no `hiddenapibypass`
   reference remains (`grep -r hiddenapibypass third_party/coui17 --include=*.kt` only finds the
   explanatory comment).
+
+## 0002-localizable-sheet-close-label.patch
+
+- **File:** `coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/layout/BottomSheetContentLayout.kt`
+- **Upstream behaviour:** the default close capsule of `WindowBottomSheet` (`SheetCloseCapsule`)
+  had its label hard-coded as `"关闭"`, so an English UI showed Chinese and apps could not localize it.
+- **Change (smallest possible):** added a public `LocalSheetCloseLabel` composition local (default
+  `"关闭"`, so upstream behaviour is unchanged for apps that don't provide it) and made it the default
+  for `SheetCloseCapsule(text = …)`.
+- **Resulting behaviour:** SwitchTether provides `stringResource(R.string.action_close)` at the root
+  (`SwitchTetherRoot`), so every sheet's close capsule follows the app locale ("Close" / "关闭").

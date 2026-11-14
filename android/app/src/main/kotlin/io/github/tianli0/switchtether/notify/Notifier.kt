@@ -45,7 +45,7 @@ class Notifier(
     private val prefs: StateFlow<NotifyPrefs>,
     private val isForeground: () -> Boolean,
 ) {
-    private val engine = NotificationEngine({ prefs.value }, { LocalTime.now().let { it.hour * 60 + it.minute } })
+    private val engine = NotificationEngine({ prefs.value }, { LocalTime.now().let { it.hour * 60 + it.minute } }, t = ResourceNotifyText(context))
     private val sessions = ConcurrentHashMap<String, SessionSummary>()
     private val nm = NotificationManagerCompat.from(context)
 
@@ -160,4 +160,28 @@ class Notifier(
             NotifyType.CONNECTION -> R.string.notif_ch_connection
         }
     }
+}
+
+/** Localized notification wording from app resources (follows the per-app language). */
+private class ResourceNotifyText(private val c: Context) : io.github.tianli0.switchtether.remote.notify.NotifyText {
+    private fun s(id: Int, vararg a: Any) = c.getString(id, *a)
+    override fun needsApproval(name: String) = s(R.string.ntf_needs_approval, name)
+    override fun approvalRequested() = s(R.string.ntf_approval_requested)
+    override fun asksQuestion(name: String) = s(R.string.ntf_asks_question, name)
+    override fun answerHint() = s(R.string.ntf_answer_hint)
+    override fun started(name: String) = s(R.string.ntf_started, name)
+    override fun finished(name: String) = s(R.string.ntf_finished, name)
+    override fun failed(name: String) = s(R.string.ntf_failed, name)
+    override fun interrupted(name: String) = s(R.string.ntf_interrupted, name)
+    override fun waitingInput(name: String) = s(R.string.ntf_waiting_input, name)
+    override fun waitingForYou(name: String) = s(R.string.ntf_waiting_for_you, name)
+    override fun toolCall(name: String, tool: String?) = s(R.string.ntf_tool_call, name, tool ?: s(R.string.ntf_tool))
+    override fun replied(name: String) = s(R.string.ntf_replied, name)
+    override fun stillRunning(name: String) = s(R.string.ntf_still_running, name)
+    override fun runningFor(minutes: Long) = s(R.string.ntf_running_for, minutes.toInt())
+    override fun connectionLost(desktop: String) = s(R.string.ntf_connection_lost, desktop)
+    override fun reconnected(desktop: String) = s(R.string.ntf_reconnected, desktop)
+    override fun publicApproval() = s(R.string.ntf_public_approval)
+    override fun publicWaiting() = s(R.string.ntf_public_waiting)
+    override fun publicActivity() = s(R.string.ntf_public_activity)
 }

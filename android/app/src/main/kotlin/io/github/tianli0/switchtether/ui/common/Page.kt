@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.common
 
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,8 +30,6 @@ import io.github.suqi8.coui.kmp.basic.Scaffold
 import io.github.suqi8.coui.kmp.basic.ScrollBehavior
 import io.github.suqi8.coui.kmp.basic.SmallTopAppBar
 import io.github.suqi8.coui.kmp.basic.TopAppBar
-import io.github.suqi8.coui.kmp.icon.COUIIcons
-import io.github.suqi8.coui.kmp.icon.extended.Back
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.utils.overScrollVertical
 import io.github.tianli0.switchtether.R
@@ -85,7 +85,7 @@ fun Page(
         containerColor = color,
         topBar = {
             val nav: @Composable () -> Unit = {
-                if (onBack != null) ToolbarIcon(COUIIcons.Back, stringResource(R.string.action_back), onBack)
+                if (onBack != null) ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), onBack)
             }
             if (large) {
                 TopAppBar(title = title, subtitle = subtitle, color = color, scrollBehavior = behavior, navigationIcon = nav, actions = actions)

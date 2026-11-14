@@ -30,6 +30,8 @@ Settings → About → Open source licenses (`LicensesScreen`).
 | Kotlin stdlib | 2.4.10 | Apache-2.0 | |
 | `kotlinx-coroutines` | 1.11.0 | Apache-2.0 | |
 | `kotlinx-serialization-json` | 1.11.0 | Apache-2.0 | |
+| Phosphor Icons, Compose port `com.adamglin:phosphor-icon` | 1.0.0 | MIT | App icon set (Regular / Fill); icons © Phosphor Icons (phosphoricons.com, MIT); unused icons removed by R8 in release |
+| LobeHub Icons (`@lobehub/icons-static-svg`): Claude + OpenAI marks | 1.102.0 | MIT | Converted to VectorDrawables; see `third_party/brand-icons/NOTICE.md` |
 
 Transitive dependencies of the above (AndroidX annotation/collection/arch-core, Guava
 `listenablefuture` stub from CameraX, JSpecify, etc.) are Apache-2.0.

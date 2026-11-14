@@ -199,7 +199,7 @@
     <string name="usage_month">本月</string>
     <string name="usage_7d">7 天</string>
     <string name="usage_30d">30 天</string>
-    <string name="usage_tokens">%1$s tokens</string>
+    <string name="usage_tokens">%1$s Token</string>
     <string name="usage_unavailable">用量不可用</string>
     <string name="usage_summary">概览</string>
     <string name="usage_trend">每日趋势</string>
@@ -288,4 +288,12 @@
     <string name="provider_credential">更新凭据</string>
     <string name="provider_credential_note">新值在生物识别确认后发送到电脑一次，之后不会再显示。供应商：%1$s</string>
     <string name="provider_update">更新</string>
+    <string name="provider_test_ok">正常</string>
+    <string name="provider_test_failed">失败</string>
+    <string name="quota_resets">%1$s 重置</string>
+    <string name="camera_preview_desc">相机预览</string>
+    <string name="home_attention">待处理 · %1$d</string>
+    <string name="home_running">运行中 · %1$d</string>
+    <string name="home_more">更多</string>
+    <string name="home_usage_today">今日 %1$s · %2$s Token</string>
 </resources>

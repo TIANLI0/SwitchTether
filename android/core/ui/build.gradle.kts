@@ -31,6 +31,8 @@ dependencies {
     api(project(":coui-ui"))
     api(project(":coui-preference"))
     api(project(":coui-icons"))
+    // App icon set: Phosphor Icons (Regular + Fill pairs), MIT. R8 strips unused icons in release.
+    api(libs.phosphor.icon)
     api(libs.androidx.compose.ui)
     api(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.ui.tooling.preview)

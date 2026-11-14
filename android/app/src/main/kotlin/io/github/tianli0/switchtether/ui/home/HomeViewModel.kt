@@ -28,7 +28,11 @@ data class HomeState(
     val usageMonth: Loadable<UsageSummary> = Loadable.Loading,
 ) {
     val live: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }
-    val waitingCount: Int get() = live.count { it.status == "waiting" || it.waitingFor != null }
+    /** Live sessions that wait for the user (approval / question / input): shown first on Home. */
+    val attention: List<SessionSummary> get() = live.filter { it.status == "waiting" || it.waitingFor != null }
+    val waitingCount: Int get() = attention.size
+    /** Live sessions not already listed under [attention]. */
+    val running: List<SessionSummary> get() = live.filter { it.status != "waiting" && it.waitingFor == null }
     val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }.take(5)
 }
 

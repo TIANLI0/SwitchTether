@@ -11,6 +11,9 @@ import kotlinx.serialization.json.JsonObject
 /** Callbacks and session-level facts shared by all renderers (stable: does not change per event). */
 @Immutable
 data class RenderContext(
+    /** Agent id of the session (`claude_code`, `codex`, …) and its display name (avatars). */
+    val agent: String,
+    val agentLabel: String,
     val approve: CapStatus,
     val answer: CapStatus,
     val capabilityReason: String?,

@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -72,11 +74,6 @@ import io.github.suqi8.coui.kmp.basic.ChipTabGroup
 import io.github.suqi8.coui.kmp.basic.EmptyState
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
-import io.github.suqi8.coui.kmp.icon.COUIIcons
-import io.github.suqi8.coui.kmp.icon.extended.Add
-import io.github.suqi8.coui.kmp.icon.extended.Copy
-import io.github.suqi8.coui.kmp.icon.extended.Delete
-import io.github.suqi8.coui.kmp.icon.extended.Paste
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.tianli0.switchtether.R
@@ -148,7 +145,7 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
                 }
             }
             Box {
-                ToolbarIcon(COUIIcons.Add, stringResource(R.string.term_new), { showShells = true }, enabled = state.online && !state.busy)
+                ToolbarIcon(AppIcons.Add, stringResource(R.string.term_new), { showShells = true }, enabled = state.online && !state.busy)
                 WindowListPopup(show = showShells, onDismissRequest = { showShells = false }) {
                     Column(Modifier.widthIn(min = 200.dp).padding(vertical = 8.dp)) {
                         val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
@@ -164,9 +161,9 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
                 }
             }
             if (state.selectedId != null) {
-                ToolbarIcon(COUIIcons.Copy, stringResource(R.string.term_copy_screen), { clipboard.setText(AnnotatedString(state.screen.plainText())) })
-                ToolbarIcon(COUIIcons.Paste, stringResource(R.string.term_paste), { clipboard.getText()?.text?.let(vm::paste) }, enabled = state.link == TermLink.OPEN)
-                ToolbarIcon(COUIIcons.Delete, stringResource(R.string.term_kill), { confirmKill = true })
+                ToolbarIcon(AppIcons.Copy, stringResource(R.string.term_copy_screen), { clipboard.setText(AnnotatedString(state.screen.plainText())) })
+                ToolbarIcon(AppIcons.Paste, stringResource(R.string.term_paste), { clipboard.getText()?.text?.let(vm::paste) }, enabled = state.link == TermLink.OPEN)
+                ToolbarIcon(AppIcons.Delete, stringResource(R.string.term_kill), { confirmKill = true })
             }
         }
         state.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = 16.dp)) }
@@ -230,7 +227,8 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
     val lines = state.scrollback + state.screen.lines
     val cursor: TermCursor = state.screen.cursor
     val screenStart = state.scrollback.size
-    BoxWithConstraints(modifier.semantics { contentDescription = "terminal" }.testTag("terminal")) {
+    val termDesc = androidx.compose.ui.res.stringResource(io.github.tianli0.switchtether.R.string.terminal_desc)
+    BoxWithConstraints(modifier.semantics { contentDescription = termDesc }.testTag("terminal")) {
         val cols = with(density) { ((maxWidth - 16.dp).toPx() / cell.size.width).toInt() }
         val rows = with(density) { ((maxHeight - 8.dp).toPx() / cell.size.height).toInt() }
         LaunchedEffect(cols, rows) { onSize(cols, rows) }

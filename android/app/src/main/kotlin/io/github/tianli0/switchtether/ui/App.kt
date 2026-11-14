@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui
 
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -19,7 +21,6 @@ import io.github.suqi8.coui.kmp.blur.LocalBlurEnabled
 import io.github.suqi8.coui.kmp.blur.isRuntimeShaderSupported
 import io.github.suqi8.coui.kmp.blur.layerBackdrop
 import io.github.suqi8.coui.kmp.blur.rememberLayerBackdrop
-import io.github.suqi8.coui.kmp.icon.extended.Add
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -49,14 +50,10 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.suqi8.coui.kmp.basic.BottomFloatingNavigationBar
 import io.github.suqi8.coui.kmp.basic.BottomFloatingNavigationBarDefaults
 import io.github.suqi8.coui.kmp.basic.BottomFloatingNavigationBarItem
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.suqi8.coui.kmp.basic.NavigationRail
 import io.github.suqi8.coui.kmp.basic.NavigationRailItem
-import io.github.suqi8.coui.kmp.icon.COUIIcons
-import io.github.suqi8.coui.kmp.icon.extended.Home
-import io.github.suqi8.coui.kmp.icon.extended.Layers
-import io.github.suqi8.coui.kmp.icon.extended.Messages
-import io.github.suqi8.coui.kmp.icon.extended.Settings
-import io.github.suqi8.coui.kmp.icon.extended.Tune
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.AppContainer
 import io.github.tianli0.switchtether.R
@@ -100,6 +97,11 @@ fun SwitchTetherRoot() {
     val container = appContainer()
     val theme by container.settingsStore.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
     SwitchTetherTheme(theme) {
+      // coui's default sheet close capsule label (patch 0002) follows the app locale.
+      CompositionLocalProvider(
+        io.github.suqi8.coui.kmp.layout.LocalSheetCloseLabel provides stringResource(R.string.action_close),
+        io.github.tianli0.switchtether.ui.components.LocalExpandStateLabels provides (stringResource(R.string.state_expanded) to stringResource(R.string.state_collapsed)),
+      ) {
         val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = LOADING_SENTINEL)
         val conn by container.connection.state.collectAsState()
         val pending by container.pendingVerification.collectAsState()
@@ -116,6 +118,7 @@ fun SwitchTetherRoot() {
                 else -> MainShell()
             }
         }
+      }
     }
 }
 
@@ -126,6 +129,11 @@ fun MainShell() {
     val nav: NavViewModel = viewModel()
     val container = appContainer()
     val openRequest by container.openSessionRequest.collectAsState()
+    val openTerminal by container.openTerminalRequest.collectAsState()
+    // Switch to Workspace; WorkspaceScreen consumes the request and attaches (with step-up).
+    androidx.compose.runtime.LaunchedEffect(openTerminal) {
+        if (openTerminal != null) nav.select(Tab.WORKSPACE)
+    }
     androidx.compose.runtime.LaunchedEffect(openRequest) {
         openRequest?.let {
             container.openSessionRequest.value = null
@@ -152,17 +160,23 @@ fun MainShell() {
             onCreated = { id, title -> nav.push(Route.SessionDetail(id, title)) },
         )
         val items = listOf(
-            Triple(Tab.HOME, stringResource(R.string.tab_home), COUIIcons.Home),
-            Triple(Tab.SESSIONS, stringResource(R.string.tab_sessions), COUIIcons.Messages),
-            Triple(Tab.WORKSPACE, stringResource(R.string.tab_workspace), COUIIcons.Layers),
-            Triple(Tab.MANAGE, stringResource(R.string.tab_manage), COUIIcons.Tune),
-            Triple(Tab.SETTINGS, stringResource(R.string.tab_settings), COUIIcons.Settings),
+            NavItem(Tab.HOME, stringResource(R.string.tab_home), AppIcons.Home, AppIcons.HomeSelected),
+            NavItem(Tab.SESSIONS, stringResource(R.string.tab_sessions), AppIcons.Sessions, AppIcons.SessionsSelected),
+            NavItem(Tab.WORKSPACE, stringResource(R.string.tab_workspace), AppIcons.Workspace, AppIcons.WorkspaceSelected),
+            NavItem(Tab.MANAGE, stringResource(R.string.tab_manage), AppIcons.Manage, AppIcons.ManageSelected),
+            NavItem(Tab.SETTINGS, stringResource(R.string.tab_settings), AppIcons.Settings, AppIcons.SettingsSelected),
         )
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail(modifier = Modifier.statusBarsPadding(), color = pageContainerColor()) {
-                    items.forEach { (tab, label, icon) ->
-                        NavigationRailItem(selected = nav.tab == tab, onClick = { nav.select(tab) }, icon = icon, label = label)
+                    items.forEach { item ->
+                        val selected = nav.tab == item.tab
+                        NavigationRailItem(
+                            selected = selected,
+                            onClick = { nav.select(item.tab) },
+                            icon = if (selected) item.selectedIcon else item.icon,
+                            label = item.label,
+                        )
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxSize()) { Destination(nav, top) }
@@ -215,12 +229,19 @@ fun MainShell() {
                                             .semantics { contentDescription = newSessionLabel },
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Icon(COUIIcons.Add, contentDescription = null, tint = COUITheme.colorScheme.onSurface)
+                                        Icon(AppIcons.Add, contentDescription = null, tint = COUITheme.colorScheme.onSurface)
                                     }
                                 },
                             ) {
-                                items.forEach { (tab, label, icon) ->
-                                    BottomFloatingNavigationBarItem(selected = nav.tab == tab, onClick = { nav.select(tab) }, icon = icon, label = label)
+                                items.forEach { item ->
+                                    val selected = nav.tab == item.tab
+                                    BottomFloatingNavigationBarItem(
+                                        selected = selected,
+                                        onClick = { nav.select(item.tab) },
+                                        icon = item.icon,
+                                        selectedIcon = item.selectedIcon,
+                                        label = item.label,
+                                    )
                                 }
                             }
                         }
@@ -231,11 +252,14 @@ fun MainShell() {
     }
 }
 
+/** Outlined icon when unselected, filled icon when selected (Material Icons pairs). */
+private class NavItem(val tab: Tab, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
+
 @Composable
 private fun Destination(nav: NavViewModel, top: Route?) {
     val onBack: () -> Unit = { nav.back() }
     when (top) {
-        is Route.SessionDetail -> SessionDetailScreen(top.sessionId, top.title, onBack)
+        is Route.SessionDetail -> SessionDetailScreen(top.sessionId, top.title, onBack, onOpenSession = { id, title -> nav.push(Route.SessionDetail(id, title)) })
         Route.NewSession -> NewSessionScreen(onBack, onCreated = { id, title ->
             nav.back()
             nav.push(Route.SessionDetail(id, title))

@@ -16,7 +16,14 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
+        // Google's repository only serves Android/Google groups; everything else comes from Maven Central.
+        google {
+            content {
+                includeGroupByRegex("""com\.android.*""")
+                includeGroupByRegex("""com\.google.*""")
+                includeGroupByRegex("androidx.*")
+            }
+        }
         mavenCentral()
     }
 }

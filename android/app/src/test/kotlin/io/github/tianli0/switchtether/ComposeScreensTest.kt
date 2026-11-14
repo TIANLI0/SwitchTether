@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -108,6 +109,8 @@ class ComposeScreensTest {
     }
 
     private fun renderCtx(approve: CapStatus) = RenderContext(
+        agent = "claude_code",
+        agentLabel = "Claude Code",
         approve = approve,
         answer = approve,
         capabilityReason = "external interactive session",
@@ -138,22 +141,22 @@ class ComposeScreensTest {
         )
         return SessionDetailState(
             sessionId = "s1",
-            detail = Loadable.Ready(SessionDetail(summary(), caps(), emptyList())),
+            detail = Loadable.Ready(SessionDetail(summary(), caps(continueSession = "PARTIAL"), emptyList())),
             events = Loadable.Ready(Unit),
-            log = log,
-            items = log.renderItems(),
             connection = ONLINE,
-        )
+        ).derive(log = log)
     }
 
     @Test
     fun sessionDetailRendersAllKindsNatively() {
         val state = detailState()
+        var continued = 0
         rule.setContent {
             SwitchTetherTheme {
                 SessionDetailContent(
                     state = state, initialTitle = null, ctx = renderCtx(CapStatus.BLOCKED), busy = null,
-                    onBack = {}, onReload = {}, onLoadOlder = {}, onDraft = {}, onSend = {}, onInterrupt = {}, onRetryConnection = {},
+                    onBack = {}, onReload = {}, onLoadOlder = {}, onToggleSteps = {}, onDraft = {}, onSend = {}, onInterrupt = {},
+                    onContinue = { continued++ }, onRetryConnection = {},
                 )
             }
         }
@@ -165,7 +168,7 @@ class ComposeScreensTest {
         see("Fix the login bug")
         see("Looking at login.kt now.") // markdown bold rendered as styled text, no asterisks
         see("run unit tests")
-        see("src/login.kt")
+        see("login.kt")
         see("Reproduce")
         see("Run rm -rf build")
         see("Answer on the computer", substring = true) // approve BLOCKED is explained
@@ -174,29 +177,83 @@ class ComposeScreensTest {
         // Approval buttons exist but are disabled because the capability is BLOCKED.
         list.performScrollToNode(hasText("Allow"))
         rule.onNodeWithText("Allow").assertIsNotEnabled()
-        // Composer is disabled with an honest explanation (sendMessage BLOCKED).
-        rule.onNodeWithTag("send").assertIsNotEnabled()
-        rule.onNodeWithText("Sending messages to this session is not possible", substring = true).assertExists()
-        // Capability strip
-        rule.onNodeWithText("approve: BLOCKED").assertExists()
+        // Read-only session: no dead input field, an explicit reason instead.
+        assertTrue(rule.onAllNodesWithTag("send").fetchSemanticsNodes().isEmpty())
+        rule.onNodeWithText("Read-only on the phone").assertExists()
+        rule.onNodeWithTag("readonly-tip").assertExists()
+        // Pending approval banner is shown above the timeline.
+        rule.onNodeWithTag("pending-banner").assertExists()
+        // "Continue on phone" is offered because the desktop advertises continueSession.
+        rule.onNodeWithTag("continue").performClick()
+        assertEquals(1, continued)
     }
 
     @Test
     fun approvalButtonsEnabledWhenVerified() {
         val state = detailState().let { s ->
-            s.copy(detail = Loadable.Ready(SessionDetail(summary(control = "full"), caps(send = "VERIFIED", approve = "VERIFIED", interrupt = "VERIFIED"), emptyList())))
+            s.copy(detail = Loadable.Ready(SessionDetail(summary(control = "full", status = "busy"), caps(send = "VERIFIED", approve = "VERIFIED", interrupt = "VERIFIED"), emptyList())))
         }
         rule.setContent {
             SwitchTetherTheme {
                 SessionDetailContent(
                     state = state, initialTitle = null, ctx = renderCtx(CapStatus.VERIFIED), busy = null,
-                    onBack = {}, onReload = {}, onLoadOlder = {}, onDraft = {}, onSend = {}, onInterrupt = {}, onRetryConnection = {},
+                    onBack = {}, onReload = {}, onLoadOlder = {}, onToggleSteps = {}, onDraft = {}, onSend = {}, onInterrupt = {},
+                    onContinue = {}, onRetryConnection = {},
                 )
             }
         }
+        assertTrue(rule.onAllNodesWithTag("continue").fetchSemanticsNodes().isEmpty())
         rule.onNodeWithTag("event-list").performScrollToNode(hasText("Allow"))
         rule.onNodeWithText("Allow").assertIsEnabled()
         rule.onNodeWithContentDescriptionSafe("Interrupt")
+    }
+
+    @Test
+    fun attachedSessionKeepsComposerAndOffersOpenTerminal() {
+        val attached = summary(control = "full", status = "busy").copy(origin = "vscode", managed = false, terminalId = "t-7")
+        val state = detailState().let { s ->
+            s.copy(detail = Loadable.Ready(SessionDetail(attached, caps(send = "VERIFIED", approve = "VERIFIED", interrupt = "VERIFIED", continueSession = "PARTIAL"), emptyList())))
+        }
+        var opened: String? = null
+        rule.setContent {
+            SwitchTetherTheme {
+                SessionDetailContent(
+                    state = state, initialTitle = null, ctx = renderCtx(CapStatus.VERIFIED), busy = null,
+                    onBack = {}, onReload = {}, onLoadOlder = {}, onToggleSteps = {}, onDraft = {}, onSend = {}, onInterrupt = {},
+                    onContinue = {}, onRetryConnection = {}, onOpenTerminal = { opened = it },
+                )
+            }
+        }
+        // Full control: normal composer, no read-only bar and no "continue on phone".
+        rule.onNodeWithTag("send").assertExists()
+        assertTrue(rule.onAllNodesWithText("Read-only on the phone").fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodesWithTag("continue").fetchSemanticsNodes().isEmpty())
+        rule.onNodeWithText("Attached · VS Code").assertExists()
+        rule.onNodeWithContentDescriptionSafe("Open terminal")
+        rule.onNode(androidx.compose.ui.test.hasContentDescription("Open terminal")).performClick()
+        assertEquals("t-7", opened)
+    }
+
+    @Test
+    fun homeShowsAttentionFirstAndNoConnectedCard() {
+        val waiting = summary(id = "w1", status = "waiting").copy(title = "Needs approval session", waitingFor = "approval")
+        val running = summary(id = "r1", status = "busy").copy(title = "Busy session")
+        val state = io.github.tianli0.switchtether.ui.home.HomeState(
+            connection = ONLINE,
+            sessions = Loadable.Ready(listOf(running, waiting)),
+        )
+        rule.setContent {
+            SwitchTetherTheme {
+                io.github.tianli0.switchtether.ui.home.HomeContent(state, onOpen = {}, onSelectTab = {}, onRetry = {}, onRefresh = {})
+            }
+        }
+        rule.onNodeWithText("Needs you · 1").assertExists()
+        rule.onNodeWithText("Running · 1").assertExists()
+        val att = rule.onNodeWithText("Needs approval session").fetchSemanticsNode().boundsInRoot.top
+        val run = rule.onNodeWithText("Busy session").fetchSemanticsNode().boundsInRoot.top
+        assertTrue("attention rows come before running rows", att < run)
+        // Healthy connection: no connection card / banner text at all.
+        assertTrue(rule.onAllNodesWithText("Connected", substring = true).fetchSemanticsNodes().isEmpty())
     }
 
     @Test

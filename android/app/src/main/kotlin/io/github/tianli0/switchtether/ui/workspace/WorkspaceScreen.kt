@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,9 +28,6 @@ import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.TabRowWithContour
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
-import io.github.suqi8.coui.kmp.icon.COUIIcons
-import io.github.suqi8.coui.kmp.icon.extended.Back
-import io.github.suqi8.coui.kmp.icon.extended.Refresh
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.SessionQuery
@@ -56,6 +55,14 @@ fun WorkspaceScreen() {
     val conn by container.connection.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val termVm = containerViewModel { c -> TerminalViewModel(c.connection, c.stepUpGate) { c.pairingStoreStepUpEnabled() } }
+    val openTerminal by container.openTerminalRequest.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(openTerminal) {
+        val id = openTerminal ?: return@LaunchedEffect
+        container.openTerminalRequest.value = null
+        tab = 0
+        termVm.refresh()
+        termVm.select(id) // attaching goes through the usual terminal step-up
+    }
     val filesVm = containerViewModel { c ->
         FilesViewModel(c.connection, c.stepUpGate, { context.applicationContext.contentResolver }) {
             c.sessions.list(SessionQuery()).items.firstOrNull { it.isLive && it.cwd != null }?.cwd
@@ -94,7 +101,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
         BackHandler { vm.closeGitDetail() }
         Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ToolbarIcon(COUIIcons.Back, stringResource(R.string.action_back), vm::closeGitDetail)
+                ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), vm::closeGitDetail)
                 Text(detail.first, style = DevType.code, color = COUITheme.colorScheme.onSurface, maxLines = 1)
             }
             LoadableContent(detail.second, onRetry = vm::closeGitDetail) { text ->
@@ -115,7 +122,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
             TextInput(repo, { repo = it }, stringResource(R.string.git_repo), modifier = Modifier.weight(1f),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Go),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { vm.setRepo(repo.trim()) }))
-            ToolbarIcon(COUIIcons.Refresh, stringResource(R.string.action_refresh), { vm.setRepo(repo.trim()) })
+            ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), { vm.setRepo(repo.trim()) })
         }
         val git = state.git ?: return
         LoadableContent(git, onRetry = vm::loadGit) { st ->
@@ -147,7 +154,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
                             commits.take(50).forEachIndexed { i, c ->
                                 BasicComponent(
                                     title = c.subject,
-                                    summary = "${c.hash.take(8)} · ${c.author} · ${Formatters.relative(c.timeMs)}",
+                                    summary = "${c.hash.take(8)} · ${c.author} · ${io.github.tianli0.switchtether.ui.common.relativeTime(c.timeMs)}",
                                     cardListPosition = cardListPositionOf(i, minOf(50, commits.size)),
                                     onClick = { st.entries.firstOrNull()?.let { e -> vm.gitShow(c.hash, e.path) } },
                                 )

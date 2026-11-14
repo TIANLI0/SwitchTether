@@ -29,20 +29,6 @@ object Formatters {
         else -> DecimalFormat("0.#").format(v) + "%"
     }
 
-    /** Compact relative time: "now", "5m", "3h", "2d", else a short date. */
-    fun relative(epochMs: Long?, nowMs: Long = System.currentTimeMillis()): String {
-        if (epochMs == null || epochMs <= 0) return "—"
-        val d = (nowMs - epochMs).coerceAtLeast(0) / 1000
-        return when {
-            d < 45 -> "now"
-            d < 3600 -> "${d / 60}m"
-            d < 86_400 -> "${d / 3600}h"
-            d < 7 * 86_400 -> "${d / 86_400}d"
-            else -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(Locale.getDefault())
-                .format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
-        }
-    }
-
     fun dateTime(epochMs: Long?): String = epochMs?.let {
         DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).withLocale(Locale.getDefault())
             .format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))

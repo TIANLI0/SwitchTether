@@ -175,8 +175,12 @@ data class DeviceView(
 enum class CapStatus {
     VERIFIED, PARTIAL, BLOCKED, UNTESTED, UNKNOWN;
 
-    /** Only VERIFIED controls are offered as enabled actions in the UI. */
-    val usable: Boolean get() = this == VERIFIED
+    /**
+     * Whether the desktop offers the action at all. VERIFIED, PARTIAL (works with stated
+     * limitations) and UNTESTED (implemented, not exercised live) are enabled; the status is
+     * still shown to the user. BLOCKED / UNKNOWN are disabled.
+     */
+    val usable: Boolean get() = this == VERIFIED || this == PARTIAL || this == UNTESTED
 
     companion object {
         fun parse(value: String?): CapStatus =
@@ -207,8 +211,16 @@ data class SessionSummary(
     val gitBranch: String? = null,
     val pid: Long? = null,
     val managed: Boolean = false,
+    /** Set when the session is mirrored from a SwitchTether terminal (`GET /v1/terminals/{id}`). */
+    val terminalId: String? = null,
 ) {
     val isLive: Boolean get() = liveness == "live"
+
+    /**
+     * The user's own process (VS Code, desktop app, CLI) that SwitchTether is attached to through the
+     * opt-in wrapper: full control without being a SwitchTether-managed session.
+     */
+    val isAttached: Boolean get() = controlLevel == ControlLevel.FULL && !managed && origin != "managed"
     val controlLevel: ControlLevel get() = ControlLevel.parse(control)
 }
 
@@ -238,6 +250,8 @@ data class SessionCapabilities(
     val approve: String? = null,
     val answerQuestion: String? = null,
     val interrupt: String? = null,
+    /** Present (e.g. `PARTIAL`) when the session can be continued as a managed one on the phone. */
+    val continueSession: String? = null,
     val reason: String? = null,
 ) {
     fun status(name: Capability): CapStatus = CapStatus.parse(
@@ -248,11 +262,12 @@ data class SessionCapabilities(
             Capability.APPROVE -> approve
             Capability.ANSWER_QUESTION -> answerQuestion
             Capability.INTERRUPT -> interrupt
+            Capability.CONTINUE_SESSION -> continueSession
         },
     )
 }
 
-enum class Capability { READ_HISTORY, LIVE_EVENTS, SEND_MESSAGE, APPROVE, ANSWER_QUESTION, INTERRUPT }
+enum class Capability { READ_HISTORY, LIVE_EVENTS, SEND_MESSAGE, APPROVE, ANSWER_QUESTION, INTERRUPT, CONTINUE_SESSION }
 
 /** `GET /v1/sessions/{id}`: the summary fields plus capabilities and open requests. */
 data class SessionDetail(
@@ -338,10 +353,15 @@ data class ToggleBody(val commandId: String, val app: String, val enabled: Boole
 data class CreateSessionBody(
     val commandId: String,
     val agent: String,
-    val cwd: String,
+    /** Required for new sessions; optional with [resumeFrom] (defaults to the original's). */
+    val cwd: String?,
     val prompt: String? = null,
     val model: String? = null,
     val permissionMode: String? = null,
+    /** Continue an existing (externally started) session as a managed one. */
+    val resumeFrom: String? = null,
+    /** `"continue"` with [resumeFrom]. */
+    val mode: String? = null,
 )
 
 // ---------------------------------------------------------------------------------------------

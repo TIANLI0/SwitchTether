@@ -1393,18 +1393,25 @@ fun SheetActionButton(
 }
 
 /**
+ * Label of the default [SheetCloseCapsule]. Apps provide a localized string (e.g. from their own
+ * resources) so the capsule is not stuck with the hard-coded Chinese label.
+ */
+val LocalSheetCloseLabel = androidx.compose.runtime.staticCompositionLocalOf { "关闭" }
+
+/**
  * The capsule close button in the panel toolbar: 40dp height, full radius.
  *
  * @param onClick Invoked when the button is clicked.
  * @param modifier The modifier to be applied to the button.
- * @param text The button label, defaults to `"关闭"`.
+ * @param text The button label, defaults to [LocalSheetCloseLabel] (`"关闭"` unless the app
+ *   provides a localized label).
  * @param enabled Whether the button accepts input.
  */
 @Composable
 fun SheetCloseCapsule(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    text: String = "关闭",
+    text: String = LocalSheetCloseLabel.current,
     enabled: Boolean = true,
 ) {
     SheetToolbarButtonSurface(

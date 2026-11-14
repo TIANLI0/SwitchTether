@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.R
+import io.github.tianli0.switchtether.ui.common.UiText
+
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.net.Uri
@@ -76,7 +79,7 @@ data class FilesUiState(
     val editText: String = "",
     val saving: Boolean = false,
     val conflict: ConflictState? = null,
-    val message: String? = null,
+    val message: io.github.tianli0.switchtether.ui.common.UiText? = null,
     val transfer: TransferState? = null,
     // git
     val repo: String? = null,
@@ -185,7 +188,7 @@ class FilesViewModel(
     fun startEdit() {
         val f = (_state.value.file as? Loadable.Ready)?.value ?: return
         if (f.text == null || f.truncated) {
-            _state.update { it.copy(message = "not editable (binary or truncated)") }
+            _state.update { it.copy(message = UiText(R.string.files_msg_not_editable)) }
             return
         }
         _state.update { it.copy(editing = true, editText = f.text.orEmpty()) }
@@ -196,11 +199,11 @@ class FilesViewModel(
     fun cancelEdit() = _state.update { it.copy(editing = false) }
 
     /** Write with a files_write step-up; asks again once if the grant expired server-side. */
-    private suspend fun writeOp(label: String, op: suspend (RemoteApi, String) -> CommandResponse): CommandOutcome? {
+    private suspend fun writeOp(label: Int, op: suspend (RemoteApi, String) -> CommandResponse): CommandOutcome? {
         val api = api() ?: return null
         repeat(2) {
             if (gate.ensure(StepUpScopes.FILES_WRITE).isFailure) {
-                _state.update { it.copy(message = "$label: confirmation cancelled") }
+                _state.update { it.copy(message = UiText(R.string.files_msg_cancelled, listOf(label))) }
                 return null
             }
             val out = Commands.run { id -> op(api, id) }
@@ -222,14 +225,14 @@ class FilesViewModel(
     private fun write(f: FileContent, text: String, base: String?, path: String = f.path, createOnly: Boolean = false, after: () -> Unit = {}) {
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            val out = writeOp("save") { api, id -> api.fsWrite(WriteBody(id, path, text, base, f.encoding, f.bom, createOnly)) }
+            val out = writeOp(R.string.files_op_save) { api, id -> api.fsWrite(WriteBody(id, path, text, base, f.encoding, f.bom, createOnly)) }
             when (out) {
                 is CommandOutcome.Succeeded -> {
                     val sha = out.response.body.obj()?.str("sha256") ?: f.sha256
                     if (path == f.path) {
-                        _state.update { it.copy(saving = false, editing = false, conflict = null, file = Loadable.Ready(f.copy(text = text, sha256 = sha)), message = "saved") }
+                        _state.update { it.copy(saving = false, editing = false, conflict = null, file = Loadable.Ready(f.copy(text = text, sha256 = sha)), message = UiText(R.string.files_msg_saved)) }
                     } else {
-                        _state.update { it.copy(saving = false, conflict = null, message = "saved as $path") }
+                        _state.update { it.copy(saving = false, conflict = null, message = UiText(R.string.files_msg_saved_as, listOf(path))) }
                     }
                     after()
                 }
@@ -244,11 +247,11 @@ class FilesViewModel(
                             )
                         }
                     } else {
-                        _state.update { it.copy(saving = false, message = "${e.code}: ${e.body.message}") }
+                        _state.update { it.copy(saving = false, message = UiText(R.string.files_msg_rejected, listOf(R.string.files_op_save, "${e.code}: ${e.body.message}"))) }
                     }
                 }
                 null -> _state.update { it.copy(saving = false) }
-                else -> _state.update { it.copy(saving = false, message = "outcome unknown — reopen the file to check: $out") }
+                else -> _state.update { it.copy(saving = false, message = UiText(R.string.files_msg_unknown, listOf(R.string.files_op_save))) }
             }
         }
     }
@@ -295,7 +298,7 @@ class FilesViewModel(
 
     // ---- create / rename / delete ---------------------------------------------------------------------
 
-    fun mkdir(name: String) = pathOp("mkdir") { api, id -> api.fsMkdir(PathBody(id, join(currentDir() ?: return@pathOp null, name))) }
+    fun mkdir(name: String) = pathOp(R.string.files_op_mkdir) { api, id -> api.fsMkdir(PathBody(id, join(currentDir() ?: return@pathOp null, name))) }
 
     fun newFile(name: String) {
         val dir = currentDir() ?: return
@@ -303,21 +306,21 @@ class FilesViewModel(
         write(FileContent(path = path), "", base = null, path = path, createOnly = true) { browse(dir) }
     }
 
-    fun rename(entry: FsEntry, newName: String) = pathOp("rename") { api, id ->
+    fun rename(entry: FsEntry, newName: String) = pathOp(R.string.files_op_rename) { api, id ->
         api.fsRename(RenameBody(id, entry.path, join(entry.path.substring(0, maxOf(entry.path.lastIndexOf('\\'), entry.path.lastIndexOf('/'))), newName)))
     }
 
     /** Moves to the desktop's trash/recycle bin (server side). */
-    fun delete(entry: FsEntry) = pathOp("delete") { api, id -> api.fsDelete(PathBody(id, entry.path)) }
+    fun delete(entry: FsEntry) = pathOp(R.string.files_op_delete) { api, id -> api.fsDelete(PathBody(id, entry.path)) }
 
-    private fun pathOp(label: String, op: suspend (RemoteApi, String) -> CommandResponse?) {
+    private fun pathOp(label: Int, op: suspend (RemoteApi, String) -> CommandResponse?) {
         viewModelScope.launch {
             val out = writeOp(label) { api, id -> op(api, id) ?: throw IllegalStateException("no directory") }
             when (out) {
-                is CommandOutcome.Succeeded -> _state.update { it.copy(message = "$label: ok") }
-                is CommandOutcome.Rejected -> _state.update { it.copy(message = "$label: ${out.error.code}: ${out.error.body.message}") }
+                is CommandOutcome.Succeeded -> _state.update { it.copy(message = UiText(R.string.files_msg_ok, listOf(label))) }
+                is CommandOutcome.Rejected -> _state.update { it.copy(message = UiText(R.string.files_msg_rejected, listOf(label, "${out.error.code}: ${out.error.body.message}"))) }
                 null -> Unit
-                else -> _state.update { it.copy(message = "$label: $out") }
+                else -> _state.update { it.copy(message = UiText(R.string.files_msg_unknown, listOf(label))) }
             }
             currentDir()?.let(::browse)
         }
@@ -344,7 +347,7 @@ class FilesViewModel(
                 return@launch
             }
             _state.update { it.copy(transfer = TransferState(name, 0, size)) }
-            val begin = writeOp("upload") { api, id ->
+            val begin = writeOp(R.string.files_op_upload) { api, id ->
                 val v = api.beginUpload(BeginUploadBody(id, join(dir, name), size))
                 CommandResponse(io.github.tianli0.switchtether.remote.protocol.ProtocolJson.encodeToJsonElement(io.github.tianli0.switchtether.remote.protocol.UploadView.serializer(), v), false)
             }

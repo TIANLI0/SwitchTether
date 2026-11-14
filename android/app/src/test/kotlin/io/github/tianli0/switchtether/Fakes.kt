@@ -97,7 +97,11 @@ class FakeSessionRepository : SessionRepository {
         return nextStatus
     }
 
-    override suspend fun createSession(request: NewSessionRequest, commandId: String) = nextOutcome(commandId)
+    var lastCreate: NewSessionRequest? = null
+    override suspend fun createSession(request: NewSessionRequest, commandId: String): CommandOutcome {
+        lastCreate = request
+        return nextOutcome(commandId)
+    }
     override suspend fun fsRoots() = listOf(FsEntry(name = "app", path = "D:\\proj\\app", kind = "dir"))
     override suspend fun fsList(path: String) = FsListing(path = path, parent = null, entries = listOf(FsEntry("src", "$path\\src", "dir")))
 }
@@ -119,5 +123,5 @@ fun summary(id: String = "s1", live: Boolean = true, control: String = "observe"
     liveness = if (live) "live" else "ended", status = status, control = control, lastActiveAtMs = 1_731_503_600_000,
 )
 
-fun caps(send: String = "BLOCKED", approve: String = "BLOCKED", interrupt: String = "BLOCKED") =
-    SessionCapabilities(sendMessage = send, approve = approve, interrupt = interrupt, answerQuestion = approve, readHistory = "VERIFIED", liveEvents = "PARTIAL", reason = "external interactive session")
+fun caps(send: String = "BLOCKED", approve: String = "BLOCKED", interrupt: String = "BLOCKED", continueSession: String? = null) =
+    SessionCapabilities(sendMessage = send, approve = approve, interrupt = interrupt, answerQuestion = approve, readHistory = "VERIFIED", liveEvents = "PARTIAL", continueSession = continueSession, reason = "external interactive session")

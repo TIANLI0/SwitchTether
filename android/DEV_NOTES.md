@@ -75,3 +75,43 @@ Living log so work survives context limits. Newest entries at the bottom of each
   (scratch helpers tools/ui.py, tools/capture.sh). Pairing links also open via
   `adb shell am start -a android.intent.action.VIEW -d '<switchtether://pair?...>'`.
 - Screenshots: android/docs/screenshots/{light,dark}/01..10.
+
+## Phase C (2026-11-14)
+- Icons: library glyphs only (COUIIcons / COUIIcons.Basic). A hand-drawn NavIcons.kt was written,
+  then deleted at the lead's request. Workspace uses Folder/FolderFill; the other tabs rely on the
+  item's selected tint.
+- Session UI redesign:
+  - core/ui components/Chat.kt: segment(), AgentAvatar, ChatBubble, StepStatusIndicator,
+    CollapsibleRow, AttentionCard, TimelineCard, InputPill, RoundIconButton, InfoChip.
+  - app Timeline.kt: step folding and pending keys.
+  - Renderers.kt rewritten.
+  - SessionDetailScreen: chips, info sheet, TopTips, pending banner, composer pill.
+  - SessionRow: avatar with status dot.
+- Continue on phone: CreateSessionBody gained resumeFrom/mode (cwd now optional),
+  SessionCapabilities gained continueSession, and the VM has continueOnPhone(fork).
+  E2E setup: ran `claude -p` in android/build/e2e-cwd, then copied the transcript into the sandbox
+  home's .claude/projects so the sandbox desktop lists it in History. Continue and fork both verified.
+- zh-CN: every string translated; added NotifyText, UiText and relativeTime; coui patch 0002
+  (LocalSheetCloseLabel).
+- Typing on the emulator: with the app locale set to zh-CN, Gboard starts in pinyin and composes
+  whatever `adb shell input text` sends. Tap the globe key to switch to English before typing.
+- Tests: 78 green (core:remote 49, core:ui 4, app 25; new: TimelineTest x3, continue VM tests x2).
+
+## Phase D (2026-11-14)
+- Icons:
+  - Tried Material icons-extended first; the user found them ugly.
+  - Now Phosphor (`com.adamglin:phosphor-icon:1.0.0`, MIT): Regular when unselected, Fill when
+    selected, all through `AppIcons`.
+  - settings.gradle.kts: the `google()` repository is now limited to `com.android` / `com.google` /
+    `androidx` groups. A dl.google.com hiccup was blocking resolution of Maven Central-only groups.
+  - Release APK: 6,957,361 → 6,878,289 bytes.
+- Home is task-first: no connected card; order is waiting, running (compact rows), recent, then a
+  one-card "更多" section.
+- Brand marks: LobeHub claude.svg and openai.svg converted to VectorDrawables
+  (scratch script svg2vd.py, path copied verbatim). See third_party/brand-icons/NOTICE.md.
+- Attached sessions: `SessionSummary.terminalId` / `isAttached`; badge "已接管 · …"; composer kept for
+  `control == full`; no 接续; "打开终端" goes through `AppContainer.openTerminalRequest` to Workspace.
+- Screenshots: redact.py masks session rows whose project isn't e2e-cwd (Home only). capture_d2.sh
+  aborts if an expected test row isn't on screen. One unguarded dark-mode run opened a real session;
+  those images were deleted, never copied into the repo.
+- Tests: 80 green (2 new Compose tests: attached session + task-first Home).

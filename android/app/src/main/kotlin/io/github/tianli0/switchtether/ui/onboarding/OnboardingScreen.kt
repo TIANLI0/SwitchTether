@@ -245,8 +245,9 @@ private fun ScanContent(onScanned: (String) -> Unit, onBack: () -> Unit) {
         denied = !ok
     }
     Title(stringResource(R.string.scan_title), stringResource(R.string.scan_hint))
+    val cameraDesc = stringResource(R.string.camera_preview_desc)
     if (granted) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)).semantics { contentDescription = "camera preview" }) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)).semantics { contentDescription = cameraDesc }) {
             QrScanner(onResult = onScanned, modifier = Modifier.fillMaxSize())
         }
     } else {

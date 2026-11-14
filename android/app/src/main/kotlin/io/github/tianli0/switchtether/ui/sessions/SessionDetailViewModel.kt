@@ -8,6 +8,7 @@ import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.data.DraftStore
 import io.github.tianli0.switchtether.domain.SessionChange
 import io.github.tianli0.switchtether.domain.SessionRepository
+import io.github.tianli0.switchtether.domain.createdSession
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
 import io.github.tianli0.switchtether.remote.protocol.Capability
@@ -55,17 +56,52 @@ data class SessionDetailState(
     val events: Loadable<Unit> = Loadable.Loading,
     val log: AgentEventLog = AgentEventLog.EMPTY,
     val items: List<RenderItem> = emptyList(),
+    /** [items] folded into chat rows and "N steps" blocks (see [buildTimeline]). */
+    val timeline: List<TimelineRow> = emptyList(),
+    /** Keys of approval/question rows still waiting for an answer. */
+    val pending: List<String> = emptyList(),
     val collapsed: Set<String> = emptySet(),
+    val expandedSteps: Set<String> = emptySet(),
     val hasMoreBefore: Boolean = false,
     val loadingOlder: Boolean = false,
     val connection: ConnectionState = ConnectionState.Unpaired,
     val draft: String = "",
+    /** Managed session created by "continue on phone" (navigate to it once). */
+    val continuedAs: io.github.tianli0.switchtether.remote.protocol.SessionSummary? = null,
 ) {
     val online: Boolean get() = connection is ConnectionState.Online
     fun cap(c: Capability): CapStatus = detail.valueOrNull?.capabilities?.status(c) ?: CapStatus.UNKNOWN
-    val canSend: Boolean get() = online && cap(Capability.SEND_MESSAGE) == CapStatus.VERIFIED
-    val canInterrupt: Boolean get() = online && cap(Capability.INTERRUPT) == CapStatus.VERIFIED
+    val canSend: Boolean get() = online && cap(Capability.SEND_MESSAGE).usable
+    val canInterrupt: Boolean get() = online && cap(Capability.INTERRUPT).usable
     val rollingStatus: AgentEvent? get() = log[ROLLING_STATUS_ID]
+
+    /**
+     * "Continue on phone": offered only when the desktop advertises `capabilities.continueSession`
+     * (external Claude Code / Codex sessions) and the phone cannot already drive the session.
+     */
+    val canOfferContinue: Boolean get() {
+        val d = detail.valueOrNull ?: return false
+        return d.capabilities.continueSession != null && !canSend && d.summary.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL
+    }
+
+    /** Claude sessions may also be forked (a copy that leaves the original transcript untouched). */
+    val canFork: Boolean get() = canOfferContinue && detail.valueOrNull?.summary?.agent.let { it == "claude_code" || it == "claude" }
+
+    /** The desktop refuses to fork a session whose original is mid-turn. */
+    val originalBusy: Boolean get() = detail.valueOrNull?.summary?.let { it.isLive && it.status == "busy" } == true
+
+    /** Rebuild derived rows after the log / collapse / expansion state changed. */
+    fun derive(log: AgentEventLog = this.log, collapsed: Set<String> = this.collapsed, expandedSteps: Set<String> = this.expandedSteps): SessionDetailState {
+        val items = log.renderItems(collapsed).filter { it.event.id != ROLLING_STATUS_ID && !isLowValueSystem(it.event) }
+        return copy(
+            log = log,
+            collapsed = collapsed,
+            expandedSteps = expandedSteps,
+            items = items,
+            timeline = buildTimeline(items, expandedSteps),
+            pending = pendingRequestKeys(items),
+        )
+    }
 }
 
 @OptIn(FlowPreview::class)
@@ -127,7 +163,7 @@ class SessionDetailViewModel(
             try {
                 val page = repo.events(sessionId, limit = PAGE)
                 val log = AgentEventLog.of(page.events)
-                _state.update { it.copy(log = log, items = items(log, it.collapsed), hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
+                _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
             } catch (e: CancellationException) {
                 throw e
@@ -177,7 +213,7 @@ class SessionDetailViewModel(
                 val page = repo.events(sessionId, before = min, limit = PAGE)
                 _state.update {
                     val log = it.log.upsert(page.events)
-                    it.copy(log = log, items = items(log, it.collapsed), hasMoreBefore = page.hasMoreBefore, loadingOlder = false)
+                    it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, loadingOlder = false)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -191,15 +227,47 @@ class SessionDetailViewModel(
     fun applyEvents(events: List<AgentEvent>) {
         _state.update { st ->
             val log = st.log.upsert(events)
-            if (log === st.log) st else st.copy(log = log, items = items(log, st.collapsed))
+            if (log === st.log) st else st.derive(log = log)
         }
     }
 
     fun toggleCollapse(parentId: String) {
         _state.update { st ->
             val c = if (parentId in st.collapsed) st.collapsed - parentId else st.collapsed + parentId
-            st.copy(collapsed = c, items = items(st.log, c))
+            st.derive(collapsed = c)
         }
+    }
+
+    fun toggleSteps(groupId: String) {
+        _state.update { st ->
+            val e = if (groupId in st.expandedSteps) st.expandedSteps - groupId else st.expandedSteps + groupId
+            st.derive(expandedSteps = e)
+        }
+    }
+
+    /**
+     * Continue (or, for Claude, fork) this externally started session as a SwitchTether-managed one
+     * with the same history (`POST /v1/sessions {resumeFrom, mode}`). Never retried silently; a 409
+     * (original busy on the computer / Codex thread open elsewhere) shows the desktop's message.
+     */
+    fun continueOnPhone(label: String, fork: Boolean = false) {
+        val s = _state.value.detail.valueOrNull?.summary ?: return
+        val req = io.github.tianli0.switchtether.domain.NewSessionRequest(
+            agent = if (s.agent == "claude") "claude_code" else s.agent,
+            cwd = s.cwd.orEmpty(), // optional: the desktop defaults to the original's directory
+            prompt = null,
+            model = null,
+            permissionMode = null,
+            resumeFrom = sessionId,
+            mode = if (fork) "fork" else "continue",
+        )
+        commands.run(label, onSuccess = { out ->
+            _state.update { it.copy(continuedAs = out.createdSession()) }
+        }) { id -> repo.createSession(req, id) }
+    }
+
+    fun consumeContinued() {
+        _state.update { it.copy(continuedAs = null) }
     }
 
     fun loadPayload(eventId: String) {
@@ -254,9 +322,6 @@ class SessionDetailViewModel(
     fun answer(label: String, requestId: String, answers: JsonObject) {
         commands.run(label) { id -> repo.answer(sessionId, requestId, answers, id) }
     }
-
-    private fun items(log: AgentEventLog, collapsed: Set<String>): List<RenderItem> =
-        log.renderItems(collapsed).filter { it.event.id != ROLLING_STATUS_ID && !isLowValueSystem(it.event) }
 
     companion object {
         const val PAGE = 300

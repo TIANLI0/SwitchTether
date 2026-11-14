@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.manage
 
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,18 +31,11 @@ import io.github.suqi8.coui.kmp.basic.Switch
 import io.github.suqi8.coui.kmp.basic.TabRow
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
-import io.github.suqi8.coui.kmp.icon.COUIIcons
-import io.github.suqi8.coui.kmp.icon.extended.Refresh
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
-import io.github.suqi8.coui.kmp.icon.extended.Layers
-import io.github.suqi8.coui.kmp.icon.extended.Link
-import io.github.suqi8.coui.kmp.icon.extended.Notes
-import io.github.suqi8.coui.kmp.icon.extended.Recent
-import io.github.suqi8.coui.kmp.icon.extended.Tasks
 import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
 import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.tianli0.switchtether.ui.home.RowIcon
@@ -83,15 +78,15 @@ fun ManageScreen(onOpen: (Route) -> Unit) {
         LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
                 GroupCard {
-                    ArrowPreference(title = stringResource(R.string.manage_providers), summary = stringResource(R.string.manage_providers_summary), startAction = { RowIcon(COUIIcons.Layers) }, onClick = { onOpen(Route.Providers) }, cardListPosition = CardListPosition.Head)
-                    ArrowPreference(title = stringResource(R.string.manage_usage), summary = stringResource(R.string.manage_usage_summary), startAction = { RowIcon(COUIIcons.Recent) }, onClick = { onOpen(Route.Usage) }, cardListPosition = CardListPosition.Tail)
+                    ArrowPreference(title = stringResource(R.string.manage_providers), summary = stringResource(R.string.manage_providers_summary), startAction = { RowIcon(AppIcons.Providers) }, onClick = { onOpen(Route.Providers) }, cardListPosition = CardListPosition.Head)
+                    ArrowPreference(title = stringResource(R.string.manage_usage), summary = stringResource(R.string.manage_usage_summary), startAction = { RowIcon(AppIcons.Usage) }, onClick = { onOpen(Route.Usage) }, cardListPosition = CardListPosition.Tail)
                 }
             }
             item {
                 GroupCard {
-                    ArrowPreference(title = stringResource(R.string.manage_mcp), startAction = { RowIcon(COUIIcons.Link) }, onClick = { onOpen(Route.Mcp) }, cardListPosition = CardListPosition.Head)
-                    ArrowPreference(title = stringResource(R.string.manage_skills), startAction = { RowIcon(COUIIcons.Tasks) }, onClick = { onOpen(Route.Skills) }, cardListPosition = CardListPosition.Middle)
-                    ArrowPreference(title = stringResource(R.string.manage_prompts), startAction = { RowIcon(COUIIcons.Notes) }, onClick = { onOpen(Route.Prompts) }, cardListPosition = CardListPosition.Tail)
+                    ArrowPreference(title = stringResource(R.string.manage_mcp), startAction = { RowIcon(AppIcons.Mcp) }, onClick = { onOpen(Route.Mcp) }, cardListPosition = CardListPosition.Head)
+                    ArrowPreference(title = stringResource(R.string.manage_skills), startAction = { RowIcon(AppIcons.Terminal) }, onClick = { onOpen(Route.Skills) }, cardListPosition = CardListPosition.Middle)
+                    ArrowPreference(title = stringResource(R.string.manage_prompts), startAction = { RowIcon(AppIcons.Prompts) }, onClick = { onOpen(Route.Prompts) }, cardListPosition = CardListPosition.Tail)
                 }
             }
             item { Text(stringResource(R.string.manage_write_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
@@ -127,7 +122,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
     Page(
         title = stringResource(R.string.manage_providers),
         onBack = onBack,
-        actions = { ToolbarIcon(COUIIcons.Refresh, stringResource(R.string.action_refresh), vm::load) },
+        actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::load) },
     ) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         AppTabs(state.apps, state.app, vm::selectApp)
@@ -218,7 +213,7 @@ private fun ProviderCard(
             }
             test?.let { t ->
                 Text(
-                    (if (t.ok) "✓ " else "✗ ") + listOfNotNull(t.message, t.latencyMs?.let { "${it} ms" }).joinToString(" · ").ifEmpty { if (t.ok) "OK" else "failed" },
+                    (if (t.ok) "✓ " else "✗ ") + listOfNotNull(t.message, t.latencyMs?.let { "${it} ms" }).joinToString(" · ").ifEmpty { stringResource(if (t.ok) R.string.provider_test_ok else R.string.provider_test_failed) },
                     style = DevType.codeSmall,
                     color = if (t.ok) dev.ok else dev.danger,
                 )
@@ -240,7 +235,7 @@ fun UsageScreen(onBack: () -> Unit) {
     val vm = containerViewModel { UsageViewModel(it.connection, it.management) }
     val state by vm.state.collectAsStateWithLifecycle()
     val conn by container.connection.state.collectAsStateWithLifecycle()
-    Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { ToolbarIcon(COUIIcons.Refresh, stringResource(R.string.action_refresh), vm::load) }) {
+    Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::load) }) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         TabRow(
             tabs = listOf(stringResource(R.string.usage_today), stringResource(R.string.usage_7d), stringResource(R.string.usage_30d)),
@@ -381,7 +376,7 @@ private fun QuotaCard(q: QuotaView) {
             Text(q.reason ?: stringResource(R.string.quota_no_reason), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
         } else {
             q.tiers.forEach { t ->
-                Text("${t.name}: ${t.utilizationPercent?.let { "%.0f%%".format(it) } ?: "—"}" + (t.resetsAt?.let { " · resets $it" } ?: ""), style = DevType.codeSmall, color = COUITheme.colorScheme.onSurface)
+                Text("${t.name}: ${t.utilizationPercent?.let { "%.0f%%".format(it) } ?: "—"}" + (t.resetsAt?.let { " · " + stringResource(R.string.quota_resets, it) } ?: ""), style = DevType.codeSmall, color = COUITheme.colorScheme.onSurface)
                 io.github.suqi8.coui.kmp.basic.LinearProgressIndicator(progress = ((t.utilizationPercent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
             }
         }
@@ -406,7 +401,7 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
             ToggleListKind.PROMPTS -> R.string.manage_prompts
         },
     )
-    Page(title = title, onBack = onBack, actions = { ToolbarIcon(COUIIcons.Refresh, stringResource(R.string.action_refresh), vm::load) }) {
+    Page(title = title, onBack = onBack, actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::load) }) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         AppTabs(DEFAULT_APPS, state.app, vm::selectApp)
         if (kind == ToggleListKind.PROMPTS) {

@@ -303,4 +303,12 @@
     <string name="provider_credential">Update credential</string>
     <string name="provider_credential_note">The new value is sent once to the computer (after biometric confirmation) and is never shown again. Provider: %1$s</string>
     <string name="provider_update">Update</string>
+    <string name="provider_test_ok">OK</string>
+    <string name="provider_test_failed">Failed</string>
+    <string name="quota_resets">resets %1$s</string>
+    <string name="camera_preview_desc">Camera preview</string>
+    <string name="home_attention">Needs you · %1$d</string>
+    <string name="home_running">Running · %1$d</string>
+    <string name="home_more">More</string>
+    <string name="home_usage_today">Today %1$s · %2$s tokens</string>
 </resources>

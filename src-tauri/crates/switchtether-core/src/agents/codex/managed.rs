@@ -1211,24 +1211,122 @@ impl ManagedSession for ManagedCodex {
     }
 }
 
-/// Locate the `codex` executable.
+/// Locate the `codex` executable: the newest of the CLI on PATH (or the usual
+/// install locations) and, on Windows, the one bundled with Codex Desktop. An
+/// old CLI may not support the models the user's account offers.
 pub fn find_codex_bin() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(p) = crate::util::which("codex") {
-        return Some(p);
+        candidates.push(p);
     }
-    let home = dirs::home_dir()?;
-    let candidates = if cfg!(windows) {
-        vec![home
-            .join("AppData")
-            .join("Roaming")
-            .join("npm")
-            .join("codex.cmd")]
-    } else {
-        vec![
-            PathBuf::from("/opt/homebrew/bin/codex"),
-            PathBuf::from("/usr/local/bin/codex"),
-            home.join(".local").join("bin").join("codex"),
-        ]
-    };
-    candidates.into_iter().find(|p| p.is_file())
+    if let Some(home) = dirs::home_dir() {
+        let extra = if cfg!(windows) {
+            vec![home
+                .join("AppData")
+                .join("Roaming")
+                .join("npm")
+                .join("codex.cmd")]
+        } else {
+            vec![
+                PathBuf::from("/opt/homebrew/bin/codex"),
+                PathBuf::from("/usr/local/bin/codex"),
+                home.join(".local").join("bin").join("codex"),
+            ]
+        };
+        candidates.extend(extra.into_iter().filter(|p| p.is_file()));
+    }
+    if let Some(p) = desktop_bundled_codex() {
+        candidates.push(p);
+    }
+    candidates.dedup();
+    if candidates.len() <= 1 {
+        return candidates.pop();
+    }
+    candidates
+        .into_iter()
+        .map(|p| (codex_version(&p), p))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, p)| p)
+}
+
+/// `codex --version` → comparable (major, minor, patch); unknown sorts lowest.
+fn codex_version(p: &std::path::Path) -> (u64, u64, u64) {
+    let mut cmd = std::process::Command::new(p);
+    cmd.arg("--version")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd.output().ok();
+    let text = out
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    parse_version(&text)
+}
+
+fn parse_version(text: &str) -> (u64, u64, u64) {
+    let v = text
+        .split_whitespace()
+        .find(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .unwrap_or("");
+    let mut it = v.split(['.', '-']).map(|x| x.parse::<u64>().unwrap_or(0));
+    (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    )
+}
+
+/// Codex Desktop's own `codex.exe` (MSIX package `OpenAI.Codex`).
+fn desktop_bundled_codex() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1).InstallLocation",
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .output()
+            .ok()?;
+        let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if dir.is_empty() {
+            return None;
+        }
+        let p = PathBuf::from(dir)
+            .join("app")
+            .join("resources")
+            .join("codex.exe");
+        p.is_file().then_some(p)
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[test]
+    fn versions_compare_numerically() {
+        assert_eq!(
+            super::parse_version(
+                "codex-cli 0.167.0-alpha.4.1
+"
+            ),
+            (0, 167, 0)
+        );
+        assert!(
+            super::parse_version("codex-cli 0.137.0") < super::parse_version("codex-cli 0.167.0")
+        );
+        assert_eq!(super::parse_version(""), (0, 0, 0));
+    }
 }

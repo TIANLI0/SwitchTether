@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="session_steps">
+        <item quantity="other">%1$d 个步骤</item>
+    </plurals>
+    <string name="session_steps_failed">%1$d 个失败</string>
+    <string name="step_pending">等待中</string>
+    <string name="step_running">运行中</string>
+    <string name="step_completed">已完成</string>
+    <string name="step_failed">失败</string>
+    <string name="step_denied">已拒绝</string>
+    <string name="step_interrupted">已中断</string>
+    <string name="step_unknown">未知</string>
+    <string name="render_thinking">思考过程</string>
+    <string name="render_input">输入</string>
+    <string name="render_output">输出</string>
+    <string name="render_exit_code">退出码 %1$d</string>
+    <string name="render_empty_output">（无输出）</string>
+    <string name="render_file_add">新增</string>
+    <string name="render_file_delete">删除</string>
+    <string name="render_file_modify">修改</string>
+    <string name="render_file_rename">重命名</string>
+    <string name="render_plan_title">计划</string>
+    <string name="render_plan_progress">已完成 %1$d/%2$d</string>
+    <string name="render_approval_needed">需要你的审批</string>
+    <string name="render_question_needed">智能体有个问题</string>
+    <string name="render_cwd">位于 %1$s</string>
+    <string name="decision_allow">已允许</string>
+    <string name="decision_allow_session">本会话内允许</string>
+    <string name="decision_deny">已拒绝</string>
+    <string name="decision_abort">已中止</string>
+    <string name="resolved_by_desktop">（在电脑上）</string>
+    <string name="resolved_by_phone">（在手机上）</string>
+    <string name="resolved_line">%1$s%2$s</string>
+    <string name="render_usage">Token：输入 %1$s · 输出 %2$s · 缓存读取 %3$s · 缓存写入 %4$s</string>
+    <string name="render_system">系统 · %1$s</string>
+    <string name="render_status_running">工作中</string>
+    <string name="render_status_waiting_approval">等待审批</string>
+    <string name="render_status_waiting_input">等待输入</string>
+    <string name="render_status_completed">本轮已完成</string>
+    <string name="render_status_error">出错</string>
+    <string name="render_status_idle">空闲</string>
+
+    <plurals name="pending_banner">
+        <item quantity="other">%1$d 个请求等待你处理</item>
+    </plurals>
+    <string name="pending_banner_action">查看</string>
+
+    <string name="session_info">会话信息</string>
+    <string name="session_info_agent">智能体</string>
+    <string name="session_info_model">模型</string>
+    <string name="session_info_status">状态</string>
+    <string name="session_info_control">手机控制</string>
+    <string name="session_info_origin">启动方式</string>
+    <string name="session_info_project">项目</string>
+    <string name="session_info_branch">分支</string>
+    <string name="session_info_cwd">工作目录</string>
+    <string name="session_info_activity">当前活动</string>
+    <string name="session_info_capabilities">手机可执行的操作</string>
+    <string name="session_info_last_active">最近活动</string>
+    <string name="cap_status_verified">可用</string>
+    <string name="cap_status_partial">部分可用</string>
+    <string name="cap_status_blocked">不可用</string>
+    <string name="cap_status_untested">未验证</string>
+    <string name="cap_status_unknown">未知</string>
+    <string name="origin_managed">由 SwitchTether 启动</string>
+    <string name="origin_external">在电脑上启动</string>
+    <string name="waiting_for_approval">等待审批</string>
+    <string name="waiting_for_input">等待输入</string>
+    <string name="waiting_for_other">等待：%1$s</string>
+
+    <string name="session_readonly_tip">此会话是在电脑上启动的。你可以在这里查看进展，但回复需要在电脑上输入。</string>
+    <string name="session_blocked_tip">手机暂时无法回复此会话（%1$s）。</string>
+    <string name="composer_readonly">手机端只读</string>
+    <string name="composer_send_unavailable">此会话暂不支持发送消息</string>
+
+    <string name="continue_action">在手机上接续</string>
+    <string name="continue_title">在手机上接续此会话？</string>
+    <string name="continue_point_context">SwitchTether 会在电脑上启动一个受管的 %1$s 会话，带着相同的上下文继续这段对话。</string>
+    <string name="continue_point_window">电脑上原来的窗口不会显示你在手机上发送的内容。</string>
+    <string name="continue_point_busy">原会话在电脑上忙碌或等待处理时无法接续（Codex 的线程在别处打开时也不行）。</string>
+    <string name="continue_busy">原会话仍在运行，请等它空闲后再接续。</string>
+    <string name="continue_confirm">接续</string>
+    <string name="continue_command">接续会话</string>
+
+    <string name="continue_fork">以副本继续</string>
+    <string name="continue_fork_hint">以副本继续（仅 Claude）不会改动原会话的记录。</string>
+    <string name="continue_command_fork">以副本继续会话</string>
+
+    <string name="time_now">刚刚</string>
+    <string name="time_minutes">%1$d 分钟前</string>
+    <string name="time_hours">%1$d 小时前</string>
+    <string name="time_days">%1$d 天前</string>
+    <string name="session_managed_chip">SwitchTether</string>
+    <string name="state_expanded">已展开</string>
+    <string name="state_collapsed">已收起</string>
+    <string name="render_system_continued">已在 SwitchTether 中接续。之后的回合在 SwitchTether 进程中运行，电脑上原来的窗口不会显示。</string>
+    <string name="render_system_init">智能体进程已启动</string>
+    <string name="option_allow">允许</string>
+    <string name="option_allow_session">本会话内始终允许</string>
+    <string name="option_deny">拒绝</string>
+    <string name="option_abort">停止智能体</string>
+    <string name="attached_badge">已接管 · %1$s</string>
+    <string name="client_terminal">终端</string>
+    <string name="open_terminal">打开终端</string>
+</resources>

@@ -74,6 +74,9 @@ data class NewSessionRequest(
     val prompt: String?,
     val model: String?,
     val permissionMode: String?,
+    /** Session id to continue from (`mode = "continue"`): forks an external session into a managed one. */
+    val resumeFrom: String? = null,
+    val mode: String? = null,
 )
 
 interface ManagementRepository {
@@ -162,10 +165,12 @@ class RemoteSessionRepository(private val conn: ConnectionController) : SessionR
                 CreateSessionBody(
                     commandId = c,
                     agent = request.agent,
-                    cwd = request.cwd,
+                    cwd = request.cwd.takeIf { it.isNotBlank() },
                     prompt = request.prompt?.takeIf { it.isNotBlank() },
                     model = request.model?.takeIf { it.isNotBlank() },
                     permissionMode = request.permissionMode?.takeIf { it.isNotBlank() },
+                    resumeFrom = request.resumeFrom,
+                    mode = request.mode,
                 ),
             )
         }

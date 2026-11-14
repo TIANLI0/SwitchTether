@@ -51,4 +51,17 @@
     <string name="git_clean">工作区干净</string>
     <string name="git_log">最近提交</string>
     <string name="git_no_changes">没有差异。</string>
+    <string name="files_op_save">保存</string>
+    <string name="files_op_mkdir">新建文件夹</string>
+    <string name="files_op_rename">重命名</string>
+    <string name="files_op_delete">删除</string>
+    <string name="files_op_upload">上传</string>
+    <string name="files_msg_not_editable">此文件无法在这里编辑（二进制或内容已截断）。</string>
+    <string name="files_msg_cancelled">%1$s：已取消确认。</string>
+    <string name="files_msg_saved">已保存。</string>
+    <string name="files_msg_saved_as">已另存为 %1$s。</string>
+    <string name="files_msg_rejected">%1$s失败：%2$s</string>
+    <string name="files_msg_unknown">%1$s：结果未知。请重新打开文件夹或文件确认后再重试。</string>
+    <string name="files_msg_ok">%1$s：完成。</string>
+    <string name="terminal_desc">终端</string>
 </resources>

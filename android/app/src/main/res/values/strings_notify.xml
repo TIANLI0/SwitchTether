@@ -24,4 +24,24 @@
     <string name="notif_battery">Battery optimization</string>
     <string name="notif_battery_summary">Some phones stop background connections. Allow SwitchTether to run unrestricted if notifications arrive late.</string>
     <string name="notif_system_settings">Sound and vibration per channel</string>
+    <string name="ntf_needs_approval">%1$s needs approval</string>
+    <string name="ntf_approval_requested">Approval requested</string>
+    <string name="ntf_asks_question">%1$s asks a question</string>
+    <string name="ntf_answer_hint">Answer in SwitchTether or on the computer</string>
+    <string name="ntf_started">%1$s started working</string>
+    <string name="ntf_finished">%1$s finished</string>
+    <string name="ntf_failed">%1$s failed</string>
+    <string name="ntf_interrupted">%1$s was interrupted</string>
+    <string name="ntf_waiting_input">%1$s is waiting for input</string>
+    <string name="ntf_waiting_for_you">%1$s is waiting for you</string>
+    <string name="ntf_tool_call">%1$s: %2$s</string>
+    <string name="ntf_tool">tool</string>
+    <string name="ntf_replied">%1$s replied</string>
+    <string name="ntf_still_running">%1$s is still running</string>
+    <string name="ntf_running_for">Running for %1$d min</string>
+    <string name="ntf_connection_lost">Connection to %1$s lost</string>
+    <string name="ntf_reconnected">Reconnected to %1$s</string>
+    <string name="ntf_public_approval">An agent needs your approval</string>
+    <string name="ntf_public_waiting">An agent is waiting for you</string>
+    <string name="ntf_public_activity">Agent activity</string>
 </resources>

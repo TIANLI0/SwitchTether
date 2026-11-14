@@ -93,6 +93,50 @@ class ViewModelTest {
     }
 
     @Test
+    fun continueOnPhoneForksIntoManagedSessionAndSurfacesConflicts() = runTest(dispatcher) {
+        val created = """{"id":"managed:abc","agent":"claude_code","origin":"managed","managed":true,"title":"Fix login bug"}"""
+        val repo = FakeSessionRepository().apply {
+            detail = SessionDetail(summary(live = false, status = "completed").copy(cwd = "D:/w"), caps(continueSession = "PARTIAL"), emptyList())
+            nextOutcome = { CommandOutcome.Succeeded(it, io.github.tianli0.switchtether.remote.api.CommandResponse(io.github.tianli0.switchtether.remote.protocol.ProtocolJson.parseToJsonElement(created), false)) }
+        }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.canOfferContinue)
+        assertTrue(vm.state.value.canFork)
+        vm.continueOnPhone("continue")
+        advanceUntilIdle()
+        assertEquals("s1", repo.lastCreate?.resumeFrom)
+        assertEquals("continue", repo.lastCreate?.mode)
+        assertEquals("claude_code", repo.lastCreate?.agent)
+        assertEquals("managed:abc", vm.state.value.continuedAs?.id)
+
+        vm.consumeContinued()
+        vm.continueOnPhone("fork", fork = true)
+        advanceUntilIdle()
+        assertEquals("fork", repo.lastCreate?.mode)
+
+        // 409 (original busy on the computer): shown with the desktop's message, never retried.
+        vm.consumeContinued()
+        repo.nextOutcome = {
+            CommandOutcome.Rejected(it, io.github.tianli0.switchtether.remote.api.ApiException(409, io.github.tianli0.switchtether.remote.protocol.ApiErrorBody("conflict", "original session is busy"), null))
+        }
+        vm.continueOnPhone("continue")
+        advanceUntilIdle()
+        val prompt = vm.commands.prompt.value
+        assertEquals(io.github.tianli0.switchtether.ui.common.CommandPrompt.Kind.REJECTED, prompt?.kind)
+        assertTrue(prompt?.detail.orEmpty().contains("original session is busy"))
+        assertEquals(null, vm.state.value.continuedAs)
+    }
+
+    @Test
+    fun continueIsNotOfferedWithoutTheCapability() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply { detail = SessionDetail(summary(), caps(), emptyList()) }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        assertTrue(!vm.state.value.canOfferContinue)
+    }
+
+    @Test
     fun lowValueSystemRowsAreHidden() = runTest(dispatcher) {
         val repo = FakeSessionRepository().apply {
             detail = SessionDetail(summary(), caps(), emptyList())

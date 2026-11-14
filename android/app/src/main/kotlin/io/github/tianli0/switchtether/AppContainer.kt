@@ -94,6 +94,9 @@ class AppContainer(private val context: Context) {
     /** Session id requested by a notification tap (consumed by the main shell). */
     val openSessionRequest = MutableStateFlow<String?>(null)
 
+    /** Terminal id to show in Workspace → Terminals (from a session mirrored from a terminal). */
+    val openTerminalRequest = MutableStateFlow<String?>(null)
+
     fun onForeground() {
         isForeground = true
         network.start()

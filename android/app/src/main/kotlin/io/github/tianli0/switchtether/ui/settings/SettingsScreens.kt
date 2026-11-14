@@ -301,6 +301,8 @@ val LICENSES = listOf(
     LicenseEntry("ZXing core", "Apache-2.0", "ZXing authors"),
     LicenseEntry("material-color-utilities (com.materialkolor)", "Apache-2.0", "Google LLC / Jordon de Hoog"),
     LicenseEntry("material3-window-size-class (JetBrains)", "Apache-2.0", "JetBrains s.r.o."),
+    LicenseEntry("Phosphor Icons (com.adamglin:phosphor-icon 1.0.0)", "MIT", "Icons by Phosphor Icons (Helena Zhang, Tobias Fried); Compose port by Adam Glin"),
+    LicenseEntry("LobeHub Icons (Claude and OpenAI marks, @lobehub/icons-static-svg 1.102.0)", "MIT", "Copyright (c) 2023 LobeHub. Claude is a trademark of Anthropic PBC, OpenAI a trademark of OpenAI; used only to identify the agent."),
 )
 
 @Composable

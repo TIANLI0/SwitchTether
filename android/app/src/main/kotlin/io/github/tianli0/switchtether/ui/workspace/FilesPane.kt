@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+
+import io.github.tianli0.switchtether.ui.common.resolve
+
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,16 +41,6 @@ import io.github.suqi8.coui.kmp.basic.Switch
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
-import io.github.suqi8.coui.kmp.icon.COUIIcons
-import io.github.suqi8.coui.kmp.icon.extended.AddFolder
-import io.github.suqi8.coui.kmp.icon.extended.Back
-import io.github.suqi8.coui.kmp.icon.extended.Create
-import io.github.suqi8.coui.kmp.icon.extended.Download
-import io.github.suqi8.coui.kmp.icon.extended.Edit
-import io.github.suqi8.coui.kmp.icon.extended.Hide
-import io.github.suqi8.coui.kmp.icon.extended.More
-import io.github.suqi8.coui.kmp.icon.extended.Show
-import io.github.suqi8.coui.kmp.icon.extended.UploadCloud
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.FsEntry
@@ -75,7 +69,7 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel) {
         else -> Browser(state, vm)
     }
     state.message?.let { msg ->
-        ConfirmDialog(show = true, title = stringResource(R.string.files_title), message = msg, confirmText = stringResource(R.string.action_ok), onConfirm = vm::clearMessage, onDismiss = vm::clearMessage)
+        ConfirmDialog(show = true, title = stringResource(R.string.files_title), message = msg.resolve(), confirmText = stringResource(R.string.action_ok), onConfirm = vm::clearMessage, onDismiss = vm::clearMessage)
     }
     state.pendingSensitive?.let { e ->
         ConfirmDialog(
@@ -108,10 +102,10 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
             TextInput(state.query, vm::setQuery, stringResource(R.string.files_search), modifier = Modifier.weight(1f), showClearButton = true,
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { vm.search() }),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search))
-            ToolbarIcon(if (state.showHidden) COUIIcons.Show else COUIIcons.Hide, stringResource(R.string.files_hidden), vm::toggleHidden)
-            ToolbarIcon(COUIIcons.Create, stringResource(R.string.files_new_file), { nameDialog = "file" }, enabled = listing != null)
-            ToolbarIcon(COUIIcons.AddFolder, stringResource(R.string.files_new_folder), { nameDialog = "folder" }, enabled = listing != null)
-            ToolbarIcon(COUIIcons.UploadCloud, stringResource(R.string.files_upload), { picker.launch(arrayOf("*/*")) }, enabled = listing != null)
+            ToolbarIcon(if (state.showHidden) AppIcons.Show else AppIcons.Hide, stringResource(R.string.files_hidden), vm::toggleHidden)
+            ToolbarIcon(AppIcons.NewFile, stringResource(R.string.files_new_file), { nameDialog = "file" }, enabled = listing != null)
+            ToolbarIcon(AppIcons.NewFolder, stringResource(R.string.files_new_folder), { nameDialog = "folder" }, enabled = listing != null)
+            ToolbarIcon(AppIcons.Upload, stringResource(R.string.files_upload), { picker.launch(arrayOf("*/*")) }, enabled = listing != null)
         }
         Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.files_search_content), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
@@ -148,10 +142,10 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
                             rows.forEachIndexed { i, e ->
                                 BasicComponent(
                                     title = (if (e.isDir) "\u25B8 " else "") + e.name,
-                                    summary = if (e.isDir) null else listOfNotNull(Formatters.bytes(e.size), e.modifiedMs?.let(Formatters::relative)).joinToString(" · "),
+                                    summary = if (e.isDir) null else listOfNotNull(Formatters.bytes(e.size), e.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) }).joinToString(" · "),
                                     endActions = {
                                         if (e.sensitive) StatusPill(stringResource(R.string.new_session_sensitive), LocalDevColors.current.warn)
-                                        if (e.name != "..") ToolbarIcon(COUIIcons.More, stringResource(R.string.files_actions, e.name), { actionsFor = e })
+                                        if (e.name != "..") ToolbarIcon(AppIcons.More, stringResource(R.string.files_actions, e.name), { actionsFor = e })
                                     },
                                     onClick = { if (e.name == "..") vm.browse(e.path) else vm.open(e) },
                                     onClickLabel = e.name,
@@ -225,11 +219,11 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
     BackHandler { if (state.editing) vm.cancelEdit() else vm.closeFile() }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolbarIcon(COUIIcons.Back, stringResource(R.string.action_back), { if (state.editing) vm.cancelEdit() else vm.closeFile() })
+            ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), { if (state.editing) vm.cancelEdit() else vm.closeFile() })
             val f = (state.file as? Loadable.Ready)?.value
             Text(f?.path?.substringAfterLast('\\')?.substringAfterLast('/') ?: "", style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1)
-            if (f != null && !state.editing) ToolbarIcon(COUIIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
-            if (f != null && !state.editing) ToolbarIcon(COUIIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(f.path.substringAfterLast('\\').substringAfterLast('/'), f.path, "file", f.size)) })
+            if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
+            if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(f.path.substringAfterLast('\\').substringAfterLast('/'), f.path, "file", f.size)) })
             if (state.editing) {
                 Button(onClick = vm::save, enabled = !state.saving, colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.padding(end = 8.dp).testTag("save")) {
                     Text(if (state.saving) "…" else stringResource(R.string.files_save), color = COUITheme.colorScheme.onPrimary)
