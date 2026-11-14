@@ -33,6 +33,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend || 'true' }}
       backend: ${{ steps.filter.outputs.backend || 'true' }}
       android: ${{ steps.filter.outputs.android || 'true' }}
+      relay: ${{ steps.filter.outputs.relay || 'true' }}
     steps:
       # On pull_request the filter reads changed files via the API (no checkout);
       # on push it needs a local git history to diff against.
@@ -70,6 +71,9 @@ jobs:
             android:
               - "android/**"
               - "protocol/**"
+              - ".github/workflows/ci.yml"
+            relay:
+              - "relay/**"
               - ".github/workflows/ci.yml"
 
   frontend:
@@ -371,3 +375,53 @@ jobs:
         with:
           name: switchtether-android-debug
           path: android/app/build/outputs/apk/debug/*.apk
+
+  # Relay server (Go, relay/): vet, race tests, then build the Docker image and smoke-test it.
+  relay:
+    name: Relay
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.relay == 'true'
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: relay/go.sum
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+      - name: Build Docker image
+        run: docker build -t switchtether-relay:ci .
+
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name relay-smoke -p 127.0.0.1:47700:47700 -p 127.0.0.1:8080:8080 switchtether-relay:ci
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 0.5; done
+          curl -fsS http://127.0.0.1:8080/healthz
+          # Raw TCP transport: a phone asking for an unknown desktop gets "ERR offline".
+          exec 3<>/dev/tcp/127.0.0.1/47700
+          printf 'ST-RELAY/1 CONNECT %064d\n' 0 >&3
+          read -r -t 5 answer <&3 || true
+          exec 3<&-
+          echo "CONNECT answered: $answer"
+          test "$answer" = "ERR offline"
+          docker exec relay-smoke /switchtether-relay -healthcheck
+          docker stop relay-smoke
+          docker logs relay-smoke

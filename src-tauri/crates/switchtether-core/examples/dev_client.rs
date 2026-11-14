@@ -147,7 +147,32 @@ async fn call(
         .map(|p| p.parse().unwrap())
         .unwrap_or_else(|| target["port"].as_u64().unwrap() as u16);
     let cfg = switchtether_core::tls::client::client_config(me, target["fp"].as_str().unwrap())?;
-    let tcp = tokio::net::TcpStream::connect((host.as_str(), port)).await?;
+    // ST_RELAY=host:port (+ ST_RELAY_TOKEN): reach the desktop through a relay
+    // (docs/RELAY.md §2.3); the TLS session below is unchanged.
+    let tcp = match std::env::var("ST_RELAY") {
+        Ok(relay) => {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut s = tokio::net::TcpStream::connect(relay.as_str()).await?;
+            let token = std::env::var("ST_RELAY_TOKEN").unwrap_or_else(|_| "-".into());
+            s.write_all(
+                format!(
+                    "ST-RELAY/1 CONNECT {} {token}\n",
+                    target["fp"].as_str().unwrap()
+                )
+                .as_bytes(),
+            )
+            .await?;
+            let mut line = Vec::new();
+            let mut b = [0u8; 1];
+            while s.read(&mut b).await? == 1 && b[0] != b'\n' {
+                line.push(b[0]);
+            }
+            let line = String::from_utf8_lossy(&line).to_string();
+            anyhow::ensure!(line == "OK", "relay: {line}");
+            s
+        }
+        Err(_) => tokio::net::TcpStream::connect((host.as_str(), port)).await?,
+    };
     let tls = tokio_rustls::TlsConnector::from(cfg)
         .connect(
             rustls::pki_types::ServerName::try_from("switchtether.local")?,

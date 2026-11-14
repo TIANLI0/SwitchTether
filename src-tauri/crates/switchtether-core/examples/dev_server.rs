@@ -55,7 +55,10 @@ async fn main() -> anyhow::Result<()> {
             network_mode: NetworkMode::Lan,
             server_name: format!("{} (dev)", hostname()),
             server_version: env!("CARGO_PKG_VERSION").into(),
-            relay: None,
+            relay: arg("--relay-url").map(|url| switchtether_core::relay::RelayConfig {
+                url,
+                token: arg("--relay-token").unwrap_or_else(|| "dev-token".into()),
+            }),
         },
         "dev-server".into(),
         identity.clone(),

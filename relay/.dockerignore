@@ -1,0 +1,6 @@
+# Only go.mod, go.sum, cmd/ and internal/ are needed (see Dockerfile).
+cloudflare/
+**/testdata/
+**/*_test.go
+*.md
+docker-compose.yml

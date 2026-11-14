@@ -150,3 +150,9 @@ pub async fn remote_set_takeover(hook: String, enabled: bool) -> Result<Value, S
 pub async fn remote_reset_relay_token(state: State<'_, RemoteState>) -> Result<Value, String> {
     state.get()?.reset_relay_token().await
 }
+
+/// Update check through the FluentSetup installer (Windows installs).
+#[tauri::command]
+pub async fn st_update_check() -> Result<Value, String> {
+    Ok(super::update::check().await)
+}

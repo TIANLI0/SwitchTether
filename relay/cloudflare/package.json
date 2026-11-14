@@ -1,0 +1,19 @@
+{
+  "name": "switchtether-relay-cloudflare",
+  "private": true,
+  "description": "Cloudflare Worker that routes /v1/tunnel and /healthz to the SwitchTether relay container",
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "wrangler": "4.156.0"
+  }
+}

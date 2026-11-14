@@ -1,0 +1,32 @@
+# Example: run the SwitchTether relay with both transports.
+#   docker compose -f relay/docker-compose.yml up -d --build
+#
+# Desktop relay URL:  tcp://<host>:47700   or   ws://<host>:8080/v1/tunnel
+# For wss:// either put a TLS reverse proxy (Caddy, nginx, Traefik) in front of port 8080,
+# or mount a certificate and set SWITCHTETHER_RELAY_TLS_CERT / _TLS_KEY (see below).
+services:
+  relay:
+    build: .
+    image: switchtether-relay:local
+    restart: unless-stopped
+    ports:
+      - "47700:47700" # raw TCP transport
+      - "8080:8080" # WebSocket /v1/tunnel and /healthz
+    environment:
+      SWITCHTETHER_RELAY_LOG_LEVEL: info
+      # Limits (docs/RELAY.md §4); these are the defaults.
+      SWITCHTETHER_RELAY_MAX_DESKTOPS: "10000"
+      SWITCHTETHER_RELAY_MAX_PENDING_PER_DESKTOP: "16"
+      SWITCHTETHER_RELAY_MAX_TUNNELS_PER_DESKTOP: "32"
+      SWITCHTETHER_RELAY_IDLE_TIMEOUT: 10m
+      SWITCHTETHER_RELAY_BANDWIDTH: "0" # bytes/s per tunnel direction, 0 = unlimited
+      # Serve wss:// directly (mount the files first):
+      # SWITCHTETHER_RELAY_TLS_CERT: /certs/fullchain.pem
+      # SWITCHTETHER_RELAY_TLS_KEY: /certs/privkey.pem
+    # The files must be readable by the container user (uid 65532, distroless "nonroot").
+    # volumes:
+    #   - ./certs:/certs:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 15s # > SWITCHTETHER_RELAY_SHUTDOWN_GRACE (10s)

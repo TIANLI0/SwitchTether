@@ -7,7 +7,9 @@
 pub mod bridge;
 pub mod commands;
 pub mod remote;
+pub mod replace_cc_switch;
 pub mod takeover;
+pub mod update;
 pub mod upstream_import;
 
 use tauri::Manager;
@@ -15,6 +17,7 @@ use tauri::Manager;
 /// Called at the very start of Tauri `setup`, after logging is initialised and
 /// before the database or settings are opened.
 pub fn on_setup_before_database() {
+    replace_cc_switch::migrate_autostart_name();
     if crate::app_store::get_app_config_dir_override().is_some() {
         // The user pointed the data dir somewhere explicit; never import into it.
         return;

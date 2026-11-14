@@ -1,0 +1,96 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TIANLI0/FluentSetup/main/shared/schemas/fluentsetup.project.schema.json",
+  "schemaVersion": 1,
+  "variables": { "Version": "0.1.0" },
+  "app": {
+    "id": "TIANLI0.SwitchTether",
+    "name": "SwitchTether",
+    "publisher": "TIANLI0",
+    "version": "$(Version)",
+    "description": "CC Switch with a secure phone remote for Claude Code and Codex",
+    "website": "https://github.com/TIANLI0/SwitchTether",
+    "icon": "../../src-tauri/icons/icon.ico",
+    "mainExecutable": "switchtether.exe",
+    "appUserModelId": "io.github.tianli0.switchtether"
+  },
+  "files": {
+    "source": "../../target-win/app",
+    "include": ["**/*"],
+    "exclude": ["**/*.pdb"]
+  },
+  "install": {
+    "scope": "user",
+    "defaultScope": "user",
+    "userDir": "{LocalAppData}\\Programs\\{AppName}",
+    "allowCustomDir": true,
+    "desktopShortcut": "optionalOff",
+    "startMenuShortcut": "on",
+    "launchAfterInstall": "optionalOn",
+    "allowDowngrade": false,
+    "minWindowsBuild": 17763,
+    "closeProcesses": ["switchtether.exe", "cc-switch.exe"],
+    "relaunchArguments": []
+  },
+  "requirements": {
+    "webView2": { "required": true, "auto": "download" }
+  },
+  "options": [
+    {
+      "id": "replaceCcSwitch",
+      "label": {
+        "en-US": "Replace CC Switch if it is installed (its data is kept and imported)",
+        "zh-CN": "如已安装 CC Switch，则替换它（保留并导入其全部数据）",
+        "zh-TW": "如已安裝 CC Switch，則取代它（保留並匯入其全部資料）",
+        "ja-JP": "CC Switch がインストールされていれば置き換える（データは保持して取り込みます）",
+        "ko-KR": "CC Switch가 설치되어 있으면 대체(데이터는 유지하고 가져옴)",
+        "de-DE": "CC Switch ersetzen, falls installiert (Daten bleiben erhalten und werden übernommen)",
+        "ru-RU": "Заменить CC Switch, если он установлен (данные сохраняются и импортируются)"
+      },
+      "default": true,
+      "quietDefault": true
+    }
+  ],
+  "actions": [
+    {
+      "id": "replaceCcSwitch",
+      "when": "afterInstall",
+      "run": "switchtether.exe",
+      "arguments": ["--replace-cc-switch"],
+      "ifOption": "replaceCcSwitch",
+      "timeoutSeconds": 600,
+      "successExitCodes": [0],
+      "onFailure": "warn",
+      "name": {
+        "en-US": "Replacing CC Switch",
+        "zh-CN": "替换 CC Switch",
+        "zh-TW": "取代 CC Switch"
+      }
+    }
+  ],
+  "protocols": [
+    { "scheme": "switchtether", "description": "SwitchTether link" },
+    { "scheme": "ccswitch", "description": "CC Switch link (handled by SwitchTether)", "ifOption": "replaceCcSwitch" }
+  ],
+  "uninstall": {
+    "removeRunValues": ["SwitchTether"]
+  },
+  "update": {
+    "github": "TIANLI0/SwitchTether",
+    "asset": "SwitchTether-{Version}-Setup.exe",
+    "checksums": "SHA256SUMS.txt"
+  },
+  "ui": {
+    "license": "../../LICENSE",
+    "licenseMode": "firstInstall",
+    "theme": "system",
+    "backdrop": "mica",
+    "useSystemAccent": true
+  },
+  "output": {
+    "directory": "../../target-win/dist",
+    "fileName": "SwitchTether-{Version}-Setup.exe",
+    "architecture": "x64",
+    "compression": "max"
+  },
+  "signing": { "enabled": false }
+}

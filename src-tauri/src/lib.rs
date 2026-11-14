@@ -483,6 +483,11 @@ fn handle_second_instance(app: &tauri::AppHandle, args: Vec<String>) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Entry point for `switchtether.exe --replace-cc-switch` (installer action).
+pub fn replace_cc_switch() -> std::process::ExitCode {
+    switchtether::replace_cc_switch::run()
+}
+
 pub fn run() {
     // 设置 panic hook，在应用崩溃时记录日志到 <app_config_dir>/crash.log（默认 ~/.cc-switch/crash.log）
     panic_hook::setup_panic_hook();
@@ -1628,6 +1633,7 @@ pub fn run() {
             switchtether::commands::remote_takeover_status,
             switchtether::commands::remote_set_takeover,
             switchtether::commands::remote_reset_relay_token,
+            switchtether::commands::st_update_check,
             commands::get_providers,
             commands::get_current_provider,
             commands::add_provider,

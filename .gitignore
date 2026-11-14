@@ -44,3 +44,4 @@ android/.kotlin/
 
 # switchtether-shim sidecar (built by scripts/build-shim.mjs)
 src-tauri/binaries/
+target-win/
