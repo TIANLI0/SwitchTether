@@ -300,4 +300,7 @@
     <string name="new_session_start">Start session</string>
     <string name="new_session_confirm_title">Start a managed session?</string>
     <string name="new_session_confirm_body">Start %1$s in %2$s on the computer.</string>
+    <string name="provider_credential">Update credential</string>
+    <string name="provider_credential_note">The new value is sent once to the computer (after biometric confirmation) and is never shown again. Provider: %1$s</string>
+    <string name="provider_update">Update</string>
 </resources>

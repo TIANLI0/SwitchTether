@@ -45,7 +45,11 @@ data class ProvidersState(
     val testResults: Map<String, OperationResult> = emptyMap(),
 )
 
-class ProvidersViewModel(private val conn: ConnectionController, private val repo: ManagementRepository) : ViewModel() {
+class ProvidersViewModel(
+    private val conn: ConnectionController,
+    private val repo: ManagementRepository,
+    private val gate: io.github.tianli0.switchtether.domain.StepUpGate? = null,
+) : ViewModel() {
     private val _state = MutableStateFlow(ProvidersState())
     val state: StateFlow<ProvidersState> = _state.asStateFlow()
     val commands = CommandTracker(viewModelScope) { repo.commandStatus(it) }
@@ -78,6 +82,15 @@ class ProvidersViewModel(private val conn: ConnectionController, private val rep
     fun switchTo(label: String, providerId: String) {
         val app = _state.value.app
         commands.run(label, onSuccess = { load() }) { id -> repo.switchProvider(app, providerId, id) }
+    }
+
+    /** Write-only credential update behind a `config_write` step-up (value never read back). */
+    fun setCredential(label: String, providerId: String, field: String, value: String) {
+        val app = _state.value.app
+        viewModelScope.launch {
+            if (gate != null && gate.ensure(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.CONFIG_WRITE).isFailure) return@launch
+            commands.run(label, onSuccess = { load() }) { id -> repo.setCredential(app, providerId, field, value, id) }
+        }
     }
 
     fun test(label: String, providerId: String) {

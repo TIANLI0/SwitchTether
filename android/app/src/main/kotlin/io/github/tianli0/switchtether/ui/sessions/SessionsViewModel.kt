@@ -49,7 +49,7 @@ data class SessionsState(
             }
             .filter { agent == null || it.agent == agent }
             .filter { project == null || it.project == project }
-            .sortedWith(compareByDescending<SessionSummary> { it.isLive }.thenByDescending { it.lastActiveAtMs ?: 0 })
+            .sortedWith(compareByDescending<SessionSummary> { it.isLive }.thenByDescending { it.lastActiveAtMs ?: 0L })
 }
 
 @OptIn(FlowPreview::class)

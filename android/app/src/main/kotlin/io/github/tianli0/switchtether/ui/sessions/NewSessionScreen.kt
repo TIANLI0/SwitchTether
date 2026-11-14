@@ -2,6 +2,7 @@ package io.github.tianli0.switchtether.ui.sessions
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -130,6 +131,8 @@ class NewSessionViewModel(private val conn: ConnectionController, private val re
     fun setPrompt(t: String) = _state.update { it.copy(prompt = t) }
     fun setModel(t: String) = _state.update { it.copy(model = t) }
     fun setPermissionMode(m: String) = _state.update { it.copy(permissionMode = m) }
+
+    fun consumeCreated() = _state.update { it.copy(created = null, prompt = "") }
 
     fun start(label: String) {
         val s = _state.value
@@ -334,4 +337,55 @@ private fun DirRow(name: String, sensitive: Boolean, onClick: () -> Unit) {
             StatusPill(stringResource(R.string.new_session_sensitive), dev.warn)
         }
     }
+}
+
+
+/** "New SwitchTether-managed session" as a coui bottom sheet (opened from the capsule "+"). */
+@Composable
+fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onCreated: (String, String?) -> Unit) {
+    val vm = containerViewModel(key = "new-session-sheet") { NewSessionViewModel(it.connection, it.sessions) }
+    val state by vm.state.collectAsStateWithLifecycle()
+    val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
+    val busy by vm.commands.busy.collectAsStateWithLifecycle()
+    var confirm by remember { mutableStateOf(false) }
+    val startLabel = stringResource(R.string.new_session_start)
+    state.created?.let { created ->
+        androidx.compose.runtime.LaunchedEffect(created.id) {
+            vm.consumeCreated()
+            onDismiss()
+            onCreated(created.id, created.title)
+        }
+    }
+    io.github.suqi8.coui.kmp.window.WindowBottomSheet(
+        show = show,
+        title = stringResource(R.string.new_session_subtitle),
+        onDismissRequest = onDismiss,
+    ) {
+        Box(Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
+            NewSessionContent(
+                state = state,
+                busy = busy != null,
+                onAgent = vm::setAgent,
+                onBrowse = vm::browse,
+                onSelect = vm::select,
+                onReloadRoots = vm::loadRoots,
+                onPrompt = vm::setPrompt,
+                onModel = vm::setModel,
+                onPermissionMode = vm::setPermissionMode,
+                onStart = { confirm = true },
+            )
+        }
+    }
+    ConfirmDialog(
+        show = confirm,
+        title = stringResource(R.string.new_session_confirm_title),
+        message = stringResource(R.string.new_session_confirm_body, state.agent, state.cwd.orEmpty()),
+        confirmText = startLabel,
+        onConfirm = {
+            confirm = false
+            vm.start(startLabel)
+        },
+        onDismiss = { confirm = false },
+    )
+    CommandPromptDialog(prompt, vm.commands::checkStatus, vm.commands::retry, vm.commands::dismiss)
 }

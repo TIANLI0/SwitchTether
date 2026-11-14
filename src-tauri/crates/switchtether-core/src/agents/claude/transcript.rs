@@ -788,10 +788,20 @@ mod tests {
     #[test]
     fn bookkeeping_system_records_are_hidden() {
         let mut p = ClaudeParser::new();
-        assert!(p.feed(&json!({"type":"system","subtype":"thinking_tokens"})).is_empty());
-        assert!(p.feed(&json!({"type":"system","subtype":"status","status":"x"})).is_empty());
-        assert_eq!(p.feed(&json!({"type":"system","subtype":"informational","content":"hi"}))[0].kind, "system");
-        assert_eq!(p.feed(&json!({"type":"system","subtype":"init","model":"m"}))[0].kind, "system");
+        assert!(p
+            .feed(&json!({"type":"system","subtype":"thinking_tokens"}))
+            .is_empty());
+        assert!(p
+            .feed(&json!({"type":"system","subtype":"status","status":"x"}))
+            .is_empty());
+        assert_eq!(
+            p.feed(&json!({"type":"system","subtype":"informational","content":"hi"}))[0].kind,
+            "system"
+        );
+        assert_eq!(
+            p.feed(&json!({"type":"system","subtype":"init","model":"m"}))[0].kind,
+            "system"
+        );
     }
 
     #[test]

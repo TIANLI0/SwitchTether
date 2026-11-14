@@ -17,6 +17,19 @@ import io.github.tianli0.switchtether.remote.protocol.PairRequest
 import io.github.tianli0.switchtether.remote.protocol.PairResponse
 import io.github.tianli0.switchtether.remote.protocol.PayloadChunk
 import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
+import io.github.tianli0.switchtether.remote.protocol.BeginUploadBody
+import io.github.tianli0.switchtether.remote.protocol.CreateTerminalBody
+import io.github.tianli0.switchtether.remote.protocol.FileContent
+import io.github.tianli0.switchtether.remote.protocol.GitDiff
+import io.github.tianli0.switchtether.remote.protocol.GitLog
+import io.github.tianli0.switchtether.remote.protocol.GitShow
+import io.github.tianli0.switchtether.remote.protocol.PathBody
+import io.github.tianli0.switchtether.remote.protocol.RenameBody
+import io.github.tianli0.switchtether.remote.protocol.RepoStatus
+import io.github.tianli0.switchtether.remote.protocol.ScrollbackPage
+import io.github.tianli0.switchtether.remote.protocol.TerminalList
+import io.github.tianli0.switchtether.remote.protocol.UploadView
+import io.github.tianli0.switchtether.remote.protocol.WriteBody
 import io.github.tianli0.switchtether.remote.protocol.SendMessageBody
 import io.github.tianli0.switchtether.remote.protocol.SessionCapabilities
 import io.github.tianli0.switchtether.remote.protocol.SessionDetail
@@ -214,6 +227,26 @@ class RemoteApi(
     suspend fun testProvider(app: String, providerId: String, commandId: String): CommandResponse =
         command(commandId, url("v1/providers", app, providerId, "test"), CommandBody(commandId))
 
+    /** Write-only credential update (step-up `config_write`); the value is never read back. */
+    suspend fun setProviderCredential(app: String, providerId: String, field: String, value: String, commandId: String): CommandResponse {
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("commandId", kotlinx.serialization.json.JsonPrimitive(commandId))
+            put("field", kotlinx.serialization.json.JsonPrimitive(field))
+            put("value", kotlinx.serialization.json.JsonPrimitive(value))
+        }
+        val tracker = SendTracker()
+        val req = Request.Builder().url(url("v1/providers", app, providerId, "credential"))
+            .put(body.toString().toRequestBody(jsonMedia)).header("Idempotency-Key", commandId).tagged()
+            .tag(SendTracker::class.java, tracker).build()
+        val r = try {
+            fetch(req)
+        } catch (e: IOException) {
+            throw CommandTransportException(commandId, tracker.sent, e)
+        }
+        if (!r.ok) throw toApiException(r)
+        return CommandResponse(parseJson(r.text), r.headers["X-Command-Replayed"] == "true")
+    }
+
     // ---- §7.3 usage -----------------------------------------------------------------------------------
 
     suspend fun usage(kind: String, fromEpochSec: Long?, toEpochSec: Long?, app: String? = null): JsonElement {
@@ -247,6 +280,107 @@ class RemoteApi(
 
     suspend fun enablePrompt(app: String, promptId: String, commandId: String): CommandResponse =
         command(commandId, url("v1/prompts", app, promptId, "enable"), CommandBody(commandId))
+
+    // ---- §7.6 terminals (step-up `terminal`) ---------------------------------------------------------
+
+    suspend fun terminals(): TerminalList = get("v1/terminals")
+
+    suspend fun createTerminal(body: CreateTerminalBody): CommandResponse = command(body.commandId, url("v1/terminals"), body)
+
+    suspend fun killTerminal(id: String): JsonElement = executeJson(Request.Builder().url(url("v1/terminals", id)).delete().tagged().build())
+
+    suspend fun terminalScrollback(id: String, offset: Int, limit: Int): ScrollbackPage = get(
+        url("v1/terminals", id, "scrollback").newBuilder()
+            .addQueryParameter("offset", offset.toString()).addQueryParameter("limit", limit.toString()).build(),
+    )
+
+    /** `GET /v1/terminals/{id}/stream` WebSocket (snapshot/patch frames, §7.6). */
+    fun openTerminal(id: String, listener: WebSocketListener): WebSocket =
+        readClient.newWebSocket(Request.Builder().url(url("v1/terminals", id, "stream")).tagged().build(), listener)
+
+    // ---- §7.7 files & git (writes need step-up `files_write`) --------------------------------------------
+
+    suspend fun fsRead(path: String, allowSensitive: Boolean = false, maxBytes: Long = 2L * 1024 * 1024): FileContent = get(
+        url("v1/fs/read").newBuilder().addQueryParameter("path", path)
+            .addQueryParameter("allowSensitive", allowSensitive.toString())
+            .addQueryParameter("maxBytes", maxBytes.toString()).build(),
+    )
+
+    suspend fun fsSearch(root: String, q: String, content: Boolean, limit: Int = 200): JsonElement = getJson(
+        url("v1/fs/search").newBuilder().addQueryParameter("root", root).addQueryParameter("q", q)
+            .addQueryParameter("content", content.toString()).addQueryParameter("limit", limit.toString()).build(),
+    )
+
+    suspend fun fsWrite(body: WriteBody): CommandResponse {
+        val tracker = SendTracker()
+        val req = Request.Builder().url(url("v1/fs/write")).put(encode(body))
+            .header("Idempotency-Key", body.commandId).tagged().tag(SendTracker::class.java, tracker).build()
+        val r = try {
+            fetch(req)
+        } catch (e: IOException) {
+            throw CommandTransportException(body.commandId, tracker.sent, e)
+        }
+        if (!r.ok) throw toApiException(r)
+        return CommandResponse(parseJson(r.text), r.headers["X-Command-Replayed"] == "true")
+    }
+
+    suspend fun fsMkdir(body: PathBody): CommandResponse = command(body.commandId, url("v1/fs/mkdir"), body)
+
+    suspend fun fsDelete(body: PathBody): CommandResponse = command(body.commandId, url("v1/fs/delete"), body)
+
+    suspend fun fsRename(body: RenameBody): CommandResponse = command(body.commandId, url("v1/fs/rename"), body)
+
+    suspend fun beginUpload(body: BeginUploadBody): UploadView =
+        decode(UploadView.serializer(), command(body.commandId, url("v1/fs/upload"), body).body)
+
+    suspend fun uploadChunk(uploadId: String, offset: Long, bytes: ByteArray): UploadView {
+        val u = url("v1/fs/upload", uploadId).newBuilder().addQueryParameter("offset", offset.toString()).build()
+        val req = Request.Builder().url(u).put(bytes.toRequestBody("application/octet-stream".toMediaType())).tagged().build()
+        val r = fetch(req)
+        if (!r.ok) throw toApiException(r)
+        return decode(UploadView.serializer(), parseJson(r.text))
+    }
+
+    suspend fun cancelUpload(uploadId: String): JsonElement =
+        executeJson(Request.Builder().url(url("v1/fs/upload", uploadId)).delete().tagged().build())
+
+    /** Streams `GET /v1/fs/download` into [sink]; returns the number of bytes written. Runs on IO. */
+    suspend fun download(path: String, sink: java.io.OutputStream, onProgress: (Long, Long?) -> Unit = { _, _ -> }): Long =
+        withContext(Dispatchers.IO) {
+            val req = Request.Builder().url(url("v1/fs/download").newBuilder().addQueryParameter("path", path).build()).get().tagged().build()
+            readClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) throw toApiException(Fetched(resp.code, resp.headers, resp.body.string()))
+                val total = resp.body.contentLength().takeIf { it >= 0 }
+                var n = 0L
+                resp.body.byteStream().use { input ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val r = input.read(buf)
+                        if (r < 0) break
+                        sink.write(buf, 0, r)
+                        n += r
+                        onProgress(n, total)
+                    }
+                }
+                n
+            }
+        }
+
+    suspend fun gitStatus(repo: String): RepoStatus = get(url("v1/git/status").newBuilder().addQueryParameter("repo", repo).build())
+
+    suspend fun gitDiff(repo: String, path: String?, staged: Boolean = false): GitDiff = get(
+        url("v1/git/diff").newBuilder().addQueryParameter("repo", repo).apply { path?.let { addQueryParameter("path", it) } }
+            .addQueryParameter("staged", staged.toString()).build(),
+    )
+
+    suspend fun gitLog(repo: String, path: String? = null, limit: Int = 50): GitLog = get(
+        url("v1/git/log").newBuilder().addQueryParameter("repo", repo).apply { path?.let { addQueryParameter("path", it) } }
+            .addQueryParameter("limit", limit.toString()).build(),
+    )
+
+    suspend fun gitShow(repo: String, rev: String, path: String): GitShow = get(
+        url("v1/git/show").newBuilder().addQueryParameter("repo", repo).addQueryParameter("rev", rev).addQueryParameter("path", path).build(),
+    )
 
     // ---- §6 event stream ---------------------------------------------------------------------------
 

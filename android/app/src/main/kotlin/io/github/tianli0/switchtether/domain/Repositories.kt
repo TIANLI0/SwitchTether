@@ -82,6 +82,7 @@ interface ManagementRepository {
     suspend fun providers(app: String): ProvidersView
     suspend fun switchProvider(app: String, id: String, commandId: String = newCommandId()): CommandOutcome
     suspend fun testProvider(app: String, id: String, commandId: String = newCommandId()): CommandOutcome
+    suspend fun setCredential(app: String, id: String, field: String, value: String, commandId: String = newCommandId()): CommandOutcome
     suspend fun usageSummary(fromSec: Long, toSec: Long, app: String? = null): UsageSummary
     suspend fun usageTrend(fromSec: Long, toSec: Long, app: String? = null): List<DailyUsage>
     suspend fun usageModels(fromSec: Long, toSec: Long, app: String? = null): List<UsageBreakdownRow>
@@ -187,6 +188,8 @@ class RemoteManagementRepository(private val conn: ConnectionController) : Manag
     override suspend fun providers(app: String) = conn.withApi { ProvidersView.parse(it.providers(app), app) }
     override suspend fun switchProvider(app: String, id: String, commandId: String) = conn.command(commandId) { api, c -> api.switchProvider(app, id, c) }
     override suspend fun testProvider(app: String, id: String, commandId: String) = conn.command(commandId) { api, c -> api.testProvider(app, id, c) }
+    override suspend fun setCredential(app: String, id: String, field: String, value: String, commandId: String) =
+        conn.command(commandId) { api, c -> api.setProviderCredential(app, id, field, value, c) }
     override suspend fun usageSummary(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageSummary.parse(it.usage("summary", fromSec, toSec, app)) }
     override suspend fun usageTrend(fromSec: Long, toSec: Long, app: String?) = conn.withApi { DailyUsage.parseList(it.usage("trends", fromSec, toSec, app)) }
     override suspend fun usageModels(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageBreakdownRow.parseModels(it.usage("models", fromSec, toSec, app)) }

@@ -700,8 +700,19 @@ impl AgentHub {
                 }
                 let Some(hub) = hub.upgrade() else { break };
                 let live = hub.claude.live_sessions().await;
+                // A managed session's own process also appears in the Claude registry;
+                // it is reported once, under its `managed:` id, never as a second session.
+                let managed_native: Vec<String> = hub
+                    .managed
+                    .read()
+                    .values()
+                    .filter_map(|m| m.native_session_id())
+                    .collect();
                 let mut now: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
-                for l in &live {
+                for l in live
+                    .iter()
+                    .filter(|l| !managed_native.contains(&l.session_id))
+                {
                     let id = format!("claude:{}", l.session_id);
                     let state = (l.status.clone(), l.waiting_for.clone());
                     if prev.get(&id) != Some(&state) {

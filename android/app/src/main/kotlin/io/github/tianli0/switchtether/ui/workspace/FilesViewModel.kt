@@ -1,0 +1,456 @@
+package io.github.tianli0.switchtether.ui.workspace
+
+import android.content.ContentResolver
+import android.content.ContentValues
+import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
+import android.provider.OpenableColumns
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import io.github.tianli0.switchtether.connection.ConnectionController
+import io.github.tianli0.switchtether.connection.ConnectionManager
+import io.github.tianli0.switchtether.connection.ConnectionState
+import io.github.tianli0.switchtether.domain.StepUpGate
+import io.github.tianli0.switchtether.remote.api.ApiException
+import io.github.tianli0.switchtether.remote.api.CommandResponse
+import io.github.tianli0.switchtether.remote.api.RemoteApi
+import io.github.tianli0.switchtether.remote.command.CommandOutcome
+import io.github.tianli0.switchtether.remote.command.Commands
+import io.github.tianli0.switchtether.remote.files.TextDiff
+import io.github.tianli0.switchtether.remote.files.UploadPlan
+import io.github.tianli0.switchtether.remote.files.copyPathFor
+import io.github.tianli0.switchtether.remote.protocol.BeginUploadBody
+import io.github.tianli0.switchtether.remote.protocol.ErrorCodes
+import io.github.tianli0.switchtether.remote.protocol.FileContent
+import io.github.tianli0.switchtether.remote.protocol.FsEntry
+import io.github.tianli0.switchtether.remote.protocol.FsListing
+import io.github.tianli0.switchtether.remote.protocol.GitCommit
+import io.github.tianli0.switchtether.remote.protocol.PathBody
+import io.github.tianli0.switchtether.remote.protocol.RenameBody
+import io.github.tianli0.switchtether.remote.protocol.RepoStatus
+import io.github.tianli0.switchtether.remote.protocol.SearchHit
+import io.github.tianli0.switchtether.remote.protocol.StepUpScopes
+import io.github.tianli0.switchtether.remote.protocol.WriteBody
+import io.github.tianli0.switchtether.remote.protocol.obj
+import io.github.tianli0.switchtether.remote.protocol.str
+import io.github.tianli0.switchtether.ui.common.Loadable
+import io.github.tianli0.switchtether.ui.common.loadable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** The desktop changed the file since it was opened (409 conflict on write). */
+data class ConflictState(
+    val path: String,
+    val mine: String,
+    val desktopText: String?,
+    val desktopSha: String?,
+    val suggestedCopyPath: String,
+) {
+    /** Native unified diff: desktop (current) → mine. */
+    val diff: String get() = TextDiff.unified(desktopText.orEmpty(), mine)
+}
+
+data class TransferState(val label: String, val done: Long, val total: Long?, val error: String? = null, val finished: Boolean = false)
+
+data class FilesUiState(
+    val online: Boolean = false,
+    val roots: Loadable<List<FsEntry>> = Loadable.Loading,
+    val listing: Loadable<FsListing>? = null,
+    val showHidden: Boolean = false,
+    val query: String = "",
+    val searchContent: Boolean = false,
+    val results: Loadable<List<SearchHit>>? = null,
+    /** File opened in the viewer/editor (contents in memory only). */
+    val file: Loadable<FileContent>? = null,
+    val pendingSensitive: FsEntry? = null,
+    val editing: Boolean = false,
+    val editText: String = "",
+    val saving: Boolean = false,
+    val conflict: ConflictState? = null,
+    val message: String? = null,
+    val transfer: TransferState? = null,
+    // git
+    val repo: String? = null,
+    val git: Loadable<RepoStatus>? = null,
+    val gitDiff: Pair<String, Loadable<String>>? = null,
+    val gitLog: Loadable<List<GitCommit>>? = null,
+    val gitShow: Pair<String, Loadable<String>>? = null,
+)
+
+/**
+ * Files & Git workspace. Reads are plain GETs; every write (save, create, rename, delete,
+ * upload) first ensures a `files_write` step-up grant and carries a commandId. Saves send the
+ * `baseSha256` of the version that was opened; a 409 conflict opens [ConflictState] instead of
+ * overwriting anything.
+ */
+class FilesViewModel(
+    private val conn: ConnectionController,
+    private val gate: StepUpGate,
+    private val resolverProvider: () -> ContentResolver,
+    private val defaultRepo: suspend () -> String?,
+) : ViewModel() {
+    private val _state = MutableStateFlow(FilesUiState())
+    val state: StateFlow<FilesUiState> = _state.asStateFlow()
+    private var uploadJob: Job? = null
+    private val resolver: ContentResolver get() = resolverProvider()
+
+    init {
+        viewModelScope.launch {
+            conn.state.distinctUntilChangedBy { it::class }.collect { s ->
+                _state.update { it.copy(online = s is ConnectionState.Online) }
+                if (s is ConnectionState.Online && _state.value.roots !is Loadable.Ready) loadRoots()
+            }
+        }
+    }
+
+    private fun api(): RemoteApi? = conn.apiOrNull()
+
+    fun loadRoots() {
+        val api = api() ?: return
+        viewModelScope.launch {
+            val r = loadable { api.fsRoots().roots }
+            _state.update { it.copy(roots = r) }
+            if (_state.value.listing == null) r.valueOrNull?.firstOrNull()?.let { browse(it.path) }
+            if (_state.value.repo == null) _state.update { it.copy(repo = runCatching { defaultRepo() }.getOrNull() ?: r.valueOrNull?.firstOrNull()?.path) }
+        }
+    }
+
+    fun browse(path: String) {
+        val api = api() ?: return
+        _state.update { it.copy(listing = Loadable.Loading, results = null) }
+        viewModelScope.launch {
+            val r = loadable { api.fsList(path, _state.value.showHidden) }
+            _state.update { it.copy(listing = r) }
+        }
+    }
+
+    fun toggleHidden() {
+        _state.update { it.copy(showHidden = !it.showHidden) }
+        currentDir()?.let(::browse)
+    }
+
+    fun currentDir(): String? = (_state.value.listing as? Loadable.Ready)?.value?.path
+
+    fun setQuery(q: String) = _state.update { it.copy(query = q) }
+
+    fun setSearchContent(v: Boolean) = _state.update { it.copy(searchContent = v) }
+
+    fun search() {
+        val api = api() ?: return
+        val root = currentDir() ?: return
+        val q = _state.value.query.trim()
+        if (q.isEmpty()) {
+            _state.update { it.copy(results = null) }
+            return
+        }
+        _state.update { it.copy(results = Loadable.Loading) }
+        viewModelScope.launch {
+            val r = loadable { SearchHit.parseList(api.fsSearch(root, q, _state.value.searchContent).obj()) }
+            _state.update { it.copy(results = r) }
+        }
+    }
+
+    /** Sensitive entries (keys, .env…) need an explicit confirmation before their content is read. */
+    fun open(entry: FsEntry, confirmedSensitive: Boolean = false) {
+        if (entry.isDir) return browse(entry.path)
+        if (entry.sensitive && !confirmedSensitive) {
+            _state.update { it.copy(pendingSensitive = entry) }
+            return
+        }
+        openPath(entry.path, allowSensitive = entry.sensitive)
+    }
+
+    fun dismissSensitive() = _state.update { it.copy(pendingSensitive = null) }
+
+    fun openPath(path: String, allowSensitive: Boolean = false) {
+        val api = api() ?: return
+        _state.update { it.copy(file = Loadable.Loading, pendingSensitive = null, editing = false, conflict = null) }
+        viewModelScope.launch {
+            val r = loadable { api.fsRead(path, allowSensitive) }
+            _state.update { it.copy(file = r) }
+        }
+    }
+
+    fun closeFile() = _state.update { it.copy(file = null, editing = false, conflict = null) }
+
+    fun startEdit() {
+        val f = (_state.value.file as? Loadable.Ready)?.value ?: return
+        if (f.text == null || f.truncated) {
+            _state.update { it.copy(message = "not editable (binary or truncated)") }
+            return
+        }
+        _state.update { it.copy(editing = true, editText = f.text.orEmpty()) }
+    }
+
+    fun setEditText(t: String) = _state.update { it.copy(editText = t) }
+
+    fun cancelEdit() = _state.update { it.copy(editing = false) }
+
+    /** Write with a files_write step-up; asks again once if the grant expired server-side. */
+    private suspend fun writeOp(label: String, op: suspend (RemoteApi, String) -> CommandResponse): CommandOutcome? {
+        val api = api() ?: return null
+        repeat(2) {
+            if (gate.ensure(StepUpScopes.FILES_WRITE).isFailure) {
+                _state.update { it.copy(message = "$label: confirmation cancelled") }
+                return null
+            }
+            val out = Commands.run { id -> op(api, id) }
+            if (out is CommandOutcome.Rejected && out.error.code == ErrorCodes.STEP_UP_REQUIRED) {
+                gate.invalidate(StepUpScopes.FILES_WRITE)
+            } else {
+                return out
+            }
+        }
+        return null
+    }
+
+    fun save() {
+        val f = (_state.value.file as? Loadable.Ready)?.value ?: return
+        val mine = _state.value.editText
+        write(f, mine, base = f.sha256)
+    }
+
+    private fun write(f: FileContent, text: String, base: String?, path: String = f.path, createOnly: Boolean = false, after: () -> Unit = {}) {
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            val out = writeOp("save") { api, id -> api.fsWrite(WriteBody(id, path, text, base, f.encoding, f.bom, createOnly)) }
+            when (out) {
+                is CommandOutcome.Succeeded -> {
+                    val sha = out.response.body.obj()?.str("sha256") ?: f.sha256
+                    if (path == f.path) {
+                        _state.update { it.copy(saving = false, editing = false, conflict = null, file = Loadable.Ready(f.copy(text = text, sha256 = sha)), message = "saved") }
+                    } else {
+                        _state.update { it.copy(saving = false, conflict = null, message = "saved as $path") }
+                    }
+                    after()
+                }
+                is CommandOutcome.Rejected -> {
+                    val e = out.error
+                    if (e.code == ErrorCodes.CONFLICT && path == f.path && !createOnly) {
+                        val d = e.body.details
+                        _state.update {
+                            it.copy(
+                                saving = false,
+                                conflict = ConflictState(f.path, text, d?.str("currentText"), d?.str("currentSha256"), d?.str("suggestedCopyPath") ?: copyPathFor(f.path)),
+                            )
+                        }
+                    } else {
+                        _state.update { it.copy(saving = false, message = "${e.code}: ${e.body.message}") }
+                    }
+                }
+                null -> _state.update { it.copy(saving = false) }
+                else -> _state.update { it.copy(saving = false, message = "outcome unknown — reopen the file to check: $out") }
+            }
+        }
+    }
+
+    // ---- conflict actions ---------------------------------------------------------------------------
+
+    /** Keep my version as a new file next to it (createOnly; never touches the desktop's file). */
+    fun keepMineAsCopy() {
+        val c = _state.value.conflict ?: return
+        val f = (_state.value.file as? Loadable.Ready)?.value ?: return
+        write(f, c.mine, base = null, path = c.suggestedCopyPath, createOnly = true) { openPath(f.path) }
+    }
+
+    /** Discard my edit and show the desktop's version. */
+    fun reloadDesktop() {
+        val f = (_state.value.file as? Loadable.Ready)?.value ?: return
+        openPath(f.path, f.sensitive)
+    }
+
+    /** Overwrite: re-read the CURRENT sha first, then write against it (explicitly confirmed in UI). */
+    fun overwrite() {
+        val c = _state.value.conflict ?: return
+        val f = (_state.value.file as? Loadable.Ready)?.value ?: return
+        val api = api() ?: return
+        viewModelScope.launch {
+            val current = runCatching { api.fsRead(f.path, f.sensitive) }.getOrNull()
+            write(f.copy(sha256 = current?.sha256 ?: c.desktopSha.orEmpty()), c.mine, base = current?.sha256 ?: c.desktopSha)
+        }
+    }
+
+    /** Manual merge: edit starting from the desktop text plus my version, saved against the desktop sha. */
+    fun startManualMerge() {
+        val c = _state.value.conflict ?: return
+        val f = (_state.value.file as? Loadable.Ready)?.value ?: return
+        val merged = "<<<<<<< desktop\n${c.desktopText.orEmpty()}\n=======\n${c.mine}\n>>>>>>> mine\n"
+        _state.update {
+            it.copy(conflict = null, editing = true, editText = merged, file = Loadable.Ready(f.copy(text = c.desktopText, sha256 = c.desktopSha ?: f.sha256)))
+        }
+    }
+
+    fun dismissConflict() = _state.update { it.copy(conflict = null) }
+
+    fun clearMessage() = _state.update { it.copy(message = null) }
+
+    // ---- create / rename / delete ---------------------------------------------------------------------
+
+    fun mkdir(name: String) = pathOp("mkdir") { api, id -> api.fsMkdir(PathBody(id, join(currentDir() ?: return@pathOp null, name))) }
+
+    fun newFile(name: String) {
+        val dir = currentDir() ?: return
+        val path = join(dir, name)
+        write(FileContent(path = path), "", base = null, path = path, createOnly = true) { browse(dir) }
+    }
+
+    fun rename(entry: FsEntry, newName: String) = pathOp("rename") { api, id ->
+        api.fsRename(RenameBody(id, entry.path, join(entry.path.substring(0, maxOf(entry.path.lastIndexOf('\\'), entry.path.lastIndexOf('/'))), newName)))
+    }
+
+    /** Moves to the desktop's trash/recycle bin (server side). */
+    fun delete(entry: FsEntry) = pathOp("delete") { api, id -> api.fsDelete(PathBody(id, entry.path)) }
+
+    private fun pathOp(label: String, op: suspend (RemoteApi, String) -> CommandResponse?) {
+        viewModelScope.launch {
+            val out = writeOp(label) { api, id -> op(api, id) ?: throw IllegalStateException("no directory") }
+            when (out) {
+                is CommandOutcome.Succeeded -> _state.update { it.copy(message = "$label: ok") }
+                is CommandOutcome.Rejected -> _state.update { it.copy(message = "$label: ${out.error.code}: ${out.error.body.message}") }
+                null -> Unit
+                else -> _state.update { it.copy(message = "$label: $out") }
+            }
+            currentDir()?.let(::browse)
+        }
+    }
+
+    private fun join(dir: String, name: String): String {
+        val sep = if (dir.contains('\\')) "\\" else "/"
+        return if (dir.endsWith(sep)) dir + name else dir + sep + name
+    }
+
+    // ---- upload / download -------------------------------------------------------------------------
+
+    /** SAF document → chunked upload into the current directory (progress + cancel). */
+    fun upload(uri: Uri) {
+        val dir = currentDir() ?: return
+        uploadJob = viewModelScope.launch {
+            val (name, size) = withContext(Dispatchers.IO) {
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) (c.getString(0) ?: "upload.bin") to c.getLong(1) else null
+                } ?: ("upload.bin" to -1L)
+            }
+            if (size < 0) {
+                _state.update { it.copy(transfer = TransferState(name, 0, null, "unknown file size")) }
+                return@launch
+            }
+            _state.update { it.copy(transfer = TransferState(name, 0, size)) }
+            val begin = writeOp("upload") { api, id ->
+                val v = api.beginUpload(BeginUploadBody(id, join(dir, name), size))
+                CommandResponse(io.github.tianli0.switchtether.remote.protocol.ProtocolJson.encodeToJsonElement(io.github.tianli0.switchtether.remote.protocol.UploadView.serializer(), v), false)
+            }
+            val uploadId = (begin as? CommandOutcome.Succeeded)?.response?.body?.obj()?.str("uploadId")
+            if (uploadId == null) {
+                _state.update { it.copy(transfer = it.transfer?.copy(error = (begin as? CommandOutcome.Rejected)?.error?.body?.message ?: "upload refused")) }
+                return@launch
+            }
+            val api = api() ?: return@launch
+            try {
+                withContext(Dispatchers.IO) {
+                    resolver.openInputStream(uri)!!.use { input ->
+                        for ((offset, len) in UploadPlan.chunks(size)) {
+                            if (!isActive) break
+                            val buf = ByteArray(len.toInt())
+                            var read = 0
+                            while (read < len) {
+                                val r = input.read(buf, read, len.toInt() - read)
+                                if (r < 0) break
+                                read += r
+                            }
+                            api.uploadChunk(uploadId, offset, if (read == buf.size) buf else buf.copyOf(read))
+                            _state.update { it.copy(transfer = it.transfer?.copy(done = offset + read)) }
+                        }
+                    }
+                }
+                _state.update { it.copy(transfer = it.transfer?.copy(finished = true)) }
+                browse(dir)
+            } catch (e: Exception) {
+                runCatching { api.cancelUpload(uploadId) }
+                _state.update { it.copy(transfer = it.transfer?.copy(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))) }
+            }
+        }
+    }
+
+    fun cancelTransfer() {
+        uploadJob?.cancel()
+        _state.update { it.copy(transfer = it.transfer?.copy(error = "cancelled")) }
+    }
+
+    fun dismissTransfer() = _state.update { it.copy(transfer = null) }
+
+    /** Download into the public Downloads collection via MediaStore (no storage permission needed). */
+    fun download(entry: FsEntry) {
+        val api = api() ?: return
+        uploadJob = viewModelScope.launch {
+            _state.update { it.copy(transfer = TransferState(entry.name, 0, entry.size.takeIf { s -> s > 0 })) }
+            try {
+                val uri = withContext(Dispatchers.IO) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, entry.name)
+                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SwitchTether")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("cannot create download")
+                }
+                withContext(Dispatchers.IO) {
+                    resolver.openOutputStream(uri)!!.use { out ->
+                        api.download(entry.path, out) { n, total -> _state.update { it.copy(transfer = it.transfer?.copy(done = n, total = total)) } }
+                    }
+                    resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                }
+                _state.update { it.copy(transfer = it.transfer?.copy(finished = true)) }
+            } catch (e: Exception) {
+                _state.update { it.copy(transfer = it.transfer?.copy(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))) }
+            }
+        }
+    }
+
+    // ---- git ------------------------------------------------------------------------------------------
+
+    fun setRepo(path: String) {
+        _state.update { it.copy(repo = path, git = null, gitLog = null, gitDiff = null, gitShow = null) }
+        loadGit()
+    }
+
+    fun loadGit() {
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        _state.update { it.copy(git = Loadable.Loading) }
+        viewModelScope.launch {
+            val st = loadable { api.gitStatus(repo) }
+            val log = loadable { api.gitLog(repo).commits }
+            _state.update { it.copy(git = st, gitLog = log) }
+        }
+    }
+
+    fun gitDiff(path: String, staged: Boolean = false) {
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        _state.update { it.copy(gitDiff = path to Loadable.Loading) }
+        viewModelScope.launch {
+            val d = loadable { api.gitDiff(repo, path, staged).diff }
+            _state.update { it.copy(gitDiff = path to d) }
+        }
+    }
+
+    fun gitShow(rev: String, path: String) {
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        _state.update { it.copy(gitShow = "$rev:$path" to Loadable.Loading) }
+        viewModelScope.launch {
+            val r = loadable { api.gitShow(repo, rev, path).text ?: "(binary)" }
+            _state.update { it.copy(gitShow = "$rev:$path" to r) }
+        }
+    }
+
+    fun closeGitDetail() = _state.update { it.copy(gitDiff = null, gitShow = null) }
+}

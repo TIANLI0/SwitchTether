@@ -63,6 +63,10 @@ Living log so work survives context limits. Newest entries at the bottom of each
     noisy system rows hidden, approval confirm dialog, glass blur disabled (LocalBlurEnabled=false, translucent on emulator)
 - [x] coui17 adoption pass: Scaffold+collapsing TopAppBar, group cards+cardListPosition, BottomFloatingNavigationBar, TabRowWithContour, ChipTabGroup, PullToRefresh, EmptyState, FAB, Switch/RadioButtonPreference, WindowDialog; brand #1F6BFF; adaptive logo icon; blur off; screenshots in docs/screenshots
 
+## Phase B (2026-11-14): terminal (TerminalViewModel/TerminalPane, core terminal reducer+KeyEncoder), files/git (FilesViewModel/FilesPane, conflict flow, SAF upload, MediaStore download), MonitorService (connectedDevice FGS) + Notifier (NotificationEngine), StepUpGate, NewSessionSheet, catch-up after=, provider credential update. Tests: 73 green.
+
+- Phase B E2E (sandbox app :47617): providers/usage/quota real shapes, terminal echo hi, files conflict keep-copy, git status/log, FGS + approval notification. Fixes: Long/Int sort crash, singleTask deep link, unpair race, trend labels, quota reason, terminal IME diff input, JCE fork for tests.
+
 ## Emulator / E2E how-to (2026-11-14)
 - AVD `st_e2e_api36` lives in the scratch `ANDROID_AVD_HOME` (…/scratchpad/avd); start with
   `emulator -avd st_e2e_api36 -gpu host -port 5580` (with `-gpu swiftshader_indirect` RenderEffect blur

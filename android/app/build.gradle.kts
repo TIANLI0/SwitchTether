@@ -41,6 +41,9 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // Robolectric's sandbox breaks JCE provider verification for later plain-JVM TLS tests in
+            // the same JVM (okhttp-tls key stores), so each test class gets its own JVM.
+            all { it.forkEvery = 1 }
         }
     }
     packaging {
@@ -81,6 +84,8 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.test.ext.junit)
     testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.okhttp.mockwebserver3)
+    testImplementation(libs.okhttp.tls)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     androidTestImplementation(libs.androidx.test.runner)

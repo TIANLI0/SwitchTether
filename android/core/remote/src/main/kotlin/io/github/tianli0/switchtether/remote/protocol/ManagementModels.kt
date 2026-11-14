@@ -15,7 +15,7 @@ import kotlinx.serialization.json.contentOrNull
 // ---- Providers ----------------------------------------------------------------------------------
 
 /** A redacted secret field: the server only says whether it is set plus an optional last-4 hint. */
-data class SecretFieldStatus(val path: String, val configured: Boolean, val hint: String?)
+data class SecretFieldStatus(val path: String, val configured: Boolean, val hint: String?, val name: String = path.substringAfterLast('.'))
 
 data class ProviderView(
     val id: String,
@@ -35,7 +35,10 @@ data class ProviderView(
             websiteUrl = o.str("websiteUrl"),
             notes = o.str("notes"),
             iconColor = o.str("iconColor"),
-            secretFields = collectSecrets(o, ""),
+            // Preferred: the server's explicit list `secretFields: [{field, name, configured, hint}]`.
+            secretFields = (o["secretFields"] as? JsonArray)?.mapNotNull { it.obj() }?.map {
+                SecretFieldStatus(it.str("field") ?: "", it.bool("configured") ?: false, it.str("hint"), it.str("name") ?: it.str("field") ?: "")
+            }?.filter { it.path.isNotEmpty() } ?: collectSecrets(o, ""),
             raw = o,
         )
 
@@ -181,6 +184,7 @@ data class QuotaView(
                 tool = o.str("tool") ?: tool,
                 available = available && tiers.isNotEmpty(),
                 reason = o.str("reason", "error", "credentialMessage")
+                    ?: o.str("credentialStatus")?.let { "credential status: $it" } // CC Switch SubscriptionQuota
                     ?: if (available && tiers.isEmpty()) "no quota tiers reported" else null,
                 planName = o.str("planName"),
                 tiers = tiers,

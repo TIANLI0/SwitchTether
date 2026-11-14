@@ -285,4 +285,7 @@
     <string name="new_session_start">启动会话</string>
     <string name="new_session_confirm_title">启动托管会话？</string>
     <string name="new_session_confirm_body">在电脑上于 %2$s 启动 %1$s。</string>
+    <string name="provider_credential">更新凭据</string>
+    <string name="provider_credential_note">新值在生物识别确认后发送到电脑一次，之后不会再显示。供应商：%1$s</string>
+    <string name="provider_update">更新</string>
 </resources>

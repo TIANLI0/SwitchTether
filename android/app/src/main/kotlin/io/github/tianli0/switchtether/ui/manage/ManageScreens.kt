@@ -114,7 +114,9 @@ private fun AppTabs(apps: List<String>, selected: String, onSelect: (String) -> 
 @Composable
 fun ProvidersScreen(onBack: () -> Unit) {
     val container = appContainer()
-    val vm = containerViewModel { ProvidersViewModel(it.connection, it.management) }
+    val vm = containerViewModel { ProvidersViewModel(it.connection, it.management, it.stepUpGate) }
+    var credTarget by remember { mutableStateOf<Pair<ProviderView, io.github.tianli0.switchtether.remote.protocol.SecretFieldStatus>?>(null) }
+    val credLabel = stringResource(R.string.provider_credential)
     val state by vm.state.collectAsStateWithLifecycle()
     val conn by container.connection.state.collectAsStateWithLifecycle()
     val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
@@ -140,6 +142,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
                         busy = busy,
                         onSwitch = { confirmSwitch = p },
                         onTest = { vm.test("$testLabel: ${p.name}", p.id) },
+                        onCredential = { f -> credTarget = p to f },
                     )
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -158,6 +161,26 @@ fun ProvidersScreen(onBack: () -> Unit) {
         onDismiss = { confirmSwitch = null },
     )
     CommandPromptDialog(prompt, vm.commands::checkStatus, vm.commands::retry, vm.commands::dismiss)
+    credTarget?.let { (p, f) ->
+        var value by remember(p.id, f.path) { mutableStateOf("") }
+        io.github.suqi8.coui.kmp.window.WindowDialog(show = true, title = "$credLabel · ${f.name}", onDismissRequest = { credTarget = null }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.provider_credential_note, p.name), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                io.github.suqi8.coui.kmp.basic.TextField(
+                    value = value, onValueChange = { value = it }, label = f.name, singleLine = true, showPasswordToggle = true,
+                    backgroundMode = io.github.suqi8.coui.kmp.basic.TextFieldMode.Rectangle,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(text = stringResource(R.string.action_cancel), onClick = { credTarget = null }, modifier = Modifier.weight(1f))
+                    io.github.suqi8.coui.kmp.basic.Button(
+                        onClick = { vm.setCredential("$credLabel: ${p.name}", p.id, f.path, value); credTarget = null },
+                        enabled = value.isNotBlank(), modifier = Modifier.weight(1f),
+                        colors = io.github.suqi8.coui.kmp.basic.ButtonDefaults.buttonColorsPrimary(),
+                    ) { Text(stringResource(R.string.files_save), color = COUITheme.colorScheme.onPrimary) }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -168,6 +191,7 @@ private fun ProviderCard(
     busy: String?,
     onSwitch: () -> Unit,
     onTest: () -> Unit,
+    onCredential: (io.github.tianli0.switchtether.remote.protocol.SecretFieldStatus) -> Unit = {},
 ) {
     val dev = LocalDevColors.current
     GroupCard {
@@ -182,11 +206,15 @@ private fun ProviderCard(
             p.notes?.takeIf { it.isNotBlank() }?.let { Text(it, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 3) }
             // Secrets: only configured/hint as reported by the server; values are never requested.
             p.secretFields.forEach { s ->
-                Text(
-                    "${s.path.substringAfterLast('.')}: " + if (s.configured) stringResource(R.string.provider_secret_set, s.hint ?: "••••") else stringResource(R.string.provider_secret_unset),
-                    style = DevType.codeSmall,
-                    color = if (s.configured) dev.gutter else dev.warn,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${s.name}: " + if (s.configured) stringResource(R.string.provider_secret_set, s.hint ?: "••••") else stringResource(R.string.provider_secret_unset),
+                        style = DevType.codeSmall,
+                        color = if (s.configured) dev.gutter else dev.warn,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(text = stringResource(R.string.provider_update), onClick = { onCredential(s) }, enabled = busy == null)
+                }
             }
             test?.let { t ->
                 Text(
@@ -308,7 +336,7 @@ private fun TrendChart(days: List<DailyUsage>) {
         EmptyMessage(stringResource(R.string.usage_no_data))
         return
     }
-    val points = days.map { BarPoint(it.date.takeLast(5), it.tokens.toDouble()) }
+    val points = days.map { d -> BarPoint(d.date.take(10).let { if (it.length == 10) it.substring(5) else it }, d.tokens.toDouble()) }
     val summary = stringResource(R.string.usage_trend_a11y, days.size) + " " + days.joinToString("; ") { "${it.date}: ${Formatters.tokens(it.tokens)}" }
     Column(Modifier.padding(16.dp)) {
         Text(stringResource(R.string.usage_tokens_per_day), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)

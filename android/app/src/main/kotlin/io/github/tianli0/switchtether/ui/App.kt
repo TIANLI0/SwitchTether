@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -102,6 +103,11 @@ fun SwitchTetherRoot() {
         val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = LOADING_SENTINEL)
         val conn by container.connection.state.collectAsState()
         val pending by container.pendingVerification.collectAsState()
+        // Performs step-up requests from ViewModels with this activity (BiometricPrompt).
+        val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
+        androidx.compose.runtime.LaunchedEffect(activity) {
+            if (activity != null) container.stepUpGate.requests.collect { container.stepUpGate.handle(activity, it) }
+        }
         // COUI pages sit on `surface` (light grey); cards use `surfaceContainer`.
         Box(Modifier.fillMaxSize().background(pageContainerColor())) {
             when {
@@ -118,11 +124,33 @@ private val LOADING_SENTINEL = io.github.tianli0.switchtether.data.PairedDesktop
 @Composable
 fun MainShell() {
     val nav: NavViewModel = viewModel()
+    val container = appContainer()
+    val openRequest by container.openSessionRequest.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(openRequest) {
+        openRequest?.let {
+            container.openSessionRequest.value = null
+            nav.push(Route.SessionDetail(it, null))
+        }
+    }
+    // Android 13+: ask for notification permission once the user reached the main UI.
+    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    val ctx = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
     BackHandler(enabled = nav.stack.isNotEmpty() || nav.tab != Tab.HOME) { nav.back() }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val top = nav.top
         val newSessionLabel = stringResource(R.string.new_session_title)
+        var showNewSession by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+        io.github.tianli0.switchtether.ui.sessions.NewSessionSheet(
+            show = showNewSession,
+            onDismiss = { showNewSession = false },
+            onCreated = { id, title -> nav.push(Route.SessionDetail(id, title)) },
+        )
         val items = listOf(
             Triple(Tab.HOME, stringResource(R.string.tab_home), COUIIcons.Home),
             Triple(Tab.SESSIONS, stringResource(R.string.tab_sessions), COUIIcons.Messages),
@@ -183,7 +211,7 @@ fun MainShell() {
                                     Box(
                                         Modifier
                                             .fillMaxSize()
-                                            .clickable(role = Role.Button, onClickLabel = newSessionLabel) { nav.push(Route.NewSession) }
+                                            .clickable(role = Role.Button, onClickLabel = newSessionLabel) { showNewSession = true }
                                             .semantics { contentDescription = newSessionLabel },
                                         contentAlignment = Alignment.Center,
                                     ) {

@@ -101,7 +101,7 @@ class SessionDetailViewModel(
             }
         }
         viewModelScope.launch { conn.state.collect { s -> _state.update { it.copy(connection = s) } } }
-        viewModelScope.launch { repo.refetch.collect { load() } }
+        viewModelScope.launch { repo.refetch.collect { reason -> if (reason == "epoch_changed") load() else catchUp() } }
         viewModelScope.launch {
             repo.changes.collect { ch ->
                 when (ch) {
@@ -133,6 +133,36 @@ class SessionDetailViewModel(
                 throw e
             } catch (e: Exception) {
                 _state.update { it.copy(events = Loadable.Failed(UiError.from(e))) }
+            }
+        }
+    }
+
+    /**
+     * After a reconnect/resync within the same desktop epoch: fetch everything newer than the last
+     * seen seq (`after=` pages until hasMore=false) instead of dropping the loaded history.
+     */
+    fun catchUp() {
+        val max = _state.value.log.maxSeq ?: return load()
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            val d = loadable { repo.detail(sessionId) }
+            if (d is Loadable.Ready) _state.update { it.copy(detail = d) }
+            try {
+                var after = max
+                var pages = 0
+                while (pages < CATCH_UP_MAX_PAGES) {
+                    val page = repo.events(sessionId, after = after, limit = PAGE)
+                    applyEvents(page.events)
+                    pages++
+                    val newMax = page.events.maxOfOrNull { it.seq } ?: break
+                    if (!page.hasMoreBefore || newMax <= after) break // with after=, hasMore means "more newer"
+                    after = newMax
+                }
+                if (pages >= CATCH_UP_MAX_PAGES) load() // too far behind: start from the newest page
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                load()
             }
         }
     }
@@ -230,5 +260,6 @@ class SessionDetailViewModel(
 
     companion object {
         const val PAGE = 300
+        const val CATCH_UP_MAX_PAGES = 20
     }
 }

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_title">已连接到你的电脑</string>
+    <string name="service_text">正在监听智能体会话的审批与状态变化</string>
+    <string name="notif_ch_service">后台连接</string>
+    <string name="notif_ch_approval">等待审批</string>
+    <string name="notif_ch_input">等待输入</string>
+    <string name="notif_ch_started">任务开始</string>
+    <string name="notif_ch_completed">任务完成</string>
+    <string name="notif_ch_failed">任务失败</string>
+    <string name="notif_ch_interrupted">会话被中断</string>
+    <string name="notif_ch_tool">工具调用</string>
+    <string name="notif_ch_reply">智能体回复</string>
+    <string name="notif_ch_long">长时间运行提醒</string>
+    <string name="notif_ch_connection">连接断开 / 恢复</string>
+    <string name="notif_quiet">免打扰时段</string>
+    <string name="notif_quiet_summary">%1$s – %2$s：通知静默送达</string>
+    <string name="notif_quiet_start">开始（小时）</string>
+    <string name="notif_quiet_end">结束（小时）</string>
+    <string name="notif_muted_agents">静音的智能体</string>
+    <string name="notif_muted_projects">静音的项目</string>
+    <string name="notif_muted_hint">用逗号分隔，例如 codex, my-project</string>
+    <string name="notif_privacy">锁屏上只显示脱敏提示，解锁后才显示标题和详情。代码和消息内容永远不会显示在锁屏上。</string>
+    <string name="notif_battery">电池优化</string>
+    <string name="notif_battery_summary">部分手机会停止后台连接。如果通知延迟，请允许 SwitchTether 不受限制地运行。</string>
+    <string name="notif_system_settings">各通道的声音与振动</string>
+</resources>

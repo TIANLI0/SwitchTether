@@ -27,9 +27,9 @@ data class HomeState(
     val usageToday: Loadable<UsageSummary> = Loadable.Loading,
     val usageMonth: Loadable<UsageSummary> = Loadable.Loading,
 ) {
-    val live: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0 }
+    val live: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }
     val waitingCount: Int get() = live.count { it.status == "waiting" || it.waitingFor != null }
-    val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0 }.take(5)
+    val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }.take(5)
 }
 
 class HomeViewModel(

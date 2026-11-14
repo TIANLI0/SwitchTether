@@ -29,6 +29,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -81,15 +84,57 @@ class AppContainer(private val context: Context) {
 
     private val network = NetworkMonitor(context) { connection.onNetworkAvailable() }
 
+    @Volatile var isForeground: Boolean = false
+        private set
+    @Volatile private var serviceRunning = false
+
+    val notifyPrefsState = settingsStore.notifyPrefs.stateIn(appScope, SharingStarted.Eagerly, io.github.tianli0.switchtether.remote.notify.NotifyPrefs())
+    private val notifier = io.github.tianli0.switchtether.notify.Notifier(context, appScope, connection, notifyPrefsState) { isForeground }
+
+    /** Session id requested by a notification tap (consumed by the main shell). */
+    val openSessionRequest = MutableStateFlow<String?>(null)
+
     fun onForeground() {
+        isForeground = true
+        network.start()
+        connection.start()
+        appScope.launch {
+            if (pairingStore.current() != null && settingsStore.backgroundConnection.first()) {
+                io.github.tianli0.switchtether.notify.MonitorService.start(context)
+            }
+        }
+    }
+
+    fun onBackground() {
+        isForeground = false
+        // With the monitor service running the connection stays up; otherwise nothing runs in background.
+        if (!serviceRunning) {
+            network.stop()
+            connection.stop()
+        }
+    }
+
+    fun onServiceKeepAlive() {
+        serviceRunning = true
         network.start()
         connection.start()
     }
 
-    fun onBackground() {
-        // Phase B adds an opt-in foreground service; until then nothing runs in the background.
-        network.stop()
-        connection.stop()
+    fun onServiceStopped() {
+        serviceRunning = false
+        if (!isForeground) {
+            network.stop()
+            connection.stop()
+        }
+    }
+
+    /** Settings toggle "Stay connected in background". */
+    fun setBackgroundConnection(enabled: Boolean) {
+        appScope.launch {
+            settingsStore.setBackgroundConnection(enabled)
+            if (enabled && pairingStore.current() != null) io.github.tianli0.switchtether.notify.MonitorService.start(context)
+            if (!enabled) io.github.tianli0.switchtether.notify.MonitorService.stop(context)
+        }
     }
 
     /**
@@ -114,19 +159,24 @@ class AppContainer(private val context: Context) {
      */
     suspend fun unpair(): Boolean {
         val desktop = pairingStore.current() ?: return false
-        val remoteOk = runCatching { (connection.apiOrNull() ?: throw NotConnectedException()).unpairSelf() }.isSuccess
+        // Stop the connection loop first so the desktop's revoke (close 4403) is not reported as
+        // "revoked by the desktop" after a user-initiated unpair.
+        val api = connection.apiOrNull()
         connection.reset()
+        val remoteOk = runCatching { (api ?: throw NotConnectedException()).unpairSelf() }.isSuccess
         wipeLocal(desktop)
         return remoteOk
     }
 
     private suspend fun wipeLocal(desktop: PairedDesktop) {
+        io.github.tianli0.switchtether.notify.MonitorService.stop(context)
         pairingStore.clear()
         keys.delete(desktop.identityAlias)
         keys.delete(desktop.stepUpAlias)
         keys.deleteAllExcept(emptySet())
         draftStore.clearAll()
         clearCaches()
+        stepUpGate.clear()
     }
 
     fun clearCaches() {
@@ -152,6 +202,21 @@ class AppContainer(private val context: Context) {
         val signature = BiometricSigner(keys).sign(activity, alias, payload, title, subtitle)
         return api.stepUpVerify(challenge.challengeId, Base64.getEncoder().encodeToString(signature))
     }
+
+    /** Step-up for terminal / files_write / config_write, performed by the activity host. */
+    val stepUpGate = io.github.tianli0.switchtether.domain.StepUpGate({ activity, scope ->
+        stepUp(activity, scope, context.getString(R.string.stepup_prompt_title), context.getString(R.string.stepup_prompt_subtitle))
+    })
+
+    @Volatile private var stepUpEnabledCache = true
+
+    init {
+        appScope.launch { pairingStore.desktop.collect { stepUpEnabledCache = it?.stepUpEnabled == true } }
+        notifier.start()
+    }
+
+    /** Whether the current pairing has a step-up key (terminal/file writes possible at all). */
+    fun pairingStoreStepUpEnabled(): Boolean = stepUpEnabledCache
 
     val deviceName: String get() = listOf(Build.MANUFACTURER, Build.MODEL).filter { it.isNotBlank() }.distinct().joinToString(" ").ifEmpty { "Android" }
 }

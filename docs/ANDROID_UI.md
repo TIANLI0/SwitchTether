@@ -195,16 +195,122 @@ files, `hiddenapibypass` patched out, Oplus private materials disabled at the th
 NOTICE + MPL headers kept, MPL source link in the licenses screen. Re-sync with
 `third_party/coui17/sync_coui17.py`.
 
-## 9. Known limitations (Phase A)
+## 10. Phase B — Workspace, background, notifications
 
-- No background connection/notifications yet (Phase B); the app disconnects when not visible.
+### 10.1 Terminals (§7.6)
+- `TerminalViewModel` keeps one live stream (the selected terminal). Frames are parsed by
+  `TermFrame` and reduced by `TermScreen.apply` (snapshot replaces, patch replaces changed rows,
+  stale patches ignored, exit). Reconnect = new snapshot.
+- `TerminalPane`:
+  - Chrome: coui `ChipTabGroup` tabs; `WindowListPopup` shell picker (from `GET /v1/terminals`
+    `shells`).
+  - Rendering: monospace rows as `AnnotatedString`s with the 256-colour palette, `#rrggbb`,
+    bold/italic/underline/inverse and an inverted cursor cell; font size A-/A+.
+  - Sizing: cols/rows are measured from the cell size and sent as `resize` (debounced).
+  - Scrollback: paged from `…/scrollback`.
+  - Clipboard: copy screen, long-press a line to copy, paste (bracketed when the program enabled it).
+- Input:
+  - An invisible `BasicTextField` whose edits are diffed, so composing IMEs work; a replacement
+    becomes Backspace + text.
+  - An extra-key row: Esc, Tab, latching Ctrl/Alt, arrows, Home/End, PgUp/PgDn, `| ~ / -`.
+  - `KeyEncoder` handles application-cursor mode (`ESC O A`), CSI modifiers (`ESC[1;5C`) and
+    Ctrl→C0 (Ctrl+C = 0x03).
+- Step-up `terminal` (`StepUpGate`) runs before create/attach. On expiry (`error step_up_required`
+  frame, close 4401, or 403 on upgrade) it asks again instead of failing.
+
+### 10.2 Files & Git (§7.7)
+- Browse: roots and directory list (hidden toggle). Sensitive entries show a badge and need a
+  confirm before reading with `allowSensitive`.
+- Name/content search, a viewer using the existing highlighter, and a monospace editor. Saves send
+  `baseSha256`.
+- Save, create, rename, trash and upload need step-up `files_write` (asked again once if the
+  server says the grant expired).
+- **409 conflict** opens `ConflictState`: a native unified diff (desktop → mine, `TextDiff`) plus
+  four actions:
+  - Keep mine as a copy: `createOnly` to the server's `suggestedCopyPath`.
+  - Reload the desktop version.
+  - Overwrite: re-reads the current sha, then writes, after an explicit confirm.
+  - Manual merge: an editor seeded with conflict markers, saved against the desktop sha.
+- Upload: SAF `OpenDocument` → `POST /v1/fs/upload` → chunked `PUT …?offset=` (2 MiB chunks,
+  `UploadPlan`). It shows progress and can be cancelled; cancel also deletes the server-side upload.
+- Download: streamed into `MediaStore.Downloads/SwitchTether`; no storage permission needed.
+- Git: status (branch/upstream/ahead/behind; the default repo is the cwd of the first live
+  session), per-file diff (native `DiffView`), recent log, file at revision.
+
+### 10.3 Background connection and notifications
+- **Foreground service type: `connectedDevice`.**
+  - **Why it fits:** the app's core function is a live network connection to the user's own
+    paired computer, an external device. Android lists "network connection to an external device"
+    under this type. Its Android 14+ runtime prerequisite is met by the normal-level
+    `CHANGE_NETWORK_STATE` permission.
+  - **Rejected types:**
+    - `dataSync`: on Android 15 it has a 6 h / 24 h budget and is meant for bounded transfers.
+    - `remoteMessaging`: meant for continuing a user's text-message conversation across devices.
+    - `specialUse`: reserved for cases where no standard type fits, and needs a Play justification.
+  - **Start/stop:** the service starts only from the foreground (Android 12+ restrictions),
+    controlled by "Stay connected in background" (default **on**, user can turn it off). It stops
+    on unpair or when the toggle is turned off. Its ongoing notification is on the `service` channel.
+  - **Battery:** Settings → Notifications → Battery optimization opens the system
+    ignore-optimization list with an explanation. The app does not request
+    `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (Play policy).
+- **Rules** (`NotificationEngine`, pure and unit-tested):
+  - Sources: `session.event` (`approval_request` and `question` while unresolved, `status`
+    transitions, `tool_call`, final `assistant_message`) and `session.upserted` (`waiting` /
+    `waitingFor`).
+  - Also: connection lost/restored, and a long-running reminder (30 min busy).
+  - Notifications are de-duplicated by key.
+  - Per-type enable, with one Android channel per type, so sound and vibration are set per
+    channel in system settings.
+  - Muted agents and projects.
+  - Quiet hours (may wrap midnight) make notifications silent.
+- **Privacy:** `VISIBILITY_PRIVATE` with a redacted public version ("An agent needs your approval").
+  Titles and details appear only when unlocked; code or message text never appears on the lock
+  screen. Tapping a notification opens the session (`EXTRA_SESSION_ID`, `singleTask`).
+- Notifications are posted only while the app is not in the foreground. Drafts are never sent
+  automatically. POST_NOTIFICATIONS is requested once when the main UI first appears (Android 13+).
+
+### 10.4 Other Phase B changes
+- New managed session is now a coui `WindowBottomSheet` opened from the capsule "+" (the page
+  route still exists for deep links).
+- Reconnect catch-up: an open session fetches `after=lastSeq` pages until `hasMore=false`
+  (max 20 pages). It falls back to the newest page on epoch change.
+- Providers:
+  - `secretFields: [{field, name, configured, hint}]` are parsed and shown.
+  - "Update" sends a write-only credential behind step-up `config_write`.
+  - Quota shows `credentialStatus` as the honest reason when there is no explicit reason.
+- AskUserQuestion answers are keyed by question text (`{"<question>": "<label(s)>"}`). This is
+  **UNTESTED** live.
+- Fixes found in E2E:
+  - **Sort crash:** the session-sorting comparator mixed Long and Int and crashed when
+    `lastActiveAtMs` was null.
+  - **Duplicate activities:** a pairing deep link created a second activity; now `singleTask`.
+  - **Wrong revoke reason:** a user-initiated unpair showed "revoked by desktop".
+
+| Workspace feature | Status |
+| :--- | :--- |
+| Terminal create/attach/input/resize/kill, colours, CJK, Ctrl/Alt/arrows, step-up re-prompt | done, E2E (PowerShell, `echo hi` → `hi`) |
+| Scrollback paging, copy/paste, font size | done, not E2E-verified in detail |
+| Files browse/search/view/edit, sensitive confirm | done, E2E browse/view/edit |
+| Conflict flow (diff + keep copy / reload / overwrite / merge) | done, E2E keep-copy; unit test covers keep-copy + overwrite |
+| Create/rename/delete(trash), upload (SAF, chunked), download (MediaStore) | done, not E2E-verified |
+| Git status/diff/log/show | done, E2E status + log |
+| FGS + notifications (approval while backgrounded) | done, E2E (approval notification with redacted public version) |
+
+Screenshots: `android/docs/screenshots/phase-b/` (terminal, file-conflict, notifications).
+
+## 9. Known limitations
+
 - Event-stream `subscribe` frames are not sent (the server currently broadcasts all topics).
-- Resync reloads the newest event page of an open session (older pages are dropped) instead of an
-  `after=` catch-up, because per-session seqs may change after a desktop restart.
 - Revocation detected only as a TLS alert (handshake refused) is shown as offline unless the
   message names "revoked"; definitive signals (HTTP/close codes/hello) wipe immediately.
 - Provider/usage/MCP/skill/prompt views parse CC Switch JSON leniently; field names were taken
   from CC Switch's TypeScript types and need checking against the real desktop backend.
-- Question answers are keyed by question text (Claude Code AskUserQuestion format).
+- Question answers are keyed by question text (Claude Code AskUserQuestion format) — UNTESTED live.
+- Step-up grants are cached in memory only. After an app restart the phone asks again even if
+  the desktop grant is still valid (it could query `GET /v1/auth/step-up`).
+- One approval can notify twice when the desktop also lists the managed process as an observed
+  `claude:<id>` live session (its `session.upserted` is not filtered the way the session list is).
+- coui17's `WindowBottomSheet` shows a hard-coded Chinese close label (关闭).
+- Terminal cell width assumes a monospace font; CJK double-width glyphs may drift slightly.
 - Re-pairing while already paired via a deep link is not supported (unpair first).
 - `ui` component registry has only two built-in components.

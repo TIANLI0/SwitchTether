@@ -229,15 +229,19 @@ class ViewModelTest {
 
     @Test
     fun sessionsListSeparatesLiveAndHistoryAndAppliesUpserts() = runTest(dispatcher) {
-        val repo = FakeSessionRepository().apply { sessions = listOf(summary("a", live = true), summary("b", live = false)) }
+        val repo = FakeSessionRepository().apply {
+            sessions = listOf(summary("a", live = true), summary("b", live = false), summary("n", live = false).copy(lastActiveAtMs = null))
+        }
         val vm = SessionsViewModel(FakeConnection(), repo)
         advanceUntilIdle()
         assertEquals(listOf("a"), vm.state.value.visible.map { it.id })
+        vm.setScope(SessionScope.ALL)
+        assertEquals(listOf("a", "b", "n"), vm.state.value.visible.map { it.id }) // null lastActive must not crash sorting
         vm.setScope(SessionScope.HISTORY)
-        assertEquals(listOf("b"), vm.state.value.visible.map { it.id })
+        assertEquals(listOf("b", "n"), vm.state.value.visible.map { it.id })
         repo.changeFlow.emit(SessionChange.Upserted(summary("b", live = true)))
         advanceUntilIdle()
-        assertTrue(vm.state.value.visible.isEmpty())
+        assertEquals(listOf("n"), vm.state.value.visible.map { it.id })
         vm.setScope(SessionScope.LIVE)
         assertEquals(setOf("a", "b"), vm.state.value.visible.map { it.id }.toSet())
     }
@@ -289,6 +293,7 @@ class ViewModelTest {
         override suspend fun providers(app: String): ProvidersView = no()
         override suspend fun switchProvider(app: String, id: String, commandId: String): CommandOutcome = no()
         override suspend fun testProvider(app: String, id: String, commandId: String): CommandOutcome = no()
+        override suspend fun setCredential(app: String, id: String, field: String, value: String, commandId: String): CommandOutcome = no()
         override suspend fun usageSummary(fromSec: Long, toSec: Long, app: String?): UsageSummary = no()
         override suspend fun usageTrend(fromSec: Long, toSec: Long, app: String?): List<DailyUsage> = no()
         override suspend fun usageModels(fromSec: Long, toSec: Long, app: String?): List<UsageBreakdownRow> = no()

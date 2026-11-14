@@ -31,7 +31,15 @@ import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.common.pageScroll
 import io.github.tianli0.switchtether.connection.ConnectionManager
 import io.github.tianli0.switchtether.connection.ConnectionState
-import io.github.tianli0.switchtether.data.NotificationType
+import io.github.tianli0.switchtether.notify.Notifier
+import io.github.tianli0.switchtether.remote.notify.NotifyPrefs
+import io.github.tianli0.switchtether.remote.notify.NotifyType
+import io.github.tianli0.switchtether.ui.common.TextInput
+import io.github.tianli0.switchtether.ui.common.pageListPadding
+import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.suqi8.coui.kmp.basic.cardListPositionOf
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import io.github.tianli0.switchtether.remote.protocol.StepUpScopes
 import io.github.tianli0.switchtether.remote.tls.Fingerprints
 import io.github.tianli0.switchtether.security.StepUpSignException
@@ -53,7 +61,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
     val scope = rememberCoroutineScope()
     val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(null)
     val theme by container.settingsStore.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
-    val background by container.settingsStore.backgroundConnection.collectAsStateWithLifecycle(false)
+    val background by container.settingsStore.backgroundConnection.collectAsStateWithLifecycle(true)
     val conn by container.connection.state.collectAsStateWithLifecycle()
     var confirmUnpair by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -122,7 +130,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
                 PageCard {
                     SwitchPreference(
                         checked = background,
-                        onCheckedChange = { v -> scope.launch { container.settingsStore.setBackgroundConnection(v) } },
+                        onCheckedChange = { v -> container.setBackgroundConnection(v) },
                         title = stringResource(R.string.settings_background),
                         summary = stringResource(R.string.settings_background_summary),
                     )
@@ -204,29 +212,80 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
 @Composable
 fun NotificationPrefsScreen(onBack: () -> Unit) {
     val container = appContainer()
-    val scope = rememberCoroutineScope()
-    val disabled by container.settingsStore.disabledNotifications.collectAsStateWithLifecycle(emptySet())
+    val context = LocalContext.current
+    val prefs by container.notifyPrefsState.collectAsStateWithLifecycle()
+    fun update(t: (NotifyPrefs) -> NotifyPrefs) = container.appScope.launch { container.settingsStore.updateNotifyPrefs(t) }
     Page(title = stringResource(R.string.settings_notifications), onBack = onBack) {
-        Column {
-            Text(stringResource(R.string.notifications_phase_b), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp))
-            PageCard {
-                listOf(
-                    NotificationType.APPROVAL_REQUESTED to R.string.notif_approval,
-                    NotificationType.SESSION_WAITING to R.string.notif_waiting,
-                    NotificationType.SESSION_FINISHED to R.string.notif_finished,
-                    NotificationType.SESSION_ERROR to R.string.notif_error,
-                    NotificationType.CONNECTION_LOST to R.string.notif_connection,
-                ).forEach { (type, label) ->
+        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            item {
+                PageCard {
+                    NotifyType.entries.forEachIndexed { i, type ->
+                        SwitchPreference(
+                            checked = type in prefs.enabled,
+                            onCheckedChange = { v -> update { p -> p.copy(enabled = if (v) p.enabled + type else p.enabled - type) } },
+                            title = stringResource(Notifier.channelName(type)),
+                            cardListPosition = cardListPositionOf(i, NotifyType.entries.size),
+                        )
+                    }
+                }
+            }
+            item { SectionHeader(stringResource(R.string.notif_quiet)) }
+            item {
+                PageCard {
                     SwitchPreference(
-                        checked = type !in disabled,
-                        onCheckedChange = { v -> scope.launch { container.settingsStore.setNotificationEnabled(type, v) } },
-                        title = stringResource(label),
+                        checked = prefs.quietHoursEnabled,
+                        onCheckedChange = { v -> update { it.copy(quietHoursEnabled = v) } },
+                        title = stringResource(R.string.notif_quiet),
+                        summary = stringResource(R.string.notif_quiet_summary, hm(prefs.quietStartMin), hm(prefs.quietEndMin)),
+                    )
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        TextInput((prefs.quietStartMin / 60).toString(), { v -> v.toIntOrNull()?.takeIf { it in 0..23 }?.let { h -> update { it.copy(quietStartMin = h * 60) } } }, stringResource(R.string.notif_quiet_start), modifier = Modifier.weight(1f))
+                        Spacer(Modifier.size(12.dp))
+                        TextInput((prefs.quietEndMin / 60).toString(), { v -> v.toIntOrNull()?.takeIf { it in 0..23 }?.let { h -> update { it.copy(quietEndMin = h * 60) } } }, stringResource(R.string.notif_quiet_end), modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+            item { SectionHeader(stringResource(R.string.notif_muted_agents)) }
+            item {
+                PageCard {
+                    Column(Modifier.padding(16.dp)) {
+                        TextInput(prefs.mutedAgents.joinToString(", "), { v -> update { it.copy(mutedAgents = splitList(v)) } }, stringResource(R.string.notif_muted_hint))
+                    }
+                }
+            }
+            item { SectionHeader(stringResource(R.string.notif_muted_projects)) }
+            item {
+                PageCard {
+                    Column(Modifier.padding(16.dp)) {
+                        TextInput(prefs.mutedProjects.joinToString(", "), { v -> update { it.copy(mutedProjects = splitList(v)) } }, stringResource(R.string.notif_muted_hint))
+                    }
+                }
+            }
+            item {
+                PageCard {
+                    ArrowPreference(
+                        title = stringResource(R.string.notif_system_settings),
+                        onClick = {
+                            runCatching {
+                                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName))
+                            }
+                        },
+                    )
+                    ArrowPreference(
+                        title = stringResource(R.string.notif_battery),
+                        summary = stringResource(R.string.notif_battery_summary),
+                        onClick = { runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } },
                     )
                 }
             }
+            item { Text(stringResource(R.string.notif_privacy), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp)) }
         }
     }
 }
+
+private fun hm(min: Int) = "%02d:%02d".format(min / 60, min % 60)
+
+private fun splitList(v: String): Set<String> = v.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
 data class LicenseEntry(val name: String, val license: String, val note: String)
 

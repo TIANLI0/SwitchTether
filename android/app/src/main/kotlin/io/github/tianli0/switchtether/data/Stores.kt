@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import io.github.tianli0.switchtether.remote.notify.NotifyPrefs
+import io.github.tianli0.switchtether.remote.notify.NotifyType
 import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -38,8 +40,6 @@ data class PairedDesktop(
     fun orderedHosts(): List<String> = listOfNotNull(lastGoodHost) + hosts.filter { it != lastGoodHost }
 }
 
-/** Notification event types (delivery is wired in Phase B). */
-enum class NotificationType { APPROVAL_REQUESTED, SESSION_WAITING, SESSION_FINISHED, SESSION_ERROR, CONNECTION_LOST }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "switchtether")
 
@@ -53,10 +53,10 @@ interface PairingStore {
 interface SettingsStore {
     val themeMode: Flow<ThemeMode>
     val backgroundConnection: Flow<Boolean>
-    val disabledNotifications: Flow<Set<NotificationType>>
+    val notifyPrefs: Flow<NotifyPrefs>
     suspend fun setThemeMode(mode: ThemeMode)
     suspend fun setBackgroundConnection(enabled: Boolean)
-    suspend fun setNotificationEnabled(type: NotificationType, enabled: Boolean)
+    suspend fun updateNotifyPrefs(transform: (NotifyPrefs) -> NotifyPrefs)
 }
 
 /** Unsent message drafts (local only; never sent automatically). */
@@ -72,7 +72,10 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
     private val keyDesktop = stringPreferencesKey("paired_desktop_v1")
     private val keyTheme = stringPreferencesKey("theme_mode")
     private val keyBackground = booleanPreferencesKey("background_connection")
-    private val keyNotifOff = stringSetPreferencesKey("notifications_disabled")
+    private val keyNotifyOn = stringSetPreferencesKey("notify_enabled_types")
+    private val keyMutedAgents = stringSetPreferencesKey("notify_muted_agents")
+    private val keyMutedProjects = stringSetPreferencesKey("notify_muted_projects")
+    private val keyQuiet = stringPreferencesKey("notify_quiet") // "on|start|end"
     private val draftPrefix = "draft:"
 
     override val desktop: Flow<PairedDesktop?> = store.data.map { prefs ->
@@ -93,10 +96,20 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
         p[keyTheme]?.let { v -> ThemeMode.entries.firstOrNull { it.name == v } } ?: ThemeMode.SYSTEM
     }
 
-    override val backgroundConnection: Flow<Boolean> = store.data.map { it[keyBackground] ?: false }
+    /** Default ON (best-effort continuous monitoring), user can turn it off. */
+    override val backgroundConnection: Flow<Boolean> = store.data.map { it[keyBackground] ?: true }
 
-    override val disabledNotifications: Flow<Set<NotificationType>> = store.data.map { p ->
-        p[keyNotifOff].orEmpty().mapNotNull { v -> NotificationType.entries.firstOrNull { it.name == v } }.toSet()
+    override val notifyPrefs: Flow<NotifyPrefs> = store.data.map { p ->
+        val d = NotifyPrefs()
+        val quiet = p[keyQuiet]?.split('|')
+        NotifyPrefs(
+            enabled = p[keyNotifyOn]?.mapNotNull { v -> NotifyType.entries.firstOrNull { it.name == v } }?.toSet() ?: d.enabled,
+            mutedAgents = p[keyMutedAgents].orEmpty(),
+            mutedProjects = p[keyMutedProjects].orEmpty(),
+            quietHoursEnabled = quiet?.getOrNull(0) == "1",
+            quietStartMin = quiet?.getOrNull(1)?.toIntOrNull() ?: d.quietStartMin,
+            quietEndMin = quiet?.getOrNull(2)?.toIntOrNull() ?: d.quietEndMin,
+        )
     }
 
     override suspend fun setThemeMode(mode: ThemeMode) {
@@ -107,10 +120,13 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
         store.edit { it[keyBackground] = enabled }
     }
 
-    override suspend fun setNotificationEnabled(type: NotificationType, enabled: Boolean) {
+    override suspend fun updateNotifyPrefs(transform: (NotifyPrefs) -> NotifyPrefs) {
+        val n = transform(notifyPrefs.first())
         store.edit { p ->
-            val cur = p[keyNotifOff].orEmpty()
-            p[keyNotifOff] = if (enabled) cur - type.name else cur + type.name
+            p[keyNotifyOn] = n.enabled.map { it.name }.toSet()
+            p[keyMutedAgents] = n.mutedAgents
+            p[keyMutedProjects] = n.mutedProjects
+            p[keyQuiet] = "${if (n.quietHoursEnabled) 1 else 0}|${n.quietStartMin}|${n.quietEndMin}"
         }
     }
 
