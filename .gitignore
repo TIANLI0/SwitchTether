@@ -39,3 +39,5 @@ android/.kotlin/
 *.jks
 *.keystore
 !android/**/debug.keystore.README
+
+!AGENTS.md

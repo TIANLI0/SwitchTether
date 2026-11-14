@@ -6,15 +6,11 @@ import { describe, expect, it } from "vitest";
 // 这里拦住最容易漏的两类改动：章节结构和赞助商表。
 const ROOT = path.resolve(__dirname, "../..");
 
+// SwitchTether maintains an English and a Simplified Chinese README (the
+// upstream CC Switch README is kept as README_UPSTREAM.md).
 const READMES = [
   ["README.md", "English"],
   ["README_ZH.md", "简体中文"],
-  ["README_ZH-TW.md", "繁體中文"],
-  ["README_JA.md", "日本語"],
-  ["README_KO.md", "한국어"],
-  ["README_TR.md", "Türkçe"],
-  ["README_RU.md", "Русский"],
-  ["README_DE.md", "Deutsch"],
 ] as const;
 
 // 简体中文版面向大陆读者，赞助商表有地区版本（国内活动页、中文横幅），

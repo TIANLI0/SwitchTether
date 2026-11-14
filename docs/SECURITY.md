@@ -1,0 +1,164 @@
+# SwitchTether security model
+
+SwitchTether gives a phone real control over a computer (agents, shells, files, CC Switch
+configuration). This document describes what protects that channel, what it does **not**
+protect against, and how each requirement is tested. Report vulnerabilities privately via
+GitHub Security Advisories on the repository; do not open public issues.
+
+## 1. Assets and threat model
+
+| Asset | Where it lives |
+|---|---|
+| Desktop TLS identity private key | OS keychain (Windows Credential Manager / macOS Keychain / Secret Service); owner-only file fallback when no keychain exists. Never exported. |
+| Phone identity + step-up keys | Android Keystore (non-exportable). A fresh identity per pairing. |
+| Paired device records, audit log, command log | `~/.switchtether/remote/remote.db` |
+| Provider API keys / OAuth tokens | CC Switch database and agent config files — **never** sent to the phone |
+| User files, shells, agent sessions | the desktop |
+
+Attackers considered: other devices on the LAN/Tailnet, a network attacker (MITM), a
+stolen or lost phone, someone who briefly sees the pairing QR code, a malicious repository
+opened by an agent, buggy clients replaying requests.
+
+Out of scope: an attacker who already runs code as the desktop user (they can read
+everything SwitchTether can), a compromised Android OS, physical access to an unlocked
+desktop.
+
+## 2. Transport
+
+- **TLS 1.3 only** (rustls, `ring` provider). TLS 1.2 is disabled on both sides; session
+  tickets are disabled so every connection re-proves the client key.
+- **Server authentication by pinning.** The desktop presents a self-signed ECDSA P-256
+  certificate. Its SHA-256 fingerprint is delivered out of band in the pairing QR code; the
+  phone accepts exactly that certificate (constant-time comparison). Hostname verification is
+  intentionally not used: hosts are IPs/MagicDNS names that change, and the pin is a stronger
+  anchor than a hostname.
+- **Mutual TLS on every connection.** The phone presents a self-signed certificate whose key
+  lives in Android Keystore. rustls verifies the CertificateVerify signature (proof of key
+  possession); the API then authorizes by SHA-256 of that certificate. Clients without a
+  certificate never get an HTTP response (`e2e: client_without_certificate_is_rejected`).
+- **Network exposure.** The listener binds all interfaces so Wi-Fi/Tailscale changes need
+  no rebind, but the accept loop drops peers whose source address is not allowed *before* TLS:
+  default `lan` = RFC1918, link-local, loopback, CGNAT/Tailscale, IPv6 ULA; `tailscale_only`;
+  `localhost_only`; `any` must be selected explicitly and shows a warning. Being on the LAN or
+  Tailnet never grants access by itself.
+- The Remote API is a separate listener from CC Switch's model proxy (`127.0.0.1:15721`).
+
+## 3. Pairing
+
+1. The desktop user clicks "Show QR code" (remote access must already be enabled — it is off
+   by default).
+2. The QR contains host candidates, port, server fingerprint, a pairing id and a 256-bit
+   one-time secret. TTL 5 minutes, single use, at most 4 active offers.
+3. The phone connects (pinned TLS + its client certificate) and sends the secret. The device
+   identity is bound to the **TLS client certificate of that connection**; the secret only
+   proves the phone saw the desktop screen.
+4. Protection: constant-time comparison; 5 wrong secrets destroy the offer; 20 attempts per
+   minute per source IP; concurrent use of one secret succeeds at most once
+   (`e2e: concurrent_pairing_race_only_one_wins`).
+5. Both screens show a 6-digit verification code derived from both fingerprints for visual
+   comparison.
+
+MITM: an attacker cannot impersonate the desktop (pin) and cannot replay the secret against
+the real desktop without seeing the screen; even then the attacker would only pair *its own*
+certificate, visible in the desktop's device list and revocable.
+
+## 4. Authorization
+
+- Every endpoint except `GET /v1/hello` and `POST /v1/pair` requires an active paired device.
+- The API is an explicit whitelist (`src-tauri/crates/switchtether-core/src/api/*`); Tauri IPC
+  commands are not exposed.
+- **Step-up (biometric) scopes** — `terminal`, `files_write`, `config_write` — require a grant
+  obtained by signing a server challenge with a second Keystore key that is usable only after
+  BiometricPrompt / device-credential authentication. The server verifies the ECDSA signature
+  over `switchtether-stepup-v1\n{deviceId}\n{challengeId}\n{nonce}\n{scope}`; challenges are
+  single use (60 s), grants last 15 min, are per device and scope, and are dropped on
+  revocation. Terminal input frames re-check the grant. The server never trusts a client flag.
+- Per-device rate limit (30 req/s, burst 120); JSON bodies ≤ 1 MiB; upload chunks ≤ 8 MiB;
+  WebSocket frames bounded; at most 64 concurrent connections.
+
+## 5. Revocation
+
+Revoking a device (desktop UI, or the phone unpairing itself):
+
+1. adds its certificate fingerprint to the TLS deny-list (new handshakes fail);
+2. removes it from the active registry (in-flight requests get `403 device_revoked`);
+3. cancels every connection of that certificate — WebSockets close with code 4403
+   (`e2e: revocation_closes_event_stream_immediately`);
+4. deletes its step-up key, grants and pending command records, kills terminals it opened;
+5. writes an audit record. The deny-list survives restarts (`e2e: server_restart_keeps_devices`).
+
+Data already stored on a lost phone cannot be wiped remotely. The app stores no transcripts,
+file contents or credentials persistently (see docs/ANDROID_UI.md), and keys are hardware-
+bound, so a revoked phone holds nothing that grants further access.
+
+## 6. Secrets never leave the desktop
+
+- Provider views replace secret values with `{configured, hint: "…last4"}` (structural
+  redaction using CC Switch's own sensitive-key classifier plus SwitchTether's, then a second
+  JSON-wide pass in the API layer). Credential updates are write-only and limited to existing
+  secret fields of that provider; the value is never logged or audited.
+- MCP server env/headers, settings (whitelisted subset) and proxy status are redacted.
+- Error messages from backend services are passed through a text redactor; internal errors
+  return a generic message and are logged locally only.
+- The file browser **denies** credential stores and key material (`~/.ssh`, `~/.gnupg`,
+  `~/.aws`, `~/.kube`, `~/.docker`, `~/.config/gh`, `~/.claude/.credentials.json`,
+  `~/.codex/auth.json`, `~/.switchtether`, `~/.cc-switch`, keychains, browser profiles,
+  `/etc/shadow`, `id_*` private keys…) after canonicalization (symlinks cannot bypass it), and
+  marks `.env`, `*.pem`, `*.key`… as **sensitive** (explicit confirmation to open, cannot be
+  downloaded, every read audited).
+
+## 7. Remote shell
+
+A terminal opened from the phone runs with the full privileges of the logged-in desktop user.
+SwitchTether does **not** pretend to filter dangerous commands (string filtering cannot
+restrict a shell). Protections are: biometric step-up, per-device ownership, audit of
+open/close and input volume (never input content), kill on revocation and on quit.
+
+## 8. Replay and duplicate operations
+
+TLS prevents network replay. Application-level duplicates (client retries) are handled by
+mandatory `commandId`s: a completed command returns its stored result instead of executing
+again; a command still running or with unknown outcome after a crash returns 409 and the
+client must query `GET /v1/commands/{id}` and let the user decide
+(`e2e: idempotent_commands_and_unknown_outcome`). The Android client disables OkHttp's silent
+retries.
+
+## 9. Agent safety boundaries
+
+- SwitchTether never edits Claude Code / Codex configuration, hooks, plugins, MCP settings or
+  launch commands to gain control; externally started sessions are observe-only.
+- Managed sessions are explicit, labelled, and run with the user's normal settings.
+- Codex threads open elsewhere are never resumed (single-writer locks are respected and never
+  probed).
+- `git` is invoked with `core.fsmonitor=false`, no external diff, no textconv, no pager and no
+  credential prompts, so read-only Git queries cannot run repository-provided programs.
+
+## 10. Logging and audit
+
+Audit records (90-day retention): pairing (incl. failures), revocation, step-up grants and
+denials, provider switches, credential updates (field name only), MCP/skill/prompt toggles,
+session create/message (length only)/approve/interrupt/stop, terminal create/kill/session,
+file write/rename/delete/upload/download and sensitive reads. Targets/details pass through
+the redactor.
+
+## 11. Security test inventory
+
+| Requirement | Test |
+|---|---|
+| Unpaired client | `e2e: unpaired_clients_only_reach_pairing` |
+| Wrong certificate / wrong pin | `e2e: wrong_server_pin_is_rejected_by_client`, `client_without_certificate_is_rejected` |
+| Revoked certificate | `e2e: pairing_then_revocation`, `registry::tests::register_lookup_revoke` |
+| Replay / duplicates | `e2e: idempotent_commands_and_unknown_outcome`, `stepup::tests::full_flow` (challenge replay) |
+| Privilege escalation (no step-up) | `e2e: terminal_requires_step_up_and_streams_output`, `file_write_conflict_over_api` |
+| Concurrent operations | `e2e: concurrent_pairing_race_only_one_wins`; live managed-session second answer → 409 |
+| Path traversal / symlinks / denied paths | `files::policy::tests::*`, `files::tests::list_hides_denied_and_hidden`, e2e traversal |
+| Oversized messages | `e2e: oversized_body_is_rejected` |
+| Unexpected disconnect / crash recovery | `registry::tests::pending_commands_become_unknown_after_restart`, event replay/resync tests |
+| Secret redaction | `redact::tests::*`, `switchtether::bridge::tests::secret_fields_are_pointers_with_hints` |
+
+## 12. Updates
+
+SwitchTether uses its own updater endpoint and key. The committed updater public key is a
+placeholder that fails signature verification, so no update can be installed until a
+maintainer configures a real key (docs/BUILD.md). The upstream CC Switch key and
+`dl.ccswitch.io` are not trusted.

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- SwitchTether mark: a desktop and a phone joined by a tether. Original artwork (MIT). -->
+  <rect x="48" y="48" width="928" height="928" rx="232" fill="#1F6BFF"/>
+  <!-- desktop -->
+  <rect x="214" y="250" width="420" height="300" rx="56" fill="none" stroke="#FFFFFF" stroke-width="56"/>
+  <path d="M334 652 H514" stroke="#FFFFFF" stroke-width="56" stroke-linecap="round"/>
+  <path d="M424 550 V652" stroke="#FFFFFF" stroke-width="56"/>
+  <!-- tether -->
+  <path d="M634 400 C742 400 762 470 762 520" fill="none" stroke="#9CC1FF" stroke-width="40" stroke-linecap="round"/>
+  <!-- phone -->
+  <rect x="664" y="520" width="196" height="300" rx="44" fill="#FFFFFF"/>
+  <rect x="728" y="770" width="68" height="16" rx="8" fill="#1F6BFF"/>
+</svg>

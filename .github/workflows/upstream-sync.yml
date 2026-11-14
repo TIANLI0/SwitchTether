@@ -1,0 +1,102 @@
+name: Upstream sync
+
+# Checks for new CC Switch stable releases and opens a merge PR. Never releases.
+# See docs/UPSTREAM_SYNC.md for the review checklist.
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to merge (default: latest release)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine target upstream release
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          current=$(tr -d '[:space:]' < UPSTREAM_VERSION)
+          if [ -n "$INPUT_TAG" ]; then
+            latest="$INPUT_TAG"
+          else
+            latest=$(gh release list -R farion1231/cc-switch --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName')
+          fi
+          echo "current=$current latest=$latest"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ -z "$latest" ] || [ "$latest" = "$current" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if a sync branch already exists
+        if: steps.target.outputs.up_to_date != 'true'
+        id: exists
+        run: |
+          if git ls-remote --exit-code --heads origin "upstream-sync/${{ steps.target.outputs.latest }}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream release
+        if: steps.target.outputs.up_to_date != 'true' && steps.exists.outputs.exists != 'true'
+        id: merge
+        env:
+          TAG: ${{ steps.target.outputs.latest }}
+        run: |
+          git config user.name "switchtether-sync-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/farion1231/cc-switch.git
+          git fetch upstream "refs/tags/$TAG:refs/tags/$TAG" --no-tags
+          git switch -c "upstream-sync/$TAG"
+          if git merge --no-ff --no-edit "$TAG"; then
+            echo "$TAG" > UPSTREAM_VERSION
+            git add UPSTREAM_VERSION
+            git commit -m "chore: record upstream CC Switch $TAG"
+            echo "conflicts=" >> "$GITHUB_OUTPUT"
+          else
+            files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+            echo "conflicts=$files" >> "$GITHUB_OUTPUT"
+            # Keep conflict markers out of the branch: record the merge intent only.
+            git merge --abort
+            git commit --allow-empty -m "chore: upstream CC Switch $TAG needs a manual merge"
+          fi
+          git push origin "upstream-sync/$TAG"
+
+      - name: Open pull request
+        if: steps.target.outputs.up_to_date != 'true' && steps.exists.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.latest }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          if [ -n "$CONFLICTS" ]; then
+            status="**Merge conflicts — resolve manually** (\`git merge $TAG\` on this branch): $CONFLICTS"
+          else
+            status="Merged cleanly. CI must pass before merging."
+          fi
+          body="Upstream CC Switch release: https://github.com/farion1231/cc-switch/releases/tag/$TAG
+
+          $status
+
+          Review checklist (docs/UPSTREAM_SYNC.md):
+          - [ ] Rust workspace tests + clippy on all OSes
+          - [ ] Frontend typecheck + unit tests
+          - [ ] SCHEMA_VERSION change reviewed; CC Switch import still works
+          - [ ] New \`.cc-switch\` path literals routed through \`get_app_home_dir()\`
+          - [ ] Remote API fixtures pass on Rust and Android
+          - [ ] Manual smoke test of provider switching from the phone"
+          gh pr create --base main --head "upstream-sync/$TAG" --title "Sync upstream CC Switch $TAG" --body "$body"

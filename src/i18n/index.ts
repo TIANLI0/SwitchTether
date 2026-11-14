@@ -110,7 +110,23 @@ const resources = {
   },
 };
 
-i18n.use(initReactI18next).init({
+/**
+ * SwitchTether: upstream strings name the product "CC Switch". Rebrand at
+ * render time instead of rewriting ~115 strings per locale, so upstream locale
+ * updates merge cleanly (docs/UPSTREAM_SYNC.md).
+ */
+export const switchTetherBrand = {
+  type: "postProcessor" as const,
+  name: "switchtetherBrand",
+  process(value: string) {
+    return typeof value === "string"
+      ? value.replace(/CC Switch/g, "SwitchTether")
+      : value;
+  },
+};
+
+i18n.use(initReactI18next).use(switchTetherBrand).init({
+  postProcess: ["switchtetherBrand"],
   resources,
   lng: getInitialLanguage(), // 根据本地存储或系统语言选择默认语言
   fallbackLng: "en", // 如果缺少中文翻译则退回英文

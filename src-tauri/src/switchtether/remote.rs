@@ -174,6 +174,15 @@ impl RemoteRuntime {
                 log::warn!("[switchtether] remote server failed to start: {e}");
             }
         }
+        // Development aid (debug builds only): log a pairing link so automated
+        // smoke tests can pair without clicking through the UI.
+        #[cfg(debug_assertions)]
+        if std::env::var_os("SWITCHTETHER_DEV_LOG_PAIRING").is_some() {
+            match rt.create_pairing().await {
+                Ok(v) => log::info!("[switchtether][dev] pairing link: {}", v["uri"].as_str().unwrap_or("")),
+                Err(e) => log::warn!("[switchtether][dev] pairing link unavailable: {e}"),
+            }
+        }
         Ok(rt)
     }
 

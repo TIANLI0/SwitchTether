@@ -41,6 +41,10 @@ const SAFE_KEYS: &[&str] = &[
     "apikeyconfigured",
     "hasapikey",
     "keyboard",
+    // Metadata lists produced by SwitchTether itself (no secret values inside).
+    "secretfields",
+    "credentialstatus",
+    "credentialmessage",
 ];
 
 pub fn is_sensitive_key(key: &str) -> bool {
@@ -231,6 +235,14 @@ mod tests {
         );
         // "auth" itself is a sensitive key → whole object masked
         assert_eq!(v["settingsConfig"]["auth"]["redacted"], json!(true));
+    }
+
+    #[test]
+    fn secret_field_metadata_survives_redaction() {
+        let mut v = json!({ "secretFields": [{ "field": "/env/TOKEN", "name": "TOKEN", "configured": true, "hint": "…abcd" }] });
+        redact_json(&mut v);
+        assert_eq!(v["secretFields"][0]["name"], "TOKEN");
+        assert_eq!(v["secretFields"][0]["hint"], "…abcd");
     }
 
     #[test]

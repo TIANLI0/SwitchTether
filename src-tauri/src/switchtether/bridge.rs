@@ -98,7 +98,7 @@ pub fn secret_fields(config: &Value) -> Vec<Value> {
                         {
                             out.push(json!({
                                 "field": p,
-                                "key": k,
+                                "name": k,
                                 "configured": !s.trim().is_empty(),
                                 "hint": switchtether_core::redact::mask_secret(s),
                             }));
