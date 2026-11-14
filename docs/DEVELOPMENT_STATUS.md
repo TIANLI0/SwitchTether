@@ -40,7 +40,7 @@ in docs/research), **UNTESTED**, **TODO**.
 | Remote runtime lifecycle, off-by-default config | DONE | sandboxed run |
 | Settings → Remote page (8 locales) | DONE | 5 component tests; rendered in the real app |
 | Quit confirmation / exit cleanup | PARTIAL | implemented; not exercised manually |
-| Windows installer | see release build notes in TESTING.md |
+| Windows installers (NSIS + MSI, unsigned) | DONE — `pnpm tauri build --bundles nsis,msi` on Windows 11 (built from `1bb7f502`) |
 
 ## Android (`android/`)
 

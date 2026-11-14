@@ -58,3 +58,11 @@ CC_SWITCH_TEST_HOME=$SB SWITCHTETHER_TEST_APP_DIR=1 SWITCHTETHER_SECRET_BACKEND=
 SWITCHTETHER_DEV_LOG_PAIRING=1 SWITCHTETHER_SKIP_UPSTREAM_IMPORT=1 pnpm tauri dev
 # pairing link appears in $SB/.switchtether/logs/switchtether.log
 ```
+
+## Builds performed
+
+| Artifact | Command | Result |
+|---|---|---|
+| Windows NSIS + MSI installers (x64, unsigned) | `pnpm tauri build --bundles nsis,msi` | built: `SwitchTether_0.1.0_x64-setup.exe` (15 MiB), `SwitchTether_0.1.0_x64_en-US.msi` (21 MiB) |
+| macOS / Linux bundles | release workflow | not built locally (no macOS/Linux host) |
+| Android debug APK | `./gradlew :app:assembleDebug` | built (see ANDROID_UI.md) |
