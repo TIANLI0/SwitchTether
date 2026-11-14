@@ -196,6 +196,14 @@ impl PairingManager {
     }
 }
 
+/// Pairing link with the relay URL and access token appended (docs/RELAY.md §5).
+pub fn with_relay(uri: &str, relay: &crate::relay::RelayConfig) -> String {
+    let enc = |v: &str| {
+        percent_encoding::utf8_percent_encode(v, percent_encoding::NON_ALPHANUMERIC).to_string()
+    };
+    format!("{uri}&r={}&rt={}", enc(&relay.url), enc(&relay.token))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

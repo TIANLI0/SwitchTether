@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
             network_mode: NetworkMode::Lan,
             server_name: format!("{} (dev)", hostname()),
             server_version: env!("CARGO_PKG_VERSION").into(),
+            relay: None,
         },
         "dev-server".into(),
         identity.clone(),

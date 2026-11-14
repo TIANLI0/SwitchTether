@@ -145,3 +145,8 @@ pub async fn remote_set_takeover(hook: String, enabled: bool) -> Result<Value, S
         .await
         .map_err(|e| e.to_string())?
 }
+
+#[tauri::command]
+pub async fn remote_reset_relay_token(state: State<'_, RemoteState>) -> Result<Value, String> {
+    state.get()?.reset_relay_token().await
+}

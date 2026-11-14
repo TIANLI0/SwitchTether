@@ -71,6 +71,7 @@ export function RemoteSection() {
   const [busy, setBusy] = useState(false);
   const [portDraft, setPortDraft] = useState("");
   const [nameDraft, setNameDraft] = useState("");
+  const [relayDraft, setRelayDraft] = useState<string | null>(null);
   const [pairing, setPairing] = useState<PairingOffer | null>(null);
   const [paired, setPaired] = useState<{ name: string; code: string } | null>(
     null,
@@ -359,6 +360,84 @@ export function RemoteSection() {
         </SettingsCard>
       </SettingsBlock>
 
+      {status && (
+        <SettingsBlock
+          title={t("remote.relay.title")}
+          help={{ title: t("remote.relay.title"), body: t("remote.relay.help") }}
+        >
+          <SettingsCard>
+            <SettingsRow
+              label={t("remote.relay.url")}
+              description={t("remote.relay.urlHint")}
+              control={
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="h-control-sm w-64 font-mono"
+                    placeholder="wss://relay.example.com/v1/tunnel"
+                    value={relayDraft ?? status.config.relayUrl ?? ""}
+                    onChange={(e) => setRelayDraft(e.target.value)}
+                    aria-label={t("remote.relay.url")}
+                  />
+                  <Button
+                    variant="neutral"
+                    size="compact"
+                    disabled={
+                      busy ||
+                      relayDraft === null ||
+                      relayDraft.trim() === (status.config.relayUrl ?? "")
+                    }
+                    onClick={() =>
+                      void save({ relayUrl: relayDraft?.trim() || null }).then(
+                        () => setRelayDraft(null),
+                      )
+                    }
+                  >
+                    {t("remote.apply")}
+                  </Button>
+                </div>
+              }
+            />
+            <SettingsSwitchRow
+              label={t("remote.relay.enable")}
+              description={
+                status.relay && status.config.relayEnabled
+                  ? t(`remote.relay.state.${status.relay.state}`, {
+                      error: status.relay.error ?? "",
+                    })
+                  : t("remote.relay.enableHint")
+              }
+              checked={Boolean(status.config.relayEnabled)}
+              disabled={busy || !status.config.relayUrl}
+              onCheckedChange={(v) => void save({ relayEnabled: v })}
+            />
+            {status.config.relayEnabled && (
+              <SettingsRow
+                label={t("remote.relay.token")}
+                description={t("remote.relay.tokenHint")}
+                control={
+                  <Button
+                    variant="neutral"
+                    size="compact"
+                    disabled={busy}
+                    onClick={() =>
+                      void remoteApi
+                        .resetRelayToken()
+                        .then((s) => {
+                          setStatus(s);
+                          toast.success(t("remote.relay.tokenReset"));
+                        })
+                        .catch((e) => toast.error(String(e)))
+                    }
+                  >
+                    {t("remote.relay.resetToken")}
+                  </Button>
+                }
+              />
+            )}
+          </SettingsCard>
+        </SettingsBlock>
+      )}
+
       <SettingsBlock title={t("remote.devices.title")}>
         <SettingsCard>
           {active.length === 0 && (
@@ -592,72 +671,149 @@ export function RemoteSection() {
         open={!!pairing || !!paired}
         onOpenChange={(open) => !open && (closePairing(), setPaired(null))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className={paired ? "max-w-md" : "max-w-2xl"}>
           <DialogHeader>
             <DialogTitle>
               {paired ? t("remote.pair.success") : t("remote.pair.title")}
             </DialogTitle>
           </DialogHeader>
           {pairing && (
-            <div className="space-y-3">
-              <p className="text-body text-fg-2">{t("remote.pair.scan")}</p>
-              {/* QR is generated locally by the desktop backend (qrcode crate). */}
-              <div
-                className="mx-auto w-fit rounded-panel bg-white p-2"
-                dangerouslySetInnerHTML={{ __html: pairing.qrSvg }}
-              />
-              <div className="text-center text-caption text-fg-2">
-                {secondsLeft > 0
-                  ? t("remote.pair.expiresIn", { seconds: secondsLeft })
-                  : t("remote.pair.expired")}
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+              <div className="flex shrink-0 flex-col items-center gap-2">
+                <div className="relative h-[232px] w-[232px] overflow-hidden rounded-panel border bg-white p-3 shadow-sm">
+                  {/* QR is generated locally by the desktop backend (qrcode crate). */}
+                  <div
+                    data-testid="pair-qr"
+                    className={`h-full w-full [&>svg]:h-full [&>svg]:w-full ${
+                      secondsLeft > 0 ? "" : "opacity-15 blur-[2px]"
+                    }`}
+                    dangerouslySetInnerHTML={{ __html: pairing.qrSvg }}
+                  />
+                  {secondsLeft === 0 && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                      <span className="text-body font-medium text-neutral-800">
+                        {t("remote.pair.expired")}
+                      </span>
+                      <Button
+                        variant="solid"
+                        size="compact"
+                        onClick={() => void startPairing()}
+                      >
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                        {t("remote.pair.newCode")}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="h-1 w-[232px] overflow-hidden rounded-full bg-selected">
+                  <div
+                    className="h-full rounded-full bg-action transition-[width] duration-1000 ease-linear"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, (secondsLeft / 300) * 100))}%`,
+                    }}
+                  />
+                </div>
+                <div className="text-caption tabular-nums text-fg-2">
+                  {secondsLeft > 0
+                    ? t("remote.pair.expiresIn", { seconds: secondsLeft })
+                    : t("remote.pair.expired")}
+                </div>
               </div>
-              <div className="text-caption text-fg-3">
-                {t("remote.fingerprint")}:{" "}
-                <span className="font-mono">{pairing.fingerprintDisplay}</span>
+
+              <div className="min-w-0 flex-1 space-y-4">
+                <ol className="space-y-2.5">
+                  {(["step1", "step2", "step3"] as const).map((k, i) => (
+                    <li key={k} className="flex items-start gap-2.5">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-action-soft text-caption font-semibold text-action-text">
+                        {i + 1}
+                      </span>
+                      <span className="text-body text-fg-1">
+                        {t(`remote.pair.${k}`)}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+
+                <dl className="space-y-2 rounded-panel bg-subtle px-3 py-2.5 text-caption">
+                  <div className="flex gap-3">
+                    <dt className="w-16 shrink-0 text-fg-3">
+                      {t("remote.pair.computer")}
+                    </dt>
+                    <dd className="min-w-0 truncate text-fg-1">
+                      {status?.config.serverName || status?.serverName}
+                    </dd>
+                  </div>
+                  <div className="flex gap-3">
+                    <dt className="w-16 shrink-0 text-fg-3">
+                      {t("remote.pair.addresses")}
+                    </dt>
+                    <dd className="flex min-w-0 flex-wrap gap-1">
+                      {pairing.hosts.map((h) => (
+                        <span
+                          key={h}
+                          className="rounded bg-selected px-1.5 py-0.5 font-mono text-fg-2"
+                        >
+                          {h}:{pairing.port}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                  <div className="flex gap-3">
+                    <dt className="w-16 shrink-0 text-fg-3">
+                      {t("remote.fingerprint")}
+                    </dt>
+                    <dd className="min-w-0 break-all font-mono text-fg-2">
+                      {pairing.fingerprintDisplay}
+                    </dd>
+                  </div>
+                </dl>
+
+                <Button
+                  variant="neutral"
+                  size="compact"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(pairing.uri);
+                    toast.success(t("remote.pair.copied"));
+                  }}
+                >
+                  <Copy className="mr-1.5 h-3.5 w-3.5" />
+                  {t("remote.pair.copyLink")}
+                </Button>
+                <p className="flex items-start gap-1.5 text-caption text-fg-3">
+                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {t("remote.pair.privacy")}
+                </p>
               </div>
-              <Button
-                variant="neutral"
-                size="compact"
-                onClick={() => {
-                  void navigator.clipboard.writeText(pairing.uri);
-                  toast.success(t("remote.pair.copied"));
-                }}
-              >
-                <Copy className="mr-1.5 h-3.5 w-3.5" />
-                {t("remote.pair.copyLink")}
-              </Button>
-              <p className="text-caption text-fg-3">
-                {t("remote.pair.privacy")}
-              </p>
             </div>
           )}
           {paired && (
-            <div className="space-y-2 text-body text-fg-1">
-              <p>{t("remote.pair.pairedWith", { name: paired.name })}</p>
-              <p>
-                {t("remote.pair.verify")}{" "}
-                <span className="font-mono text-section tracking-widest">
-                  {paired.code}
-                </span>
+            <div className="flex flex-col items-center gap-3 py-2 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success-soft text-success-text">
+                <ShieldCheck className="h-6 w-6" />
+              </span>
+              <p className="text-body text-fg-1">
+                {t("remote.pair.pairedWith", { name: paired.name })}
               </p>
+              <p className="text-caption text-fg-2">{t("remote.pair.verify")}</p>
+              <div className="flex gap-1.5" data-testid="pair-code">
+                {paired.code.split("").map((c, i) => (
+                  <span
+                    key={i}
+                    className="flex h-11 w-9 items-center justify-center rounded-panel border bg-subtle font-mono text-section font-semibold text-fg-1"
+                  >
+                    {c}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
           <DialogFooter>
-            {pairing && secondsLeft === 0 && (
-              <Button
-                variant="solid"
-                size="compact"
-                onClick={() => void startPairing()}
-              >
-                {t("remote.pair.newCode")}
-              </Button>
-            )}
             <Button
-              variant="neutral"
+              variant={paired ? "solid" : "neutral"}
               size="compact"
               onClick={() => (closePairing(), setPaired(null))}
             >
-              {t("remote.close")}
+              {paired ? t("remote.pair.done") : t("remote.close")}
             </Button>
           </DialogFooter>
         </DialogContent>

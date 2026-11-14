@@ -56,6 +56,21 @@ impl ServerIdentity {
         })
     }
 
+    /// ECDSA P-256 / SHA-256 signature (ASN.1 DER) with the identity key.
+    /// Used only to prove ownership of the fingerprint to a relay.
+    pub fn sign(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+        use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+        let rng = ring::rand::SystemRandom::new();
+        let kp =
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &self.key_pkcs8_der, &rng)
+                .map_err(|e| anyhow::anyhow!("identity key: {e}"))?;
+        Ok(kp
+            .sign(&rng, message)
+            .map_err(|e| anyhow::anyhow!("sign: {e}"))?
+            .as_ref()
+            .to_vec())
+    }
+
     pub fn certificate(&self) -> CertificateDer<'static> {
         CertificateDer::from(self.cert_der.clone())
     }

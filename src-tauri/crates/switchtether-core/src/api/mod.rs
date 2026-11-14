@@ -48,6 +48,8 @@ pub struct ApiContext {
     pub pairing: PairingManager,
     pub stepup: StepUpManager,
     pub events: Arc<EventBus>,
+    /// Relay link state (docs/RELAY.md), shown on the settings page.
+    pub relay_status: Arc<parking_lot::Mutex<crate::relay::RelayStatus>>,
     pub connections: ConnectionTracker,
     pub backend: Arc<dyn CcSwitchBackend>,
     pub terminals: Arc<TerminalManager>,
@@ -76,6 +78,10 @@ impl ApiContext {
             pairing: PairingManager::new(),
             stepup: StepUpManager::default(),
             events,
+            relay_status: Arc::new(parking_lot::Mutex::new(crate::relay::RelayStatus {
+                state: "off".into(),
+                ..Default::default()
+            })),
             connections: ConnectionTracker::default(),
             backend,
             terminals,

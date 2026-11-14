@@ -649,7 +649,7 @@ pub fn run() {
                 log::info!(
                     "=== SwitchTether v{} (CC Switch base v{}) started ===",
                     app.package_info().version,
-                    env!("CARGO_PKG_VERSION")
+                    crate::switchtether::upstream_version()
                 );
             }
 
@@ -1627,6 +1627,7 @@ pub fn run() {
             switchtether::commands::remote_quit_impact,
             switchtether::commands::remote_takeover_status,
             switchtether::commands::remote_set_takeover,
+            switchtether::commands::remote_reset_relay_token,
             commands::get_providers,
             commands::get_current_provider,
             commands::add_provider,

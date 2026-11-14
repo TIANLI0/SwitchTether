@@ -8,6 +8,15 @@ export interface RemoteConfig {
   port: number;
   networkMode: NetworkMode;
   serverName?: string | null;
+  /** Optional relay (docs/RELAY.md). */
+  relayEnabled?: boolean;
+  relayUrl?: string | null;
+}
+
+export interface RelayStatus {
+  state: "off" | "connecting" | "connected" | "error";
+  error?: string | null;
+  tunnels: number;
 }
 
 export interface HostCandidate {
@@ -37,6 +46,7 @@ export interface RemoteStatus {
   pairedDevices: number;
   terminals: number;
   managedSessions: number;
+  relay?: RelayStatus;
 }
 
 export interface PairingOffer {
@@ -127,6 +137,7 @@ export const remoteApi = {
   listTerminals: () => invoke<RemoteTerminal[]>("remote_list_terminals"),
   killTerminal: (id: string) => invoke<boolean>("remote_kill_terminal", { id }),
   auditLog: (limit = 50) => invoke<AuditEntry[]>("remote_audit_log", { limit }),
+  resetRelayToken: () => invoke<RemoteStatus>("remote_reset_relay_token"),
   takeoverStatus: () => invoke<TakeoverStatus>("remote_takeover_status"),
   setTakeover: (hook: TakeoverHook, enabled: boolean) =>
     invoke<{ report: Record<string, unknown>[]; status: TakeoverStatus }>(

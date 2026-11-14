@@ -5428,7 +5428,13 @@
       "success": "Telefon eşleştirildi",
       "pairedWith": "{{name}} ile eşleştirildi.",
       "verify": "Doğrulama kodu (telefondakiyle aynı olmalı):",
-      "newCode": "Yeni kod"
+      "newCode": "Yeni kod",
+      "step1": "Telefonunda SwitchTether'i aç.",
+      "step2": "“Bilgisayar ekle”ye dokun ve bu kodu tara.",
+      "step3": "Doğrulama kodunun iki ekranda da aynı olduğunu kontrol et.",
+      "computer": "Bilgisayar",
+      "addresses": "Adres",
+      "done": "Bitti"
     },
     "devices": {
       "title": "Eşleştirilmiş telefonlar",
@@ -5481,6 +5487,25 @@
         "label": "Terminal · st-claude / st-codex",
         "description": "st-claude ve st-codex komutlarını ekler ({{dir}}). Telefondan erişmek istediğin oturumlar için claude / codex yerine bunları kullan; claude ve codex'in kendisi değişmez.",
         "enabledToast": "Açıldı. Yeni bir terminal açıp st-claude veya st-codex çalıştır."
+      }
+    },
+    "basedOn": "CC Switch v{{version}} tabanlı",
+    "relay": {
+      "title": "Röle (diğer ağlar)",
+      "help": "İsteğe bağlı. Kendi barındırdığın bir röle (Docker veya Cloudflare, relay/README.md'ye bak) üzerinden bu bilgisayara her yerden bağlan. Telefonun şifreli bağlantısı röleden uçtan uca geçer: röle yalnızca şifreli veriyi görür ve hiçbir anahtar tutmaz. Röle adresi ve erişim belirteci eşleştirme QR koduna eklenir.",
+      "url": "Röle adresi",
+      "urlHint": "tcp://sunucu:47700 veya wss://sunucu/v1/tunnel",
+      "enable": "Röle üzerinden bağlan",
+      "enableHint": "Kapalı. Önce bir röle adresi gir.",
+      "token": "Röle erişim belirteci",
+      "tokenHint": "Eşleştirme QR kodunda bulunur. Sızdıysa sıfırla; bağlı telefonlar yenisini otomatik alır, diğerlerinin yeniden eşleşmesi gerekir.",
+      "resetToken": "Sıfırla",
+      "tokenReset": "Röle belirteci sıfırlandı.",
+      "state": {
+        "off": "Kapalı",
+        "connecting": "Röleye bağlanılıyor…",
+        "connected": "Röleye bağlı",
+        "error": "Röle hatası: {{error}}"
       }
     }
   }

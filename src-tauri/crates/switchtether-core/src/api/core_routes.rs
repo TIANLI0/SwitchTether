@@ -21,6 +21,7 @@ pub fn routes() -> Router<Arc<ApiContext>> {
         .route("/v1/hello", get(hello))
         .route("/v1/pair", post(pair))
         .route("/v1/status", get(status))
+        .route("/v1/relay", get(relay_info))
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/device", get(device_self).delete(unpair_self))
         .route("/v1/auth/step-up", get(step_up_grants))
@@ -296,4 +297,17 @@ async fn command_status(
         .map_err(|e| ApiError::internal("command status", e))?
         .ok_or_else(|| ApiError::not_found("unknown commandId"))?;
     Ok(Json(serde_json::to_value(rec).unwrap_or_default()))
+}
+
+/// Relay URL and access token for an already paired phone (docs/RELAY.md §5),
+/// so a token reset does not require re-pairing phones that are connected.
+async fn relay_info(
+    axum::extract::State(ctx): axum::extract::State<std::sync::Arc<super::ApiContext>>,
+    _dev: super::AuthDevice,
+) -> axum::Json<serde_json::Value> {
+    let relay = ctx.config.read().relay.clone();
+    axum::Json(match relay {
+        Some(r) => serde_json::json!({ "enabled": true, "url": r.url, "token": r.token }),
+        None => serde_json::json!({ "enabled": false }),
+    })
 }

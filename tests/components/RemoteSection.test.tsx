@@ -186,7 +186,7 @@ describe("RemoteSection", () => {
         },
       }),
     );
-    expect(await screen.findByText("123456")).toBeInTheDocument();
+    expect(await screen.findByTestId("pair-code")).toHaveTextContent("123456");
   });
 
   it("disables remote access through the backend", async () => {

@@ -2574,8 +2574,15 @@ fn attach_entry(
     Ok(Some(match entry {
         TrayEntry::Separator => return Ok(None),
         TrayEntry::Item { id, text, enabled } => MenuItemKind::MenuItem(
-            MenuItem::with_id(app, id.as_str(), text, *enabled, None::<&str>)
-                .map_err(menu_error)?,
+            // SwitchTether hook: product name in upstream tray texts.
+            MenuItem::with_id(
+                app,
+                id.as_str(),
+                crate::switchtether::brand(text),
+                *enabled,
+                None::<&str>,
+            )
+            .map_err(menu_error)?,
         ),
         TrayEntry::Check {
             id,
@@ -2583,8 +2590,15 @@ fn attach_entry(
             enabled,
             checked,
         } => MenuItemKind::Check(
-            CheckMenuItem::with_id(app, id.as_str(), text, *enabled, *checked, None::<&str>)
-                .map_err(menu_error)?,
+            CheckMenuItem::with_id(
+                app,
+                id.as_str(),
+                crate::switchtether::brand(text),
+                *enabled,
+                *checked,
+                None::<&str>,
+            )
+            .map_err(menu_error)?,
         ),
         TrayEntry::Submenu {
             id,
@@ -2592,7 +2606,8 @@ fn attach_entry(
             app: app_type,
             children,
         } => {
-            let mut builder = SubmenuBuilder::with_id(app, id.as_str(), text);
+            let mut builder =
+                SubmenuBuilder::with_id(app, id.as_str(), crate::switchtether::brand(text));
             for child in children {
                 builder = match attach_entry(app, child, handles)? {
                     Some(item) => builder.item(&item),
@@ -2764,7 +2779,8 @@ fn update_problem_indicator(app: &tauri::AppHandle, texts: &TrayTexts, problems:
     };
     let has_dot = !problems.is_empty();
     let tooltip = if TRAY_TOOLTIP_ENABLED {
-        tray_tooltip(texts, problems)
+        // SwitchTether hook: product name in upstream tray texts.
+        crate::switchtether::brand(&tray_tooltip(texts, problems)).into_owned()
     } else {
         String::new()
     };

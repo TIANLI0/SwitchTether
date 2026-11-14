@@ -22,6 +22,10 @@ import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { WHATS_NEW_ENTRIES, entriesUpTo } from "@/lib/whatsNew";
 import ccswitchLogo from "@/assets/icons/logo.svg";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import upstreamVersionRaw from "../../../UPSTREAM_VERSION?raw";
+
+/** CC Switch release this build is based on. */
+const UPSTREAM_VERSION = upstreamVersionRaw.trim().replace(/^v/, "");
 
 interface AboutSectionProps {
   isPortable: boolean;
@@ -211,6 +215,13 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             ) : (
               <span className="tabular-nums">{`${t("common.version")} v${displayVersion}`}</span>
             )}
+            <span className="tabular-nums">
+              {t("remote.basedOn", {
+                version: UPSTREAM_VERSION,
+                // Keep the upstream name here (no rebranding).
+                postProcess: [],
+              })}
+            </span>
             {isPortable && (
               <Badge
                 variant="secondary"

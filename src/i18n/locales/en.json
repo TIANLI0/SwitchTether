@@ -5428,7 +5428,13 @@
       "success": "Phone paired",
       "pairedWith": "Paired with {{name}}.",
       "verify": "Verification code (should match the phone):",
-      "newCode": "New code"
+      "newCode": "New code",
+      "step1": "Open SwitchTether on your phone.",
+      "step2": "Tap Add computer and scan this code.",
+      "step3": "Check that the verification code matches on both screens.",
+      "computer": "Computer",
+      "addresses": "Address",
+      "done": "Done"
     },
     "devices": {
       "title": "Paired phones",
@@ -5481,6 +5487,25 @@
         "label": "Terminal · st-claude / st-codex",
         "description": "Adds st-claude and st-codex commands ({{dir}}). Use them instead of claude / codex for sessions you want to reach from the phone; claude and codex themselves are unchanged.",
         "enabledToast": "Enabled. Open a new terminal and run st-claude or st-codex."
+      }
+    },
+    "basedOn": "Based on CC Switch v{{version}}",
+    "relay": {
+      "title": "Relay (other networks)",
+      "help": "Optional. Reach this computer from anywhere through a relay you host yourself (Docker or Cloudflare, see relay/README.md). The phone's encrypted connection runs end-to-end through the relay: it only sees ciphertext and holds no keys. Phones receive the relay address and access token in the pairing QR code.",
+      "url": "Relay address",
+      "urlHint": "tcp://host:47700 or wss://host/v1/tunnel",
+      "enable": "Connect through the relay",
+      "enableHint": "Off. Set a relay address first.",
+      "token": "Relay access token",
+      "tokenHint": "Included in the pairing QR code. Reset it if it leaked; connected phones pick up the new one, others must pair again.",
+      "resetToken": "Reset",
+      "tokenReset": "Relay token reset.",
+      "state": {
+        "off": "Off",
+        "connecting": "Connecting to the relay…",
+        "connected": "Connected to the relay",
+        "error": "Relay error: {{error}}"
       }
     }
   }

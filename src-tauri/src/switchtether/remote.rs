@@ -22,6 +22,7 @@ use tauri::Emitter;
 use tokio_util::sync::CancellationToken;
 
 pub const UI_EVENT: &str = "switchtether-remote-event";
+const RELAY_TOKEN_SECRET: &str = "relay-token";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -31,6 +32,10 @@ pub struct RemoteConfig {
     pub port: u16,
     pub network_mode: NetworkMode,
     pub server_name: Option<String>,
+    /// Optional relay (docs/RELAY.md): off unless the user turns it on.
+    pub relay_enabled: bool,
+    /// `tcp://host:port` or `wss://host/v1/tunnel`
+    pub relay_url: Option<String>,
 }
 
 impl Default for RemoteConfig {
@@ -40,6 +45,8 @@ impl Default for RemoteConfig {
             port: switchtether_core::DEFAULT_PORT,
             network_mode: NetworkMode::Lan,
             server_name: None,
+            relay_enabled: false,
+            relay_url: None,
         }
     }
 }
@@ -127,6 +134,7 @@ impl RemoteRuntime {
                 network_mode: config.network_mode,
                 server_name: config.server_name.clone().unwrap_or_else(hostname),
                 server_version: app.package_info().version.to_string(),
+                relay: None,
             },
             server_id(&dir),
             identity,
@@ -217,6 +225,7 @@ impl RemoteRuntime {
             cfg.port = c.port;
             cfg.network_mode = c.network_mode;
             cfg.server_name = c.server_name.clone().unwrap_or_else(hostname);
+            cfg.relay = self.relay_config(&c);
         }
         match RemoteServer::start(self.ctx.clone()).await {
             Ok(handle) => {
@@ -254,7 +263,14 @@ impl RemoteRuntime {
         let old = self.config.lock().clone();
         save_config(&new)?;
         *self.config.lock() = new.clone();
-        let restart = old.port != new.port || old.network_mode != new.network_mode;
+        if new.relay_enabled {
+            let url = new.relay_url.clone().unwrap_or_default();
+            switchtether_core::relay::parse_url(&url).map_err(|e| e.to_string())?;
+        }
+        let restart = old.port != new.port
+            || old.network_mode != new.network_mode
+            || old.relay_enabled != new.relay_enabled
+            || old.relay_url != new.relay_url;
         if !new.enabled {
             self.stop().await;
         } else if restart || self.running_port().await.is_none() {
@@ -263,6 +279,46 @@ impl RemoteRuntime {
         }
         if let Some(name) = &new.server_name {
             self.ctx.config.write().server_name = name.clone();
+        }
+        Ok(self.status().await)
+    }
+
+    /// Relay access token (OS keychain), created on first use.
+    fn relay_token(&self, create: bool) -> Option<String> {
+        let store = switchtether_core::secret_store::default_store(&remote_dir());
+        if let Ok(Some(t)) = store.get(RELAY_TOKEN_SECRET) {
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+        if !create {
+            return None;
+        }
+        let t = switchtether_core::util::random_token();
+        store.set(RELAY_TOKEN_SECRET, &t).ok()?;
+        Some(t)
+    }
+
+    fn relay_config(&self, c: &RemoteConfig) -> Option<switchtether_core::relay::RelayConfig> {
+        if !c.relay_enabled {
+            return None;
+        }
+        let url = c.relay_url.clone().filter(|u| !u.trim().is_empty())?;
+        Some(switchtether_core::relay::RelayConfig {
+            url: url.trim().to_string(),
+            token: self.relay_token(true)?,
+        })
+    }
+
+    /// New relay token: phones must re-pair (or fetch it again while connected).
+    pub async fn reset_relay_token(&self) -> Result<Value, String> {
+        let store = switchtether_core::secret_store::default_store(&remote_dir());
+        store
+            .set(RELAY_TOKEN_SECRET, &switchtether_core::util::random_token())
+            .map_err(|e| e.to_string())?;
+        if self.running_port().await.is_some() {
+            self.stop().await;
+            self.start().await?;
         }
         Ok(self.status().await)
     }
@@ -290,6 +346,7 @@ impl RemoteRuntime {
             "pairedDevices": devices.iter().filter(|d| d.is_active()).count(),
             "terminals": self.ctx.terminals.count(),
             "managedSessions": self.ctx.agents.managed_count(),
+            "relay": self.ctx.relay_status.lock().clone(),
         })
     }
 
@@ -308,10 +365,13 @@ impl RemoteRuntime {
             );
         }
         let name = self.ctx.config.read().server_name.clone();
-        let offer = self
+        let mut offer = self
             .ctx
             .pairing
             .create(hosts, port, &self.ctx.identity.fingerprint, &name);
+        if let Some(relay) = self.ctx.config.read().relay.clone() {
+            offer.uri = switchtether_core::pairing::with_relay(&offer.uri, &relay);
+        }
         let svg =
             qrcode::QrCode::with_error_correction_level(offer.uri.as_bytes(), qrcode::EcLevel::M)
                 .map_err(|e| e.to_string())?

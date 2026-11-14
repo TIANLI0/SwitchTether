@@ -5428,7 +5428,13 @@
       "success": "手机已配对",
       "pairedWith": "已与 {{name}} 配对。",
       "verify": "验证码（应与手机上显示的一致）：",
-      "newCode": "新二维码"
+      "newCode": "新二维码",
+      "step1": "在手机上打开 SwitchTether。",
+      "step2": "点击「添加电脑」，扫描这个二维码。",
+      "step3": "核对两边显示的验证码是否一致。",
+      "computer": "电脑",
+      "addresses": "地址",
+      "done": "完成"
     },
     "devices": {
       "title": "已配对的手机",
@@ -5481,6 +5487,25 @@
         "label": "终端 · st-claude / st-codex",
         "description": "添加 st-claude 和 st-codex 命令（{{dir}}）。想在手机上接管的会话用它们代替 claude / codex 启动；claude 和 codex 本身不变。",
         "enabledToast": "已开启。打开新的终端运行 st-claude 或 st-codex。"
+      }
+    },
+    "basedOn": "基于 CC Switch v{{version}}",
+    "relay": {
+      "title": "中转（跨网络连接）",
+      "help": "可选功能。通过你自己部署的中转服务（Docker 或 Cloudflare，见 relay/README.zh-CN.md）在任何网络下连接这台电脑。手机的加密连接端到端穿过中转：中转只能看到密文，不持有任何密钥。中转地址和访问令牌会写进配对二维码。",
+      "url": "中转地址",
+      "urlHint": "tcp://主机:47700 或 wss://主机/v1/tunnel",
+      "enable": "通过中转连接",
+      "enableHint": "未开启。请先填写中转地址。",
+      "token": "中转访问令牌",
+      "tokenHint": "包含在配对二维码中。泄露时请重置；已连接的手机会自动获取新令牌，其他手机需重新配对。",
+      "resetToken": "重置",
+      "tokenReset": "已重置中转令牌。",
+      "state": {
+        "off": "已关闭",
+        "connecting": "正在连接中转…",
+        "connected": "已连接到中转",
+        "error": "中转出错：{{error}}"
       }
     }
   }

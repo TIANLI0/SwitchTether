@@ -51,6 +51,7 @@ async fn start() -> Fixture {
             network_mode: NetworkMode::LocalhostOnly,
             server_name: "Test Desktop".into(),
             server_version: "0.0.0-test".into(),
+            relay: None,
         },
         "server-1".into(),
         identity.clone(),

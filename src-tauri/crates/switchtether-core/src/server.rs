@@ -35,6 +35,8 @@ pub struct RemoteServerConfig {
     pub network_mode: NetworkMode,
     pub server_name: String,
     pub server_version: String,
+    /// Optional relay (docs/RELAY.md); off unless the user configured one.
+    pub relay: Option<crate::relay::RelayConfig>,
 }
 
 /// Identity of the TLS peer of one connection, injected into every request.
@@ -141,6 +143,7 @@ pub struct RemoteServerHandle {
     pub local_addrs: Vec<SocketAddr>,
     shutdown: CancellationToken,
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    _advertiser: Option<crate::discovery::Advertiser>,
 }
 
 impl RemoteServerHandle {
@@ -204,6 +207,58 @@ impl RemoteServer {
                 shutdown.clone(),
             )));
         }
+        // LAN discovery (mDNS) only while listening on the LAN.
+        let advertiser = if matches!(cfg.network_mode, NetworkMode::Lan | NetworkMode::Any) {
+            let port = local_addrs.first().map(|a| a.port()).unwrap_or(cfg.port);
+            match crate::discovery::Advertiser::start(
+                &cfg.server_name,
+                &ctx.server_id,
+                &ctx.identity.fingerprint,
+                port,
+            ) {
+                Ok(a) => Some(a),
+                Err(e) => {
+                    log::warn!("[remote] LAN discovery unavailable: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        if let Some(relay_cfg) = cfg.relay.clone() {
+            let ctx2 = ctx.clone();
+            let acceptor2 = acceptor.clone();
+            let router2 = router.clone();
+            let shutdown2 = shutdown.clone();
+            let on_tunnel: crate::relay::OnTunnel = std::sync::Arc::new(move |stream, addr| {
+                if ctx2.connections.len() >= MAX_CONNECTIONS {
+                    log::warn!("[remote] connection limit reached; dropping relay tunnel");
+                    return;
+                }
+                tokio::spawn(serve_connection(
+                    ctx2.clone(),
+                    acceptor2.clone(),
+                    router2.clone(),
+                    stream,
+                    addr,
+                    shutdown2.clone(),
+                ));
+            });
+            crate::relay::spawn(
+                relay_cfg,
+                ctx.identity.clone(),
+                ctx.relay_status.clone(),
+                on_tunnel,
+                shutdown.child_token(),
+            );
+        } else {
+            *ctx.relay_status.lock() = crate::relay::RelayStatus {
+                state: "off".into(),
+                ..Default::default()
+            };
+        }
+
         tasks.push(tokio::spawn(maintenance_loop(
             ctx.clone(),
             shutdown.clone(),
@@ -220,6 +275,7 @@ impl RemoteServer {
             local_addrs,
             shutdown,
             tasks,
+            _advertiser: advertiser,
         })
     }
 }
@@ -291,14 +347,16 @@ async fn accept_loop(
     }
 }
 
-async fn serve_connection(
+async fn serve_connection<S>(
     ctx: Arc<ApiContext>,
     acceptor: TlsAcceptor,
     router: axum::Router,
-    tcp: tokio::net::TcpStream,
+    tcp: S,
     addr: SocketAddr,
     shutdown: CancellationToken,
-) {
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let tls = match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(tcp)).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {

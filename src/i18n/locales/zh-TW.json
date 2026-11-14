@@ -5428,7 +5428,13 @@
       "success": "手機已配對",
       "pairedWith": "已與 {{name}} 配對。",
       "verify": "驗證碼（應與手機上顯示的一致）：",
-      "newCode": "新 QR 碼"
+      "newCode": "新 QR 碼",
+      "step1": "在手機上開啟 SwitchTether。",
+      "step2": "點選「新增電腦」，掃描這個 QR 碼。",
+      "step3": "核對兩邊顯示的驗證碼是否一致。",
+      "computer": "電腦",
+      "addresses": "位址",
+      "done": "完成"
     },
     "devices": {
       "title": "已配對的手機",
@@ -5481,6 +5487,25 @@
         "label": "終端機 · st-claude / st-codex",
         "description": "新增 st-claude 與 st-codex 指令（{{dir}}）。想在手機上接管的工作階段改用它們代替 claude / codex 啟動；claude 與 codex 本身不變。",
         "enabledToast": "已開啟。開啟新的終端機執行 st-claude 或 st-codex。"
+      }
+    },
+    "basedOn": "基於 CC Switch v{{version}}",
+    "relay": {
+      "title": "中繼（跨網路連線）",
+      "help": "選用功能。透過你自行部署的中繼服務（Docker 或 Cloudflare，見 relay/README.zh-CN.md）在任何網路下連線這台電腦。手機的加密連線端對端穿過中繼：中繼只看得到密文，不持有任何金鑰。中繼位址與存取權杖會寫進配對 QR 碼。",
+      "url": "中繼位址",
+      "urlHint": "tcp://主機:47700 或 wss://主機/v1/tunnel",
+      "enable": "透過中繼連線",
+      "enableHint": "未開啟。請先填寫中繼位址。",
+      "token": "中繼存取權杖",
+      "tokenHint": "包含在配對 QR 碼中。外洩時請重設；已連線的手機會自動取得新權杖，其他手機需重新配對。",
+      "resetToken": "重設",
+      "tokenReset": "已重設中繼權杖。",
+      "state": {
+        "off": "已關閉",
+        "connecting": "正在連線中繼…",
+        "connected": "已連線到中繼",
+        "error": "中繼錯誤：{{error}}"
       }
     }
   }

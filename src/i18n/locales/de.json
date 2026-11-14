@@ -5428,7 +5428,13 @@
       "success": "Handy gekoppelt",
       "pairedWith": "Mit {{name}} gekoppelt.",
       "verify": "Prüfcode (sollte mit dem Handy übereinstimmen):",
-      "newCode": "Neuer Code"
+      "newCode": "Neuer Code",
+      "step1": "Öffne SwitchTether auf deinem Handy.",
+      "step2": "Tippe auf „Computer hinzufügen“ und scanne diesen Code.",
+      "step3": "Prüfe, ob der Bestätigungscode auf beiden Bildschirmen gleich ist.",
+      "computer": "Computer",
+      "addresses": "Adresse",
+      "done": "Fertig"
     },
     "devices": {
       "title": "Gekoppelte Handys",
@@ -5481,6 +5487,25 @@
         "label": "Terminal · st-claude / st-codex",
         "description": "Fügt die Befehle st-claude und st-codex hinzu ({{dir}}). Nutze sie statt claude / codex für Sitzungen, die du vom Handy erreichen willst; claude und codex selbst bleiben unverändert.",
         "enabledToast": "Aktiviert. Öffne ein neues Terminal und starte st-claude oder st-codex."
+      }
+    },
+    "basedOn": "Basiert auf CC Switch v{{version}}",
+    "relay": {
+      "title": "Relay (andere Netzwerke)",
+      "help": "Optional. Erreiche diesen Computer von überall über ein selbst betriebenes Relay (Docker oder Cloudflare, siehe relay/README.md). Die verschlüsselte Verbindung des Handys läuft Ende-zu-Ende durch das Relay: Es sieht nur Chiffretext und besitzt keine Schlüssel. Relay-Adresse und Zugriffstoken stehen im Kopplungs-QR-Code.",
+      "url": "Relay-Adresse",
+      "urlHint": "tcp://host:47700 oder wss://host/v1/tunnel",
+      "enable": "Über das Relay verbinden",
+      "enableHint": "Aus. Lege zuerst eine Relay-Adresse fest.",
+      "token": "Relay-Zugriffstoken",
+      "tokenHint": "Steht im Kopplungs-QR-Code. Setze es zurück, falls es bekannt wurde; verbundene Handys erhalten das neue automatisch, andere müssen neu gekoppelt werden.",
+      "resetToken": "Zurücksetzen",
+      "tokenReset": "Relay-Token zurückgesetzt.",
+      "state": {
+        "off": "Aus",
+        "connecting": "Verbinde mit dem Relay…",
+        "connected": "Mit dem Relay verbunden",
+        "error": "Relay-Fehler: {{error}}"
       }
     }
   }

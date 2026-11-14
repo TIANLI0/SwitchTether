@@ -41,6 +41,23 @@ pub fn on_setup_before_database() {
 
 /// Register remote state and initialise the Remote Core in the background
 /// (keychain access may be slow or prompt on macOS).
+/// Product name in upstream (CC Switch) strings shown by native UI (tray menu,
+/// tooltips). The web UI is rebranded by the i18n post-processor instead.
+pub fn brand(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains("CC Switch") {
+        std::borrow::Cow::Owned(text.replace("CC Switch", "SwitchTether"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// CC Switch release this build is based on (`UPSTREAM_VERSION`).
+const UPSTREAM_VERSION: &str = include_str!("../../../UPSTREAM_VERSION");
+
+pub fn upstream_version() -> &'static str {
+    UPSTREAM_VERSION.trim().trim_start_matches('v')
+}
+
 pub fn setup_remote(app: &tauri::App) {
     app.manage(remote::RemoteState::default());
     let handle = app.handle().clone();
