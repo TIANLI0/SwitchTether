@@ -71,6 +71,54 @@ fn strip_injected(text: &str) -> String {
     out.trim().to_string()
 }
 
+fn extract_image_items(content: &Value) -> Vec<Value> {
+    let Some(blocks) = content.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for b in blocks {
+        if b.get("type").and_then(|t| t.as_str()) != Some("image") {
+            continue;
+        }
+        let Some(src) = b.get("source") else {
+            continue;
+        };
+        match src.get("type").and_then(|t| t.as_str()) {
+            Some("base64") => {
+                let media_type = src
+                    .get("media_type")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("image/png");
+                if let Some(data) = src.get("data").and_then(|d| d.as_str()) {
+                    // Cap inline base64 per image at 512 KiB to keep event logs bounded.
+                    if data.len() <= 512 * 1024 {
+                        out.push(json!({
+                            "kind": "base64",
+                            "mediaType": media_type,
+                            "data": data,
+                        }));
+                    } else {
+                        out.push(json!({
+                            "kind": "omitted",
+                            "mediaType": media_type,
+                        }));
+                    }
+                }
+            }
+            Some("url") => {
+                if let Some(url) = src.get("url").and_then(|u| u.as_str()) {
+                    out.push(json!({
+                        "kind": "url",
+                        "url": url,
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn content_text(content: &Value) -> String {
     match content {
         Value::String(s) => s.clone(),
@@ -217,10 +265,18 @@ impl ClaudeParser {
             }
         }
 
-        // Plain user text (string content or text blocks).
+        // Plain user text (string content or text blocks) or image-only user message.
         let raw = content_text(&content);
         let text = strip_injected(&raw);
-        if !text.is_empty() {
+        let image_items = extract_image_items(&content);
+        let images = match &content {
+            Value::Array(b) => b
+                .iter()
+                .filter(|x| x.get("type").and_then(|t| t.as_str()) == Some("image"))
+                .count(),
+            _ => 0,
+        };
+        if !text.is_empty() || images > 0 {
             if text.starts_with("[Request interrupted by user") {
                 out.push(EventDraft::new(
                     format!("{uuid}:interrupt"),
@@ -250,19 +306,18 @@ impl ClaudeParser {
                 ));
             } else {
                 self.current_turn = Some(uuid.clone());
-                let images = match &content {
-                    Value::Array(b) => b
-                        .iter()
-                        .filter(|x| x.get("type").and_then(|t| t.as_str()) == Some("image"))
-                        .count(),
-                    _ => 0,
-                };
                 let (p, truncated) = preview(&text, 64 * 1024);
                 let mut d = EventDraft::new(
                     uuid.clone(),
                     "user_message",
                     ts,
-                    json!({ "text": p, "images": images, "source": "unknown", "truncated": truncated }),
+                    json!({
+                        "text": p,
+                        "images": images,
+                        "imageItems": image_items,
+                        "source": "unknown",
+                        "truncated": truncated
+                    }),
                 );
                 d.turn_id = Some(uuid);
                 out.push(d);
@@ -385,18 +440,26 @@ impl ClaudeParser {
                     out.push(fc);
                 }
             }
-            // Sub-agent result → subagent event.
+            // Sub-agent result → subagent event (linked under the Task/Agent tool_call).
             if (name == "Task" || name == "Agent") && st.get("agentId").is_some() {
+                let desc = self
+                    .tools
+                    .get(call_id)
+                    .and_then(|tc| tc.data.get("title").and_then(|t| t.as_str()))
+                    .map(String::from);
                 let mut sa = EventDraft::new(
                     format!("sa:{call_id}"),
                     "subagent",
                     ts,
                     json!({
-                        "agentId": st.get("agentId"), "status": st.get("status").cloned().unwrap_or(json!("completed")),
+                        "agentId": st.get("agentId"),
+                        "description": desc,
+                        "status": st.get("status").cloned().unwrap_or(json!("completed")),
                         "callId": call_id,
                     }),
                 );
                 sa.turn_id = turn;
+                sa.parent_id = Some(call_id.to_string());
                 out.push(sa);
             }
         }

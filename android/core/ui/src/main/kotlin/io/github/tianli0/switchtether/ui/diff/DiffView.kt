@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.diff
 
 import androidx.compose.foundation.background
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -41,7 +42,7 @@ fun DiffView(
     var limit by remember(diff) { mutableStateOf(initialLines) }
     val dev = LocalDevColors.current
     val total = files.sumOf { f -> f.hunks.sumOf { it.lines.size + 1 } }
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(dev.codeBackground)) {
+    Column(modifier.fillMaxWidth().clip(SquircleShape(8.dp)).background(dev.codeBackground)) {
         BoxWithConstraints {
         val viewport = maxWidth
         Column(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 4.dp).widthIn(min = viewport).width(IntrinsicSize.Max)) {

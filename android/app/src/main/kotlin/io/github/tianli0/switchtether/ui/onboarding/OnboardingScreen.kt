@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.onboarding
 
 import android.Manifest
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -188,7 +189,7 @@ private fun IntroContent(
 ) {
     Title(stringResource(R.string.app_name), stringResource(R.string.onboarding_subtitle))
     if (revokedReason != null) {
-        Banner(stringResource(R.string.onboarding_revoked, revokedReason.second ?: "—", revokedReason.first), LocalDevColors.current.danger, Modifier.clip(RoundedCornerShape(10.dp)))
+        Banner(stringResource(R.string.onboarding_revoked, revokedReason.second ?: "—", revokedReason.first), LocalDevColors.current.danger, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     Card(Modifier.fillMaxWidth()) {
@@ -204,7 +205,7 @@ private fun IntroContent(
     }
     if (!deviceSecure) {
         Spacer(Modifier.height(12.dp))
-        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(RoundedCornerShape(10.dp)))
+        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     Button(
@@ -257,7 +258,7 @@ private fun ScanContent(onScanned: (String) -> Unit, onBack: () -> Unit) {
     Title(stringResource(R.string.scan_title), stringResource(R.string.scan_hint))
     val cameraDesc = stringResource(R.string.camera_preview_desc)
     if (granted) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)).semantics { contentDescription = cameraDesc }) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(SquircleShape(16.dp)).semantics { contentDescription = cameraDesc }) {
             QrScanner(onResult = onScanned, modifier = Modifier.fillMaxSize())
         }
     } else {
@@ -289,7 +290,7 @@ private fun ConfirmContent(link: PairingLink, deviceSecure: Boolean, onPair: () 
     Text(stringResource(R.string.confirm_fingerprint_hint), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
     if (!deviceSecure) {
         Spacer(Modifier.height(10.dp))
-        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(RoundedCornerShape(10.dp)))
+        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     Button(onClick = onPair, modifier = Modifier.fillMaxWidth().testTag("pair"), colors = ButtonDefaults.buttonColorsPrimary()) {
@@ -346,11 +347,11 @@ private fun VerificationContent(result: PairingResult, onDone: () -> Unit, onRej
         },
     )
     if (!result.codesMatch) {
-        Banner(stringResource(R.string.verify_mismatch), dev.danger, Modifier.clip(RoundedCornerShape(10.dp)))
+        Banner(stringResource(R.string.verify_mismatch), dev.danger, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     if (!result.stepUpEnabled) {
-        Banner(stringResource(R.string.verify_no_stepup), dev.warn, Modifier.clip(RoundedCornerShape(10.dp)))
+        Banner(stringResource(R.string.verify_no_stepup), dev.warn, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     Spacer(Modifier.height(8.dp))

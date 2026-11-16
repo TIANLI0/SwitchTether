@@ -166,4 +166,40 @@ class StepUpPayloadTest {
         // SPKI encoding of the public key is what is sent as stepUpPublicKey
         assertEquals("X.509", kp.public.format)
     }
+
+    @Test
+    fun claudeTaskSubagentNestsByCallId() {
+        val log = io.github.tianli0.switchtether.remote.session.AgentEventLog.of(
+            listOf(
+                io.github.tianli0.switchtether.remote.protocol.AgentEvent(
+                    id = "m1:0",
+                    seq = 1,
+                    kind = io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL,
+                    data = kotlinx.serialization.json.buildJsonObject {
+                        put("callId", kotlinx.serialization.json.JsonPrimitive("toolu_sub_1"))
+                        put("name", kotlinx.serialization.json.JsonPrimitive("Agent"))
+                        put("category", kotlinx.serialization.json.JsonPrimitive("task"))
+                        put("status", kotlinx.serialization.json.JsonPrimitive("running"))
+                    },
+                ),
+                io.github.tianli0.switchtether.remote.protocol.AgentEvent(
+                    id = "m2:0",
+                    seq = 2,
+                    kind = io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL,
+                    parentId = "toolu_sub_1",
+                    data = kotlinx.serialization.json.buildJsonObject {
+                        put("callId", kotlinx.serialization.json.JsonPrimitive("toolu_inner"))
+                        put("name", kotlinx.serialization.json.JsonPrimitive("Read"))
+                        put("status", kotlinx.serialization.json.JsonPrimitive("completed"))
+                    },
+                ),
+            ),
+        )
+        val items = log.renderItems()
+        assertEquals(2, items.size)
+        assertTrue(items[0].hasChildren)
+        assertEquals(1, items[1].depth)
+        assertEquals(1, log.renderItems(collapsedParents = setOf("m1:0")).size)
+        assertEquals(1, log.renderItems(collapsedParents = setOf("toolu_sub_1")).size)
+    }
 }

@@ -65,7 +65,7 @@ class AgentEventLog private constructor(
                 val rid = e.data.str("requestId")
                 if (rid != null && events.any { it.kind == EventKinds.APPROVAL_REQUEST && it.data.str("requestId") == rid }) continue
             }
-            val ancestors = ancestorsOf(e)
+            val ancestors = ancestorsOf(e, callsByCallId)
             if (ancestors.any { it in collapsedParents }) continue
             out += RenderItem(
                 event = e,
@@ -80,15 +80,27 @@ class AgentEventLog private constructor(
             )
         }
         val parents = events.mapNotNullTo(HashSet()) { it.parentId }
-        return out.map { if (it.event.id in parents) it.copy(hasChildren = true) else it }
+        return out.map { item ->
+            val callId = item.event.data.str("callId")
+            if (item.event.id in parents || (callId != null && callId in parents)) {
+                item.copy(hasChildren = true)
+            } else {
+                item
+            }
+        }
     }
 
-    private fun ancestorsOf(e: AgentEvent): List<String> {
+    private fun ancestorsOf(e: AgentEvent, callsByCallId: Map<String, AgentEvent>): List<String> {
         val chain = ArrayList<String>()
         var p = e.parentId
         while (p != null && p !in chain && chain.size < 8) {
+            val parentEvent = byId[p] ?: callsByCallId[p]
+            // Record both the raw parent key (e.g. callId) and resolved event id so collapsing works either way.
             chain += p
-            p = byId[p]?.parentId
+            if (parentEvent != null && parentEvent.id != p) {
+                chain += parentEvent.id
+            }
+            p = parentEvent?.parentId
         }
         return chain
     }

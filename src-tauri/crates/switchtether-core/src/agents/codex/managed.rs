@@ -90,6 +90,8 @@ pub struct CodexConn {
     replies: Mutex<HashMap<String, oneshot::Sender<Result<Value, Value>>>>,
     verdicts: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     pub threads: Mutex<HashMap<String, Arc<ManagedCodex>>>,
+    /// Subagent threadId -> parent threadId (routed into parent session, never listed as top-level).
+    pub subagent_parents: Mutex<HashMap<String, String>>,
     pub origin: &'static str,
     pub cwd: PathBuf,
 }
@@ -107,6 +109,7 @@ impl CodexConn {
             replies: Mutex::new(HashMap::new()),
             verdicts: Mutex::new(HashMap::new()),
             threads: Mutex::new(HashMap::new()),
+            subagent_parents: Mutex::new(HashMap::new()),
             origin,
             cwd,
         })
@@ -152,7 +155,17 @@ impl CodexConn {
             .and_then(|l| serde_json::from_str::<Value>(l).ok())
     }
 
+    fn subagent_parent_id(t: &Value) -> Option<String> {
+        s(t, "parentThreadId").or_else(|| {
+            t.pointer("/source/subAgent/thread_spawn/parent_thread_id")
+                .and_then(|x| x.as_str())
+                .map(String::from)
+        })
+    }
+
     /// Threads that a frame reveals: `(threadId, cwd)`.
+    /// Subagent threads (`parentThreadId` set) are linked to their parent thread instead of
+    /// creating separate top-level sessions.
     pub fn discover(&self, frame: &Value) -> Vec<(String, Option<String>)> {
         if frame.get("t").and_then(|t| t.as_str()) != Some("out") {
             return vec![];
@@ -160,12 +173,16 @@ impl CodexConn {
         let Some(v) = Self::parse(frame) else {
             return vec![];
         };
-        let known = |id: &str| self.threads.lock().contains_key(id);
+        let known = |id: &str| {
+            self.threads.lock().contains_key(id) || self.subagent_parents.lock().contains_key(id)
+        };
         let mut out = Vec::new();
         // Replies to thread/start | thread/resume | thread/fork (host or ours).
         if let Some(t) = v.pointer("/result/thread") {
             if let Some(id) = s(t, "id") {
-                if !known(&id) {
+                if let Some(parent) = Self::subagent_parent_id(t) {
+                    self.subagent_parents.lock().insert(id, parent);
+                } else if !known(&id) {
                     out.push((id, s(t, "cwd").or(s(v.get("result").unwrap(), "cwd"))));
                 }
             }
@@ -173,7 +190,14 @@ impl CodexConn {
         if s(&v, "method").as_deref() == Some("thread/started") {
             if let Some(t) = v.pointer("/params/thread") {
                 if let Some(id) = s(t, "id") {
-                    if !known(&id) {
+                    if let Some(parent) = Self::subagent_parent_id(t) {
+                        self.subagent_parents
+                            .lock()
+                            .insert(id.clone(), parent.clone());
+                        if let Some(parent_session) = self.threads.lock().get(&parent).cloned() {
+                            parent_session.on_subagent_started(&id, t);
+                        }
+                    } else if !known(&id) {
                         out.push((id, s(t, "cwd")));
                     }
                 }
@@ -186,9 +210,25 @@ impl CodexConn {
         out
     }
 
-    fn thread_of(&self, v: &Value) -> Option<Arc<ManagedCodex>> {
+    fn thread_of(&self, v: &Value) -> Option<(Arc<ManagedCodex>, Option<String>)> {
         let id = v.pointer("/params/threadId").and_then(|x| x.as_str())?;
-        self.threads.lock().get(id).cloned()
+        if let Some(t) = self.threads.lock().get(id).cloned() {
+            return Some((t, None));
+        }
+        let mut cur = id.to_string();
+        let mut hops = 0;
+        let parents = self.subagent_parents.lock();
+        while let Some(p) = parents.get(&cur) {
+            hops += 1;
+            if hops > 8 {
+                break;
+            }
+            if let Some(t) = self.threads.lock().get(p).cloned() {
+                return Some((t, Some(id.to_string())));
+            }
+            cur = p.clone();
+        }
+        None
     }
 
     pub async fn on_frame(&self, frame: Value) {
@@ -210,18 +250,30 @@ impl CodexConn {
                         }
                     }
                     (Some(id), Some(m)) => {
-                        if let Some(t) = self.thread_of(&v) {
-                            t.on_server_request(
+                        if let Some((t, subagent_tid)) = self.thread_of(&v) {
+                            t.on_server_request_with_parent(
                                 id.clone(),
                                 &m,
                                 v.get("params").cloned().unwrap_or(Value::Null),
+                                subagent_tid.map(|tid| format!("cx-sa-{tid}")),
                             )
                             .await;
                         }
                     }
                     (None, Some(m)) => {
-                        if let Some(t) = self.thread_of(&v) {
-                            t.on_notification(&m, v.get("params").cloned().unwrap_or(Value::Null));
+                        if let Some((t, subagent_tid)) = self.thread_of(&v) {
+                            if let Some(tid) = subagent_tid {
+                                t.on_subagent_notification(
+                                    &tid,
+                                    &m,
+                                    v.get("params").cloned().unwrap_or(Value::Null),
+                                );
+                            } else {
+                                t.on_notification(
+                                    &m,
+                                    v.get("params").cloned().unwrap_or(Value::Null),
+                                );
+                            }
                         }
                     }
                     _ => {}
@@ -273,6 +325,142 @@ impl CodexConn {
             let _ = tx.send(Err(json!({ "message": "process exited" })));
         }
     }
+}
+
+fn elicitation_to_questions(params: &Value) -> Vec<Value> {
+    let mode = s(params, "mode").unwrap_or_default();
+    let msg = s(params, "message").unwrap_or_else(|| "Input requested".into());
+    let server = s(params, "serverName").unwrap_or_default();
+    if mode == "url" {
+        let url = s(params, "url").unwrap_or_default();
+        return vec![json!({
+            "id": "__confirm__",
+            "header": if server.is_empty() { Value::Null } else { json!(server) },
+            "question": if url.is_empty() { msg } else { format!("{msg}\n{url}") },
+            "multiSelect": false,
+            "allowOther": false,
+            "options": [
+                { "label": "Accept", "description": "Confirm and continue" }
+            ],
+        })];
+    }
+    let Some(props) = params
+        .pointer("/requestedSchema/properties")
+        .and_then(|p| p.as_object())
+    else {
+        return vec![json!({
+            "id": "__confirm__",
+            "header": if server.is_empty() { Value::Null } else { json!(server) },
+            "question": msg,
+            "multiSelect": false,
+            "allowOther": true,
+            "options": [],
+        })];
+    };
+    props
+        .iter()
+        .map(|(k, schema)| {
+            let title = s(schema, "title").unwrap_or_else(|| k.clone());
+            let desc = s(schema, "description");
+            let ty = s(schema, "type").unwrap_or_else(|| "string".into());
+            let mut multi = false;
+            let mut options: Vec<Value> = Vec::new();
+            if let Some(en) = schema.get("enum").and_then(|e| e.as_array()) {
+                for v in en {
+                    if let Some(lbl) = v.as_str() {
+                        options.push(json!({ "label": lbl, "description": Value::Null }));
+                    }
+                }
+            } else if let Some(one_of) = schema
+                .get("oneOf")
+                .or_else(|| schema.get("anyOf"))
+                .and_then(|e| e.as_array())
+            {
+                for v in one_of {
+                    if let Some(c) = v.get("const").and_then(|x| x.as_str()) {
+                        let t = s(v, "title").unwrap_or_else(|| c.to_string());
+                        options.push(json!({ "label": t, "value": c, "description": Value::Null }));
+                    }
+                }
+            } else if ty == "array" {
+                multi = true;
+                if let Some(en) = schema.pointer("/items/enum").and_then(|e| e.as_array()) {
+                    for v in en {
+                        if let Some(lbl) = v.as_str() {
+                            options.push(json!({ "label": lbl, "description": Value::Null }));
+                        }
+                    }
+                } else if let Some(any_of) =
+                    schema.pointer("/items/anyOf").and_then(|e| e.as_array())
+                {
+                    for v in any_of {
+                        if let Some(c) = v.get("const").and_then(|x| x.as_str()) {
+                            let t = s(v, "title").unwrap_or_else(|| c.to_string());
+                            options.push(
+                                json!({ "label": t, "value": c, "description": Value::Null }),
+                            );
+                        }
+                    }
+                }
+            } else if ty == "boolean" {
+                options.push(json!({ "label": "true", "description": "Yes" }));
+                options.push(json!({ "label": "false", "description": "No" }));
+            }
+            let allow_other = options.is_empty();
+            json!({
+                "id": k,
+                "header": if server.is_empty() { Value::Null } else { json!(server) },
+                "question": if let Some(d) = desc { format!("{title}\n{d}") } else { title },
+                "multiSelect": multi,
+                "allowOther": allow_other,
+                "isSecret": false,
+                "options": options,
+                "schemaType": ty,
+            })
+        })
+        .collect()
+}
+
+fn build_elicitation_content(params: &Value, answers: Option<&Value>) -> Value {
+    let Some(ans_map) = answers.and_then(|a| a.as_object()) else {
+        return json!({});
+    };
+    let props = params
+        .pointer("/requestedSchema/properties")
+        .and_then(|p| p.as_object());
+    let mut out = serde_json::Map::new();
+    for (k, v) in ans_map {
+        if k == "__confirm__" {
+            continue;
+        }
+        let schema_ty = props
+            .and_then(|p| p.get(k))
+            .and_then(|s| s.get("type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("string");
+        let val = match (schema_ty, v) {
+            ("boolean", Value::String(s)) => json!(s == "true"),
+            ("integer", Value::String(s)) => s
+                .parse::<i64>()
+                .map(|n| json!(n))
+                .unwrap_or_else(|_| v.clone()),
+            ("number", Value::String(s)) => s
+                .parse::<f64>()
+                .map(|n| json!(n))
+                .unwrap_or_else(|_| v.clone()),
+            ("array", Value::String(s)) => {
+                let arr: Vec<&str> = s
+                    .split(',')
+                    .map(|x| x.trim())
+                    .filter(|x| !x.is_empty())
+                    .collect();
+                json!(arr)
+            }
+            _ => v.clone(),
+        };
+        out.insert(k.clone(), val);
+    }
+    Value::Object(out)
 }
 
 fn s(v: &Value, k: &str) -> Option<String> {
@@ -340,7 +528,10 @@ impl ManagedCodex {
         let init = me
             .request(
                 "initialize",
-                json!({ "clientInfo": { "name": "switchtether", "title": "SwitchTether", "version": env!("CARGO_PKG_VERSION") } }),
+                json!({
+                    "clientInfo": { "name": "switchtether", "title": "SwitchTether", "version": env!("CARGO_PKG_VERSION") },
+                    "capabilities": { "experimentalApi": true, "requestAttestation": false }
+                }),
                 Duration::from_secs(30),
             )
             .await;
@@ -573,6 +764,17 @@ impl ManagedCodex {
     }
 
     pub(crate) async fn on_server_request(&self, rpc_id: Value, method: &str, params: Value) {
+        self.on_server_request_with_parent(rpc_id, method, params, None)
+            .await;
+    }
+
+    pub(crate) async fn on_server_request_with_parent(
+        &self,
+        rpc_id: Value,
+        method: &str,
+        params: Value,
+        parent_id: Option<String>,
+    ) {
         let ts = crate::util::now_rfc3339();
         let request_id = format!(
             "cx-{}",
@@ -582,7 +784,8 @@ impl ManagedCodex {
             }
         );
         let event_id = format!("req:{request_id}");
-        let draft = match method {
+        let mut is_question = false;
+        let mut draft = match method {
             "item/commandExecution/requestApproval" => EventDraft::new(
                 &event_id,
                 "approval_request",
@@ -617,27 +820,99 @@ impl ManagedCodex {
                     "resolved": false,
                 }),
             ),
+            "item/permissions/requestApproval" => EventDraft::new(
+                &event_id,
+                "approval_request",
+                &ts,
+                json!({
+                    "requestId": request_id, "kind": "tool", "title": "Grant permissions",
+                    "detail": params.get("reason"), "cwd": params.get("cwd"),
+                    "toolName": "permissions", "input": params.get("permissions").cloned().unwrap_or(Value::Null),
+                    "options": [
+                        { "id": "allow", "label": "Allow" },
+                        { "id": "allow_session", "label": "Allow for session" },
+                        { "id": "deny", "label": "Deny" }
+                    ],
+                    "resolved": false,
+                }),
+            ),
+            "item/tool/requestUserInput" => {
+                is_question = true;
+                let questions: Vec<Value> = params
+                    .get("questions")
+                    .and_then(|q| q.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, q)| {
+                        let id = q.get("id").cloned().unwrap_or_else(|| json!(i.to_string()));
+                        let opts = q
+                            .get("options")
+                            .and_then(|o| o.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        let is_other = q
+                            .get("isOther")
+                            .and_then(|b| b.as_bool())
+                            .unwrap_or(opts.is_empty());
+                        let is_secret =
+                            q.get("isSecret").and_then(|b| b.as_bool()).unwrap_or(false);
+                        json!({
+                            "id": id,
+                            "header": q.get("header"),
+                            "question": q.get("question"),
+                            "multiSelect": false,
+                            "allowOther": is_other,
+                            "isSecret": is_secret,
+                            "options": opts,
+                        })
+                    })
+                    .collect();
+                EventDraft::new(
+                    &event_id,
+                    "question",
+                    &ts,
+                    json!({
+                        "requestId": request_id,
+                        "questions": questions,
+                        "cancellable": true,
+                        "resolved": false,
+                    }),
+                )
+            }
+            "mcpServer/elicitation/request" => {
+                is_question = true;
+                let questions = elicitation_to_questions(&params);
+                let mut data = json!({
+                    "requestId": request_id,
+                    "questions": questions,
+                    "cancellable": true,
+                    "elicitationMode": params.get("mode"),
+                    "serverName": params.get("serverName"),
+                    "resolved": false,
+                });
+                if let Some(u) = params.get("url") {
+                    data["url"] = u.clone();
+                }
+                EventDraft::new(&event_id, "question", &ts, data)
+            }
             _ if self.remote.is_some() => {
-                // Codex Desktop owns the connection and answers these itself.
+                // Codex Desktop owns the connection and answers other internal requests itself.
                 return;
             }
             _ => {
-                // Elicitations / permission profiles / dynamic tools are not
-                // supported from the phone yet: answer explicitly so the turn
-                // does not hang.
-                let reply = match method {
-                    "mcpServer/elicitation/request" => {
-                        json!({ "id": rpc_id, "result": { "action": "decline" } })
-                    }
-                    _ => {
-                        json!({ "id": rpc_id, "error": { "code": -32601, "message": "not supported by SwitchTether" } })
-                    }
-                };
+                // Dynamic tool calls or auth tokens are not supported from the phone:
+                // answer explicitly so the turn does not hang.
+                let reply = json!({ "id": rpc_id, "error": { "code": -32601, "message": "not supported by SwitchTether" } });
                 let _ = self.write(&reply).await;
                 self.system(&format!("Declined unsupported request: {method}"));
                 return;
             }
         };
+        if let Some(pid) = parent_id {
+            draft.parent_id = Some(pid);
+        }
         self.pending.lock().insert(
             request_id,
             PendingApproval {
@@ -649,7 +924,14 @@ impl ManagedCodex {
         );
         self.log.lock().upsert(draft, true);
         self.set_status("waiting");
-        self.publish_status("waiting_approval", None);
+        self.publish_status(
+            if is_question {
+                "waiting_input"
+            } else {
+                "waiting_approval"
+            },
+            None,
+        );
     }
 
     fn item_events(&self, item: &Value, turn_id: Option<&str>, done: bool) -> Vec<EventDraft> {
@@ -663,16 +945,44 @@ impl ManagedCodex {
         };
         match item.get("type").and_then(|t| t.as_str()) {
             Some("userMessage") => {
-                let text: Vec<String> = item
-                    .get("content")
-                    .and_then(|c| c.as_array())
-                    .map(|a| a.iter().filter_map(|x| s(x, "text")).collect())
-                    .unwrap_or_default();
+                let mut text: Vec<String> = Vec::new();
+                let mut image_items: Vec<Value> = Vec::new();
+                if let Some(arr) = item.get("content").and_then(|c| c.as_array()) {
+                    for x in arr {
+                        match x.get("type").and_then(|t| t.as_str()) {
+                            Some("text") => {
+                                if let Some(t) = s(x, "text") {
+                                    text.push(t);
+                                }
+                            }
+                            Some("image") => {
+                                if let Some(url) = s(x, "url") {
+                                    image_items.push(json!({ "kind": "url", "url": url }));
+                                }
+                            }
+                            Some("localImage") => {
+                                if let Some(path) = s(x, "path") {
+                                    image_items.push(json!({ "kind": "local", "path": path }));
+                                }
+                            }
+                            _ => {
+                                if let Some(t) = s(x, "text") {
+                                    text.push(t);
+                                }
+                            }
+                        }
+                    }
+                }
                 push(EventDraft::new(
                     eid,
                     "user_message",
                     ts,
-                    json!({ "text": text.join("\n"), "images": 0, "source": "phone" }),
+                    json!({
+                        "text": text.join("\n"),
+                        "images": image_items.len(),
+                        "imageItems": image_items,
+                        "source": "phone"
+                    }),
                 ));
             }
             Some("agentMessage") => {
@@ -850,6 +1160,100 @@ impl ManagedCodex {
                     ));
                 }
             }
+            Some("collabAgentToolCall") => {
+                let status = match item.get("status").and_then(|x| x.as_str()) {
+                    Some("completed") => "completed",
+                    Some("failed") => "failed",
+                    _ => "running",
+                };
+                let tool = s(item, "tool").unwrap_or_else(|| "spawnAgent".into());
+                let prompt = s(item, "prompt");
+                let title = prompt
+                    .as_deref()
+                    .and_then(|p| p.lines().next())
+                    .map(|l| preview(l, 120).0)
+                    .unwrap_or_else(|| tool.clone());
+                push(EventDraft::new(
+                    &eid,
+                    "tool_call",
+                    &ts,
+                    json!({
+                        "callId": id, "name": tool, "title": title,
+                        "category": "task", "input": item, "status": status,
+                    }),
+                ));
+                let receivers: Vec<String> = item
+                    .get("receiverThreadIds")
+                    .and_then(|r| r.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let states = item.get("agentsStates").and_then(|s| s.as_object());
+                for tid in receivers {
+                    let st = states.and_then(|m| m.get(&tid));
+                    let sa_status = match st.and_then(|v| s(v, "status")).as_deref() {
+                        Some("completed") => "completed",
+                        Some("errored") => "failed",
+                        Some("interrupted") => "interrupted",
+                        Some("shutdown") => "completed",
+                        Some("notFound") => "failed",
+                        _ => {
+                            if status == "failed" {
+                                "failed"
+                            } else {
+                                "running"
+                            }
+                        }
+                    };
+                    let mut sa = EventDraft::new(
+                        format!("cx-sa-{tid}"),
+                        "subagent",
+                        &ts,
+                        json!({
+                            "agentId": tid,
+                            "description": prompt,
+                            "status": sa_status,
+                            "message": st.and_then(|v| s(v, "message")),
+                            "callId": id,
+                        }),
+                    );
+                    sa.parent_id = Some(id.clone());
+                    push(sa);
+                }
+            }
+            Some("imageView") => {
+                let path = s(item, "path").unwrap_or_default();
+                push(EventDraft::new(
+                    eid,
+                    "assistant_message",
+                    ts,
+                    json!({
+                        "text": format!("Viewed image: `{}`", path),
+                        "imageItems": [{ "kind": "local", "path": path }],
+                    }),
+                ));
+            }
+            Some("imageGeneration") => {
+                let status = s(item, "status").unwrap_or_default();
+                let saved = s(item, "savedPath");
+                let prompt = s(item, "revisedPrompt").unwrap_or_default();
+                let mut imgs = Vec::new();
+                if let Some(p) = &saved {
+                    imgs.push(json!({ "kind": "local", "path": p }));
+                }
+                push(EventDraft::new(
+                    eid,
+                    "assistant_message",
+                    ts,
+                    json!({
+                        "text": if prompt.is_empty() { format!("Generated image ({status})") } else { prompt },
+                        "imageItems": imgs,
+                    }),
+                ));
+            }
             Some("webSearch") => push(EventDraft::new(
                 eid,
                 "tool_call",
@@ -874,6 +1278,82 @@ impl ManagedCodex {
             None => {}
         }
         out
+    }
+
+    pub(crate) fn on_subagent_started(&self, tid: &str, thread: &Value) {
+        let desc = s(thread, "agentNickname")
+            .or_else(|| s(thread, "agentRole"))
+            .or_else(|| s(thread, "name"))
+            .or_else(|| s(thread, "preview").filter(|p| !p.is_empty()));
+        let mut d = EventDraft::new(
+            format!("cx-sa-{tid}"),
+            "subagent",
+            crate::util::now_rfc3339(),
+            json!({
+                "agentId": tid,
+                "agentType": s(thread, "agentRole"),
+                "description": desc,
+                "status": "running",
+            }),
+        );
+        // Preserve existing parent_id if collabAgentToolCall already created this subagent row.
+        let mut log = self.log.lock();
+        if let Some(existing) = log.get(&d.id) {
+            d.parent_id = existing.parent_id.clone();
+            if d.data["description"].is_null() {
+                d.data["description"] = existing.data["description"].clone();
+            }
+        }
+        log.upsert(d, true);
+    }
+
+    pub(crate) fn on_subagent_notification(&self, tid: &str, method: &str, p: Value) {
+        let sa_id = format!("cx-sa-{tid}");
+        match method {
+            "thread/status/changed" => {
+                let ty = p.pointer("/status/type").and_then(|t| t.as_str());
+                let mapped = match ty {
+                    Some("idle") => Some("completed"),
+                    Some("systemError") => Some("failed"),
+                    Some("active") => Some("running"),
+                    _ => None,
+                };
+                if let Some(st) = mapped {
+                    self.log.lock().update(&sa_id, true, |e| {
+                        e.data["status"] = json!(st);
+                    });
+                }
+            }
+            "turn/completed" => {
+                let status = p
+                    .get("turn")
+                    .and_then(|t| s(t, "status"))
+                    .unwrap_or_default();
+                let mapped = match status.as_str() {
+                    "interrupted" => "interrupted",
+                    "failed" => "failed",
+                    _ => "completed",
+                };
+                self.log.lock().update(&sa_id, true, |e| {
+                    e.data["status"] = json!(mapped);
+                });
+            }
+            "item/started" | "item/completed" => {
+                if let Some(item) = p.get("item") {
+                    let done = method == "item/completed";
+                    let turn_id = s(&p, "turnId");
+                    let drafts = self.item_events(item, turn_id.as_deref(), done);
+                    let mut log = self.log.lock();
+                    for mut d in drafts {
+                        if d.parent_id.is_none() {
+                            d.parent_id = Some(sa_id.clone());
+                        }
+                        log.upsert(d, true);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn on_notification(&self, method: &str, p: Value) {
@@ -1084,13 +1564,34 @@ impl ManagedSession for ManagedCodex {
     fn has_pending_requests(&self) -> bool {
         !self.pending.lock().is_empty()
     }
+    fn supports_images(&self) -> bool {
+        true
+    }
 
     async fn send_message(&self, text: &str) -> ApiResult<()> {
+        self.send_message_with_images(text, &[]).await
+    }
+
+    async fn send_message_with_images(
+        &self,
+        text: &str,
+        images: &[crate::agents::managed::ImageAttachment],
+    ) -> ApiResult<()> {
         if self.liveness() != Liveness::Live {
             return Err(ApiError::conflict("codex app-server has exited"));
         }
         let thread_id = self.thread_id()?;
-        let input = json!([{ "type": "text", "text": text, "text_elements": [] }]);
+        let mut inputs: Vec<Value> = Vec::new();
+        if !text.trim().is_empty() {
+            inputs.push(json!({ "type": "text", "text": text, "text_elements": [] }));
+        }
+        for img in images {
+            inputs.push(json!({
+                "type": "image",
+                "url": format!("data:{};base64,{}", img.media_type, img.data_base64),
+            }));
+        }
+        let input = Value::Array(inputs);
         let current_turn = self.state.lock().turn_id.clone();
         match current_turn {
             // A turn is running: steer it with additional input.
@@ -1135,16 +1636,9 @@ impl ManagedSession for ManagedCodex {
         decision: &str,
         _message: Option<String>,
         _updated_input: Option<Value>,
-        _answers: Option<Value>,
+        answers: Option<Value>,
         by: &str,
     ) -> ApiResult<Value> {
-        let codex_decision = match decision {
-            "allow" => "accept",
-            "allow_session" => "acceptForSession",
-            "deny" => "decline",
-            "abort" => "cancel",
-            other => return Err(ApiError::validation(format!("unknown decision '{other}'"))),
-        };
         let pending = {
             let mut p = self.pending.lock();
             match p.remove(request_id) {
@@ -1159,6 +1653,98 @@ impl ManagedSession for ManagedCodex {
                 }
             }
         };
+        let reply_msg = match pending.method.as_str() {
+            "item/tool/requestUserInput" => match decision {
+                "answer" | "allow" => {
+                    let ans_map = answers.as_ref().and_then(|a| a.as_object());
+                    let mut out = serde_json::Map::new();
+                    if let Some(m) = ans_map {
+                        for (k, v) in m {
+                            let arr: Vec<String> = match v {
+                                Value::Array(a) => a
+                                    .iter()
+                                    .filter_map(|x| x.as_str().map(String::from))
+                                    .collect(),
+                                Value::String(s) => {
+                                    if s.is_empty() {
+                                        vec![]
+                                    } else {
+                                        vec![s.clone()]
+                                    }
+                                }
+                                other => vec![other.to_string()],
+                            };
+                            out.insert(k.clone(), json!({ "answers": arr }));
+                        }
+                    }
+                    json!({ "id": pending.rpc_id, "result": { "answers": Value::Object(out) } })
+                }
+                "cancel" | "deny" | "abort" => json!({
+                    "id": pending.rpc_id,
+                    "error": { "code": -32000, "message": "User cancelled" }
+                }),
+                other => {
+                    self.pending.lock().insert(request_id.to_string(), pending);
+                    return Err(ApiError::validation(format!("unknown decision '{other}'")));
+                }
+            },
+            "mcpServer/elicitation/request" => match decision {
+                "answer" | "allow" => {
+                    let mode = s(&pending.params, "mode").unwrap_or_default();
+                    let content = if mode == "url" {
+                        Value::Null
+                    } else {
+                        build_elicitation_content(&pending.params, answers.as_ref())
+                    };
+                    json!({
+                        "id": pending.rpc_id,
+                        "result": { "action": "accept", "content": content, "_meta": null }
+                    })
+                }
+                "deny" => json!({
+                    "id": pending.rpc_id,
+                    "result": { "action": "decline", "content": null, "_meta": null }
+                }),
+                "cancel" | "abort" => json!({
+                    "id": pending.rpc_id,
+                    "result": { "action": "cancel", "content": null, "_meta": null }
+                }),
+                other => {
+                    self.pending.lock().insert(request_id.to_string(), pending);
+                    return Err(ApiError::validation(format!("unknown decision '{other}'")));
+                }
+            },
+            "item/permissions/requestApproval" => match decision {
+                "allow" | "allow_session" => json!({
+                    "id": pending.rpc_id,
+                    "result": {
+                        "permissions": pending.params.get("permissions").cloned().unwrap_or(json!({})),
+                        "scope": if decision == "allow_session" { "session" } else { "turn" },
+                    }
+                }),
+                "deny" | "abort" | "cancel" => json!({
+                    "id": pending.rpc_id,
+                    "result": { "permissions": {}, "scope": "turn" }
+                }),
+                other => {
+                    self.pending.lock().insert(request_id.to_string(), pending);
+                    return Err(ApiError::validation(format!("unknown decision '{other}'")));
+                }
+            },
+            _ => {
+                let codex_decision = match decision {
+                    "allow" => "accept",
+                    "allow_session" => "acceptForSession",
+                    "deny" => "decline",
+                    "abort" | "cancel" => "cancel",
+                    other => {
+                        self.pending.lock().insert(request_id.to_string(), pending);
+                        return Err(ApiError::validation(format!("unknown decision '{other}'")));
+                    }
+                };
+                json!({ "id": pending.rpc_id, "result": { "decision": codex_decision } })
+            }
+        };
         self.resolved
             .lock()
             .insert(request_id.to_string(), by.to_string());
@@ -1170,8 +1756,7 @@ impl ManagedSession for ManagedCodex {
             }
             _ => None,
         };
-        self.write(&json!({ "id": pending.rpc_id, "result": { "decision": codex_decision } }))
-            .await?;
+        self.write(&reply_msg).await?;
         if let Some(rx) = verdict {
             // Codex Desktop may have answered at the same moment: the shim decides.
             if let Ok(Ok(false)) = tokio::time::timeout(Duration::from_secs(5), rx).await {
@@ -1184,7 +1769,6 @@ impl ManagedSession for ManagedCodex {
                 .with_details(json!({ "resolvedBy": "desktop" })));
             }
         }
-        let _ = (&pending.method, &pending.params);
         let ev = self.log.lock().update(&pending.event_id, true, |e| {
             e.data["resolved"] = json!(true);
             e.data["decision"] = json!(decision);
@@ -1204,6 +1788,12 @@ impl ManagedSession for ManagedCodex {
         }
         if let Some(mut c) = self.child.lock().take() {
             let _ = c.start_kill();
+        }
+        let mut st = self.state.lock();
+        if st.liveness == Liveness::Live {
+            st.liveness = Liveness::Ended;
+            st.status = "completed";
+            st.last_active_at_ms = crate::util::now_ms();
         }
     }
     fn origin(&self) -> &'static str {
@@ -1328,5 +1918,150 @@ mod version_tests {
             super::parse_version("codex-cli 0.137.0") < super::parse_version("codex-cli 0.167.0")
         );
         assert_eq!(super::parse_version(""), (0, 0, 0));
+    }
+
+    #[tokio::test]
+    async fn codex_user_input_elicitation_and_subagent_routing() {
+        use super::*;
+        use crate::agents::managed::ManagedSession;
+        use crate::agents::store::SessionLog;
+        use parking_lot::Mutex;
+        use std::sync::Arc;
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let conn = CodexConn::new(tx, "desktop_app", PathBuf::from("."));
+        let log = Arc::new(Mutex::new(SessionLog::new("attached:p1", None)));
+        let parent = ManagedCodex::attached(
+            "attached:p1".into(),
+            conn.clone(),
+            "th-parent".into(),
+            PathBuf::from("."),
+            log.clone(),
+        );
+        conn.threads
+            .lock()
+            .insert("th-parent".into(), parent.clone());
+
+        // 1. Subagent thread discovered via thread/started is NOT returned as a top-level thread.
+        let sub_frame = json!({
+            "t": "out",
+            "line": json!({
+                "method": "thread/started",
+                "params": {
+                    "thread": {
+                        "id": "th-child",
+                        "parentThreadId": "th-parent",
+                        "agentRole": "explorer",
+                        "agentNickname": "Scout"
+                    }
+                }
+            }).to_string()
+        });
+        assert!(conn.discover(&sub_frame).is_empty());
+        assert_eq!(
+            conn.subagent_parents
+                .lock()
+                .get("th-child")
+                .map(String::as_str),
+            Some("th-parent")
+        );
+        let sa_ev = log.lock().get("cx-sa-th-child").cloned().unwrap();
+        assert_eq!(sa_ev.kind, "subagent");
+        assert_eq!(sa_ev.data["status"], "running");
+
+        // Subagent turn/completed updates subagent status to completed.
+        conn.on_frame(json!({
+            "t": "out",
+            "line": json!({
+                "method": "turn/completed",
+                "params": { "threadId": "th-child", "turn": { "id": "t1", "status": "completed" } }
+            }).to_string()
+        }))
+        .await;
+        assert_eq!(
+            log.lock().get("cx-sa-th-child").unwrap().data["status"],
+            "completed"
+        );
+
+        // 2. item/tool/requestUserInput produces a question event and accepts structured answers.
+        parent
+            .on_server_request(
+                json!(42),
+                "item/tool/requestUserInput",
+                json!({
+                    "threadId": "th-parent",
+                    "turnId": "t1",
+                    "itemId": "i1",
+                    "questions": [{
+                        "id": "q1",
+                        "header": "Target",
+                        "question": "Which env?",
+                        "isOther": true,
+                        "isSecret": false,
+                        "options": [{ "label": "staging", "description": "Staging" }]
+                    }]
+                }),
+            )
+            .await;
+        let q_ev = log.lock().get("req:cx-42").cloned().unwrap();
+        assert_eq!(q_ev.kind, "question");
+        assert_eq!(q_ev.data["questions"][0]["allowOther"], true);
+
+        // Answer in background (verdict channel waits for shim accepted/rejected in attached mode).
+        let p2 = parent.clone();
+        let ans_task = tokio::spawn(async move {
+            p2.respond(
+                "cx-42",
+                "answer",
+                None,
+                None,
+                Some(json!({ "q1": "staging" })),
+                "phone",
+            )
+            .await
+        });
+        let injected = rx.recv().await.unwrap();
+        let inj_v: Value = serde_json::from_str(&injected).unwrap();
+        let inner: Value = serde_json::from_str(inj_v["line"].as_str().unwrap()).unwrap();
+        assert_eq!(inner["id"], 42);
+        assert_eq!(inner["result"]["answers"]["q1"]["answers"][0], "staging");
+        conn.on_frame(json!({ "t": "accepted", "line": inj_v["line"] }))
+            .await;
+        assert!(ans_task.await.unwrap().is_ok());
+
+        // 3. mcpServer/elicitation/request (form) maps schema and cancel sends action=cancel.
+        parent
+            .on_server_request(
+                json!("el-1"),
+                "mcpServer/elicitation/request",
+                json!({
+                    "threadId": "th-parent",
+                    "turnId": "t1",
+                    "serverName": "github",
+                    "mode": "form",
+                    "message": "Select options",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {
+                            "repo": { "type": "string", "title": "Repository" },
+                            "dryRun": { "type": "boolean", "title": "Dry run" }
+                        }
+                    }
+                }),
+            )
+            .await;
+        assert_eq!(log.lock().get("req:cx-el-1").unwrap().kind, "question");
+        let p3 = parent.clone();
+        let cancel_task = tokio::spawn(async move {
+            p3.respond("cx-el-1", "cancel", None, None, None, "phone")
+                .await
+        });
+        let injected2 = rx.recv().await.unwrap();
+        let inj_v2: Value = serde_json::from_str(&injected2).unwrap();
+        let inner2: Value = serde_json::from_str(inj_v2["line"].as_str().unwrap()).unwrap();
+        assert_eq!(inner2["result"]["action"], "cancel");
+        conn.on_frame(json!({ "t": "accepted", "line": inj_v2["line"] }))
+            .await;
+        assert!(cancel_task.await.unwrap().is_ok());
     }
 }

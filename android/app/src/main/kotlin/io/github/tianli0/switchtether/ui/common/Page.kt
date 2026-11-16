@@ -24,14 +24,18 @@ import io.github.suqi8.coui.kmp.basic.AppBarBlurOverlayDefaults
 import io.github.suqi8.coui.kmp.basic.COUIScrollBehavior
 import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.CardDefaults
+import io.github.suqi8.coui.kmp.basic.HighlightedIconButton
 import io.github.suqi8.coui.kmp.basic.Icon
-import io.github.suqi8.coui.kmp.basic.IconButton
 import io.github.suqi8.coui.kmp.basic.Scaffold
 import io.github.suqi8.coui.kmp.basic.ScrollBehavior
 import io.github.suqi8.coui.kmp.basic.SmallTopAppBar
 import io.github.suqi8.coui.kmp.basic.TopAppBar
+import io.github.suqi8.coui.kmp.basic.couiTopAppBarActionItem
+import io.github.suqi8.coui.kmp.icon.COUIIcons
+import io.github.suqi8.coui.kmp.icon.extended.Back
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.utils.overScrollVertical
+import io.github.suqi8.coui.kmp.utils.scrollEndHaptic
 import io.github.tianli0.switchtether.R
 
 /** Space the floating bottom navigation bar occupies over page content (set by the shell). */
@@ -52,6 +56,7 @@ fun pageContainerColor(): Color = AppBarBlurOverlayDefaults.containerColor()
 fun Modifier.pageScroll(): Modifier {
     val behavior = LocalPageScrollBehavior.current
     return this
+        .scrollEndHaptic()
         .overScrollVertical()
         .then(if (behavior != null) Modifier.nestedScroll(behavior.nestedScrollConnection) else Modifier)
         .fillMaxHeight()
@@ -85,27 +90,56 @@ fun Page(
         containerColor = color,
         topBar = {
             val nav: @Composable () -> Unit = {
-                if (onBack != null) ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), onBack)
+                if (onBack != null) {
+                    HighlightedIconButton(
+                        onClick = onBack,
+                        modifier = Modifier.couiTopAppBarActionItem(),
+                    ) {
+                        Icon(imageVector = COUIIcons.Back, contentDescription = stringResource(R.string.action_back))
+                    }
+                }
             }
             if (large) {
-                TopAppBar(title = title, subtitle = subtitle, color = color, scrollBehavior = behavior, navigationIcon = nav, actions = actions)
+                TopAppBar(
+                    title = title,
+                    subtitle = subtitle,
+                    color = color,
+                    scrollBehavior = behavior,
+                    showDivider = false,
+                    gradientGlass = true,
+                    navigationIcon = nav,
+                    actions = actions,
+                )
             } else {
-                SmallTopAppBar(title = title, subtitle = subtitle, color = color, navigationIcon = nav, actions = actions)
+                SmallTopAppBar(
+                    title = title,
+                    subtitle = subtitle,
+                    color = color,
+                    scrollBehavior = behavior,
+                    showDivider = false,
+                    gradientGlass = true,
+                    navigationIcon = nav,
+                    actions = actions,
+                )
             }
         },
         floatingActionButton = floatingActionButton,
     ) { inner ->
-        CompositionLocalProvider(LocalPageScrollBehavior provides if (large) behavior else null) {
+        CompositionLocalProvider(LocalPageScrollBehavior provides behavior) {
             Column(Modifier.fillMaxSize().padding(top = inner.calculateTopPadding()), content = content)
         }
     }
 }
 
-/** 48dp touch target icon button for app bars. */
+/** 40dp COUI17 circular toolbar icon button with standard action spacing. */
 @Composable
 fun ToolbarIcon(icon: ImageVector, contentDescription: String, onClick: () -> Unit, enabled: Boolean = true) {
-    IconButton(onClick = onClick, enabled = enabled, minWidth = 48.dp, minHeight = 48.dp) {
-        Icon(icon, contentDescription = contentDescription, tint = COUITheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+    HighlightedIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.couiTopAppBarActionItem(),
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = COUITheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
     }
 }
 

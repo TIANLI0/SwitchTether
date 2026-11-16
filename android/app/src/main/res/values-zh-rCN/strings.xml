@@ -151,6 +151,12 @@
     <string name="render_resolved">%1$s · 由 %2$s</string>
     <string name="render_control_unavailable">请在电脑上处理：此会话的该控制为 %1$s。</string>
     <string name="render_question">提问</string>
+    <string name="render_question_other">其他（自定义输入）</string>
+    <string name="render_question_input_hint">输入你的回答…</string>
+    <string name="render_image_preview">图片预览</string>
+    <string name="composer_attach_image">添加图片</string>
+    <string name="notif_battery_unrestricted">已设为无限制（支持开机与后台自动重连）</string>
+    <string name="notif_battery_restricted">当前受电池优化限制 — 建议设为“无限制”以保障开机和后台重连</string>
     <string name="render_answered">已回答</string>
     <string name="render_submit_answer">提交回答</string>
     <string name="render_subagent">子智能体</string>
@@ -364,4 +370,13 @@
     <string name="usage_log_source">来源</string>
     <string name="usage_log_id">请求 ID</string>
     <string name="usage_last_sync">会话日志同步于 %1$s（电脑时间）</string>
+    <string name="manage_agents_section">电脑上的 Agent</string>
+    <string name="notif_battery_fix_title">允许后台运行</string>
+    <string name="notif_battery_fix_summary">省电策略可能让“任务完成”通知延迟，点按为 SwitchTether 解除限制。</string>
+    <string name="new_session_options">选项</string>
+    <string name="new_session_model_default">默认模型</string>
+    <string name="new_session_note">在电脑上新建一个可由手机控制的会话；你在终端或 VS Code 里自己开的会话不受影响。</string>
+    <string name="perm_default_short">逐项确认</string>
+    <string name="perm_accept_edits_short">自动编辑</string>
+    <string name="perm_plan_short">仅规划</string>
 </resources>

@@ -31,6 +31,15 @@ data class PinnedSessionState(
     /** What the agent is doing right now ("运行命令 npm test"); null → "思考中…". */
     val step: Step? = null,
     val steps: Int = 0,
+    /** The agent's latest words this turn (first line of its newest message), shown as the card's second line. */
+    val note: String? = null,
+    /** Plan progress (the agent's todo list): done / total and the item in progress. */
+    val planDone: Int = 0,
+    val planTotal: Int = 0,
+    val planCurrent: String? = null,
+    /** Distinct files changed this turn, and tokens used this turn. */
+    val files: Set<String> = emptySet(),
+    val tokens: Long = 0,
     val turnStartedMs: Long = 0,
     val phaseSinceMs: Long = 0,
     val pending: PendingRequest? = null,
@@ -76,6 +85,17 @@ object LiveReducer {
                 s.startTurnIfIdle(now).copy(step = classifyStep(d.str("name"), d.str("title"), d.str("category"), d["input"] as? kotlinx.serialization.json.JsonObject), steps = s.steps + 1)
             } else s
             EventKinds.REASONING -> s.startTurnIfIdle(now).copy(step = null)
+            EventKinds.ASSISTANT_MESSAGE -> d.str("text")?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() }
+                ?.let { line -> s.copy(note = if (line.length > 90) line.take(89) + "…" else line) } ?: s
+            EventKinds.PLAN -> {
+                val list = (d["items"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { it as? kotlinx.serialization.json.JsonObject }
+                val current = list.firstOrNull { it.str("status") == "in_progress" }?.str("text", "content")?.lineSequence()?.firstOrNull()?.trim()
+                    ?.let { if (it.length > 60) it.take(59) + "…" else it }
+                s.copy(planDone = list.count { it.str("status") == "completed" }, planTotal = list.size, planCurrent = current)
+            }
+            EventKinds.FILE_CHANGE -> d.str("path")?.let { s.copy(files = s.files + it) } ?: s
+            EventKinds.USAGE -> s.copy(tokens = s.tokens + ((d["inputTokens"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull() ?: 0L) +
+                ((d["outputTokens"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull() ?: 0L))
             EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION -> {
                 val rid = d.str("requestId") ?: e.id
                 val resolved = d.bool("resolved") == true
@@ -137,7 +157,7 @@ object LiveReducer {
     private fun PinnedSessionState.startTurnIfIdle(now: Long): PinnedSessionState = when (phase) {
         LivePhase.RUNNING -> if (turnStartedMs == 0L) copy(turnStartedMs = now) else this
         LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> this
-        else -> copy(phase = LivePhase.RUNNING, phaseSinceMs = now, turnStartedMs = now, steps = 0, step = null, dismissed = false, resolvedElsewhere = false, waitedThisTurn = false)
+        else -> copy(phase = LivePhase.RUNNING, phaseSinceMs = now, turnStartedMs = now, steps = 0, step = null, note = null, files = emptySet(), tokens = 0, dismissed = false, resolvedElsewhere = false, waitedThisTurn = false)
     }
 
     private fun PinnedSessionState.bumpIfChanged(old: PinnedSessionState): PinnedSessionState =
@@ -183,6 +203,16 @@ interface LiveText {
     fun chipOffline(): String
     fun chipEnded(): String
     fun thinking(): String
+    /** Capsule text while running, by what the agent is doing ("命令", "编辑", …; ≤ 5 characters). */
+    fun chipStep(kind: StepKind?): String
+    /** "已执行 12 步" */
+    fun stepsDone(n: Int): String
+    /** "计划 3/5 · 正在：写单元测试" */
+    fun plan(done: Int, total: Int, current: String?): String
+    /** "改动 4 个文件" */
+    fun filesChanged(n: Int): String
+    /** "12.3K tokens" */
+    fun tokensUsed(tokens: String): String
     /** "运行命令 npm test" / "编辑 Login.kt" / "处理中". */
     fun step(step: Step): String
     fun waitingApproval(): String
@@ -204,6 +234,22 @@ interface LiveText {
         override fun chipOffline() = "Off"
         override fun chipEnded() = "Ended"
         override fun thinking() = "Thinking…"
+        override fun chipStep(kind: StepKind?) = when (kind) {
+            null -> "Think"
+            StepKind.COMMAND -> "Run"
+            StepKind.EDIT -> "Edit"
+            StepKind.READ -> "Read"
+            StepKind.SEARCH -> "Find"
+            StepKind.WEB_FETCH, StepKind.WEB_SEARCH -> "Web"
+            StepKind.SUBAGENT -> "Agent"
+            StepKind.PLAN -> "Plan"
+            StepKind.MESSAGE -> "Reply"
+            StepKind.OTHER -> "Busy"
+        }
+        override fun stepsDone(n: Int) = if (n == 1) "1 step" else "$n steps"
+        override fun plan(done: Int, total: Int, current: String?) = "Plan $done/$total" + (current?.let { " · now: $it" } ?: "")
+        override fun filesChanged(n: Int) = if (n == 1) "1 file changed" else "$n files changed"
+        override fun tokensUsed(tokens: String) = "$tokens tokens"
         override fun step(step: Step) = when (step.kind) {
             StepKind.COMMAND -> "Running " + (step.detail ?: "a command")
             StepKind.EDIT -> "Editing " + (step.detail ?: "files")
@@ -254,6 +300,13 @@ data class LiveUpdateSpec(
     val progressValue: Int = 0,
     val segments: List<Int> = emptyList(),
     val tone: Tone = Tone.NORMAL,
+    val phase: LivePhase = LivePhase.RUNNING,
+    /** What the agent is doing now; picks the card's own icon (terminal, pencil, magnifier, …). */
+    val stepKind: StepKind? = null,
+    /** Expanded body: the step, the agent's latest words and the step count. Empty when there is nothing more to say. */
+    val detail: String = "",
+    /** The short status shown next to the elapsed time ("12 steps"). */
+    val progressNote: String = "",
 ) {
     /**
      * Never indeterminate: ColorOS Fluid Cloud renders no bar for an indeterminate ProgressStyle.
@@ -300,7 +353,7 @@ object LiveUpdateRenderer {
         val segments = if (staged) listOf(33, 33, 34) else listOf(50, 50)
         val finished = s.phase == LivePhase.DONE || s.phase == LivePhase.FAILED || s.phase == LivePhase.INTERRUPTED
         val chip = when (s.phase) {
-            LivePhase.RUNNING -> t.chipRunning()
+            LivePhase.RUNNING -> if (s.step != null || s.steps > 0) t.chipStep(s.step?.kind) else t.chipRunning()
             LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> t.chipWaiting()
             LivePhase.DONE -> t.chipDone()
             LivePhase.FAILED -> t.chipFailed()
@@ -314,12 +367,27 @@ object LiveUpdateRenderer {
             // becomes its file name).
             LivePhase.WAITING_APPROVAL -> s.pending?.title?.takeIf { it.isNotBlank() }?.let { t.waitingApproval() + " · " + shortSubject(it) } ?: t.waitingApproval()
             LivePhase.WAITING_INPUT -> s.pending?.title?.takeIf { it.isNotBlank() } ?: t.waitingInput()
-            LivePhase.DONE -> t.done()
+            LivePhase.DONE -> if (s.steps > 0) t.done() + " · " + t.stepsDone(s.steps) else t.done()
             LivePhase.FAILED -> t.failed()
             LivePhase.INTERRUPTED -> t.interrupted()
             LivePhase.OFFLINE -> t.offline()
             LivePhase.ENDED -> t.ended()
         }
+        // Expanded body, one fact per line: what it is doing, what it just said, where the plan stands,
+        // and a totals line (steps · files · tokens).
+        val totals = listOfNotNull(
+            if (s.steps > 0) t.stepsDone(s.steps) else null,
+            if (s.files.isNotEmpty()) t.filesChanged(s.files.size) else null,
+            if (s.tokens > 0) t.tokensUsed(io.github.tianli0.switchtether.remote.usage.UsageFormat.tokens(s.tokens)) else null,
+        ).joinToString(" \u00b7 ")
+        val detail = if (s.notice == null && s.phase in setOf(LivePhase.RUNNING, LivePhase.DONE, LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT)) {
+            listOfNotNull(
+                if (s.phase == LivePhase.RUNNING) text else null,
+                s.note,
+                if (s.planTotal > 0) t.plan(s.planDone, s.planTotal, s.planCurrent.takeIf { s.phase == LivePhase.RUNNING }) else null,
+                totals.takeIf { it.isNotEmpty() },
+            ).joinToString("\n").takeIf { it != text } ?: ""
+        } else ""
         val actions = buildList {
             if (s.phase == LivePhase.WAITING_APPROVAL && s.pending != null) { add(LiveAction.APPROVE); add(LiveAction.DENY) }
             if (s.phase == LivePhase.WAITING_INPUT) add(LiveAction.ANSWER) else add(LiveAction.OPEN)
@@ -338,34 +406,23 @@ object LiveUpdateRenderer {
             text = text,
             chip = chip,
             chronometerBaseMs = if (s.phase == LivePhase.RUNNING && s.turnStartedMs > 0) s.turnStartedMs else null,
-            progress = when (s.phase) {
-                // Always determinate: ColorOS Fluid Cloud draws no bar for an indeterminate ProgressStyle.
-                LivePhase.RUNNING, LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT, LivePhase.OFFLINE -> LiveUpdateSpec.Progress.STAGE
-                LivePhase.DONE -> LiveUpdateSpec.Progress.FULL
-                LivePhase.FAILED, LivePhase.INTERRUPTED -> LiveUpdateSpec.Progress.ERROR
-                LivePhase.ENDED -> LiveUpdateSpec.Progress.NONE
-            },
+            progress = LiveUpdateSpec.Progress.NONE,
             promoted = promoted,
             actions = actions,
             requestId = s.pending?.requestId,
             publicText = t.publicText() + " · " + chip,
             alert = waiting && previousPhase != s.phase,
-            // One model: the tracker sits INSIDE the current stage's segment. While running it advances
-            // with the step count on an asymptotic curve, so it never reaches the stage end before the
-            // turn really finishes; waiting sits in the middle of 待确认; done is the end.
-            progressValue = when (s.phase) {
-                LivePhase.RUNNING -> runningPosition(s, segments)
-                LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> segments[0] + segments[1] / 2
-                LivePhase.OFFLINE -> if (offlineWhileWaiting) segments[0] + segments[1] / 2 else runningPosition(s, segments)
-                LivePhase.DONE, LivePhase.ENDED -> 100
-                LivePhase.FAILED, LivePhase.INTERRUPTED -> runningPosition(s, segments)
-            },
-            segments = segments,
+            progressValue = 0,
+            segments = emptyList(),
             tone = when (s.phase) {
                 LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT, LivePhase.OFFLINE -> LiveUpdateSpec.Tone.WARNING
                 LivePhase.FAILED -> LiveUpdateSpec.Tone.ERROR
                 else -> LiveUpdateSpec.Tone.NORMAL
             },
+            phase = s.phase,
+            stepKind = if (s.phase == LivePhase.RUNNING) s.step?.kind else null,
+            detail = detail,
+            progressNote = if (s.planTotal > 0) "${s.planDone}/${s.planTotal}" + (if (s.steps > 0) " \u00b7 " + t.stepsDone(s.steps) else "") else if (s.steps > 0) t.stepsDone(s.steps) else "",
         )
     }
 }

@@ -79,7 +79,7 @@
     <string name="pin_add">Pin to Fluid Cloud</string>
     <string name="pin_remove">Unpin</string>
     <string name="pin_tag">Pinned</string>
-    <string name="pin_limit">At most %1$d tasks can be pinned</string>
+    <string name="pin_limit">All %1$d slots are held by tasks you pinned. Unpin one first.</string>
     <string name="pin_menu_pin_body">Follow this task in a live notification (Fluid Cloud / status bar) until you unpin it.</string>
     <string name="pin_menu_unpin_body">Stop following this task in a live notification.</string>
     <string name="pin_sheet_title">Follow tasks in Fluid Cloud</string>
@@ -109,4 +109,19 @@
     <string name="live_step_plan">Updating the plan</string>
     <string name="live_step_message">Sending a message</string>
     <string name="live_step_other">Working…</string>
+    <string name="live_chip_think">Think</string>
+    <string name="live_chip_cmd">Run</string>
+    <string name="live_chip_edit">Edit</string>
+    <string name="live_chip_read">Read</string>
+    <string name="live_chip_find">Find</string>
+    <string name="live_chip_web">Web</string>
+    <string name="live_chip_agent">Agent</string>
+    <string name="live_chip_plan">Plan</string>
+    <string name="live_chip_reply">Reply</string>
+    <string name="live_steps_one">1 step</string>
+    <string name="live_steps_many">%1$d steps</string>
+    <string name="live_plan">Plan %1$d/%2$d</string>
+    <string name="live_plan_now">Plan %1$d/%2$d · now: %3$s</string>
+    <string name="live_files_changed">%1$d files changed</string>
+    <string name="live_tokens_used">%1$s tokens</string>
 </resources>

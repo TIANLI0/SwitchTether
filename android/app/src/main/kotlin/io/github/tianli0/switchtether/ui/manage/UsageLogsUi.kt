@@ -18,7 +18,7 @@ import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.theme.COUITheme
-import io.github.suqi8.coui.kmp.window.WindowBottomSheet
+import io.github.tianli0.switchtether.ui.common.AppBottomSheet
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.LocalMoney
 import io.github.tianli0.switchtether.remote.protocol.RequestLog
@@ -62,8 +62,8 @@ fun RequestLogRow(log: RequestLog, zone: ZoneId, position: io.github.suqi8.coui.
 /** Request detail (metadata only: the desktop never sends request or response bodies). */
 @Composable
 fun RequestLogSheet(log: RequestLog?, zone: ZoneId, onDismiss: () -> Unit) {
-    WindowBottomSheet(show = log != null, title = stringResource(R.string.usage_log_detail), onDismissRequest = onDismiss) {
-        val l = log ?: return@WindowBottomSheet
+    AppBottomSheet(show = log != null, title = stringResource(R.string.usage_log_detail), onDismissRequest = onDismiss) {
+        val l = log ?: return@AppBottomSheet
         val money = LocalMoney.current
         val rows = listOfNotNull(
             stringResource(R.string.usage_log_time) to requestTime(l.createdAtMs, zone),

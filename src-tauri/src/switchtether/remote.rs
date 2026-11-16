@@ -448,6 +448,10 @@ impl RemoteRuntime {
     pub async fn shutdown_for_exit(&self) {
         let n = self.ctx.terminals.kill_all();
         self.ctx.agents.shutdown();
+        self.ctx
+            .events
+            .publish("server.shutdown", json!({ "reason": "desktop_exit" }));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         self.stop().await;
         self.attach.lock().take();
         self.cancel.cancel();

@@ -14,6 +14,7 @@ sealed interface MdBlock {
     data class Quote(val blocks: List<MdBlock>) : MdBlock
     data class ListBlock(val ordered: Boolean, val start: Int, val items: List<ListItem>) : MdBlock
     data class Table(val header: List<String>, val align: List<Align>, val rows: List<List<String>>) : MdBlock
+    data class Image(val alt: String, val url: String) : MdBlock
     data object Rule : MdBlock
 }
 
@@ -23,8 +24,10 @@ enum class Align { START, CENTER, END }
 
 object MarkdownParser {
     private val heading = Regex("^ {0,3}(#{1,6})(?:[ \\t]+(.*?))?(?:[ \\t]+#+)?[ \\t]*$")
+    private val setext = Regex("^ {0,3}(=+|-+)[ \\t]*$")
     private val fence = Regex("^( {0,3})(`{3,}|~{3,})\\s*([^`\\s]*)?.*$")
     private val rule = Regex("^ {0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$")
+    private val imageLine = Regex("^ {0,3}!\\[([^\\]]*)\\]\\(([^)\\s]+)(?:\\s+\"[^\"]*\")?\\)[ \\t]*$")
     private val bullet = Regex("^( *)([-*+])[ \\t]+(.*)$")
     private val ordered = Regex("^( *)(\\d{1,9})[.)][ \\t]+(.*)$")
     private val task = Regex("^\\[([ xX])][ \\t]+(.*)$")
@@ -76,8 +79,25 @@ object MarkdownParser {
                 continue
             }
 
+            if (para.isNotEmpty() && setext.matches(line)) {
+                val level = if (line.trimStart().startsWith('=')) 1 else 2
+                val text = para.toString().trim()
+                para.clear()
+                out += MdBlock.Heading(level, text)
+                i++
+                continue
+            }
+
             if (rule.matches(line)) {
                 flush(); out += MdBlock.Rule; i++; continue
+            }
+
+            val im = imageLine.matchEntire(line)
+            if (im != null) {
+                flush()
+                out += MdBlock.Image(im.groupValues[1], im.groupValues[2].removePrefix("<").removeSuffix(">"))
+                i++
+                continue
             }
 
             if (line.trimStart().startsWith(">")) {

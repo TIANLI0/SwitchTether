@@ -9,15 +9,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -25,32 +27,49 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.BasicComponent
+import io.github.suqi8.coui.kmp.basic.BasicComponentDefaults
+import io.github.suqi8.coui.kmp.basic.BreadcrumbBar
+import io.github.suqi8.coui.kmp.basic.BreadcrumbItem
 import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.ButtonDefaults
+import io.github.suqi8.coui.kmp.basic.ChipTabData
+import io.github.suqi8.coui.kmp.basic.ChipTabGroup
+import io.github.suqi8.coui.kmp.basic.DropdownImpl
+import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
+import io.github.suqi8.coui.kmp.basic.ListPopupColumn
+import io.github.suqi8.coui.kmp.basic.SearchBar
 import io.github.suqi8.coui.kmp.basic.SmallTitle
-import io.github.suqi8.coui.kmp.basic.Switch
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
+import io.github.suqi8.coui.kmp.layout.DialogButtonBar
+import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
 import io.github.suqi8.coui.kmp.theme.COUITheme
+import io.github.suqi8.coui.kmp.window.WindowDialog
+import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.FsEntry
 import io.github.tianli0.switchtether.ui.code.CodeBlockView
 import io.github.tianli0.switchtether.ui.code.SyntaxHighlighter
+import io.github.tianli0.switchtether.ui.common.AppBottomSheet
 import io.github.tianli0.switchtether.ui.common.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.switchtether.ui.common.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
+import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
 import io.github.tianli0.switchtether.ui.common.TextInput
 import io.github.tianli0.switchtether.ui.common.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.pageListPadding
@@ -89,27 +108,76 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
     var target by remember { mutableStateOf<FsEntry?>(null) }
     var confirmDelete by remember { mutableStateOf<FsEntry?>(null) }
     var actionsFor by remember { mutableStateOf<FsEntry?>(null) }
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var searchExpanded by rememberSaveable { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::upload) }
     val listing = (state.listing as? Loadable.Ready)?.value
     BackHandler(enabled = listing?.parent != null) { listing?.parent?.let(vm::browse) }
     Column(Modifier.fillMaxSize()) {
-        (state.roots as? Loadable.Ready)?.value?.let { roots ->
-            LazyRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(roots, key = { it.path }) { r -> FilterChip(r.name.ifBlank { r.path }, listing?.path == r.path, { vm.browse(r.path) }) }
+        (state.roots as? Loadable.Ready)?.value?.takeIf { it.size > 1 }?.let { roots ->
+            val currentPath = listing?.path.orEmpty()
+            val selectedRoot = roots.indexOfFirst { currentPath == it.path || currentPath.startsWith(it.path.trimEnd('/', '\\') + "/") || currentPath.startsWith(it.path.trimEnd('/', '\\') + "\\") }.coerceAtLeast(0)
+            ChipTabGroup(
+                tabs = roots.map { ChipTabData(it.name.ifBlank { it.path }) },
+                selectedIndex = selectedRoot,
+                onSelectedChange = { vm.browse(roots[it].path) },
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SearchBar(
+                query = state.query,
+                onQueryChange = vm::setQuery,
+                onSearch = { vm.search() },
+                expanded = searchExpanded || state.query.isNotEmpty() || state.results != null,
+                onExpandedChange = { searchExpanded = it },
+                label = stringResource(R.string.files_search),
+                cancelText = stringResource(R.string.action_cancel),
+                onCancel = {
+                    vm.setQuery("")
+                    searchExpanded = false
+                },
+                insideMargin = DpSize(0.dp, 4.dp),
+                modifier = Modifier.weight(1f),
+            )
+            if (searchExpanded || state.query.isNotEmpty()) {
+                Spacer(Modifier.size(6.dp))
+                FilterChip(
+                    label = stringResource(R.string.files_search_content),
+                    selected = state.searchContent,
+                    onClick = { vm.setSearchContent(!state.searchContent) },
+                )
+            } else {
+                Box {
+                    ToolbarIcon(AppIcons.Add, stringResource(R.string.files_new_file), { showMoreMenu = true })
+                    WindowListPopup(show = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                        val menuItems = listOf(
+                            stringResource(R.string.files_new_file) to { if (listing != null) nameDialog = "file" },
+                            stringResource(R.string.files_new_folder) to { if (listing != null) nameDialog = "folder" },
+                            stringResource(R.string.files_upload) to { if (listing != null) picker.launch(arrayOf("*/*")) },
+                            stringResource(R.string.files_hidden) to { vm.toggleHidden() },
+                        )
+                        ListPopupColumn {
+                            menuItems.forEachIndexed { idx, (label, act) ->
+                                DropdownImpl(
+                                    text = label,
+                                    optionSize = menuItems.size,
+                                    isSelected = idx == 3 && state.showHidden,
+                                    index = idx,
+                                    onSelectedIndexChange = {
+                                        showMoreMenu = false
+                                        act()
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
             }
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextInput(state.query, vm::setQuery, stringResource(R.string.files_search), modifier = Modifier.weight(1f), showClearButton = true,
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { vm.search() }),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search))
-            ToolbarIcon(if (state.showHidden) AppIcons.Show else AppIcons.Hide, stringResource(R.string.files_hidden), vm::toggleHidden)
-            ToolbarIcon(AppIcons.NewFile, stringResource(R.string.files_new_file), { nameDialog = "file" }, enabled = listing != null)
-            ToolbarIcon(AppIcons.NewFolder, stringResource(R.string.files_new_folder), { nameDialog = "folder" }, enabled = listing != null)
-            ToolbarIcon(AppIcons.Upload, stringResource(R.string.files_upload), { picker.launch(arrayOf("*/*")) }, enabled = listing != null)
-        }
-        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.files_search_content), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
-            Switch(checked = state.searchContent, onCheckedChange = vm::setSearchContent)
         }
         state.transfer?.let { TransferRow(it, vm) }
         val results = state.results
@@ -134,15 +202,32 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
         when (val l = state.listing) {
             null -> Unit
             else -> LoadableContent(l, onRetry = { vm.currentDir()?.let(vm::browse) ?: vm.loadRoots() }) { list ->
+                val crumbs = remember(list.path) { buildBreadcrumbs(list.path) }
                 LazyColumn(Modifier.fillMaxSize().testTag("file-list"), contentPadding = pageListPadding(top = 4.dp)) {
-                    item { Text(list.path, style = DevType.codeSmall, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }
+                    if (crumbs.isNotEmpty()) {
+                        item(key = "crumbs") {
+                            BreadcrumbBar(
+                                items = crumbs.map { BreadcrumbItem(path = it.second, text = it.first) },
+                                onItemClick = { idx -> vm.browse(crumbs[idx].second) },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            )
+                        }
+                    }
                     item {
                         GroupCard {
                             val rows = listOfNotNull(list.parent?.let { FsEntry("..", it, "dir") }) + list.entries
                             rows.forEachIndexed { i, e ->
                                 BasicComponent(
-                                    title = (if (e.isDir) "\u25B8 " else "") + e.name,
+                                    title = e.name,
                                     summary = if (e.isDir) null else listOfNotNull(Formatters.bytes(e.size), e.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) }).joinToString(" · "),
+                                    startAction = {
+                                        Icon(
+                                            imageVector = if (e.isDir) AppIcons.Workspace else AppIcons.File,
+                                            contentDescription = null,
+                                            tint = if (e.isDir) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurfaceVariantSummary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    },
                                     endActions = {
                                         if (e.sensitive) StatusPill(stringResource(R.string.new_session_sensitive), LocalDevColors.current.warn)
                                         if (e.name != "..") ToolbarIcon(AppIcons.More, stringResource(R.string.files_actions, e.name), { actionsFor = e })
@@ -160,37 +245,55 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
         }
     }
     actionsFor?.let { e ->
-        io.github.suqi8.coui.kmp.window.WindowDialog(show = true, title = e.name, onDismissRequest = { actionsFor = null }) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                if (!e.isDir) TextButton(text = stringResource(R.string.files_download), onClick = { actionsFor = null; vm.download(e) }, modifier = Modifier.fillMaxWidth())
-                TextButton(text = stringResource(R.string.files_rename), onClick = { actionsFor = null; target = e; nameDialog = "rename" }, modifier = Modifier.fillMaxWidth())
-                TextButton(text = stringResource(R.string.files_delete), onClick = { actionsFor = null; confirmDelete = e }, modifier = Modifier.fillMaxWidth())
+        AppBottomSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }) {
+            val opts = buildList {
+                if (!e.isDir) add(stringResource(R.string.files_download) to { actionsFor = null; vm.download(e) })
+                add(stringResource(R.string.files_rename) to { actionsFor = null; target = e; nameDialog = "rename" })
+                add(stringResource(R.string.files_delete) to { actionsFor = null; confirmDelete = e })
+            }
+            GroupCard {
+                opts.forEachIndexed { i, (label, act) ->
+                    BasicComponent(
+                        title = label,
+                        titleColor = BasicComponentDefaults.titleColor(
+                            color = if (i == opts.lastIndex) LocalDevColors.current.danger else COUITheme.colorScheme.onSurface,
+                        ),
+                        onClick = act,
+                        cardListPosition = cardListPositionOf(i, opts.size),
+                    )
+                }
             }
         }
     }
     nameDialog?.let { kind ->
         var name by remember(kind) { mutableStateOf(if (kind == "rename") target?.name.orEmpty() else "") }
-        io.github.suqi8.coui.kmp.window.WindowDialog(
+        WindowDialog(
             show = true,
             title = stringResource(if (kind == "folder") R.string.files_new_folder else if (kind == "file") R.string.files_new_file else R.string.files_rename),
             onDismissRequest = { nameDialog = null },
         ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextInput(name, { name = it }, stringResource(R.string.files_name))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextButton(text = stringResource(R.string.action_cancel), onClick = { nameDialog = null }, modifier = Modifier.weight(1f))
-                    Button(onClick = {
-                        val n = name.trim()
-                        if (n.isNotEmpty() && !n.contains('/') && !n.contains('\\')) {
-                            when (kind) {
-                                "folder" -> vm.mkdir(n)
-                                "file" -> vm.newFile(n)
-                                else -> target?.let { vm.rename(it, n) }
-                            }
-                        }
-                        nameDialog = null
-                    }, colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_ok), color = COUITheme.colorScheme.onPrimary) }
+            Column(Modifier.fillMaxWidth()) {
+                Box(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+                    TextInput(name, { name = it }, stringResource(R.string.files_name))
                 }
+                DialogButtonBar(
+                    negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = { nameDialog = null }),
+                    positive = DialogButtonBarAction(
+                        text = stringResource(R.string.action_ok),
+                        enabled = name.trim().isNotEmpty(),
+                        onClick = {
+                            val n = name.trim()
+                            if (n.isNotEmpty() && !n.contains('/') && !n.contains('\\')) {
+                                when (kind) {
+                                    "folder" -> vm.mkdir(n)
+                                    "file" -> vm.newFile(n)
+                                    else -> target?.let { vm.rename(it, n) }
+                                }
+                            }
+                            nameDialog = null
+                        },
+                    ),
+                )
             }
         }
     }
@@ -221,7 +324,14 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), { if (state.editing) vm.cancelEdit() else vm.closeFile() })
             val f = (state.file as? Loadable.Ready)?.value
-            Text(f?.path?.substringAfterLast('\\')?.substringAfterLast('/') ?: "", style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1)
+            Text(
+                f?.path?.substringAfterLast('\\')?.substringAfterLast('/') ?: "",
+                style = COUITheme.textStyles.body1,
+                color = COUITheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(f.path.substringAfterLast('\\').substringAfterLast('/'), f.path, "file", f.size)) })
             if (state.editing) {
@@ -248,7 +358,7 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
             } else if (f.text == null) {
                 Text(stringResource(R.string.files_binary), modifier = Modifier.padding(16.dp), color = COUITheme.colorScheme.onSurfaceVariantSummary)
             } else {
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 24.dp + LocalBottomBarSpace.current)) {
                     CodeBlockView(f.text.orEmpty(), f.language ?: SyntaxHighlighter.languageForPath(f.path))
                 }
             }
@@ -291,4 +401,24 @@ private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
         }
     }
     ConfirmDialog(confirmOverwrite, stringResource(R.string.files_overwrite), stringResource(R.string.files_overwrite_confirm), stringResource(R.string.files_overwrite), { confirmOverwrite = false; vm.overwrite() }, { confirmOverwrite = false })
+}
+
+/** Splits a Windows or POSIX path into `(label, fullPath)` pairs for COUI17 [BreadcrumbBar]. */
+private fun buildBreadcrumbs(path: String): List<Pair<String, String>> {
+    if (path.isBlank()) return emptyList()
+    val isWin = path.contains('\\') || (path.length >= 2 && path[1] == ':')
+    val sep = if (isWin) "\\" else "/"
+    val parts = path.split('/', '\\').filter { it.isNotEmpty() }
+    if (parts.isEmpty()) return listOf("/" to "/")
+    val out = mutableListOf<Pair<String, String>>()
+    var acc = if (path.startsWith("/")) "/" else ""
+    parts.forEachIndexed { idx, part ->
+        acc = when {
+            idx == 0 && isWin && part.endsWith(":") -> "$part\\"
+            acc.isEmpty() || acc == "/" || acc.endsWith("\\") -> acc + part
+            else -> acc + sep + part
+        }
+        out += part to acc
+    }
+    return out
 }

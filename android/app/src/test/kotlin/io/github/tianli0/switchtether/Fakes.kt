@@ -84,14 +84,19 @@ class FakeSessionRepository : SessionRepository {
 
     override suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int) = PayloadChunk("full output", offset, 11, true)
 
-    override suspend fun sendMessage(id: String, text: String, commandId: String): CommandOutcome {
+    override suspend fun sendMessage(
+        id: String,
+        text: String,
+        commandId: String,
+        images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput>,
+    ): CommandOutcome {
         sent += commandId to text
         return nextOutcome(commandId)
     }
 
     override suspend fun interrupt(id: String, commandId: String) = nextOutcome(commandId)
     override suspend fun resolveApproval(id: String, requestId: String, decision: String, commandId: String) = nextOutcome(commandId)
-    override suspend fun answer(id: String, requestId: String, answers: JsonObject, commandId: String) = nextOutcome(commandId)
+    override suspend fun answer(id: String, requestId: String, answers: JsonObject?, commandId: String, action: String?) = nextOutcome(commandId)
     override suspend fun commandStatus(commandId: String): CommandStatus {
         statusQueries += commandId
         return nextStatus

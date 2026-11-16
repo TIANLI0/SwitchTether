@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.code
 
 import androidx.compose.foundation.background
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,7 +35,7 @@ fun CodeBlockView(
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(SquircleShape(8.dp))
             .background(dev.codeBackground),
     ) {
         if (!language.isNullOrBlank()) {

@@ -3,7 +3,7 @@
 | Item | Value |
 | :--- | :--- |
 | Upstream repository | https://github.com/Costben/coui17 (fork of `suqi8/coui`, itself a fork of `compose-miuix-ui/miuix`) |
-| Pinned commit | `a51f95746292b3b06993b15fe46be1e2b9178421` (2026-11-13, last fully green upstream CI run) — also in `UPSTREAM_SHA` |
+| Pinned commit | `0fc9b44aadf01632dd2e43ae3db6bcf10621bc8d` (2026-11-16, latest upstream `main`) — also in `UPSTREAM_SHA` |
 | License | Apache-2.0 (`LICENSE`, `NOTICE`); 68 files under `coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit/**` are MPL-2.0 (headers kept) |
 | Why vendored | The fork is not on Maven Central/JitPack; its GitHub Packages channel is a rolling, token-protected SNAPSHOT. Source vendoring pins exact bytes and keeps our AGP/Kotlin choices independent. |
 
@@ -44,5 +44,5 @@ reflection, hidden-API use, network or file access), rebuild and run the tests.
 ## MPL-2.0 source availability
 
 The MPL-2.0 files shipped in the APK are available at:
-https://github.com/Costben/coui17/tree/a51f95746292b3b06993b15fe46be1e2b9178421/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit
+https://github.com/Costben/coui17/tree/0fc9b44aadf01632dd2e43ae3db6bcf10621bc8d/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit
 (and in this directory). This link is also shown on the in-app "Open source licenses" screen.

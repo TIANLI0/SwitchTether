@@ -14,7 +14,7 @@
 //!   dismiss its dialog (Claude: `control_cancel_request`; Codex: app-server
 //!   emits `serverRequest/resolved` itself).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 
@@ -41,6 +41,12 @@ pub struct Router {
     dialect: Dialect,
     /// Agent→client requests not answered yet (key = canonical id string).
     pending: HashSet<String>,
+    /// Raw JSON lines of pending agent→client requests, for replay on desktop restart.
+    pending_lines: HashMap<String, String>,
+    /// Claude Code native session_id observed on stdout (for history preload on reattach).
+    claude_session_id: Option<String>,
+    /// Codex thread/started lines (thread_id -> synthetic thread/started JSON line) for reattach.
+    codex_threads: HashMap<String, String>,
 }
 
 fn id_key(v: &Value) -> Option<String> {
@@ -56,7 +62,27 @@ impl Router {
         Self {
             dialect,
             pending: HashSet::new(),
+            pending_lines: HashMap::new(),
+            claude_session_id: None,
+            codex_threads: HashMap::new(),
         }
+    }
+
+    pub fn claude_session_id(&self) -> Option<&str> {
+        self.claude_session_id.as_deref()
+    }
+
+    /// Frames to replay to a newly-reconnected desktop broker so it recovers
+    /// open Codex threads and any still-pending approval/question prompts.
+    pub fn reconnect_frames(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        for line in self.codex_threads.values() {
+            out.push(json!({ "t": "out", "line": line }));
+        }
+        for line in self.pending_lines.values() {
+            out.push(json!({ "t": "out", "line": line }));
+        }
+        out
     }
 
     #[cfg(test)]
@@ -119,6 +145,7 @@ impl Router {
         let parsed: Option<Value> = serde_json::from_str(line).ok();
         if let Some(v) = &parsed {
             if let Some(id) = self.reply_id(v) {
+                self.pending_lines.remove(&id);
                 if !self.pending.remove(&id) {
                     // Already answered from the phone: the agent must not see a second answer.
                     a.to_desktop
@@ -141,14 +168,47 @@ impl Router {
                 return a;
             }
             if let Some(id) = self.agent_request_id(v) {
-                self.pending.insert(id);
+                self.pending.insert(id.clone());
+                self.pending_lines.insert(id, line.to_string());
             }
-            // Claude may cancel its own request (e.g. after an interrupt).
-            if self.dialect == Dialect::ClaudeStream
-                && v.get("type").and_then(|t| t.as_str()) == Some("control_cancel_request")
-            {
-                if let Some(id) = v.get("request_id").and_then(id_key) {
-                    self.pending.remove(&id);
+            match self.dialect {
+                Dialect::ClaudeStream => {
+                    if let Some(sid) = v
+                        .get("session_id")
+                        .or_else(|| v.get("sessionId"))
+                        .and_then(|s| s.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
+                        self.claude_session_id = Some(sid.to_string());
+                    }
+                    // Claude may cancel its own request (e.g. after an interrupt).
+                    if v.get("type").and_then(|t| t.as_str()) == Some("control_cancel_request") {
+                        if let Some(id) = v.get("request_id").and_then(id_key) {
+                            self.pending.remove(&id);
+                            self.pending_lines.remove(&id);
+                        }
+                    }
+                }
+                Dialect::JsonRpc => {
+                    if let Some(t) = v.pointer("/result/thread").or_else(|| {
+                        (v.get("method").and_then(|m| m.as_str()) == Some("thread/started"))
+                            .then(|| v.pointer("/params/thread"))
+                            .flatten()
+                    }) {
+                        if let Some(tid) = t.get("id").and_then(|x| x.as_str()) {
+                            self.codex_threads.insert(
+                                tid.to_string(),
+                                json!({ "method": "thread/started", "params": { "thread": t } })
+                                    .to_string(),
+                            );
+                        }
+                    }
+                    if v.get("method").and_then(|m| m.as_str()) == Some("serverRequest/resolved") {
+                        if let Some(id) = v.pointer("/params/requestId").and_then(id_key) {
+                            self.pending.remove(&id);
+                            self.pending_lines.remove(&id);
+                        }
+                    }
                 }
             }
         }
@@ -165,6 +225,7 @@ impl Router {
             return a;
         };
         if let Some(id) = self.reply_id(&v) {
+            self.pending_lines.remove(&id);
             if !self.pending.remove(&id) {
                 a.to_desktop
                     .push(json!({ "t": "rejected", "reason": "already_answered", "line": line }));
@@ -277,5 +338,17 @@ mod tests {
         let mut r = Router::new(Dialect::ClaudeStream);
         assert_eq!(r.on_host("garbage").to_agent, vec!["garbage".to_string()]);
         assert_eq!(r.on_agent("garbage").to_host, vec!["garbage".to_string()]);
+    }
+
+    #[test]
+    fn reconnect_frames_preserve_pending_requests_and_threads() {
+        let mut r = Router::new(Dialect::JsonRpc);
+        r.on_agent(r#"{"method":"thread/started","params":{"thread":{"id":"th1","cwd":"/p"}}}"#);
+        r.on_agent(r#"{"id":7,"method":"item/tool/requestUserInput","params":{"threadId":"th1"}}"#);
+        let frames = r.reconnect_frames();
+        assert_eq!(frames.len(), 2);
+        // Once answered, pending request is no longer replayed.
+        r.on_desktop(r#"{"id":7,"result":{"answers":{}}}"#);
+        assert_eq!(r.reconnect_frames().len(), 1);
     }
 }

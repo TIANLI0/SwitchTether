@@ -8,6 +8,13 @@ import io.github.tianli0.switchtether.remote.session.RenderItem
 import io.github.tianli0.switchtether.ui.sessions.PayloadState
 import kotlinx.serialization.json.JsonObject
 
+data class ImagePreview(
+    val alt: String? = null,
+    val bytes: ByteArray? = null,
+    val url: String? = null,
+    val path: String? = null,
+)
+
 /** Callbacks and session-level facts shared by all renderers (stable: does not change per event). */
 @Immutable
 data class RenderContext(
@@ -20,11 +27,14 @@ data class RenderContext(
     val online: Boolean,
     val onApprove: (requestId: String, decision: String, label: String) -> Unit,
     val onAnswer: (requestId: String, answers: JsonObject) -> Unit,
+    val onAnswerAction: (requestId: String, answers: JsonObject?, action: String?) -> Unit = { id, ans, _ -> if (ans != null) onAnswer(id, ans) },
     val onLoadPayload: (eventId: String) -> Unit,
     val payloadOf: (eventId: String) -> PayloadState?,
     val onToggleCollapse: (eventId: String) -> Unit,
     val isCollapsed: (eventId: String) -> Boolean,
     val onLink: (String) -> Unit,
+    val onLoadImageBytes: (suspend (path: String) -> ByteArray?)? = null,
+    val onViewImage: ((ImagePreview) -> Unit)? = null,
 )
 
 typealias EventRenderer = @Composable (item: RenderItem, ctx: RenderContext) -> Unit

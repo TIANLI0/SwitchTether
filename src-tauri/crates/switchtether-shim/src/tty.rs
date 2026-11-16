@@ -4,9 +4,11 @@
 //! the same PTY, so both the user at the computer and the phone drive the very
 //! same live TUI. The PTY size follows the user's local terminal.
 
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -75,52 +77,106 @@ pub fn run(mut argv: Vec<OsString>) -> ExitCode {
     let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("pty writer")));
     let master = Arc::new(Mutex::new(pair.master));
 
-    let hello = json!({
-        "kind": "tty",
-        "agent": agent,
-        "origin": "cli",
-        "pid": child.process_id(),
-        "shimPid": std::process::id(),
-        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()),
-        "cols": cols, "rows": rows,
-        "command": program.to_string_lossy(),
-    });
-    let broker = Broker::connect(hello);
+    let child_pid = child.process_id();
+    let cwd_s = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
+    let prog_name = program.to_string_lossy().into_owned();
+    let cur_size = Arc::new(Mutex::new((cols, rows)));
+    let pty_ring: Arc<Mutex<VecDeque<u8>>> =
+        Arc::new(Mutex::new(VecDeque::with_capacity(16 * 1024)));
+    let active_broker: Arc<Mutex<Option<Broker>>> = Arc::new(Mutex::new(None));
+    let done = Arc::new(AtomicBool::new(false));
+
+    let make_hello = {
+        let cur_size = cur_size.clone();
+        let cwd_s = cwd_s.clone();
+        let prog_name = prog_name.clone();
+        move |reattached: bool| {
+            let (c, r) = *lock(&cur_size);
+            json!({
+                "kind": "tty",
+                "agent": agent,
+                "origin": "cli",
+                "pid": child_pid,
+                "shimPid": std::process::id(),
+                "cwd": cwd_s,
+                "cols": c,
+                "rows": r,
+                "command": prog_name,
+                "reattached": reattached,
+            })
+        }
+    };
+
+    let initial = Broker::connect(make_hello(false));
+    if let Some((b, _)) = &initial {
+        *lock(&active_broker) = Some(b.clone());
+    }
     let raw = local::RawMode::enable();
 
-    // phone → pty
-    if let Some((_, frames)) = &broker {
+    // phone → pty supervisor (handles desktop restarts and late desktop starts)
+    {
         let writer = writer.clone();
-        let frames = frames.get_ref().try_clone().ok();
-        if let Some(f) = &frames {
-            let _ = f.set_read_timeout(None);
-        }
-        if let Some(frames) = frames {
-            std::thread::spawn(move || {
-                use std::io::BufRead;
-                for f in std::io::BufReader::new(frames).lines() {
-                    let Ok(f) = f else { break };
-                    let Ok(v) = serde_json::from_str::<Value>(&f) else {
-                        continue;
-                    };
-                    if v.get("t").and_then(|t| t.as_str()) == Some("input") {
-                        let bytes = match (
-                            v.get("b64").and_then(|b| b.as_str()),
-                            v.get("data").and_then(|d| d.as_str()),
-                        ) {
-                            (Some(b), _) => base64::engine::general_purpose::STANDARD
-                                .decode(b)
-                                .unwrap_or_default(),
-                            (None, Some(d)) => d.as_bytes().to_vec(),
-                            _ => continue,
-                        };
-                        let mut w = lock(&writer);
-                        let _ = w.write_all(&bytes);
-                        let _ = w.flush();
+        let active_broker = active_broker.clone();
+        let pty_ring = pty_ring.clone();
+        let done = done.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let mut current = initial;
+            let mut reattached = false;
+            while !done.load(Ordering::Relaxed) {
+                if let Some((broker, frames)) = current.take() {
+                    *lock(&active_broker) = Some(broker.clone());
+                    if reattached {
+                        let snap: Vec<u8> = lock(&pty_ring).iter().copied().collect();
+                        if !snap.is_empty() {
+                            broker.send(&json!({
+                                "t": "pty",
+                                "b64": base64::engine::general_purpose::STANDARD.encode(&snap),
+                            }));
+                        }
                     }
+                    if let Ok(raw_stream) = frames.get_ref().try_clone() {
+                        let _ = raw_stream.set_read_timeout(None);
+                        for f in std::io::BufReader::new(raw_stream).lines() {
+                            if done.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            let Ok(f) = f else { break };
+                            let Ok(v) = serde_json::from_str::<Value>(&f) else {
+                                continue;
+                            };
+                            if v.get("t").and_then(|t| t.as_str()) == Some("input") {
+                                let bytes = match (
+                                    v.get("b64").and_then(|b| b.as_str()),
+                                    v.get("data").and_then(|d| d.as_str()),
+                                ) {
+                                    (Some(b), _) => base64::engine::general_purpose::STANDARD
+                                        .decode(b)
+                                        .unwrap_or_default(),
+                                    (None, Some(d)) => d.as_bytes().to_vec(),
+                                    _ => continue,
+                                };
+                                let mut w = lock(&writer);
+                                let _ = w.write_all(&bytes);
+                                let _ = w.flush();
+                            }
+                        }
+                    }
+                    *lock(&active_broker) = None;
                 }
-            });
-        }
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1500));
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                reattached = true;
+                current = Broker::connect(make_hello(true));
+            }
+        });
     }
 
     // local keyboard → pty
@@ -145,21 +201,24 @@ pub fn run(mut argv: Vec<OsString>) -> ExitCode {
     // local terminal resize → pty (+ tell the desktop)
     {
         let master = master.clone();
-        let broker = broker.as_ref().map(|(b, _)| b.clone());
+        let active_broker = active_broker.clone();
+        let cur_size = cur_size.clone();
+        let done = done.clone();
         std::thread::spawn(move || {
             let mut last = (cols, rows);
-            loop {
+            while !done.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(300));
                 if let Some(now) = local::size() {
                     if now != last && now.0 > 0 && now.1 > 0 {
                         last = now;
+                        *lock(&cur_size) = now;
                         let _ = lock(&master).resize(PtySize {
                             rows: now.1,
                             cols: now.0,
                             pixel_width: 0,
                             pixel_height: 0,
                         });
-                        if let Some(b) = &broker {
+                        if let Some(b) = lock(&active_broker).clone() {
                             b.send(&json!({ "t": "size", "cols": now.0, "rows": now.1 }));
                         }
                     }
@@ -169,7 +228,6 @@ pub fn run(mut argv: Vec<OsString>) -> ExitCode {
     }
 
     // pty → local terminal + desktop (main thread)
-    let broker_w = broker.as_ref().map(|(b, _)| b.clone());
     let mut out = std::io::stdout();
     let mut buf = vec![0u8; 16 * 1024];
     let waiter = std::thread::spawn(move || child.wait().ok().map(|s| s.exit_code() as i32));
@@ -179,12 +237,21 @@ pub fn run(mut argv: Vec<OsString>) -> ExitCode {
             Ok(n) => {
                 let _ = out.write_all(&buf[..n]);
                 let _ = out.flush();
+                {
+                    let mut ring = lock(&pty_ring);
+                    for &byte in &buf[..n] {
+                        if ring.len() >= 16 * 1024 {
+                            ring.pop_front();
+                        }
+                        ring.push_back(byte);
+                    }
+                }
                 if headless && buf[..n].windows(4).any(|w| w == b"[6n") {
                     let mut w = lock(&writer);
                     let _ = w.write_all(b"[1;1R");
                     let _ = w.flush();
                 }
-                if let Some(b) = &broker_w {
+                if let Some(b) = lock(&active_broker).clone() {
                     b.send(&json!({ "t": "pty", "b64": base64::engine::general_purpose::STANDARD.encode(&buf[..n]) }));
                 }
             }
@@ -196,8 +263,9 @@ pub fn run(mut argv: Vec<OsString>) -> ExitCode {
         }
     }
     let code = waiter.join().ok().flatten().unwrap_or(0);
+    done.store(true, Ordering::Relaxed);
     drop(raw);
-    if let Some(b) = &broker_w {
+    if let Some(b) = lock(&active_broker).clone() {
         b.send(&json!({ "t": "exit", "code": code }));
     }
     ExitCode::from(code.clamp(0, 255) as u8)

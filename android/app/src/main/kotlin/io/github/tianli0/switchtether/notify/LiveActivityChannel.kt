@@ -15,6 +15,7 @@ import androidx.core.graphics.drawable.IconCompat
 import io.github.tianli0.switchtether.MainActivity
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.live.LiveAction
+import io.github.tianli0.switchtether.remote.live.LivePhase
 import io.github.tianli0.switchtether.remote.live.LiveUpdateSpec
 
 /**
@@ -63,12 +64,13 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
             LiveUpdateSpec.Tone.WARNING -> 0xFFE8A23B.toInt()
             LiveUpdateSpec.Tone.ERROR -> 0xFFE5484D.toInt()
         }
+        val smallIcon = smallIconFor(spec.phase, spec.stepKind)
         val public = NotificationCompat.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setSmallIcon(smallIcon)
             .setContentTitle(spec.publicText) // "SwitchTether · 待确认": never the command or request text
             .build()
         val b = NotificationCompat.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_notify) // monochrome: required for the chip / capsule
+            .setSmallIcon(smallIcon) // monochrome: required for the chip / capsule
             .setContentTitle(spec.title)
             .setContentText(spec.text)
             .setSubText(subtitle)
@@ -78,33 +80,44 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
             .setShortCriticalText(spec.chip)
             .setOnlyAlertOnce(!spec.alert)
             .setSilent(!spec.alert)
-            .setCategory(if (spec.actions.contains(LiveAction.APPROVE)) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_PROGRESS)
+            .setCategory(if (spec.actions.contains(LiveAction.APPROVE) || spec.actions.contains(LiveAction.ANSWER)) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(public)
             .setContentIntent(openIntent(spec.sessionId))
             .setDeleteIntent(actionIntent(LiveUpdateActionReceiver.ACTION_DISMISSED, spec.sessionId, null))
             .setAutoCancel(false)
+        if (spec.detail.isNotBlank()) b.setStyle(NotificationCompat.BigTextStyle().bigText(spec.detail))
         val base = spec.chronometerBaseMs
         if (base != null) {
             b.setWhen(base).setShowWhen(true).setUsesChronometer(true)
         } else {
             b.setShowWhen(false)
         }
-        // Milestone track: 开始 → 运行 → (待确认) → 完成, agent mark as the tracker.
-        // Stage track: one coloured segment per stage (sum = 100), no points (a point in the gap
-        // between segments reads as a stray block). Always determinate with the tracker at the
-        // current position: ColorOS Fluid Cloud shows no bar at all for an indeterminate style.
-        if (spec.progress != LiveUpdateSpec.Progress.NONE) {
-            b.setStyle(
-                NotificationCompat.ProgressStyle()
-                    .setStyledByProgress(true)
-                    .setProgressSegments(spec.segments.map { NotificationCompat.ProgressStyle.Segment(it).setColor(accent) })
-                    .setProgressTrackerIcon(trackerIcon(agent))
-                    .setProgress(spec.progressValue.coerceIn(0, spec.segments.sum())),
-            )
-        }
         spec.actions.forEach { a -> actionFor(a, spec)?.let(b::addAction) }
         runCatching { nm.notify(TAG, id, b.build()) }
+    }
+
+    private fun smallIconFor(phase: LivePhase, step: io.github.tianli0.switchtether.remote.live.StepKind?): Int = when (phase) {
+        // Running shows what the agent is doing (terminal, pencil, magnifier, …), never the app mark.
+        LivePhase.RUNNING -> when (step) {
+            null -> R.drawable.ic_step_think
+            io.github.tianli0.switchtether.remote.live.StepKind.COMMAND -> R.drawable.ic_step_command
+            io.github.tianli0.switchtether.remote.live.StepKind.EDIT -> R.drawable.ic_step_edit
+            io.github.tianli0.switchtether.remote.live.StepKind.READ -> R.drawable.ic_step_read
+            io.github.tianli0.switchtether.remote.live.StepKind.SEARCH -> R.drawable.ic_step_search
+            io.github.tianli0.switchtether.remote.live.StepKind.WEB_FETCH, io.github.tianli0.switchtether.remote.live.StepKind.WEB_SEARCH -> R.drawable.ic_step_web
+            io.github.tianli0.switchtether.remote.live.StepKind.SUBAGENT -> R.drawable.ic_step_subagent
+            io.github.tianli0.switchtether.remote.live.StepKind.PLAN -> R.drawable.ic_step_plan
+            io.github.tianli0.switchtether.remote.live.StepKind.MESSAGE -> R.drawable.ic_step_message
+            io.github.tianli0.switchtether.remote.live.StepKind.OTHER -> R.drawable.ic_step_think
+        }
+        LivePhase.WAITING_APPROVAL -> R.drawable.ic_stat_waiting_approval
+        LivePhase.WAITING_INPUT -> R.drawable.ic_stat_waiting_input
+        LivePhase.DONE -> R.drawable.ic_stat_done
+        LivePhase.FAILED -> R.drawable.ic_stat_failed
+        LivePhase.INTERRUPTED -> R.drawable.ic_stat_interrupted
+        LivePhase.OFFLINE -> R.drawable.ic_stat_offline
+        LivePhase.ENDED -> R.drawable.ic_stat_ended
     }
 
     /**

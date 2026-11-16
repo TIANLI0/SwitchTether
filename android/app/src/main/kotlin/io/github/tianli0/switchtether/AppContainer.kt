@@ -101,6 +101,9 @@ class AppContainer(private val context: Context) {
     val notifyPrefsState = settingsStore.notifyPrefs.stateIn(appScope, SharingStarted.Eagerly, io.github.tianli0.switchtether.remote.notify.NotifyPrefs())
     private val notifier = io.github.tianli0.switchtether.notify.Notifier(context, appScope, connection, notifyPrefsState, { isForeground }) { id -> liveUpdates.isPinned(id) }
 
+    /** Working/waiting live sessions (keeps the monitor service's CPU wake lock). */
+    val activeSessions get() = notifier.activeSessions
+
     /** Home-screen widget data (memory only). */
     val widget = io.github.tianli0.switchtether.widget.StatusWidgetUpdater(context, appScope, connection, sessions)
     val money = io.github.tianli0.switchtether.domain.MoneySettings(context, appScope, connection)
@@ -138,6 +141,9 @@ class AppContainer(private val context: Context) {
     /** The phone itself interrupted/stopped a session or killed a terminal (suppresses the echo notification). */
     fun noteLocalAction(target: String, action: io.github.tianli0.switchtether.remote.notify.LocalAction) = notifier.noteLocalAction(target, action)
 
+    /** The new-session sheet was left for the folder picker page; reopen it when the picker closes. */
+    val newSessionReopen = MutableStateFlow(false)
+
     /** Session id requested by a notification tap (consumed by the main shell). */
     val openSessionRequest = MutableStateFlow<String?>(null)
 
@@ -151,6 +157,7 @@ class AppContainer(private val context: Context) {
         appScope.launch {
             // A pinned task keeps the connection alive (its Live Update must follow the session).
             if (pairingStore.current() != null && (settingsStore.backgroundConnection.first() || liveUpdates.pins.value.isNotEmpty())) {
+                io.github.tianli0.switchtether.connection.ReconnectWorker.schedulePeriodic(context)
                 io.github.tianli0.switchtether.notify.MonitorService.start(context)
             }
         }
@@ -183,8 +190,16 @@ class AppContainer(private val context: Context) {
     fun setBackgroundConnection(enabled: Boolean) {
         appScope.launch {
             settingsStore.setBackgroundConnection(enabled)
-            if (enabled && pairingStore.current() != null) io.github.tianli0.switchtether.notify.MonitorService.start(context)
-            if (!enabled) io.github.tianli0.switchtether.notify.MonitorService.stop(context)
+            if (enabled && pairingStore.current() != null) {
+                io.github.tianli0.switchtether.connection.ReconnectWorker.schedulePeriodic(context)
+                io.github.tianli0.switchtether.notify.MonitorService.start(context)
+            }
+            if (!enabled) {
+                if (liveUpdates.pins.value.isEmpty()) {
+                    io.github.tianli0.switchtether.connection.ReconnectWorker.cancel(context)
+                }
+                io.github.tianli0.switchtether.notify.MonitorService.stop(context)
+            }
         }
     }
 
@@ -220,6 +235,7 @@ class AppContainer(private val context: Context) {
     }
 
     private suspend fun wipeLocal(desktop: PairedDesktop) {
+        io.github.tianli0.switchtether.connection.ReconnectWorker.cancel(context)
         io.github.tianli0.switchtether.notify.MonitorService.stop(context)
         pairingStore.clear()
         keys.delete(desktop.identityAlias)

@@ -23,10 +23,19 @@ data class InlineColors(val link: Color, val codeText: Color, val codeBackground
 object InlineMarkdown {
     private val autolink = Regex("""https?://[^\s<>()\[\]]+[^\s<>()\[\].,;:!?'"]""")
 
-    fun render(text: String, colors: InlineColors, onLink: ((String) -> Unit)? = null): AnnotatedString =
-        buildAnnotatedString { appendInline(text, colors, onLink) }
+    fun render(
+        text: String,
+        colors: InlineColors,
+        onLink: ((String) -> Unit)? = null,
+        onImage: ((alt: String, url: String) -> Unit)? = null,
+    ): AnnotatedString = buildAnnotatedString { appendInline(text, colors, onLink, onImage) }
 
-    private fun AnnotatedString.Builder.appendInline(s: String, colors: InlineColors, onLink: ((String) -> Unit)?) {
+    private fun AnnotatedString.Builder.appendInline(
+        s: String,
+        colors: InlineColors,
+        onLink: ((String) -> Unit)?,
+        onImage: ((String, String) -> Unit)?,
+    ) {
         var i = 0
         val plain = StringBuilder()
         fun flushPlain() {
@@ -40,7 +49,7 @@ object InlineMarkdown {
             if (c == '\\' && i + 1 < s.length && s[i + 1] in "\\`*_{}[]()#+-.!|~<>") {
                 plain.append(s[i + 1]); i += 2; continue
             }
-            // hard line break inside a paragraph: keep newlines as-is
+            // inline code span
             if (c == '`') {
                 val ticks = s.countRun(i, '`')
                 val close = s.indexOf("`".repeat(ticks), i + ticks)
@@ -54,23 +63,38 @@ object InlineMarkdown {
                     continue
                 }
             }
+            // ***bold italic*** or ___bold italic___
+            if ((c == '*' || c == '_') && i + 2 < s.length && s[i + 1] == c && s[i + 2] == c) {
+                val delim = "$c$c$c"
+                val close = findClosingDelimiter(s, i + 3, delim)
+                if (close > i + 3) {
+                    flushPlain()
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic))
+                    appendInline(s.substring(i + 3, close), colors, onLink, onImage)
+                    pop()
+                    i = close + 3
+                    continue
+                }
+            }
+            // **bold** or __bold__
             if ((c == '*' || c == '_') && i + 1 < s.length && s[i + 1] == c) {
-                val close = s.indexOf("$c$c", i + 2)
+                val delim = "$c$c"
+                val close = findClosingDelimiter(s, i + 2, delim)
                 if (close > i + 2) {
                     flushPlain()
-                    pushStyle(SpanStyle(fontWeight = FontWeight.SemiBold))
-                    appendInline(s.substring(i + 2, close), colors, onLink)
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                    appendInline(s.substring(i + 2, close), colors, onLink, onImage)
                     pop()
                     i = close + 2
                     continue
                 }
             }
             if (c == '~' && i + 1 < s.length && s[i + 1] == '~') {
-                val close = s.indexOf("~~", i + 2)
+                val close = findClosingDelimiter(s, i + 2, "~~")
                 if (close > i + 2) {
                     flushPlain()
                     pushStyle(SpanStyle(textDecoration = TextDecoration.LineThrough))
-                    appendInline(s.substring(i + 2, close), colors, onLink)
+                    appendInline(s.substring(i + 2, close), colors, onLink, onImage)
                     pop()
                     i = close + 2
                     continue
@@ -78,14 +102,14 @@ object InlineMarkdown {
             }
             if ((c == '*' || c == '_') && i + 1 < s.length && !s[i + 1].isWhitespace()) {
                 val wordBoundaryOk = c == '*' || i == 0 || !s[i - 1].isLetterOrDigit()
-                var close = s.indexOf(c, i + 1)
-                while (close > 0 && close + 1 < s.length && s[close + 1] == c) close = s.indexOf(c, close + 2)
+                var close = findClosingDelimiter(s, i + 1, c.toString())
+                while (close > 0 && close + 1 < s.length && s[close + 1] == c) close = findClosingDelimiter(s, close + 2, c.toString())
                 if (wordBoundaryOk && close > i + 1 && !s[close - 1].isWhitespace() &&
                     (c == '*' || close + 1 >= s.length || !s[close + 1].isLetterOrDigit())
                 ) {
                     flushPlain()
                     pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
-                    appendInline(s.substring(i + 1, close), colors, onLink)
+                    appendInline(s.substring(i + 1, close), colors, onLink, onImage)
                     pop()
                     i = close + 1
                     continue
@@ -95,9 +119,17 @@ object InlineMarkdown {
                 val link = parseLink(s, i + 1)
                 if (link != null) {
                     flushPlain()
-                    pushStyle(SpanStyle(color = colors.link, fontStyle = FontStyle.Italic))
-                    append("[image: ${link.first.ifBlank { link.second }}]")
-                    pop()
+                    val alt = link.first.ifBlank { link.second }
+                    if (onImage != null) {
+                        val style = TextLinkStyles(SpanStyle(color = colors.link, fontStyle = FontStyle.Italic, textDecoration = TextDecoration.Underline))
+                        pushLink(LinkAnnotation.Clickable(tag = link.second, styles = style) { onImage(alt, link.second) })
+                        append("[image: $alt]")
+                        pop()
+                    } else {
+                        pushStyle(SpanStyle(color = colors.link, fontStyle = FontStyle.Italic))
+                        append("[image: $alt]")
+                        pop()
+                    }
                     i = link.third
                     continue
                 }
@@ -129,12 +161,36 @@ object InlineMarkdown {
         flushPlain()
     }
 
+    /** Find closing delimiter skipping backtick code spans and backslash escapes. */
+    private fun findClosingDelimiter(s: String, from: Int, delim: String): Int {
+        var i = from
+        while (i <= s.length - delim.length) {
+            val ch = s[i]
+            if (ch == '\\' && i + 1 < s.length) {
+                i += 2
+                continue
+            }
+            if (ch == '`') {
+                val ticks = s.countRun(i, '`')
+                val close = s.indexOf("`".repeat(ticks), i + ticks)
+                if (close > 0) {
+                    i = close + ticks
+                    continue
+                }
+            }
+            if (s.startsWith(delim, i)) return i
+            i++
+        }
+        return -1
+    }
+
     /** Returns (text, url, endIndexExclusive) for `[text](url "title")` starting at [start]. */
     private fun parseLink(s: String, start: Int): Triple<String, String, Int>? {
         var depth = 0
         var k = start
         while (k < s.length) {
             when (s[k]) {
+                '\\' -> k++
                 '[' -> depth++
                 ']' -> {
                     depth--
@@ -144,11 +200,20 @@ object InlineMarkdown {
             k++
         }
         if (k >= s.length || k + 1 >= s.length || s[k + 1] != '(') return null
-        val close = s.indexOf(')', k + 2)
-        if (close < 0) return null
+        var pDepth = 1
+        var j = k + 2
+        while (j < s.length && pDepth > 0) {
+            when (s[j]) {
+                '\\' -> j++
+                '(' -> pDepth++
+                ')' -> pDepth--
+            }
+            if (pDepth > 0) j++
+        }
+        if (pDepth != 0) return null
         val text = s.substring(start + 1, k)
-        val url = s.substring(k + 2, close).trim().substringBefore(' ').removePrefix("<").removeSuffix(">")
-        return Triple(text, url, close + 1)
+        val url = s.substring(k + 2, j).trim().substringBefore(' ').removePrefix("<").removeSuffix(">")
+        return Triple(text, url, j + 1)
     }
 
     private fun AnnotatedString.Builder.appendLink(text: String, url: String, colors: InlineColors, onLink: ((String) -> Unit)?) {

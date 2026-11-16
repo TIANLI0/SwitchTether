@@ -64,4 +64,8 @@
     <string name="files_msg_unknown">%1$s：结果未知。请重新打开文件夹或文件确认后再重试。</string>
     <string name="files_msg_ok">%1$s：完成。</string>
     <string name="terminal_desc">终端</string>
+    <string name="ws_exited">已退出</string>
+    <string name="ws_files_open">浏览文件</string>
+    <string name="ws_git_open">Git</string>
+    <string name="ws_git_hint">仓库状态、差异与历史</string>
 </resources>

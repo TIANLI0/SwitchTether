@@ -82,7 +82,7 @@ class NotConnectedException : Exception("not connected to the desktop")
  * 1. Find a reachable host (last good host first, then all candidates in parallel; pinned mTLS).
  * 2. `GET /v1/hello` (compatibility + still paired) and `GET /v1/status` (epoch/headSeq).
  * 3. Open the events WebSocket with `since`/`epoch`, de-duplicate by seq, handle `resync`.
- * 4. On failure: exponential backoff with jitter (1 s … 60 s); network changes retry immediately.
+ * 4. On failure: exponential backoff with jitter (1 s … 15 s); network changes retry immediately.
  * 5. `unpaired`/`device_revoked` (HTTP or close codes 4401/4403, or `hello.paired == false`)
  *    → [onRevoked] wipes pairing state and keys, state becomes [ConnectionState.Revoked].
  */
@@ -160,8 +160,37 @@ class ConnectionManager(
         start()
     }
 
-    /** Network became available: skip the remaining backoff. */
-    fun onNetworkAvailable() = retryNow()
+    /** Network became available / changed: skip remaining backoff or verify active socket. */
+    fun onNetworkAvailable() {
+        val currentApi = apiOrNull()
+        if (currentApi != null) {
+            scope.launch {
+                val alive = withTimeoutOrNull(3_000) { runCatching { currentApi.hello() }.isSuccess } ?: false
+                if (!alive) {
+                    streamJob?.cancel()
+                }
+            }
+        }
+        retryNow()
+    }
+
+    /** One-shot bounded connection probe for background WorkManager recovery. */
+    suspend fun probeOnce(timeoutMs: Long = 15_000L): Boolean {
+        val desktop = pairingStore.current() ?: return false
+        val identity = identityLoader(desktop.identityAlias) ?: return false
+        if (_state.value is ConnectionState.Online) return true
+        start()
+        return withTimeoutOrNull(timeoutMs) {
+            var reached = false
+            state.collect { s ->
+                if (s is ConnectionState.Online) {
+                    reached = true
+                    throw CancellationException("probe_done")
+                }
+            }
+            reached
+        } ?: (_state.value is ConnectionState.Online)
+    }
 
     private suspend fun runLoop() {
         var attempt = 0
@@ -394,11 +423,14 @@ class ConnectionManager(
         e.causeChain().any { it.message?.contains("revoked", ignoreCase = true) == true }
 
     private fun backoffMs(attempt: Int): Long {
-        val base = (1_000L shl (attempt - 1).coerceIn(0, 6)).coerceAtMost(60_000)
+        val base = (1_000L shl (attempt - 1).coerceIn(0, 6)).coerceAtMost(MAX_BACKOFF_MS)
         return base / 2 + Random.nextLong(base / 2 + 1)
     }
 
     companion object {
+        /** Longest wait between reconnect attempts: a task that finished while offline must not wait a minute more. */
+        const val MAX_BACKOFF_MS = 15_000L
+
         /** How long LAN discovery may take before falling back to the relay. */
         const val DISCOVERY_TIMEOUT_MS = 5_000L
 

@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.manage
 
 import androidx.compose.foundation.layout.Box
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
 import androidx.compose.foundation.clickable
 
@@ -37,9 +38,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.Switch
-import io.github.suqi8.coui.kmp.basic.TabRow
+import io.github.suqi8.coui.kmp.basic.TabRowWithContour
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
+import io.github.suqi8.coui.kmp.layout.DialogButtonBar
+import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
@@ -79,38 +82,31 @@ import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
+/** Manage + Settings in one page: computer, agent management, then app preferences. */
 @Composable
 fun ManageScreen(onOpen: (Route) -> Unit) {
-    val container = appContainer()
-    val conn by container.connection.state.collectAsStateWithLifecycle()
-    Page(title = stringResource(R.string.tab_manage)) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
-        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-            item {
-                GroupCard {
-                    ArrowPreference(title = stringResource(R.string.manage_providers), summary = stringResource(R.string.manage_providers_summary), startAction = { RowIcon(AppIcons.Providers) }, onClick = { onOpen(Route.Providers) }, cardListPosition = CardListPosition.Head)
-                    ArrowPreference(title = stringResource(R.string.manage_usage), summary = stringResource(R.string.manage_usage_summary), startAction = { RowIcon(AppIcons.Usage) }, onClick = { onOpen(Route.Usage) }, cardListPosition = CardListPosition.Tail)
-                }
+    io.github.tianli0.switchtether.ui.settings.SettingsScreen(onOpen = onOpen, manageItems = {
+        item { SectionHeader(stringResource(R.string.manage_agents_section)) }
+        item {
+            GroupCard {
+                ArrowPreference(title = stringResource(R.string.manage_providers), summary = stringResource(R.string.manage_providers_summary), startAction = { RowIcon(AppIcons.Providers) }, onClick = { onOpen(Route.Providers) }, cardListPosition = CardListPosition.Head)
+                ArrowPreference(title = stringResource(R.string.manage_usage), summary = stringResource(R.string.manage_usage_summary), startAction = { RowIcon(AppIcons.Usage) }, onClick = { onOpen(Route.Usage) }, cardListPosition = CardListPosition.Middle)
+                ArrowPreference(title = stringResource(R.string.manage_mcp), startAction = { RowIcon(AppIcons.Mcp) }, onClick = { onOpen(Route.Mcp) }, cardListPosition = CardListPosition.Middle)
+                ArrowPreference(title = stringResource(R.string.manage_skills), startAction = { RowIcon(AppIcons.Terminal) }, onClick = { onOpen(Route.Skills) }, cardListPosition = CardListPosition.Middle)
+                ArrowPreference(title = stringResource(R.string.manage_prompts), startAction = { RowIcon(AppIcons.Prompts) }, onClick = { onOpen(Route.Prompts) }, cardListPosition = CardListPosition.Tail)
             }
-            item {
-                GroupCard {
-                    ArrowPreference(title = stringResource(R.string.manage_mcp), startAction = { RowIcon(AppIcons.Mcp) }, onClick = { onOpen(Route.Mcp) }, cardListPosition = CardListPosition.Head)
-                    ArrowPreference(title = stringResource(R.string.manage_skills), startAction = { RowIcon(AppIcons.Terminal) }, onClick = { onOpen(Route.Skills) }, cardListPosition = CardListPosition.Middle)
-                    ArrowPreference(title = stringResource(R.string.manage_prompts), startAction = { RowIcon(AppIcons.Prompts) }, onClick = { onOpen(Route.Prompts) }, cardListPosition = CardListPosition.Tail)
-                }
-            }
-            item { Text(stringResource(R.string.manage_write_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
         }
-    }
+        item { Text(stringResource(R.string.manage_write_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+    })
 }
 
 @Composable
 private fun AppTabs(apps: List<String>, selected: String, onSelect: (String) -> Unit) {
-    TabRow(
+    TabRowWithContour(
         tabs = apps.map { Formatters.agentLabel(it) },
         selectedTabIndex = apps.indexOf(selected).coerceAtLeast(0),
         onTabSelected = { onSelect(apps[it]) },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     )
 }
 
@@ -169,20 +165,22 @@ fun ProvidersScreen(onBack: () -> Unit) {
     credTarget?.let { (p, f) ->
         var value by remember(p.id, f.path) { mutableStateOf("") }
         io.github.suqi8.coui.kmp.window.WindowDialog(show = true, title = "$credLabel · ${f.name}", onDismissRequest = { credTarget = null }) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.provider_credential_note, p.name), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
-                io.github.suqi8.coui.kmp.basic.TextField(
-                    value = value, onValueChange = { value = it }, label = f.name, singleLine = true, showPasswordToggle = true,
-                    backgroundMode = io.github.suqi8.coui.kmp.basic.TextFieldMode.Rectangle,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextButton(text = stringResource(R.string.action_cancel), onClick = { credTarget = null }, modifier = Modifier.weight(1f))
-                    io.github.suqi8.coui.kmp.basic.Button(
-                        onClick = { vm.setCredential("$credLabel: ${p.name}", p.id, f.path, value); credTarget = null },
-                        enabled = value.isNotBlank(), modifier = Modifier.weight(1f),
-                        colors = io.github.suqi8.coui.kmp.basic.ButtonDefaults.buttonColorsPrimary(),
-                    ) { Text(stringResource(R.string.files_save), color = COUITheme.colorScheme.onPrimary) }
+            Column(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.provider_credential_note, p.name), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                    io.github.suqi8.coui.kmp.basic.TextField(
+                        value = value, onValueChange = { value = it }, label = f.name, singleLine = true, showPasswordToggle = true,
+                        backgroundMode = io.github.suqi8.coui.kmp.basic.TextFieldMode.Rectangle,
+                    )
                 }
+                DialogButtonBar(
+                    negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = { credTarget = null }),
+                    positive = DialogButtonBarAction(
+                        text = stringResource(R.string.files_save),
+                        enabled = value.isNotBlank(),
+                        onClick = { vm.setCredential("$credLabel: ${p.name}", p.id, f.path, value); credTarget = null },
+                    ),
+                )
             }
         }
     }
@@ -390,7 +388,7 @@ private fun SummaryHero(s: UsageSummary) {
             Stat(stringResource(R.string.usage_cache_hit), dash(UsageFormat.hitRate(s.cacheHitRate)), Modifier.weight(1f))
         }
         Row(
-            Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { open = !open },
+            Modifier.fillMaxWidth().clip(SquircleShape(12.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { open = !open },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(stringResource(R.string.usage_details), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary, modifier = Modifier.weight(1f))

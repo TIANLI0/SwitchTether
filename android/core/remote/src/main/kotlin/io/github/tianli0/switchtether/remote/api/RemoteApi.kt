@@ -202,8 +202,13 @@ class RemoteApi(
             .build(),
     )
 
-    suspend fun sendMessage(sessionId: String, commandId: String, text: String): CommandResponse =
-        command(commandId, url("v1/sessions", sessionId, "messages"), SendMessageBody(commandId, text))
+    suspend fun sendMessage(
+        sessionId: String,
+        commandId: String,
+        text: String,
+        images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput> = emptyList(),
+    ): CommandResponse =
+        command(commandId, url("v1/sessions", sessionId, "messages"), SendMessageBody(commandId, text, images))
 
     suspend fun interrupt(sessionId: String, commandId: String): CommandResponse =
         command(commandId, url("v1/sessions", sessionId, "interrupt"), CommandBody(commandId))
@@ -211,8 +216,18 @@ class RemoteApi(
     suspend fun resolveApproval(sessionId: String, requestId: String, commandId: String, decision: String, message: String? = null): CommandResponse =
         command(commandId, url("v1/sessions", sessionId, "approvals", requestId), ApprovalBody(commandId, decision, message))
 
-    suspend fun answerQuestion(sessionId: String, requestId: String, commandId: String, answers: JsonObject): CommandResponse =
-        command(commandId, url("v1/sessions", sessionId, "answers", requestId), AnswersBody(commandId, answers))
+    suspend fun answerQuestion(
+        sessionId: String,
+        requestId: String,
+        commandId: String,
+        answers: JsonObject?,
+        action: String? = null,
+    ): CommandResponse =
+        command(commandId, url("v1/sessions", sessionId, "answers", requestId), AnswersBody(commandId, answers, action))
+
+    /** Reads a small file (e.g. an image referenced by an agent event) over the pinned mTLS channel. */
+    suspend fun fsDownloadBytes(path: String, maxBytes: Int = 8 * 1024 * 1024): ByteArray =
+        executeBytes(Request.Builder().url(url("v1/fs/download").newBuilder().addQueryParameter("path", path).build()).get().tagged().build(), maxBytes)
 
     // ---- §7.2 providers ------------------------------------------------------------------------------
 
@@ -478,6 +493,32 @@ class RemoteApi(
         val r = fetch(request)
         if (!r.ok) throw toApiException(r)
         return r.text to r.headers["Content-Type"]
+    }
+
+    private suspend fun executeBytes(request: Request, maxBytes: Int): ByteArray = suspendCancellableCoroutine { cont ->
+        val call = readClient.newCall(request)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    response.use { r ->
+                        if (!r.isSuccessful) {
+                            cont.resumeWithException(toApiException(Fetched(r.code, r.headers, r.body.string())))
+                            return
+                        }
+                        val bytes = r.body.bytes()
+                        if (bytes.size > maxBytes) {
+                            cont.resumeWithException(ApiException(413, ApiErrorBody(io.github.tianli0.switchtether.remote.protocol.ErrorCodes.PAYLOAD_TOO_LARGE, "image too large"), r.headers["X-Request-Id"]))
+                            return
+                        }
+                        cont.resume(bytes) {}
+                    }
+                } catch (e: IOException) {
+                    cont.resumeWithException(BodyReadException(e))
+                }
+            }
+        })
     }
 
     private fun parseJson(text: String): JsonElement =

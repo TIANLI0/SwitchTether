@@ -57,10 +57,22 @@ interface SessionRepository {
     suspend fun events(id: String, before: Long? = null, after: Long? = null, limit: Int = 300): EventPage
     suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int = 64 * 1024): PayloadChunk
 
-    suspend fun sendMessage(id: String, text: String, commandId: String = newCommandId()): CommandOutcome
+    suspend fun sendMessage(
+        id: String,
+        text: String,
+        commandId: String = newCommandId(),
+        images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput> = emptyList(),
+    ): CommandOutcome
     suspend fun interrupt(id: String, commandId: String = newCommandId()): CommandOutcome
     suspend fun resolveApproval(id: String, requestId: String, decision: String, commandId: String = newCommandId()): CommandOutcome
-    suspend fun answer(id: String, requestId: String, answers: JsonObject, commandId: String = newCommandId()): CommandOutcome
+    suspend fun answer(
+        id: String,
+        requestId: String,
+        answers: JsonObject?,
+        commandId: String = newCommandId(),
+        action: String? = null,
+    ): CommandOutcome
+    suspend fun downloadFile(path: String): ByteArray? = null
     suspend fun commandStatus(commandId: String): CommandStatus
 
     /** Starts a SwitchTether-managed session (§7.5); the success body is its SessionSummary. */
@@ -154,8 +166,12 @@ class RemoteSessionRepository(private val conn: ConnectionController) : SessionR
     override suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int) =
         conn.withApi { it.eventPayload(sessionId, eventId, offset, limit) }
 
-    override suspend fun sendMessage(id: String, text: String, commandId: String) =
-        conn.command(commandId) { api, c -> api.sendMessage(id, c, text) }
+    override suspend fun sendMessage(
+        id: String,
+        text: String,
+        commandId: String,
+        images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput>,
+    ) = conn.command(commandId) { api, c -> api.sendMessage(id, c, text, images) }
 
     override suspend fun interrupt(id: String, commandId: String) =
         conn.command(commandId) { api, c -> api.interrupt(id, c) }
@@ -163,8 +179,11 @@ class RemoteSessionRepository(private val conn: ConnectionController) : SessionR
     override suspend fun resolveApproval(id: String, requestId: String, decision: String, commandId: String) =
         conn.command(commandId) { api, c -> api.resolveApproval(id, requestId, c, decision) }
 
-    override suspend fun answer(id: String, requestId: String, answers: JsonObject, commandId: String) =
-        conn.command(commandId) { api, c -> api.answerQuestion(id, requestId, c, answers) }
+    override suspend fun answer(id: String, requestId: String, answers: JsonObject?, commandId: String, action: String?) =
+        conn.command(commandId) { api, c -> api.answerQuestion(id, requestId, c, answers, action) }
+
+    override suspend fun downloadFile(path: String): ByteArray? =
+        conn.apiOrNull()?.let { api -> runCatching { api.fsDownloadBytes(path) }.getOrNull() }
 
     override suspend fun commandStatus(commandId: String): CommandStatus {
         val api = conn.apiOrNull() ?: return CommandStatus.Unreachable(NotConnectedException())

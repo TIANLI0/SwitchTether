@@ -4,6 +4,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.adamglin.PhosphorIcons
 import com.adamglin.phosphoricons.Fill
 import com.adamglin.phosphoricons.Regular
+import com.adamglin.phosphoricons.regular.CaretRight
+import com.adamglin.phosphoricons.regular.Folder
+import com.adamglin.phosphoricons.regular.GitBranch
 import com.adamglin.phosphoricons.regular.ArrowClockwise
 import com.adamglin.phosphoricons.regular.ArrowDown
 import com.adamglin.phosphoricons.regular.Clock
@@ -94,6 +97,9 @@ object AppIcons {
     val Show: ImageVector get() = PhosphorIcons.Regular.Eye
     val Hide: ImageVector get() = PhosphorIcons.Regular.EyeSlash
     val Terminal: ImageVector get() = PhosphorIcons.Regular.TerminalWindow
+    val Files: ImageVector get() = PhosphorIcons.Regular.Folder
+    val Git: ImageVector get() = PhosphorIcons.Regular.GitBranch
+    val ChevronRight: ImageVector get() = PhosphorIcons.Regular.CaretRight
     val Pin: ImageVector get() = PhosphorIcons.Regular.PushPin
     val Unpin: ImageVector get() = PhosphorIcons.Regular.PushPinSlash
     val ArrowDown: ImageVector get() = PhosphorIcons.Regular.ArrowDown

@@ -64,4 +64,8 @@
     <string name="files_msg_unknown">%1$s: the outcome is unknown. Reopen the folder or file to check before trying again.</string>
     <string name="files_msg_ok">%1$s: done.</string>
     <string name="terminal_desc">Terminal</string>
+    <string name="ws_exited">Exited</string>
+    <string name="ws_files_open">Browse files</string>
+    <string name="ws_git_open">Git</string>
+    <string name="ws_git_hint">Status, diffs and history of a repository</string>
 </resources>

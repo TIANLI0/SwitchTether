@@ -70,17 +70,9 @@ fun connectionText(state: ConnectionState): String {
 fun ConnectionBanner(state: ConnectionState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     // Android 17: LAN access not granted → say what still works and offer to fix it.
     LocalNetworkStrip()
-    if (state is ConnectionState.Online) {
-        // Healthy direct connection: nothing to say. Through the relay: say so, quietly.
-        if (state.endpoint.host == io.github.tianli0.switchtether.remote.relay.RELAY_HOST) {
-            Banner(
-                text = stringResource(R.string.conn_via_relay, relayHostOf(state.desktop.relayUrl)),
-                color = LocalDevColors.current.info,
-                modifier = modifier.testTag("relay-strip"),
-            )
-        }
-        return
-    }
+    // Online (direct or through the relay) is never a banner: the path is shown once, on the
+    // Home connection card and in Manage → computer details.
+    if (state is ConnectionState.Online) return
     Banner(
         text = connectionText(state),
         color = connectionColor(state),

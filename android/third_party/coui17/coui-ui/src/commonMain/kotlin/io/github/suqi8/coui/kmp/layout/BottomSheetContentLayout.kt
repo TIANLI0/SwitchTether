@@ -158,6 +158,8 @@ import kotlin.math.abs
  *   [insideMargin.height]. None by default, as on ColorOS 17, where the platform's 60dp foot sits
  *   below the screen edge. It is dropped while the IME is up, where it would only read as dead
  *   space above the keyboard.
+ * @param dismissOffsetFraction How far the panel has to be dragged down, as a fraction of its own
+ *   height, before releasing it dismisses the sheet. See [BottomSheetDefaults.DismissOffsetFraction].
  * @param content The content of the bottom sheet.
  */
 @Suppress("ktlint:compose:modifier-not-used-at-root")
@@ -184,6 +186,7 @@ internal fun BottomSheetContentLayout(
     enableNestedScroll: Boolean = true,
     topInset: Dp? = null,
     panelPaddingBottom: Dp = BottomSheetDefaults.PanelPaddingBottom,
+    dismissOffsetFraction: Float = BottomSheetDefaults.DismissOffsetFraction,
     content: @Composable () -> Unit,
 ) {
     val animationProgress = remember { Animatable(0f, visibilityThreshold = 0.0001f) }
@@ -318,23 +321,30 @@ internal fun BottomSheetContentLayout(
                 .fillMaxSize()
                 // Key on `allowDismiss` so the gesture coroutine restarts with the latest closure
                 // when the consumer toggles it; otherwise the in-flight detector keeps the stale value.
-                .pointerInput(allowDismiss) {
-                    detectTapGestures(
-                        onTap = {
-                            if (allowDismiss) {
-                                requestDismiss()
+                .then(
+                    if (!show) {
+                        Modifier
+                    } else {
+                        Modifier
+                            .pointerInput(allowDismiss) {
+                                detectTapGestures(
+                                    onTap = {
+                                        if (allowDismiss) {
+                                            requestDismiss()
+                                        }
+                                    },
+                                )
                             }
-                        },
-                    )
-                }
-                .semantics {
-                    if (allowDismiss) {
-                        onClick(label = "Dismiss") {
-                            requestDismiss()
-                            true
-                        }
-                    }
-                },
+                            .semantics {
+                                if (allowDismiss) {
+                                    onClick(label = "Dismiss") {
+                                        requestDismiss()
+                                        true
+                                    }
+                                }
+                            }
+                    },
+                ),
             contentAlignment = Alignment.BottomCenter,
         ) {
             val sheetModifier = modifier.graphicsLayer {
@@ -368,7 +378,9 @@ internal fun BottomSheetContentLayout(
                 modifier = sheetModifier,
                 topInset = topInset,
                 panelPaddingBottom = panelPaddingBottom,
+                dismissOffsetFraction = dismissOffsetFraction,
                 enableNestedScroll = enableNestedScroll,
+                allowTouches = show,
                 startAction = startAction?.let { action ->
                     { CompositionLocalProvider(LocalDismissState provides requestDismiss) { action() } }
                 },
@@ -407,11 +419,14 @@ internal fun BottomSheetContent(
     topInset: Dp? = null,
     panelPaddingBottom: Dp = BottomSheetDefaults.PanelPaddingBottom,
     enableNestedScroll: Boolean = true,
+    dismissOffsetFraction: Float = BottomSheetDefaults.DismissOffsetFraction,
+    allowTouches: Boolean = true,
     startAction: @Composable (() -> Unit)? = null,
     endAction: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
+    val imeInsets = WindowInsets.ime
     val windowInfo = LocalWindowInfo.current
     // `containerDpSize` converts at the platform density, so under a `LocalDensity` override (a
     // ColorOS app pinned to its system density, say) it disagrees with every other dp here and the
@@ -454,9 +469,15 @@ internal fun BottomSheetContent(
         }
     }
 
-    val updateDimAlpha = remember(allowDismiss) {
+    val visibleSheetHeightPx: () -> Float = {
+        val total = sheetHeightPx.intValue.toFloat()
+        val imePx = imeInsets.getBottom(density).toFloat()
+        (total - imePx).coerceAtLeast(1f)
+    }
+
+    val updateDimAlpha = remember(allowDismiss, density) {
         { offset: Float ->
-            val thresholdPx = if (sheetHeightPx.intValue > 0) sheetHeightPx.intValue.toFloat() else 500f
+            val thresholdPx = if (sheetHeightPx.intValue > 0) visibleSheetHeightPx() else 500f
             val alpha = if (offset >= 0 && allowDismiss) {
                 1f - (offset / thresholdPx).coerceIn(0f, 1f)
             } else {
@@ -467,26 +488,25 @@ internal fun BottomSheetContent(
     }
 
     // Settlement logic
-    val performSettle: (Float) -> Unit = remember(allowDismiss, density) {
+    val performSettle: (Float) -> Unit = remember(allowDismiss, density, dismissOffsetFraction) {
         { velocity ->
             settlingJob.value?.cancel()
             isSettling.value = true
             settlingJob.value = coroutineScope.launch {
                 val currentOffset = dragOffsetY.value
                 val windowHeightPx = with(density) { currentWindowHeight.toPx() }
-                val peekPx = with(density) { PanelPeekHeight.toPx() }
-                val sheetPx = sheetHeightPx.intValue.toFloat()
-                // COUIBottomSheetBehavior.shouldHide: the sheet has to sit below the collapsed
-                // (peek) offset, and its 0.1s velocity projection has to travel more than half a
-                // peek height past it.
-                val collapsedOffset = (sheetPx - peekPx).coerceAtLeast(0f)
+                val visiblePx = visibleSheetHeightPx()
+                // COUIBottomSheetBehavior.shouldHide only releases the panel once it sits below the
+                // collapsed (peek) offset — that is, once almost the whole panel has been dragged
+                // off-screen — and then also requires a fling or a drag past half the screen. On a
+                // tall panel the first condition is barely reachable, so the panel reads as
+                // impossible to dismiss. Closing after `dismissOffsetFraction` of the panel's
+                // visible height above the IME, with the 0.1s release projection counted in, is
+                // what the gesture implies; a downward fling of `SIGNIFICANT_VELOCITY_PX` still
+                // dismisses at any travel.
                 val projected = currentOffset + velocity * VELOCITY_PROJECTION_SECONDS
-                val shouldHide = sheetPx > 0f && currentOffset >= collapsedOffset &&
-                    (projected - collapsedOffset) / peekPx > HIDE_THRESHOLD
-                // onViewReleased only hides on a mostly vertical fling above 500px/s, or once the
-                // sheet has been dragged past the middle of the screen (`releasedLow`).
-                val shouldDismiss = allowDismiss && shouldHide &&
-                    (velocity > SIGNIFICANT_VELOCITY_PX || currentOffset > sheetPx / 2f)
+                val shouldDismiss = allowDismiss && sheetHeightPx.intValue > 0 &&
+                    (projected >= visiblePx * dismissOffsetFraction || velocity > SIGNIFICANT_VELOCITY_PX)
 
                 try {
                     if (shouldDismiss) {
@@ -526,7 +546,7 @@ internal fun BottomSheetContent(
     }
 
     // Nested scroll logic
-    val nestedScrollConnection = remember(enableNestedScroll, allowDismiss, density) {
+    val nestedScrollConnection = remember(enableNestedScroll, allowDismiss, dismissOffsetFraction, density) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (!enableNestedScroll) return Offset.Zero
@@ -627,6 +647,7 @@ internal fun BottomSheetContent(
         onSettle = performSettle,
         onUpdateAlpha = updateDimAlpha,
         modifier = modifier,
+        allowTouches = allowTouches,
         onDismissRequest = onDismissRequest,
         content = content,
     )
@@ -659,6 +680,7 @@ private fun BottomSheetColumn(
     onSettle: (velocity: Float) -> Unit,
     onUpdateAlpha: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    allowTouches: Boolean = true,
     onDismissRequest: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -711,21 +733,23 @@ private fun BottomSheetColumn(
 
         Column(
             modifier = modifier
-                .pointerInput(Unit) { detectTapGestures { /* Consume click */ } }
+                .then(
+                    if (allowTouches) {
+                        Modifier.pointerInput(Unit) { detectTapGestures { /* Consume click */ } }
+                    } else {
+                        Modifier
+                    },
+                )
                 .then(if (enableNestedScroll) Modifier.nestedScroll(nestedScrollConnection) else Modifier)
                 .widthIn(max = effectiveMaxWidth)
                 .fillMaxWidth()
                 .wrapContentHeight()
                 .heightIn(max = windowHeight - topInset)
                 .onGloballyPositioned { coordinates ->
-                    // Only capture the natural sheet height while the IME is closed; otherwise the
-                    // bottom inset added by imePadding would inflate sheetHeightPx, shifting the
-                    // dim threshold and causing translationY jumps mid-animation.
-                    if (imeInsets.getBottom(density) == 0) {
-                        sheetHeightPx.intValue = coordinates.size.height
-                    }
+                    // Capture the full rendered sheet surface height (including any inner IME
+                    // padding) so enter/exit translations slide the entire panel off-screen.
+                    sheetHeightPx.intValue = coordinates.size.height
                 }
-                .then(if (defaultWindowInsetsPadding) Modifier.imePadding() else Modifier)
                 .padding(horizontal = outsideMargin.width)
                 .then(panelSurface)
                 // ColorOS 17 rims every panel, not just dialogs:
@@ -741,6 +765,9 @@ private fun BottomSheetColumn(
                     edgeStyle = GradientStrokeStyle.EDGE_STYLE_2,
                     shadowStyle = InnerShadowStyle.SHADOW_STYLE_2,
                 )
+                // Keep the sheet surface anchored to the window bottom behind the IME and lift
+                // only the inner content, avoiding a seam between the sheet edge and a rounded IME.
+                .then(if (defaultWindowInsetsPadding) Modifier.imePadding() else Modifier)
                 .padding(horizontal = insideMargin.width)
                 .padding(
                     // An extra foot gap only exists while the keyboard is away; above the IME it
@@ -822,9 +849,6 @@ private val PanelPullUpMaxOffset = 28.dp
 
 /** `COUIBottomSheetDialog`'s pull-up listener moves the parent padding by 0.2 of the drag. */
 private const val PULL_UP_FRICTION = 0.2f
-
-/** `COUIBottomSheetBehavior.HIDE_THRESHOLD`: dismissal is measured in peek heights. */
-private const val HIDE_THRESHOLD = 0.5f
 
 /** `COUIBottomSheetBehavior` projects the release velocity 0.1s ahead before comparing. */
 private const val VELOCITY_PROJECTION_SECONDS = 0.1f
@@ -1300,6 +1324,17 @@ object BottomSheetDefaults {
      * backdrop instead, so it has nothing to hang off-screen.
      */
     val PanelPaddingBottom = 0.dp
+
+    /**
+     * How far the panel has to be dragged down, as a fraction of its own height, before releasing
+     * it dismisses the sheet.
+     *
+     * `COUIBottomSheetBehavior` only releases a panel that already sits below its collapsed (peek)
+     * offset and then travels another half peek, which on a tall panel means dragging almost all of
+     * it off-screen — the gesture reads as unable to close it. Half the panel is the point where
+     * the drag stops looking like a scroll and starts looking like a dismissal.
+     */
+    val DismissOffsetFraction = 0.5f
 
     /**
      * The height of the title row, `coui_list_dialog_toolbar_height` = 50dp.

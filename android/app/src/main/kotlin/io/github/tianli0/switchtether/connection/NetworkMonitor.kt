@@ -16,6 +16,10 @@ class NetworkMonitor(context: Context, private val onAvailable: () -> Unit) {
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
             if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) onAvailable()
         }
+
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: android.net.LinkProperties) {
+            onAvailable()
+        }
     }
 
     fun start() {

@@ -10,7 +10,16 @@ use serde_json::Value;
 
 use super::model::Liveness;
 use super::store::SessionLog;
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAttachment {
+    pub media_type: String,
+    pub data_base64: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
 
 #[async_trait]
 pub trait ManagedSession: Send + Sync {
@@ -25,7 +34,23 @@ pub trait ManagedSession: Send + Sync {
     fn model(&self) -> Option<String>;
     fn title(&self) -> Option<String>;
     fn has_pending_requests(&self) -> bool;
+    fn supports_images(&self) -> bool {
+        false
+    }
     async fn send_message(&self, text: &str) -> ApiResult<()>;
+    async fn send_message_with_images(
+        &self,
+        text: &str,
+        images: &[ImageAttachment],
+    ) -> ApiResult<()> {
+        if !images.is_empty() {
+            return Err(ApiError::unavailable_capability(
+                "BLOCKED",
+                "This session does not support image input.",
+            ));
+        }
+        self.send_message(text).await
+    }
     async fn interrupt(&self) -> ApiResult<()>;
     #[allow(clippy::too_many_arguments)]
     async fn respond(
@@ -84,8 +109,18 @@ impl ManagedSession for super::claude::managed::ManagedClaude {
     fn has_pending_requests(&self) -> bool {
         !self.pending_request_ids().is_empty()
     }
+    fn supports_images(&self) -> bool {
+        true
+    }
     async fn send_message(&self, text: &str) -> ApiResult<()> {
         super::claude::managed::ManagedClaude::send_message(self, text).await
+    }
+    async fn send_message_with_images(
+        &self,
+        text: &str,
+        images: &[ImageAttachment],
+    ) -> ApiResult<()> {
+        super::claude::managed::ManagedClaude::send_message_with_images(self, text, images).await
     }
     async fn interrupt(&self) -> ApiResult<()> {
         super::claude::managed::ManagedClaude::interrupt(self).await

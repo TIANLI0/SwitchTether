@@ -57,6 +57,15 @@ class Notifier(
     private val sessions = ConcurrentHashMap<String, SessionSummary>()
     private val nm = NotificationManagerCompat.from(context)
 
+    private val _activeSessions = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /** Live sessions that are working or waiting: while > 0 the monitor service keeps the CPU awake so the event stream stays timely. */
+    val activeSessions: StateFlow<Int> = _activeSessions
+
+    private fun refreshActive() {
+        _activeSessions.value = sessions.values.count { it.isLive && (it.status == "busy" || it.status == "waiting" || it.waitingFor != null) }
+    }
+
     fun start() {
         createChannels()
         scope.launch {
@@ -65,6 +74,7 @@ class Notifier(
                 val intent = when (ev.topic) {
                     "session.upserted" -> runCatching { ProtocolJson.decodeFromJsonElement(SessionSummary.serializer(), (data["session"] as? JsonObject) ?: data) }.getOrNull()?.let {
                         sessions[it.id] = it
+                        refreshActive()
                         // Nobody is waiting any more: drop the "needs you" notification of that session.
                         if (it.waitingFor == null && it.status != "waiting") cancel(it.id, NotifySlot.ATTENTION)
                         engine.onSessionUpsert(it)

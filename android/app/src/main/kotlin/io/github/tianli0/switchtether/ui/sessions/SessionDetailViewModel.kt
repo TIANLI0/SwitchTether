@@ -69,6 +69,8 @@ data class SessionDetailState(
     val loadingOlder: Boolean = false,
     val connection: ConnectionState = ConnectionState.Unpaired,
     val draft: String = "",
+    /** Images attached to the current draft (encoded base64, sent once on send). */
+    val attachedImages: List<io.github.tianli0.switchtether.remote.protocol.ImageInput> = emptyList(),
     /** Managed session created by "continue on phone" (navigate to it once). */
     val continuedAs: io.github.tianli0.switchtether.remote.protocol.SessionSummary? = null,
     /** Messages sent from this phone and not echoed by the desktop yet (optimistic bubbles). */
@@ -147,6 +149,10 @@ class SessionDetailViewModel(
     /** Full outputs loaded on demand via the payload endpoint (memory only). */
     val payloads = mutableStateMapOf<String, PayloadState>()
 
+    /** In-memory cache of downloaded local images (never written to disk). */
+    private val imageCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    private val outgoingImages = java.util.concurrent.ConcurrentHashMap<String, List<io.github.tianli0.switchtether.remote.protocol.ImageInput>>()
+
     val commands = CommandTracker(viewModelScope) { repo.commandStatus(it) }
 
     private val draftFlow = MutableStateFlow<String?>(null)
@@ -190,7 +196,29 @@ class SessionDetailViewModel(
     fun load() {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
+            val prevDetail = _state.value.detail.valueOrNull
             val d = loadable { repo.detail(sessionId) }
+            if (d is Loadable.Failed && sessionId.startsWith("managed:") &&
+                d.error.kind == UiError.Kind.NOT_FOUND && prevDetail != null
+            ) {
+                // Desktop restarted: managed processes lived inside the old process and are now ended.
+                val endedSummary = prevDetail.summary.copy(liveness = "ended", status = "ended", control = "history", waitingFor = null)
+                val endedCaps = io.github.tianli0.switchtether.remote.protocol.SessionCapabilities(
+                    readHistory = "VERIFIED",
+                    sendMessage = "BLOCKED",
+                    approve = "BLOCKED",
+                    answerQuestion = "BLOCKED",
+                    interrupt = "BLOCKED",
+                    reason = prevDetail.capabilities.reason,
+                )
+                _state.update {
+                    it.copy(
+                        detail = Loadable.Ready(SessionDetail(endedSummary, endedCaps, emptyList())),
+                        awaitingReply = false,
+                    ).derive()
+                }
+                return@launch
+            }
             _state.update { it.copy(detail = d) }
             try {
                 val page = repo.events(sessionId, limit = PAGE)
@@ -208,7 +236,8 @@ class SessionDetailViewModel(
 
     /**
      * After a reconnect/resync within the same desktop epoch: fetch everything newer than the last
-     * seen seq (`after=` pages until hasMore=false) instead of dropping the loaded history.
+     * seen seq (`after=` pages) AND refresh the newest page so in-place updates (subagent/tool
+     * completion, resolved approvals/questions) during disconnect are recovered cleanly.
      */
     fun catchUp() {
         val max = _state.value.log.maxSeq ?: return load()
@@ -217,6 +246,8 @@ class SessionDetailViewModel(
             val d = loadable { repo.detail(sessionId) }
             if (d is Loadable.Ready) _state.update { it.copy(detail = d) }
             try {
+                val latest = repo.events(sessionId, limit = PAGE)
+                applyEvents(latest.events)
                 var after = max
                 var pages = 0
                 while (pages < CATCH_UP_MAX_PAGES) {
@@ -227,6 +258,7 @@ class SessionDetailViewModel(
                     if (!page.hasMoreBefore || newMax <= after) break // with after=, hasMore means "more newer"
                     after = newMax
                 }
+                d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
                 if (pages >= CATCH_UP_MAX_PAGES) load() // too far behind: start from the newest page
             } catch (e: CancellationException) {
                 throw e
@@ -335,6 +367,27 @@ class SessionDetailViewModel(
         draftFlow.value = text
     }
 
+    fun addImage(img: io.github.tianli0.switchtether.remote.protocol.ImageInput) {
+        _state.update { st ->
+            if (st.attachedImages.size >= 4) st else st.copy(attachedImages = st.attachedImages + img)
+        }
+    }
+
+    fun removeImage(index: Int) {
+        _state.update { st ->
+            if (index !in st.attachedImages.indices) st
+            else st.copy(attachedImages = st.attachedImages.filterIndexed { i, _ -> i != index })
+        }
+    }
+
+    suspend fun loadImageBytes(path: String): ByteArray? {
+        imageCache[path]?.let { return it }
+        val bytes = repo.downloadFile(path) ?: return null
+        if (imageCache.size > 32) imageCache.clear()
+        imageCache[path] = bytes
+        return bytes
+    }
+
     /**
      * Optimistic send: the bubble appears at once ("发送中"), the composer clears, and the list jumps
      * to the bottom. The desktop's `user_message` echo replaces the bubble ([reconcileOutgoing]).
@@ -343,14 +396,17 @@ class SessionDetailViewModel(
     fun send() {
         val st = _state.value
         val text = st.draft.trim()
-        if (text.isEmpty() || !(st.canSend || st.canQueue)) return
+        val imgs = st.attachedImages
+        if ((text.isEmpty() && imgs.isEmpty()) || !(st.canSend || st.canQueue)) return
+        val cmdId = newCommandId()
+        if (imgs.isNotEmpty()) outgoingImages[cmdId] = imgs
         val msg = OutgoingMessage(
-            commandId = newCommandId(),
-            text = text,
+            commandId = cmdId,
+            text = text.ifEmpty { "[image]" },
             status = if (st.canSend) OutgoingStatus.SENDING else OutgoingStatus.WAITING_CONNECTION,
             afterSeq = st.log.maxSeq ?: 0,
         )
-        _state.update { it.derive(outgoing = it.outgoing + msg).copy(draft = "", sendTick = it.sendTick + 1) }
+        _state.update { it.derive(outgoing = it.outgoing + msg).copy(draft = "", attachedImages = emptyList(), sendTick = it.sendTick + 1) }
         draftFlow.value = ""
         viewModelScope.launch { drafts.setDraft(sessionId, "") }
         if (st.canSend) deliver(msg.commandId)
@@ -376,10 +432,14 @@ class SessionDetailViewModel(
 
     private fun deliver(commandId: String) {
         val msg = _state.value.outgoing.firstOrNull { it.commandId == commandId } ?: return
+        val imgs = outgoingImages[commandId].orEmpty()
         setOutgoing(commandId, OutgoingStatus.SENDING, null)
         viewModelScope.launch {
-            when (val out = repo.sendMessage(sessionId, msg.text, commandId)) {
-                is CommandOutcome.Succeeded, is CommandOutcome.InProgress -> setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
+            when (val out = repo.sendMessage(sessionId, if (msg.text == "[image]" && imgs.isNotEmpty()) "" else msg.text, commandId, imgs)) {
+                is CommandOutcome.Succeeded, is CommandOutcome.InProgress -> {
+                    outgoingImages.remove(commandId)
+                    setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
+                }
                 is CommandOutcome.Rejected -> setOutgoing(commandId, OutgoingStatus.FAILED, out.error.body.message.ifBlank { out.error.code })
                 is CommandOutcome.NotSent ->
                     if (_state.value.online) setOutgoing(commandId, OutgoingStatus.FAILED, ConnectionManager.describe(out.cause))
@@ -417,8 +477,8 @@ class SessionDetailViewModel(
         commands.run(label) { id -> repo.resolveApproval(sessionId, requestId, decision, id) }
     }
 
-    fun answer(label: String, requestId: String, answers: JsonObject) {
-        commands.run(label) { id -> repo.answer(sessionId, requestId, answers, id) }
+    fun answer(label: String, requestId: String, answers: JsonObject?, action: String? = null) {
+        commands.run(label) { id -> repo.answer(sessionId, requestId, answers, id, action) }
     }
 
     companion object {

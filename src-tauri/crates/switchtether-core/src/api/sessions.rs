@@ -125,7 +125,10 @@ async fn create(
 #[serde(rename_all = "camelCase")]
 struct MessageBody {
     command_id: Option<String>,
+    #[serde(default)]
     text: String,
+    #[serde(default)]
+    images: Vec<crate::agents::managed::ImageAttachment>,
 }
 
 async fn send_message(
@@ -144,14 +147,18 @@ async fn send_message(
         || async move {
             let r = c
                 .agents
-                .send_message(&id, &body.text, client_id.as_deref())
+                .send_message_with_images(&id, &body.text, &body.images, client_id.as_deref())
                 .await?;
             c.registry.audit(
                 Some(dev.id()),
                 "session.message",
                 Some(&id),
                 "ok",
-                Some(&format!("{} chars", body.text.chars().count())),
+                Some(&format!(
+                    "{} chars, {} images",
+                    body.text.chars().count(),
+                    body.images.len()
+                )),
             );
             Ok(r)
         },
@@ -250,7 +257,10 @@ async fn approve(
 #[serde(rename_all = "camelCase")]
 struct AnswerBody {
     command_id: Option<String>,
-    answers: Value,
+    #[serde(default)]
+    answers: Option<Value>,
+    #[serde(default)]
+    action: Option<String>,
 }
 
 async fn answer(
@@ -266,15 +276,20 @@ async fn answer(
         body.command_id,
         "session.answer",
         || async move {
+            let decision = match body.action.as_deref() {
+                Some("cancel") => "cancel",
+                Some("decline") => "deny",
+                _ => "answer",
+            };
             let r = c
                 .agents
                 .respond(
                     &id,
                     &request_id,
-                    "answer",
+                    decision,
                     None,
                     None,
-                    Some(body.answers),
+                    body.answers,
                     "phone",
                 )
                 .await?;
@@ -282,7 +297,7 @@ async fn answer(
                 Some(dev.id()),
                 "session.answer",
                 Some(&id),
-                "ok",
+                decision,
                 Some(&request_id),
             );
             Ok(r)

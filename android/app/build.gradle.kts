@@ -18,8 +18,8 @@ android {
         minSdk = 29
         // Android 17. Local network access needs ACCESS_LOCAL_NETWORK (requested at runtime).
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Self-update source: public GitHub releases of TIANLI0/SwitchTether. The API base can be
         // overridden for local end-to-end tests (`-PupdateApiBase=http://10.0.2.2:8765`, debug only).

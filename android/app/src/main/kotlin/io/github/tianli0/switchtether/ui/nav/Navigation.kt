@@ -6,12 +6,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 
-enum class Tab { HOME, SESSIONS, WORKSPACE, MANAGE, SETTINGS }
+enum class Tab { HOME, SESSIONS, WORKSPACE, MANAGE }
 
 /** Detail destinations pushed above the tabs. */
 sealed interface Route {
     data class SessionDetail(val sessionId: String, val title: String?) : Route
     data object NewSession : Route
+    data class Terminal(val id: String?) : Route
+    data object Files : Route
+    data object Git : Route
+    data object PickFolder : Route
     data object Providers : Route
     data object Usage : Route
     data object Mcp : Route

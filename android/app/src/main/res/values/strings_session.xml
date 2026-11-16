@@ -124,4 +124,9 @@
         <item quantity="other">%d new messages</item>
     </plurals>
     <string name="composer_queue_hint">Offline: messages you send go out when the connection is back.</string>
+    <string name="sessions_related">%1$d earlier related sessions</string>
+    <string name="sessions_related_hide">Hide earlier related sessions</string>
+    <string name="stat_plan">Plan %1$d/%2$d</string>
+    <string name="stat_steps">%1$d steps</string>
+    <string name="stat_files">%1$d files</string>
 </resources>

@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -23,7 +27,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -71,9 +74,12 @@ import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.ChipTabData
 import io.github.suqi8.coui.kmp.basic.ChipTabGroup
+import io.github.suqi8.coui.kmp.basic.DropdownImpl
 import io.github.suqi8.coui.kmp.basic.EmptyState
+import io.github.suqi8.coui.kmp.basic.ListPopupColumn
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.tianli0.switchtether.R
@@ -83,6 +89,7 @@ import io.github.tianli0.switchtether.remote.terminal.TermKey
 import io.github.tianli0.switchtether.remote.terminal.TermPalette
 import io.github.tianli0.switchtether.ui.common.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
 import io.github.tianli0.switchtether.ui.common.ToolbarIcon
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
@@ -133,34 +140,50 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
     var confirmKill by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         // Tabs + actions
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
-                if (state.terminals.isNotEmpty()) {
+                if (state.terminals.size > 1) {
                     ChipTabGroup(
                         tabs = state.terminals.map { ChipTabData(it.title.ifBlank { it.shell }.take(18)) },
                         selectedIndex = state.terminals.indexOfFirst { it.id == state.selectedId }.coerceAtLeast(0),
                         onSelectedChange = { vm.select(state.terminals[it].id) },
-                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 0.dp),
                     )
+                } else {
+                    val active = state.terminals.firstOrNull { it.id == state.selectedId } ?: state.terminals.firstOrNull()
+                    if (active != null) {
+                        Text(
+                            active.title.ifBlank { active.shell },
+                            style = COUITheme.textStyles.body2,
+                            fontWeight = FontWeight.Medium,
+                            color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
             Box {
                 ToolbarIcon(AppIcons.Add, stringResource(R.string.term_new), { showShells = true }, enabled = state.online && !state.busy)
                 WindowListPopup(show = showShells, onDismissRequest = { showShells = false }) {
-                    Column(Modifier.widthIn(min = 200.dp).padding(vertical = 8.dp)) {
-                        val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
-                        shells.forEach { sh ->
-                            Text(
-                                sh.name.ifBlank { sh.id },
-                                style = COUITheme.textStyles.body1,
-                                color = COUITheme.colorScheme.onSurface,
-                                modifier = Modifier.fillMaxWidth().clickable { showShells = false; vm.create(sh.id.ifBlank { null }) }.padding(horizontal = 20.dp, vertical = 12.dp),
+                    val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
+                    ListPopupColumn {
+                        shells.forEachIndexed { idx, sh ->
+                            DropdownImpl(
+                                text = sh.name.ifBlank { sh.id },
+                                optionSize = shells.size,
+                                isSelected = false,
+                                index = idx,
+                                onSelectedIndexChange = {
+                                    showShells = false
+                                    vm.create(sh.id.ifBlank { null })
+                                },
                             )
                         }
                     }
                 }
             }
             if (state.selectedId != null) {
+                ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), { vm.refresh() })
                 ToolbarIcon(AppIcons.Copy, stringResource(R.string.term_copy_screen), { clipboard.setText(AnnotatedString(state.screen.plainText())) })
                 ToolbarIcon(AppIcons.Paste, stringResource(R.string.term_paste), { clipboard.getText()?.text?.let(vm::paste) }, enabled = state.link == TermLink.OPEN)
                 ToolbarIcon(AppIcons.Delete, stringResource(R.string.term_kill), { confirmKill = true })
@@ -168,28 +191,32 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
         }
         state.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = 16.dp)) }
         when {
-            state.link == TermLink.NO_STEP_UP_KEY -> GroupCard { EmptyState(title = stringResource(R.string.term_no_stepup), modifier = Modifier.padding(24.dp)) }
-            state.link == TermLink.NEEDS_STEP_UP -> GroupCard {
-                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.term_needs_stepup), style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
-                    Button(onClick = { vm.connect() }, colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.padding(top = 12.dp)) {
-                        Text(stringResource(R.string.term_confirm), color = COUITheme.colorScheme.onPrimary)
+            state.link == TermLink.NO_STEP_UP_KEY -> Box(Modifier.padding(top = 8.dp)) { GroupCard { EmptyState(title = stringResource(R.string.term_no_stepup), modifier = Modifier.padding(24.dp)) } }
+            state.link == TermLink.NEEDS_STEP_UP -> Box(Modifier.padding(top = 8.dp)) {
+                GroupCard {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.term_needs_stepup), style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
+                        Button(onClick = { vm.connect() }, colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.padding(top = 12.dp)) {
+                            Text(stringResource(R.string.term_confirm), color = COUITheme.colorScheme.onPrimary)
+                        }
                     }
                 }
             }
-            state.selectedId == null -> GroupCard {
-                EmptyState(
-                    title = stringResource(R.string.term_empty),
-                    subtitle = stringResource(R.string.workspace_security),
-                    actionText = stringResource(R.string.term_new),
-                    onActionClick = { showShells = true },
-                    modifier = Modifier.padding(vertical = 24.dp),
-                )
+            state.selectedId == null -> Box(Modifier.padding(top = 8.dp)) {
+                GroupCard {
+                    EmptyState(
+                        title = stringResource(R.string.term_empty),
+                        subtitle = stringResource(R.string.workspace_security),
+                        actionText = stringResource(R.string.term_new),
+                        onActionClick = { showShells = true },
+                        modifier = Modifier.padding(vertical = 24.dp),
+                    )
+                }
             }
             else -> {
                 TerminalSurface(
                     state = state,
-                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(10.dp)).background(TermBg)
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp).clip(SquircleShape(14.dp)).background(TermBg)
                         .clickable { focus.requestFocus(); keyboard?.show() },
                     onSize = vm::resize,
                     onCopyLine = { clipboard.setText(AnnotatedString(it)) },
@@ -200,8 +227,11 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
                 } else if (state.link == TermLink.CLOSED) {
                     TextButton(text = stringResource(R.string.term_reconnect), onClick = { vm.connect() }, modifier = Modifier.padding(horizontal = 8.dp))
                 }
-                ExtraKeys(state, vm)
+                ExtraKeys(state, vm, onKeyboard = { focus.requestFocus(); keyboard?.show() })
                 HiddenInput(focus, onText = vm::typeText, onKey = vm::key)
+                if (WindowInsets.ime.getBottom(LocalDensity.current) == 0) {
+                    Spacer(Modifier.height(LocalBottomBarSpace.current))
+                }
             }
         }
     }
@@ -223,13 +253,17 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
     val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = state.fontSp.sp, lineHeight = (state.fontSp * 1.25f).sp, color = TermFg)
     val density = LocalDensity.current
     val cell = remember(state.fontSp) { measurer.measure("M", style) }
+    // One glyph's width is rounded up to whole pixels; the real advance is fractional. Averaging a
+    // long run gives the true cell width, so the column count we report fits the screen exactly
+    // (otherwise the shell wraps lines well before the right edge).
+    val cellWidthPx = remember(state.fontSp) { measurer.measure("M".repeat(128), style).size.width / 128f }
     val listState = rememberLazyListState()
     val lines = state.scrollback + state.screen.lines
     val cursor: TermCursor = state.screen.cursor
     val screenStart = state.scrollback.size
     val termDesc = androidx.compose.ui.res.stringResource(io.github.tianli0.switchtether.R.string.terminal_desc)
     BoxWithConstraints(modifier.semantics { contentDescription = termDesc }.testTag("terminal")) {
-        val cols = with(density) { ((maxWidth - 16.dp).toPx() / cell.size.width).toInt() }
+        val cols = with(density) { ((maxWidth - 16.dp).toPx() / cellWidthPx).toInt() }
         val rows = with(density) { ((maxHeight - 8.dp).toPx() / cell.size.height).toInt() }
         LaunchedEffect(cols, rows) { onSize(cols, rows) }
         LaunchedEffect(lines.size, state.screen.version) { if (lines.isNotEmpty()) listState.scrollToItem(lines.size) }
@@ -259,41 +293,44 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
 }
 
 @Composable
-private fun ExtraKeys(state: TerminalUiState, vm: TerminalViewModel) {
+private fun ExtraKeys(state: TerminalUiState, vm: TerminalViewModel, onKeyboard: () -> Unit) {
     val keys: List<Pair<String, () -> Unit>> = listOf(
-        "Esc" to { vm.key(TermKey.ESC) },
+        "KB" to onKeyboard,
+        "^C" to { vm.typeText("\u0003") },
+        "^D" to { vm.typeText("\u0004") },
         "Tab" to { vm.key(TermKey.TAB) },
+        "Esc" to { vm.key(TermKey.ESC) },
         (if (state.ctrl) "CTRL" else "Ctrl") to vm::toggleCtrl,
         (if (state.alt) "ALT" else "Alt") to vm::toggleAlt,
-        "←" to { vm.key(TermKey.LEFT) },
         "↑" to { vm.key(TermKey.UP) },
         "↓" to { vm.key(TermKey.DOWN) },
+        "←" to { vm.key(TermKey.LEFT) },
         "→" to { vm.key(TermKey.RIGHT) },
+        "/" to { vm.typeText("/") },
+        "~" to { vm.typeText("~") },
+        "-" to { vm.typeText("-") },
+        "|" to { vm.typeText("|") },
         "Home" to { vm.key(TermKey.HOME) },
         "End" to { vm.key(TermKey.END) },
         "PgUp" to { vm.key(TermKey.PAGE_UP) },
         "PgDn" to { vm.key(TermKey.PAGE_DOWN) },
-        "|" to { vm.typeText("|") },
-        "~" to { vm.typeText("~") },
-        "/" to { vm.typeText("/") },
-        "-" to { vm.typeText("-") },
         "A-" to { vm.fontSize(-1) },
         "A+" to { vm.fontSize(+1) },
     )
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         keys.forEach { (label, action) ->
             val latched = (label == "CTRL") || (label == "ALT")
             Box(
-                Modifier.heightIn(min = 40.dp).widthIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
-                    .background(if (latched) COUITheme.colorScheme.primary else COUITheme.colorScheme.surfaceContainer)
+                Modifier.heightIn(min = 38.dp).widthIn(min = 42.dp).clip(SquircleShape(10.dp))
+                    .background(if (latched) COUITheme.colorScheme.primary else COUITheme.colorScheme.surfaceContainerHigh)
                     .clickable(onClick = action)
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = if (latched) COUITheme.colorScheme.onPrimary else COUITheme.colorScheme.onSurface)
+                Text(label, fontFamily = FontFamily.Monospace, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (latched) COUITheme.colorScheme.onPrimary else COUITheme.colorScheme.onSurface)
             }
         }
     }

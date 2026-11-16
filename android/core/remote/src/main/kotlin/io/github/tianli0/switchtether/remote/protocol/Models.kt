@@ -340,13 +340,28 @@ data class PayloadChunk(
 data class CommandBody(val commandId: String)
 
 @Serializable
-data class SendMessageBody(val commandId: String, val text: String)
+data class ImageInput(
+    val mediaType: String,
+    val dataBase64: String,
+    val name: String? = null,
+)
+
+@Serializable
+data class SendMessageBody(
+    val commandId: String,
+    val text: String,
+    val images: List<ImageInput> = emptyList(),
+)
 
 @Serializable
 data class ApprovalBody(val commandId: String, val decision: String, val message: String? = null)
 
 @Serializable
-data class AnswersBody(val commandId: String, val answers: JsonObject)
+data class AnswersBody(
+    val commandId: String,
+    val answers: JsonObject? = null,
+    val action: String? = null,
+)
 
 @Serializable
 data class ToggleBody(val commandId: String, val app: String, val enabled: Boolean)

@@ -32,21 +32,19 @@ import io.github.suqi8.coui.kmp.basic.InfiniteProgressIndicator
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.ui.theme.DevType
 
-/** Small rounded status label, e.g. LIVE / OBSERVE / BLOCKED. Text is always present (not color-only). */
+/** Small COUI17 [io.github.suqi8.coui.kmp.basic.TagView] status label, e.g. LIVE / OBSERVE / BLOCKED. Text is always present. */
 @Composable
 fun StatusPill(text: String, color: Color, modifier: Modifier = Modifier, contentDescription: String? = null) {
-    Box(
-        modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(color.copy(alpha = 0.14f))
-            .padding(horizontal = 6.dp, vertical = 2.dp)
-            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
-    ) {
-        Text(text = text, color = color, style = COUITheme.textStyles.footnote2, fontWeight = FontWeight.Medium, maxLines = 1)
-    }
+    io.github.suqi8.coui.kmp.basic.TagView(
+        text = text,
+        modifier = modifier.then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
+        cornerRadius = 8.dp,
+        colors = io.github.suqi8.coui.kmp.basic.TagViewDefaults.tagViewColors(containerColor = color.copy(alpha = 0.14f), contentColor = color),
+    )
 }
 
 @Composable
@@ -96,31 +94,19 @@ fun ErrorState(title: String, message: String?, retryLabel: String?, onRetry: ((
 
 @Composable
 fun EmptyMessage(title: String, subtitle: String? = null, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(title, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
-        if (subtitle != null) {
-            Spacer(Modifier.height(6.dp))
-            Text(subtitle, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
-        }
-    }
+    io.github.suqi8.coui.kmp.basic.EmptyState(title = title, subtitle = subtitle, modifier = modifier.fillMaxWidth().padding(vertical = 24.dp))
 }
 
-/** Thin banner for connection problems shown above content (not a dialog). */
+/** Notice above content (not a dialog): COUI17 [io.github.suqi8.coui.kmp.basic.TopTips] with a status dot. */
 @Composable
 fun Banner(text: String, color: Color, modifier: Modifier = Modifier, action: String? = null, onAction: (() -> Unit)? = null) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .background(color.copy(alpha = 0.12f))
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .semantics { liveRegion = LiveRegionMode.Polite },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(color))
-        Spacer(Modifier.size(8.dp))
-        Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-        if (action != null && onAction != null) TextButton(text = action, onClick = onAction)
-    }
+    io.github.suqi8.coui.kmp.basic.TopTips(
+        text = text,
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        startIcon = { Box(Modifier.size(8.dp).clip(SquircleShape(4.dp)).background(color)) },
+        actionText = action,
+        onAction = onAction,
+    )
 }
 
 /** Card container with standard outer margins used on list pages. */
@@ -134,12 +120,12 @@ fun PageCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     ) { content() }
 }
 
-/** Label/value row for detail pages; value is selectable-looking monospace when [mono]. */
+/** Label/value row for detail pages: a COUI17 list item (title = label, summary = value). */
 @Composable
 fun KeyValueRow(label: String, value: String, mono: Boolean = false, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
-        Text(label, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.widthIn(min = 96.dp, max = 140.dp))
-        Spacer(Modifier.size(12.dp))
-        Text(value, style = if (mono) DevType.code else COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-    }
+    io.github.suqi8.coui.kmp.basic.BasicComponent(
+        title = label,
+        summary = value,
+        modifier = modifier,
+    )
 }

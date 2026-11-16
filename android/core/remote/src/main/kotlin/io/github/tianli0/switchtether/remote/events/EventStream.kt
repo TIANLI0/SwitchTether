@@ -101,14 +101,27 @@ object CloseCodes {
  * `{"type":"ping"}` every [pingIntervalMs] (the server closes idle sockets after 60 s).
  * The flow completes after a close/failure signal; reconnecting is the caller's job.
  */
-class EventStreamClient(private val api: RemoteApi, private val pingIntervalMs: Long = 20_000) {
+class EventStreamClient(
+    private val api: RemoteApi,
+    private val pingIntervalMs: Long = 20_000,
+    /**
+     * The server answers every ping with a pong, so a healthy socket receives something at least
+     * every [pingIntervalMs]. Silence for this long means a half-open socket (Wi-Fi/mobile switch,
+     * Doze, NAT timeout): the OS would take minutes to notice, and finished tasks would be
+     * announced that much too late. Tear it down so the connection loop reconnects at once.
+     */
+    private val stallTimeoutMs: Long = 50_000,
+    private val nowMs: () -> Long = System::currentTimeMillis,
+) {
     fun connect(cursor: StreamCursor): Flow<StreamSignal> = callbackFlow {
+        val lastRx = java.util.concurrent.atomic.AtomicLong(nowMs())
         val ws = api.openEvents(cursor.lastSeq, cursor.epoch, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 trySend(StreamSignal.Opened)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                lastRx.set(nowMs())
                 trySend(StreamSignal.Frame(StreamFrame.parse(text)))
             }
 
@@ -132,6 +145,11 @@ class EventStreamClient(private val api: RemoteApi, private val pingIntervalMs: 
         val pinger = launch {
             while (isActive) {
                 delay(pingIntervalMs)
+                if (nowMs() - lastRx.get() > stallTimeoutMs) {
+                    trySend(StreamSignal.Failure(java.io.IOException("event stream stalled (no pong)"), null, null))
+                    channel.close()
+                    break
+                }
                 ws.send("""{"type":"ping"}""")
             }
         }

@@ -1,9 +1,19 @@
 package io.github.tianli0.switchtether.ui.sessions
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
 import androidx.compose.foundation.background
+import io.github.suqi8.coui.kmp.squircle.squircleClip
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import io.github.tianli0.switchtether.remote.protocol.arr
+import io.github.tianli0.switchtether.remote.protocol.obj
+import io.github.tianli0.switchtether.remote.protocol.long
+import io.github.tianli0.switchtether.remote.protocol.double
+import io.github.tianli0.switchtether.ui.components.StatFigure
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +46,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -56,7 +68,6 @@ import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.TopTips
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.theme.COUITheme
-import io.github.suqi8.coui.kmp.window.WindowBottomSheet
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
 import io.github.tianli0.switchtether.remote.protocol.Capability
@@ -64,6 +75,7 @@ import io.github.tianli0.switchtether.remote.protocol.SessionDetail
 import io.github.tianli0.switchtether.remote.protocol.str
 import io.github.tianli0.switchtether.remote.session.RenderItem
 import io.github.tianli0.switchtether.ui.appContainer
+import io.github.tianli0.switchtether.ui.common.AppBottomSheet
 import io.github.tianli0.switchtether.ui.common.CommandPromptDialog
 import io.github.tianli0.switchtether.ui.common.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
@@ -113,6 +125,7 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
     val uriHandler = LocalUriHandler.current
     var pendingLink by remember { mutableStateOf<String?>(null) }
     var pendingApproval by remember { mutableStateOf<Triple<String, String, String>?>(null) }
+    var viewingImage by remember { mutableStateOf<io.github.tianli0.switchtether.ui.sessions.render.ImagePreview?>(null) }
     var confirmInterrupt by remember { mutableStateOf(false) }
     var showContinue by rememberSaveable { mutableStateOf(false) }
 
@@ -126,6 +139,7 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
     val summary = state.detail.valueOrNull?.summary
     val agent = summary?.agent ?: "unknown"
     val agentLabel = Formatters.agentLabel(agent)
+    val cancelLabel = stringResource(R.string.action_cancel)
     val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent) {
         val caps = state.detail.valueOrNull?.capabilities
         RenderContext(
@@ -137,12 +151,28 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
             online = state.online,
             onApprove = { rid, decision, label -> pendingApproval = Triple(rid, decision, label) },
             onAnswer = { rid, answers -> vm.answer(answerLabel, rid, answers) },
+            onAnswerAction = { rid, answers, action ->
+                vm.answer(if (action == "cancel") cancelLabel else answerLabel, rid, answers, action)
+            },
             onLoadPayload = vm::loadPayload,
             payloadOf = { vm.payloads[it] },
             onToggleCollapse = vm::toggleCollapse,
             isCollapsed = { it in vm.state.value.collapsed },
             onLink = { pendingLink = it },
+            onLoadImageBytes = vm::loadImageBytes,
+            onViewImage = { viewingImage = it },
         )
+    }
+
+    val scope = rememberCoroutineScope()
+    val pickImage = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                encodePickedImage(context, uri)?.let(vm::addImage)
+            }
+        }
     }
 
     LaunchedEffect(state.continuedAs?.id) {
@@ -171,6 +201,14 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
         onOpenTerminal = { id -> container.openTerminalRequest.value = id },
         pinned = pinned,
         onTogglePin = { state.detail.valueOrNull?.summary?.let { s -> io.github.tianli0.switchtether.ui.common.togglePin(context, s) } },
+        onPickImage = {
+            pickImage.launch(
+                androidx.activity.result.PickVisualMediaRequest(
+                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                ),
+            )
+        },
+        onRemoveImage = vm::removeImage,
     )
 
     ContinueSheet(
@@ -215,6 +253,9 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
         },
         onDismiss = { confirmInterrupt = false },
     )
+    viewingImage?.let { img ->
+        ImageViewerDialog(preview = img, onLoadBytes = vm::loadImageBytes, onDismiss = { viewingImage = null })
+    }
 }
 
 @Composable
@@ -237,15 +278,24 @@ fun SessionDetailContent(
     onTogglePin: () -> Unit = {},
     onRetryOutgoing: (String) -> Unit = {},
     onDeleteOutgoing: (String) -> Unit = {},
+    onPickImage: () -> Unit = {},
+    onRemoveImage: (Int) -> Unit = {},
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
     var tipDismissed by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val displayTitle = summary?.let { io.github.tianli0.switchtether.ui.common.sessionDisplayTitle(it) } ?: initialTitle ?: stringResource(R.string.session_unnamed)
     Page(
-        title = summary?.let { io.github.tianli0.switchtether.ui.common.sessionDisplayTitle(it) } ?: initialTitle ?: stringResource(R.string.session_unnamed),
-        subtitle = summary?.let { listOfNotNull(Formatters.agentLabel(it.agent), it.model).joinToString(" · ") } ?: "",
+        title = displayTitle,
+        subtitle = summary?.let { s ->
+            listOfNotNull(
+                Formatters.agentLabel(s.agent),
+                io.github.tianli0.switchtether.ui.common.sessionProjectName(s)?.takeIf { it != displayTitle },
+                s.model,
+            ).joinToString(" · ")
+        } ?: "",
         onBack = onBack,
         actions = {
             if (summary != null && (summary.isLive || pinned)) {
@@ -255,14 +305,11 @@ fun SessionDetailContent(
                     onTogglePin,
                 )
             }
-            summary?.terminalId?.let { tid -> ToolbarIcon(AppIcons.Terminal, stringResource(R.string.open_terminal), { onOpenTerminal(tid) }) }
-            ToolbarIcon(AppIcons.Info, stringResource(R.string.session_info), { showInfo = true })
-            ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), onReload)
         },
         modifier = Modifier.imePadding(),
     ) {
         ConnectionBanner(state.connection, onRetryConnection)
-        StatusChipRow(state, onClick = { showInfo = true })
+        StatusChipRow(state, onClick = { showInfo = true }, onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } })
         val d = state.detail.valueOrNull
         if (d != null && state.online && !state.canSend) {
             val readOnly = !d.summary.managed && d.summary.origin != "managed" && d.summary.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL
@@ -300,44 +347,34 @@ fun SessionDetailContent(
                 is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing)
             }
         }
-        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue)
+        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage)
     }
     SessionInfoSheet(show = showInfo, detail = state.detail.valueOrNull, activity = state.rollingStatus?.data?.takeIf { it.str("state") !in setOf("idle", "completed", null) }?.let { listOfNotNull(statusStateLabel(it.str("state")).ifEmpty { null }, it.str("detail")).joinToString(" · ") }, onDismiss = { showInfo = false })
 }
 
-/** Compact status chips under the app bar; tapping opens the info sheet. */
+/**
+ * Under the app bar: one slim, transparent row of small capsules (what it is doing, who waits, how
+ * it is attached, limits, branch, terminal). Tapping the row opens the full info sheet.
+ */
 @Composable
-private fun StatusChipRow(state: SessionDetailState, onClick: () -> Unit) {
+private fun StatusChipRow(state: SessionDetailState, onClick: () -> Unit, onOpenTerminal: (() -> Unit)?) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
+    val terminalLabel = stringResource(R.string.open_terminal)
     Column(
-        // Press highlight follows a rounded outline inset from the screen edges (no full-width square).
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onClick).padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(SquircleShape(16.dp))
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onClick).padding(vertical = 2.dp),
     ) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            io.github.tianli0.switchtether.ui.common.AgentBadge(s.agent, size = 28.dp)
-            if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary, color = COUITheme.colorScheme.primary)
-            if (s.isLive) {
-                InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status))
-            } else {
-                InfoChip(stringResource(R.string.badge_ended), dot = dev.neutral)
-            }
+            if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status))
+            else InfoChip(stringResource(R.string.badge_ended), dot = dev.neutral)
             s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn) }
-            InfoChip(controlLabel(s.controlLevel), dot = controlColor(s.controlLevel))
-            s.project?.let { InfoChip(it) }
-            s.gitBranch?.let { InfoChip(it) }
-        }
-        state.rollingStatus?.takeIf { it.data.str("state") !in setOf("idle", "completed", null) }?.let { rs ->
-            val text = listOfNotNull(statusStateLabel(rs.data.str("state")).ifEmpty { null }, rs.data.str("detail")).joinToString(" · ")
-            if (text.isNotBlank()) {
-                Row(Modifier.padding(start = 20.dp, end = 16.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (rs.data.str("state") == "running") {
-                        RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 12.dp, ringDiameter = 9.6.dp, strokeWidth = 2.dp)
-                        Spacer(Modifier.size(6.dp))
-                    }
-                    Text(text, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+            if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary)
+            // Full control is the normal case and needs no capsule; limits do.
+            if (s.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL) InfoChip(controlLabel(s.controlLevel), dot = controlColor(s.controlLevel))
+            s.gitBranch?.let { InfoChip(it, icon = AppIcons.Git, color = COUITheme.colorScheme.onSurfaceSecondary) }
+            if (onOpenTerminal != null) {
+                InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel })
             }
         }
     }
@@ -453,6 +490,8 @@ private fun Composer(
     onSend: () -> Unit,
     onInterrupt: () -> Unit,
     onContinue: () -> Unit,
+    onPickImage: () -> Unit = {},
+    onRemoveImage: (Int) -> Unit = {},
 ) {
     val s = state.detail.valueOrNull?.summary
     Column(
@@ -494,10 +533,56 @@ private fun Composer(
                 modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
             )
         }
+        if (state.attachedImages.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 4.dp, bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                state.attachedImages.forEachIndexed { idx, img ->
+                    val bytes = remember(img.dataBase64) {
+                        runCatching { android.util.Base64.decode(img.dataBase64, android.util.Base64.DEFAULT) }.getOrNull()
+                    }
+                    val bmp = remember(bytes) {
+                        bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
+                    }
+                    Box(Modifier.size(56.dp)) {
+                        if (bmp != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bmp,
+                                contentDescription = img.name ?: stringResource(R.string.render_image_preview),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(SquircleShape(8.dp)),
+                            )
+                        }
+                        Box(
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .size(20.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(COUITheme.colorScheme.surface.copy(alpha = 0.85f))
+                                .clickable { onRemoveImage(idx) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(AppIcons.Delete, contentDescription = stringResource(R.string.action_close), tint = COUITheme.colorScheme.onSurface, modifier = Modifier.size(12.dp))
+                        }
+                    }
+                }
+            }
+        }
         Row(verticalAlignment = Alignment.Bottom) {
             val showInterrupt = state.canInterrupt && s != null && s.isLive && s.status != "idle"
             if (showInterrupt) {
                 RoundIconButton(AppIcons.Interrupt, stringResource(R.string.session_interrupt), onInterrupt, tint = LocalDevColors.current.danger, modifier = Modifier.testTag("interrupt"))
+                Spacer(Modifier.size(8.dp))
+            }
+            val supportsImages = (state.canSend || state.canQueue) && s?.terminalId == null
+            if (supportsImages) {
+                RoundIconButton(
+                    icon = AppIcons.File,
+                    label = stringResource(R.string.composer_attach_image),
+                    onClick = onPickImage,
+                    enabled = state.attachedImages.size < 4,
+                )
                 Spacer(Modifier.size(8.dp))
             }
             InputPill(
@@ -511,7 +596,11 @@ private fun Composer(
                 sendLabel = stringResource(R.string.session_send),
                 onSend = onSend,
                 // Sending never blocks the field: the bubble shows the message's own progress.
-                state = InputPillState(enabled = state.canSend || state.canQueue, sendEnabled = (state.canSend || state.canQueue) && state.draft.isNotBlank(), busy = false),
+                state = InputPillState(
+                    enabled = state.canSend || state.canQueue,
+                    sendEnabled = (state.canSend || state.canQueue) && (state.draft.isNotBlank() || state.attachedImages.isNotEmpty()),
+                    busy = false,
+                ),
                 modifier = Modifier.weight(1f),
                 fieldModifier = Modifier.testTag("composer"),
                 sendModifier = Modifier.testTag("send"),
@@ -523,8 +612,8 @@ private fun Composer(
 /** Bottom sheet with everything about the session that does not fit the chip row. */
 @Composable
 private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: String?, onDismiss: () -> Unit) {
-    WindowBottomSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss) {
-        val d = detail ?: return@WindowBottomSheet
+    AppBottomSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss) {
+        val d = detail ?: return@AppBottomSheet
         val s = d.summary
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             val rows = listOfNotNull(
@@ -574,7 +663,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
 /** Confirm sheet for "continue on phone" (fork into a managed session with the same context). */
 @Composable
 private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boolean, canFork: Boolean, enabled: Boolean, busy: Boolean, onConfirm: (fork: Boolean) -> Unit, onDismiss: () -> Unit) {
-    WindowBottomSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss) {
+    AppBottomSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             listOf(
                 stringResource(R.string.continue_point_context, agentLabel),
@@ -664,4 +753,98 @@ private fun ApprovalSheet(
             }
         }
     }
+}
+
+@Composable
+private fun ImageViewerDialog(
+    preview: io.github.tianli0.switchtether.ui.sessions.render.ImagePreview,
+    onLoadBytes: suspend (String) -> ByteArray?,
+    onDismiss: () -> Unit,
+) {
+    var bytes by remember(preview) { mutableStateOf(preview.bytes) }
+    LaunchedEffect(preview) {
+        if (bytes == null && preview.path != null) {
+            bytes = onLoadBytes(preview.path)
+        }
+    }
+    val bmp = remember(bytes) {
+        bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
+    }
+    var scale by remember(preview) { mutableStateOf(1f) }
+    var offset by remember(preview) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val transformState = androidx.compose.foundation.gestures.rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 5f)
+        offset = if (scale > 1f) offset + panChange else androidx.compose.ui.geometry.Offset.Zero
+    }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.94f))
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bmp != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = bmp,
+                    contentDescription = preview.alt ?: stringResource(R.string.render_image_preview),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .transformable(transformState)
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offset.x,
+                            translationY = offset.y,
+                        ),
+                )
+            } else {
+                Text(
+                    preview.alt ?: preview.url ?: stringResource(R.string.state_loading),
+                    style = COUITheme.textStyles.body2,
+                    color = androidx.compose.ui.graphics.Color.White,
+                    modifier = Modifier.padding(24.dp),
+                )
+            }
+            RoundIconButton(
+                icon = AppIcons.Back,
+                label = stringResource(R.string.action_close),
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp),
+            )
+        }
+    }
+}
+
+private fun encodePickedImage(
+    context: android.content.Context,
+    uri: android.net.Uri,
+): io.github.tianli0.switchtether.remote.protocol.ImageInput? {
+    return runCatching {
+        val resolver = context.contentResolver
+        val raw = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size, opts)
+        val maxDim = 1600
+        var sample = 1
+        while (opts.outWidth / sample > maxDim || opts.outHeight / sample > maxDim) sample *= 2
+        val bmp = android.graphics.BitmapFactory.decodeByteArray(
+            raw,
+            0,
+            raw.size,
+            android.graphics.BitmapFactory.Options().apply { inSampleSize = sample },
+        ) ?: return null
+        val baos = java.io.ByteArrayOutputStream()
+        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, baos)
+        val encoded = android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
+        io.github.tianli0.switchtether.remote.protocol.ImageInput(
+            mediaType = "image/jpeg",
+            dataBase64 = encoded,
+            name = uri.lastPathSegment,
+        )
+    }.getOrNull()
 }

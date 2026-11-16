@@ -38,6 +38,20 @@ import kotlinx.coroutines.launch
 class MonitorService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watching = false
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    /** Held only while a task is running or waiting for the user, so its completion is announced on time without draining the battery all day. */
+    private fun setAwake(awake: Boolean) {
+        runCatching {
+            if (awake) {
+                val lock = wakeLock ?: getSystemService(android.os.PowerManager::class.java)
+                    .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "switchtether:monitor").also { it.setReferenceCounted(false); wakeLock = it }
+                lock.acquire(WAKE_MAX_MS)
+            } else {
+                wakeLock?.takeIf { it.isHeld }?.release()
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -72,11 +86,13 @@ class MonitorService : Service() {
                     runCatching { androidx.core.app.NotificationManagerCompat.from(this@MonitorService).notify(NOTIFICATION_ID, build(online)) }
                 }
             }
+            scope.launch { container.activeSessions.collect { n -> setAwake(n > 0) } }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        setAwake(false)
         scope.cancel()
         (application as SwitchTetherApp).container.onServiceStopped()
         super.onDestroy()
@@ -84,6 +100,7 @@ class MonitorService : Service() {
 
     companion object {
         const val NOTIFICATION_ID = 7
+        private const val WAKE_MAX_MS = 15 * 60_000L
         const val ACTION_STOP = "io.github.tianli0.switchtether.STOP_MONITOR"
 
         fun start(context: Context) {

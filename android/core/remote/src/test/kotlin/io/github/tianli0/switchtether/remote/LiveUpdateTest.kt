@@ -39,9 +39,11 @@ class LiveUpdateTest {
         s = LiveReducer.onEvent(s, ev("tool_call", """{"status":"running","name":"Bash","title":"npm test"}"""), 2_000)
         val spec = render(s, 2_000)
         assertEquals("Running npm test", spec.text) // human label, no "step N"
-        assertEquals("Busy", spec.chip)
+        assertEquals("Run", spec.chip) // capsule names what the agent is doing
+        assertEquals(io.github.tianli0.switchtether.remote.live.StepKind.COMMAND, spec.stepKind)
         assertEquals(1_000L, spec.chronometerBaseMs)
-        assertEquals(LiveUpdateSpec.Progress.STAGE, spec.progress) // never indeterminate (Fluid Cloud)
+        assertEquals(LiveUpdateSpec.Progress.NONE, spec.progress) // notification progress bar removed
+        assertTrue(spec.segments.isEmpty())
         assertTrue(spec.promoted)
         assertEquals(listOf(LiveAction.OPEN, LiveAction.UNPIN), spec.actions)
         assertFalse(spec.alert)
@@ -84,7 +86,7 @@ class LiveUpdateTest {
         s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 5_000)
         assertEquals(LivePhase.DONE, s.phase)
         assertTrue(render(s, 5_000).promoted)
-        assertEquals(LiveUpdateSpec.Progress.FULL, render(s, 5_000).progress)
+        assertEquals(LiveUpdateSpec.Progress.NONE, render(s, 5_000).progress)
         assertFalse(render(s, 5_000 + LiveUpdateRenderer.DONE_PROMOTED_MS).promoted)
         // The next turn re-promotes.
         val next = LiveReducer.onUpsert(s, summary.copy(status = "busy"), 100_000)
@@ -140,38 +142,17 @@ class LiveUpdateTest {
     }
 
     @Test
-    fun trackIsWellFormedInEveryPhase() {
+    fun noProgressBarInAnyPhase() {
         val running = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
         val waiting = LiveReducer.onEvent(running, ev("approval_request", """{"requestId":"r1","title":"Run: ls","resolved":false}"""), 2_000)
         val resumed = LiveReducer.onEvent(waiting, ev("approval_request", """{"requestId":"r1","title":"Run: ls","resolved":true}"""), 3_000)
         val done = LiveReducer.onUpsert(resumed, summary.copy(status = "idle"), 4_000)
-        // Never indeterminate (Fluid Cloud draws no bar for it): running sits inside 运行 and
-        // advances with steps without reaching the end; after a question it moves inside 完成.
-        val r0 = render(running, 1_000)
-        assertEquals(LiveUpdateSpec.Progress.STAGE, r0.progress)
-        assertTrue(r0.progressValue in 1 until 50)
-        var st = running
-        var prev = r0.progressValue
-        repeat(30) { k ->
-            st = LiveReducer.onEvent(st, ev("tool_call", """{"status":"running","name":"Bash","input":{"command":"x"}}""", id = "t$k"), 1_100L + k)
-            val v = render(st, 1_100L + k).progressValue
-            assertTrue("monotonic $prev -> $v", v >= prev)
-            assertTrue("never reaches the stage end: $v", v < 50)
-            prev = v
+        listOf(running, waiting, resumed, done).forEach { s ->
+            val spec = render(s, 4_000)
+            assertEquals(LiveUpdateSpec.Progress.NONE, spec.progress)
+            assertEquals(0, spec.progressValue)
+            assertTrue(spec.segments.isEmpty())
         }
-        val after = render(resumed, 3_000)
-        assertEquals(LiveUpdateSpec.Progress.STAGE, after.progress)
-        assertTrue(after.progressValue in 67 until 100)
-        // Waiting: 运行 | 待确认 | 完成, the tracker in the middle of 待确认.
-        val w = render(waiting, 2_000)
-        assertEquals(LiveUpdateSpec.Progress.STAGE, w.progress)
-        assertEquals(listOf(33, 33, 34), w.segments)
-        assertEquals(49, w.progressValue)
-        // Done: full; a turn without questions has two stages.
-        assertEquals(100, render(done, 4_000).progressValue)
-        val plain = render(LiveReducer.onUpsert(running, summary.copy(status = "idle"), 5_000), 5_000)
-        assertEquals(listOf(50, 50), plain.segments)
-        listOf(w, render(done, 4_000), plain).forEach { assertEquals(100, it.segments.sum()) }
     }
 
     @Test
@@ -192,5 +173,20 @@ echo done"}"""))
         assertEquals("tracker.txt", LiveUpdateRenderer.shortSubject("D:/develop/app/build/tracker.txt"))
         assertEquals("Run: ls -la", LiveUpdateRenderer.shortSubject("Run: ls -la"))
         assertEquals(60, LiveUpdateRenderer.shortSubject("x".repeat(80)).length)
+    }
+
+    @Test
+    fun expandedCardCarriesPlanFilesAndTokens() {
+        var s = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        s = LiveReducer.onEvent(s, ev("plan", """{"items":[{"text":"Write parser","status":"completed"},{"text":"Add tests","status":"in_progress"},{"text":"Docs","status":"pending"}]}"""), 1_500)
+        s = LiveReducer.onEvent(s, ev("file_change", """{"path":"src/a.kt"}"""), 1_600)
+        s = LiveReducer.onEvent(s, ev("file_change", """{"path":"src/a.kt"}"""), 1_700)
+        s = LiveReducer.onEvent(s, ev("usage", """{"inputTokens":1200,"outputTokens":300}"""), 1_800)
+        s = LiveReducer.onEvent(s, ev("tool_call", """{"status":"running","name":"Bash","title":"npm test"}"""), 2_000)
+        val spec = render(s, 2_000)
+        assertTrue(spec.detail, spec.detail.contains("Plan 1/3 · now: Add tests"))
+        assertTrue(spec.detail, spec.detail.contains("1 file changed"))
+        assertTrue(spec.detail, spec.detail.contains("1,500 tokens"))
+        assertTrue(spec.progressNote, spec.progressNote.startsWith("1/3"))
     }
 }

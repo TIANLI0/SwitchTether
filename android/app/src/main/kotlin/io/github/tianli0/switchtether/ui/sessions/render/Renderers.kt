@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.sessions.render
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -131,7 +133,7 @@ private fun OutputBlock(eventId: String, text: String, truncated: Boolean, isErr
     val shown = payload?.text?.takeIf { it.length > text.length } ?: text
     var showAll by rememberSaveable(eventId) { mutableStateOf(false) }
     val display = if (showAll || shown.length <= PREVIEW_CHARS) shown else shown.take(PREVIEW_CHARS)
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(dev.codeBackground)) {
+    Column(Modifier.fillMaxWidth().clip(SquircleShape(10.dp)).background(dev.codeBackground)) {
         SelectionContainer {
             Box(Modifier.horizontalScroll(rememberScrollState()).padding(10.dp)) {
                 Text(display.ifEmpty { stringResource(R.string.render_empty_output) }, style = DevType.codeSmall, color = if (isError) dev.danger else dev.codeText, softWrap = false)
@@ -164,11 +166,18 @@ private fun OutputBlock(eventId: String, text: String, truncated: Boolean, isErr
 @Composable
 fun UserMessage(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
+    val imageItems = d["imageItems"].arr().orEmpty().mapNotNull { it.obj() }
+    val text = d.str("text").orEmpty()
     Column(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalAlignment = Alignment.End) {
-        ChatBubble { MarkdownView(d.str("text").orEmpty(), onLinkClick = ctx.onLink) }
-        val images = d["images"].arr()?.size ?: 0
+        ChatBubble {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (imageItems.isNotEmpty()) ImageStrip(imageItems, ctx)
+                if (text.isNotBlank()) MarkdownView(text, onLinkClick = ctx.onLink)
+            }
+        }
+        val images = d.long("images")?.toInt() ?: imageItems.size
         val meta = listOfNotNull(
-            if (images > 0) stringResource(R.string.render_images, images) else null,
+            if (images > 0 && imageItems.isEmpty()) stringResource(R.string.render_images, images) else null,
             shortClock(item.event.ts).ifEmpty { null },
         ).joinToString(" · ")
         if (meta.isNotEmpty()) SubtleMeta(meta, Modifier.padding(top = 3.dp, end = 4.dp))
@@ -178,6 +187,7 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
 @Composable
 fun AssistantMessage(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
+    val imageItems = d["imageItems"].arr().orEmpty().mapNotNull { it.obj() }
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             io.github.tianli0.switchtether.ui.common.AgentBadge(ctx.agent, size = 24.dp)
@@ -191,7 +201,107 @@ fun AssistantMessage(item: RenderItem, ctx: RenderContext) {
                 RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 14.dp, ringDiameter = 11.2.dp, strokeWidth = 2.dp, modifier = Modifier.semantics { contentDescription = streamingLabel })
             }
         }
-        Box(Modifier.padding(start = 32.dp, top = 4.dp)) { MarkdownView(d.str("text").orEmpty(), onLinkClick = ctx.onLink) }
+        Column(Modifier.padding(start = 32.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (imageItems.isNotEmpty()) ImageStrip(imageItems, ctx)
+            MarkdownView(
+                d.str("text").orEmpty(),
+                onLinkClick = ctx.onLink,
+                onImageClick = { alt, url -> ctx.onViewImage?.invoke(ImagePreview(alt = alt, url = url)) },
+                imageContent = { alt, url -> MarkdownImageBlock(alt, url, ctx) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImageStrip(items: List<JsonObject>, ctx: RenderContext) {
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items.forEach { img ->
+            val kind = img.str("kind")
+            when (kind) {
+                "base64" -> {
+                    val b64 = img.str("data").orEmpty()
+                    val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
+                    ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) ctx.onViewImage?.invoke(ImagePreview(bytes = bytes)) })
+                }
+                "local" -> {
+                    val path = img.str("path").orEmpty()
+                    var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
+                    androidx.compose.runtime.LaunchedEffect(path, ctx.online) {
+                        if (path.isNotBlank() && bytes == null) bytes = ctx.onLoadImageBytes?.invoke(path)
+                    }
+                    ImageThumb(bytes = bytes, label = path.substringAfterLast('/').substringAfterLast('\\'), onClick = {
+                        ctx.onViewImage?.invoke(ImagePreview(alt = path, bytes = bytes, path = path))
+                    })
+                }
+                "url" -> {
+                    val url = img.str("url").orEmpty()
+                    if (url.startsWith("data:image/")) {
+                        val b64 = url.substringAfter("base64,", "")
+                        val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
+                        ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) ctx.onViewImage?.invoke(ImagePreview(bytes = bytes)) })
+                    } else {
+                        SubtleMeta("[image: $url]")
+                    }
+                }
+                else -> SubtleMeta(stringResource(R.string.render_images, 1))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MarkdownImageBlock(alt: String, url: String, ctx: RenderContext) {
+    when {
+        url.startsWith("data:image/") -> {
+            val b64 = url.substringAfter("base64,", "")
+            val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
+            ImageThumb(bytes = bytes, label = alt.ifBlank { null }, onClick = { if (bytes != null) ctx.onViewImage?.invoke(ImagePreview(alt = alt, bytes = bytes)) })
+        }
+        !url.startsWith("http://") && !url.startsWith("https://") && url.isNotBlank() -> {
+            var bytes by remember(url) { mutableStateOf<ByteArray?>(null) }
+            androidx.compose.runtime.LaunchedEffect(url, ctx.online) {
+                if (bytes == null) bytes = ctx.onLoadImageBytes?.invoke(url)
+            }
+            if (bytes != null) {
+                ImageThumb(bytes = bytes, label = alt.ifBlank { null }, onClick = { ctx.onViewImage?.invoke(ImagePreview(alt = alt, bytes = bytes, path = url)) })
+            } else {
+                SubtleMeta("[image: ${alt.ifBlank { url }}]")
+            }
+        }
+        else -> SubtleMeta("[image: ${alt.ifBlank { url }}]")
+    }
+}
+
+@Composable
+private fun ImageThumb(bytes: ByteArray?, label: String?, onClick: () -> Unit) {
+            val bmp = remember(bytes) {
+        bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
+    }
+    if (bmp != null) {
+        androidx.compose.foundation.Image(
+            bitmap = bmp,
+            contentDescription = label ?: stringResource(R.string.render_image_preview),
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier
+                .size(120.dp)
+                .clip(SquircleShape(10.dp))
+                .border(1.dp, COUITheme.colorScheme.dividerLine, SquircleShape(10.dp))
+                .clickable(role = Role.Image, onClick = onClick),
+        )
+    } else if (label != null) {
+        Box(
+            Modifier
+                .clip(SquircleShape(10.dp))
+                .background(LocalDevColors.current.codeBackground)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            SubtleMeta("[image: $label]")
+        }
     }
 }
 
@@ -339,7 +449,7 @@ fun FileChange(item: RenderItem) {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(COUITheme.colorScheme.primary.copy(alpha = 0.10f)), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(28.dp).clip(SquircleShape(8.dp)).background(COUITheme.colorScheme.primary.copy(alpha = 0.10f)), contentAlignment = Alignment.Center) {
                 Icon(if (change == "add") AppIcons.File else AppIcons.Edit, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.size(10.dp))
@@ -528,33 +638,47 @@ fun ApprovalResolved(item: RenderItem) {
 @Composable
 fun Question(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
-    val resolved = d.bool("resolved") == true || item.resolution != null
+    val resolution = item.resolution?.data
+    val resolved = d.bool("resolved") == true || resolution != null
     val questions = d["questions"].arr().orEmpty().mapNotNull { it.obj() }
+    val cancellable = d.bool("cancellable") ?: true
     // question key -> selected labels (UI state only)
     val selections = remember(item.key) { mutableStateMapOf<String, Set<String>>() }
+    // question key -> free-text / "other" input
+    val freeTexts = remember(item.key) { mutableStateMapOf<String, String>() }
+    val otherChosen = remember(item.key) { mutableStateMapOf<String, Boolean>() }
     val enabled = !resolved && ctx.answer.usable && ctx.online
     val accent = COUITheme.colorScheme.primary
+    val otherTag = "__st_other__"
     AttentionCard(active = !resolved, color = accent) {
         AttentionHeader(AppIcons.Question, stringResource(if (resolved) R.string.render_question else R.string.render_question_needed), item.event.ts, if (resolved) COUITheme.colorScheme.onSurfaceVariantSummary else accent)
         questions.forEach { q ->
-            val key = q.str("question") ?: q.str("id") ?: ""
+            val key = q.str("id") ?: q.str("question") ?: ""
             val multi = q.bool("multiSelect") == true
+            val opts = q["options"].arr().orEmpty().mapNotNull { it.obj() }
+            val allowOther = q.bool("allowOther") == true || opts.isEmpty()
+            val isSecret = q.bool("isSecret") == true
             q.str("header")?.let { SubtleMeta(it, Modifier.padding(top = 10.dp)) }
             Text(q.str("question").orEmpty(), style = COUITheme.textStyles.body1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp))
-            q["options"].arr().orEmpty().mapNotNull { it.obj() }.forEach { o ->
+            opts.forEach { o ->
                 val label = o.str("label").orEmpty()
                 val sel = selections[key].orEmpty()
                 val selected = label in sel
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable(enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton) {
-                        selections[key] = if (multi) (if (selected) sel - label else sel + label) else setOf(label)
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(SquircleShape(10.dp)).clickable(enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton) {
+                        if (multi) {
+                            selections[key] = if (selected) sel - label else sel + label
+                        } else {
+                            otherChosen[key] = false
+                            selections[key] = setOf(label)
+                        }
                     },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (multi) {
                         Checkbox(state = ToggleableState(selected), onClick = null, enabled = enabled)
                     } else {
-                        RadioButton(selected = selected, onClick = null, enabled = enabled)
+                        RadioButton(selected = selected && otherChosen[key] != true, onClick = null, enabled = enabled)
                     }
                     Spacer(Modifier.size(8.dp))
                     Column {
@@ -563,29 +687,90 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                     }
                 }
             }
+            if (allowOther && opts.isNotEmpty() && !resolved) {
+                val isOther = otherChosen[key] == true
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(SquircleShape(10.dp)).clickable(enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton) {
+                        if (multi) {
+                            otherChosen[key] = !isOther
+                        } else {
+                            otherChosen[key] = true
+                            selections[key] = emptySet()
+                        }
+                    },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (multi) {
+                        Checkbox(state = ToggleableState(isOther), onClick = null, enabled = enabled)
+                    } else {
+                        RadioButton(selected = isOther, onClick = null, enabled = enabled)
+                    }
+                    Spacer(Modifier.size(8.dp))
+                    Text(stringResource(R.string.render_question_other), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                }
+            }
+            if ((opts.isEmpty() || otherChosen[key] == true) && !resolved) {
+                val ft = freeTexts[key].orEmpty()
+                io.github.suqi8.coui.kmp.basic.TextField(
+                    value = ft,
+                    onValueChange = { freeTexts[key] = it },
+                    enabled = enabled,
+                    singleLine = isSecret,
+                    label = stringResource(R.string.render_question_input_hint),
+                    visualTransformation = if (isSecret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                )
+            }
         }
         if (resolved) {
-            ResolvedLine(stringResource(R.string.render_answered))
+            val dec = d.str("decision") ?: resolution?.str("decision")
+            val by = d.str("by") ?: resolution?.str("by")
+            val label = if (dec != null || by != null) resolutionLabel(dec, by) else stringResource(R.string.render_answered)
+            ResolvedLine(label)
         } else {
-            val complete = questions.all { q -> selections[q.str("question") ?: q.str("id") ?: ""].orEmpty().isNotEmpty() }
-            Button(
-                onClick = {
-                    val answers = buildJsonObject {
-                        questions.forEach { q ->
-                            val key = q.str("question") ?: q.str("id") ?: ""
-                            put(key, selections[key].orEmpty().joinToString(", "))
+            val complete = questions.all { q ->
+                val key = q.str("id") ?: q.str("question") ?: ""
+                val opts = q["options"].arr().orEmpty()
+                val selOk = selections[key].orEmpty().isNotEmpty()
+                val freeOk = (opts.isEmpty() || otherChosen[key] == true) && freeTexts[key].orEmpty().isNotBlank()
+                selOk || freeOk
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (cancellable) {
+                    Button(
+                        onClick = { ctx.onAnswerAction(d.str("requestId").orEmpty(), null, "cancel") },
+                        enabled = enabled,
+                        colors = ButtonDefaults.buttonColors(),
+                        minHeight = 44.dp,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.action_cancel), color = LocalDevColors.current.danger) }
+                }
+                Button(
+                    onClick = {
+                        val answers = buildJsonObject {
+                            questions.forEach { q ->
+                                val key = q.str("id") ?: q.str("question") ?: ""
+                                val opts = q["options"].arr().orEmpty()
+                                val picked = selections[key].orEmpty().toMutableList()
+                                if ((opts.isEmpty() || otherChosen[key] == true)) {
+                                    val ft = freeTexts[key].orEmpty().trim()
+                                    if (ft.isNotEmpty()) picked += ft
+                                }
+                                put(key, picked.joinToString(", "))
+                            }
                         }
-                    }
-                    ctx.onAnswer(d.str("requestId").orEmpty(), answers)
-                },
-                enabled = enabled && complete,
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                minHeight = 44.dp,
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-            ) { Text(stringResource(R.string.render_submit_answer), color = COUITheme.colorScheme.onPrimary) }
+                        ctx.onAnswerAction(d.str("requestId").orEmpty(), answers, "submit")
+                    },
+                    enabled = enabled && complete,
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                    minHeight = 44.dp,
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(R.string.render_submit_answer), color = COUITheme.colorScheme.onPrimary) }
+            }
             if (!ctx.answer.usable) BlockedNote(ctx.answer, ctx.capabilityReason)
         }
     }
+    val _unused = otherTag
 }
 
 // ---------------------------------------------------------------------------------------------

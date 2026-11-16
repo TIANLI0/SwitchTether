@@ -25,7 +25,7 @@ import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
-import io.github.suqi8.coui.kmp.window.WindowBottomSheet
+import io.github.tianli0.switchtether.ui.common.AppBottomSheet
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.update.ReleaseInfo
 import io.github.tianli0.switchtether.ui.common.Formatters
@@ -86,12 +86,12 @@ fun UpdateSheet(
     onDismiss: () -> Unit,
 ) {
     val release = state.release()
-    WindowBottomSheet(
+    AppBottomSheet(
         show = show && release != null,
         title = release?.let { stringResource(R.string.update_sheet_title, it.version.toString()) },
         onDismissRequest = onDismiss,
     ) {
-        val r = release ?: return@WindowBottomSheet
+        val r = release ?: return@AppBottomSheet
         val dev = LocalDevColors.current
         Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(

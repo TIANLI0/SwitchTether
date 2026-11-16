@@ -451,14 +451,36 @@ impl ManagedClaude {
     }
 
     pub async fn send_message(&self, text: &str) -> ApiResult<()> {
+        self.send_message_with_images(text, &[]).await
+    }
+
+    pub async fn send_message_with_images(
+        &self,
+        text: &str,
+        images: &[crate::agents::managed::ImageAttachment],
+    ) -> ApiResult<()> {
         if self.liveness() != Liveness::Live {
             return Err(ApiError::conflict("session process has exited"));
+        }
+        let mut blocks: Vec<Value> = Vec::new();
+        if !text.trim().is_empty() {
+            blocks.push(json!({ "type": "text", "text": text }));
+        }
+        for img in images {
+            blocks.push(json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img.media_type,
+                    "data": img.data_base64,
+                }
+            }));
         }
         let msg = json!({
             "type": "user",
             "session_id": "",
             "parent_tool_use_id": null,
-            "message": { "role": "user", "content": [{ "type": "text", "text": text }] },
+            "message": { "role": "user", "content": blocks },
         });
         if self.remote.is_none() {
             self.sent_texts.lock().insert(text.trim().to_string());
@@ -518,9 +540,13 @@ impl ManagedClaude {
                 }
                 r
             }
-            "deny" | "abort" => json!({
+            "deny" | "abort" | "cancel" => json!({
                 "behavior": "deny",
-                "message": message.unwrap_or_else(|| "Denied from SwitchTether on the phone".into()),
+                "message": message.unwrap_or_else(|| if decision == "cancel" {
+                    "Cancelled from SwitchTether on the phone".into()
+                } else {
+                    "Denied from SwitchTether on the phone".into()
+                }),
                 "interrupt": decision == "abort",
             }),
             other => {
@@ -575,6 +601,12 @@ impl ManagedClaude {
         }
         if let Some(mut c) = self.child.lock().take() {
             let _ = c.start_kill();
+        }
+        let mut st = self.state.lock();
+        if st.liveness == Liveness::Live {
+            st.liveness = Liveness::Ended;
+            st.status = "completed";
+            st.last_active_at_ms = crate::util::now_ms();
         }
     }
 
@@ -677,7 +709,7 @@ impl ManagedClaude {
                     .unwrap_or(Value::Null);
                 let ts = crate::util::now_rfc3339();
                 let event_id = format!("req:{rid}");
-                let draft = if tool == "AskUserQuestion" {
+                let mut draft = if tool == "AskUserQuestion" {
                     let questions: Vec<Value> = input
                         .get("questions")
                         .and_then(|q| q.as_array())
@@ -689,6 +721,7 @@ impl ManagedClaude {
                             "id": q.get("question").cloned().unwrap_or(json!(i.to_string())),
                             "header": q.get("header"), "question": q.get("question"),
                             "multiSelect": q.get("multiSelect").cloned().unwrap_or(json!(false)),
+                            "allowOther": true,
                             "options": q.get("options").cloned().unwrap_or(json!([])),
                         }))
                         .collect();
@@ -727,6 +760,13 @@ impl ManagedClaude {
                         }),
                     )
                 };
+                if let Some(p) = v
+                    .get("parent_tool_use_id")
+                    .or_else(|| req.get("parent_tool_use_id"))
+                    .and_then(|x| x.as_str())
+                {
+                    draft.parent_id = Some(p.to_string());
+                }
                 self.pending.lock().insert(
                     rid,
                     Pending {

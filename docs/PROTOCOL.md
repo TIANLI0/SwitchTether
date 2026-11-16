@@ -210,11 +210,11 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
   while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
   Session capabilities advertise this as `continueSession: "PARTIAL"`.
-- `POST /v1/sessions/{id}/messages` `{commandId, text}` (the `commandId` comes back as `clientId` on the resulting `user_message` event)
+- `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event)
 - `POST /v1/sessions/{id}/interrupt` `{commandId}`
 - `POST /v1/sessions/{id}/approvals/{requestId}` `{commandId, decision: "allow"|"allow_session"|"deny"|"abort", message?, updatedInput?}`
   - `409 conflict` with `details.resolvedBy` if the request was already answered (by the desktop or another device).
-- `POST /v1/sessions/{id}/answers/{requestId}` `{commandId, answers}` — Agent questions.
+- `POST /v1/sessions/{id}/answers/{requestId}` `{commandId, answers?, action?: "submit"|"cancel"|"decline"}` — Agent questions & elicitations (single-select, multi-select, free text, cancel/decline).
 - `POST /v1/sessions/{id}/stop` `{commandId}` — stops a managed session's process (history stays readable).
 
 Control endpoints return `422 capability_unavailable` with `details.status` =
@@ -306,7 +306,7 @@ Session ids are opaque; the prefix is informative only.
 
 | kind | data |
 |---|---|
-| `user_message` | `{ text, images, source: "desktop"|"phone"|"unknown", clientId? }` — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
+| `user_message` | `{ text, images, imageItems?, source: "desktop"|"phone"|"unknown", clientId? }` — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
 | `assistant_message` | `{ text (Markdown), model? }` |
 | `reasoning` | `{ text, summary: bool }` — only when the agent actually exposes it |
 | `tool_call` | `{ callId, name, title, category, input, status, server?, tool? }` — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted` |
@@ -315,7 +315,7 @@ Session ids are opaque; the prefix is informative only.
 | `plan` | `{ items: [{ text, status: "pending"|"in_progress"|"completed" }] }` |
 | `approval_request` | `{ requestId, kind: "command"|"file_change"|"tool"|"network"|"other", title, detail, command?, cwd?, toolName?, input?, options: [{ id, label }] , resolved: false }` |
 | `approval_resolved` | `{ requestId, decision, by: "phone"|"desktop"|"other" }` |
-| `question` | `{ requestId, questions: [{ id, header, question, multiSelect, options: [{ label, description }] }] }` |
+| `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, allowOther?, isSecret?, options: [{ label, description }] }] }` |
 | `subagent` | `{ agentId, description, status }` |
 | `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail? }` |
 | `error` | `{ message }` |

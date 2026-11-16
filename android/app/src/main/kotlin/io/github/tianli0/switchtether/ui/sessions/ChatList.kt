@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.sessions
 
 import androidx.compose.animation.AnimatedVisibility
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -228,7 +229,7 @@ private fun Meta(text: String) = Text(text, style = COUITheme.textStyles.footnot
 @Composable
 private fun SmallAction(text: String, tag: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onClick).heightIn(min = 32.dp).padding(horizontal = 8.dp).testTag(tag),
+        Modifier.clip(SquircleShape(8.dp)).clickable(role = Role.Button, onClick = onClick).heightIn(min = 32.dp).padding(horizontal = 8.dp).testTag(tag),
         contentAlignment = Alignment.Center,
     ) { Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary) }
 }

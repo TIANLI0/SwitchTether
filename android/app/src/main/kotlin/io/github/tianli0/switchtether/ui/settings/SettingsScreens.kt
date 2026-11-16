@@ -1,6 +1,10 @@
 package io.github.tianli0.switchtether.ui.settings
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -20,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
 import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
@@ -57,7 +62,7 @@ import io.github.tianli0.switchtether.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(onOpen: (Route) -> Unit) {
+fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}) {
     val container = appContainer()
     val scope = rememberCoroutineScope()
     val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(null)
@@ -73,19 +78,21 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
     val okFmt = stringResource(R.string.stepup_ok)
     val failFmt = stringResource(R.string.stepup_failed)
 
-    Page(title = stringResource(R.string.tab_settings)) {
+    Page(title = stringResource(R.string.tab_manage)) {
+        ConnectionBanner(conn, { container.connection.retryNow() })
         LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-            item { SectionHeader(stringResource(R.string.settings_desktop)) }
             item {
                 PageCard {
                     ArrowPreference(
                         title = desktop?.name ?: "—",
-                        summary = connectionText(conn) + "\n" + (desktop?.fingerprint?.let { Fingerprints.short(it) } ?: ""),
+                        summary = connectionText(conn),
+                        startAction = { Box(Modifier.padding(end = 12.dp).size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(io.github.tianli0.switchtether.ui.common.connectionColor(conn))) },
                         onClick = { onOpen(Route.DesktopInfo) },
+                        cardListPosition = CardListPosition.Full,
                     )
-                    ArrowPreference(title = stringResource(R.string.settings_unpair), summary = stringResource(R.string.settings_unpair_summary), onClick = { confirmUnpair = true })
                 }
             }
+            manageItems()
             item { SectionHeader(stringResource(R.string.settings_security)) }
             item {
                 PageCard {
@@ -94,6 +101,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
                         title = stringResource(R.string.settings_stepup_test),
                         summary = stepUpResult ?: if (stepUp) stringResource(R.string.settings_stepup_summary) else stringResource(R.string.settings_stepup_disabled),
                         enabled = stepUp && conn is ConnectionState.Online && activity != null,
+                        cardListPosition = CardListPosition.Full,
                         onClick = {
                             val act = activity ?: return@ArrowPreference
                             scope.launch {
@@ -113,15 +121,17 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
             item { SectionHeader(stringResource(R.string.settings_appearance)) }
             item {
                 PageCard {
-                    listOf(
+                    val modes = listOf(
                         ThemeMode.SYSTEM to R.string.theme_system,
                         ThemeMode.LIGHT to R.string.theme_light,
                         ThemeMode.DARK to R.string.theme_dark,
-                    ).forEach { (mode, label) ->
+                    )
+                    modes.forEachIndexed { i, (mode, label) ->
                         RadioButtonPreference(
                             title = stringResource(label),
                             selected = theme == mode,
                             onClick = { scope.launch { container.settingsStore.setThemeMode(mode) } },
+                            cardListPosition = cardListPositionOf(i, modes.size),
                         )
                     }
                 }
@@ -134,6 +144,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
                         ArrowPreference(
                             title = stringResource(R.string.settings_language),
                             summary = stringResource(R.string.settings_language_summary),
+                            cardListPosition = CardListPosition.Full,
                             onClick = {
                                 runCatching {
                                     ctx.startActivity(
@@ -154,14 +165,44 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
                         onCheckedChange = { v -> container.setBackgroundConnection(v) },
                         title = stringResource(R.string.settings_background),
                         summary = stringResource(R.string.settings_background_summary),
+                        cardListPosition = CardListPosition.Head,
                     )
-                    ArrowPreference(title = stringResource(R.string.settings_notifications), summary = stringResource(R.string.settings_notifications_summary), onClick = { onOpen(Route.NotificationPrefs) })
+                    val ctx = LocalContext.current
+                    var unrestricted by remember { mutableStateOf(true) }
+                    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+                        unrestricted = ctx.getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(ctx.packageName) != false
+                        onPauseOrDispose { }
+                    }
+                    if (!unrestricted) {
+                        // Doze / OEM battery managers cut the connection: finished tasks are announced late.
+                        ArrowPreference(
+                            title = stringResource(R.string.notif_battery_fix_title),
+                            summary = stringResource(R.string.notif_battery_fix_summary),
+                            onClick = {
+                                runCatching {
+                                    ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:" + ctx.packageName)))
+                                }.onFailure { runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+                            },
+                            cardListPosition = CardListPosition.Middle,
+                        )
+                    }
+                    ArrowPreference(
+                        title = stringResource(R.string.settings_notifications),
+                        summary = stringResource(R.string.settings_notifications_summary),
+                        onClick = { onOpen(Route.NotificationPrefs) },
+                        cardListPosition = CardListPosition.Tail,
+                    )
                 }
             }
             item { SectionHeader(stringResource(R.string.settings_storage)) }
             item {
                 PageCard {
-                    ArrowPreference(title = stringResource(R.string.settings_clear_cache), summary = stringResource(R.string.settings_clear_cache_summary), onClick = { confirmClear = true })
+                    ArrowPreference(
+                        title = stringResource(R.string.settings_clear_cache),
+                        summary = stringResource(R.string.settings_clear_cache_summary),
+                        onClick = { confirmClear = true },
+                        cardListPosition = CardListPosition.Full,
+                    )
                 }
             }
             item { SectionHeader(stringResource(R.string.settings_about)) }
@@ -173,6 +214,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
                     ArrowPreference(
                         title = stringResource(R.string.update_check),
                         summary = updateSummary(updState, BuildConfig.VERSION_NAME),
+                        cardListPosition = CardListPosition.Middle,
                         onClick = {
                             scope.launch {
                                 if (container.updates.check() is io.github.tianli0.switchtether.update.UpdateState.Available) container.showUpdateRequest.value = true
@@ -185,12 +227,28 @@ fun SettingsScreen(onOpen: (Route) -> Unit) {
                         onCheckedChange = { v -> beta = v; container.updates.includePrerelease = v },
                         title = stringResource(R.string.update_beta),
                         summary = stringResource(R.string.update_beta_summary),
+                        cardListPosition = CardListPosition.Middle,
                     )
                     KeyValueRow(stringResource(R.string.settings_protocol), "v${io.github.tianli0.switchtether.remote.protocol.CLIENT_PROTOCOL_VERSION}")
-                    ArrowPreference(title = stringResource(R.string.settings_licenses), onClick = { onOpen(Route.Licenses) })
+                    ArrowPreference(
+                        title = stringResource(R.string.settings_licenses),
+                        onClick = { onOpen(Route.Licenses) },
+                        cardListPosition = CardListPosition.Tail,
+                    )
                 }
             }
-            item { Spacer(Modifier.height(32.dp)) }
+            item { SectionHeader(stringResource(R.string.settings_desktop)) }
+            item {
+                PageCard {
+                    ArrowPreference(
+                        title = stringResource(R.string.settings_unpair),
+                        summary = stringResource(R.string.settings_unpair_summary),
+                        onClick = { confirmUnpair = true },
+                        cardListPosition = CardListPosition.Full,
+                    )
+                }
+            }
+            item { Spacer(Modifier.height(32.dp + io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace.current)) }
         }
     }
     ConfirmDialog(
@@ -267,6 +325,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     onPauseOrDispose { }
                 }
                 PageCard {
+                    val fIntent = io.github.tianli0.switchtether.ui.common.fluidCloudSettingsIntent(ctx)
                     ArrowPreference(
                         title = stringResource(R.string.live_settings_status),
                         summary = stringResource(
@@ -277,15 +336,21 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                             },
                         ),
                         onClick = { runCatching { ctx.startActivity(io.github.tianli0.switchtether.ui.common.promotionSettingsIntent(ctx)) } },
+                        cardListPosition = CardListPosition.Head,
                     )
-                    io.github.tianli0.switchtether.ui.common.fluidCloudSettingsIntent(ctx)?.let { intent ->
-                        ArrowPreference(title = stringResource(R.string.pin_open_fluid_cloud), onClick = { runCatching { ctx.startActivity(intent) } })
+                    fIntent?.let { intent ->
+                        ArrowPreference(
+                            title = stringResource(R.string.pin_open_fluid_cloud),
+                            onClick = { runCatching { ctx.startActivity(intent) } },
+                            cardListPosition = CardListPosition.Middle,
+                        )
                     }
                     SwitchPreference(
                         checked = autoPin,
                         onCheckedChange = { v -> autoPin = v; live.autoPinPhoneSessions = v },
                         title = stringResource(R.string.live_auto_pin),
                         summary = stringResource(R.string.live_auto_pin_summary),
+                        cardListPosition = CardListPosition.Tail,
                     )
                 }
             }
@@ -337,15 +402,19 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                 PageCard {
                     ArrowPreference(
                         title = stringResource(R.string.notif_system_settings),
+                        cardListPosition = CardListPosition.Head,
                         onClick = {
                             runCatching {
                                 context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName))
                             }
                         },
                     )
+                    val pm = context.getSystemService(android.os.PowerManager::class.java)
+                    val unrestricted = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
                     ArrowPreference(
                         title = stringResource(R.string.notif_battery),
-                        summary = stringResource(R.string.notif_battery_summary),
+                        summary = stringResource(if (unrestricted) R.string.notif_battery_unrestricted else R.string.notif_battery_restricted),
+                        cardListPosition = CardListPosition.Tail,
                         onClick = { runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } },
                     )
                 }
@@ -363,7 +432,7 @@ data class LicenseEntry(val name: String, val license: String, val note: String)
 
 /** Mirrors android/THIRD_PARTY_LICENSES.md. */
 val LICENSES = listOf(
-    LicenseEntry("coui17 (Costben/coui17 @ a51f957)", "Apache-2.0 (+ MPL-2.0 files in kit/**)", "Vendored source, see third_party/coui17. MPL-2.0 sources: https://github.com/Costben/coui17/tree/a51f95746292b3b06993b15fe46be1e2b9178421/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit"),
+    LicenseEntry("coui17 (Costben/coui17 @ 0fc9b44)", "Apache-2.0 (+ MPL-2.0 files in kit/**)", "Vendored source, see third_party/coui17. MPL-2.0 sources: https://github.com/Costben/coui17/tree/0fc9b44aadf01632dd2e43ae3db6bcf10621bc8d/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit"),
     LicenseEntry("COUI (suqi8/coui), Miuix (compose-miuix-ui/miuix)", "Apache-2.0", "Upstream projects of coui17 (NOTICE)"),
     LicenseEntry("COUI-Kit (ItosEO/COUI-Kit)", "MPL-2.0", "Ported files keep their MPL-2.0 headers"),
     LicenseEntry("Jetpack Compose / Compose Multiplatform", "Apache-2.0", "Google LLC, JetBrains s.r.o."),

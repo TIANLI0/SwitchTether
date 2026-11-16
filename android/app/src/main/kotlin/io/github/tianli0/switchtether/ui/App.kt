@@ -78,7 +78,6 @@ import io.github.tianli0.switchtether.ui.sessions.SessionsScreen
 import io.github.tianli0.switchtether.ui.settings.DesktopInfoScreen
 import io.github.tianli0.switchtether.ui.settings.LicensesScreen
 import io.github.tianli0.switchtether.ui.settings.NotificationPrefsScreen
-import io.github.tianli0.switchtether.ui.settings.SettingsScreen
 import io.github.tianli0.switchtether.ui.theme.SwitchTetherTheme
 import io.github.tianli0.switchtether.ui.theme.ThemeMode
 import io.github.tianli0.switchtether.ui.workspace.WorkspaceScreen
@@ -172,20 +171,30 @@ fun MainShell() {
         io.github.tianli0.switchtether.ui.sessions.NewSessionSheet(
             show = showNewSession,
             onDismiss = { showNewSession = false },
+            onPickFolder = {
+                showNewSession = false
+                nav.push(Route.PickFolder)
+            },
             onCreated = { id, title ->
                 // "从手机发起的任务自动钉住": the phone started it, so following it is user-initiated.
                 if (container.liveUpdates.autoPinPhoneSessions) {
-                    container.liveUpdates.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true))
+                    container.liveUpdates.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true), manual = false)
                 }
                 nav.push(Route.SessionDetail(id, title))
             },
         )
+        val reopen by container.newSessionReopen.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(reopen) {
+            if (reopen) {
+                container.newSessionReopen.value = false
+                showNewSession = true
+            }
+        }
         val items = listOf(
             NavItem(Tab.HOME, stringResource(R.string.tab_home), AppIcons.Home, AppIcons.HomeSelected),
             NavItem(Tab.SESSIONS, stringResource(R.string.tab_sessions), AppIcons.Sessions, AppIcons.SessionsSelected),
             NavItem(Tab.WORKSPACE, stringResource(R.string.tab_workspace), AppIcons.Workspace, AppIcons.WorkspaceSelected),
             NavItem(Tab.MANAGE, stringResource(R.string.tab_manage), AppIcons.Manage, AppIcons.ManageSelected),
-            NavItem(Tab.SETTINGS, stringResource(R.string.tab_settings), AppIcons.Settings, AppIcons.SettingsSelected),
         )
         if (wide) {
             Row(Modifier.fillMaxSize()) {
@@ -289,10 +298,14 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
             }
             SessionDetailScreen(top.sessionId, top.title, onBack, onOpenSession = { id, title -> nav.push(Route.SessionDetail(id, title)) })
         }
-        Route.NewSession -> NewSessionScreen(onBack, onCreated = { id, title ->
+        Route.NewSession -> NewSessionScreen(onBack, onPickFolder = { nav.push(Route.PickFolder) }, onCreated = { id, title ->
             nav.back()
             nav.push(Route.SessionDetail(id, title))
         })
+        is Route.Terminal -> io.github.tianli0.switchtether.ui.workspace.TerminalPage(top.id, onBack)
+        Route.Files -> io.github.tianli0.switchtether.ui.workspace.FilesPage(onBack)
+        Route.Git -> io.github.tianli0.switchtether.ui.workspace.GitPage(onBack)
+        Route.PickFolder -> io.github.tianli0.switchtether.ui.sessions.PickFolderScreen(onBack)
         Route.Providers -> ProvidersScreen(onBack)
         Route.Usage -> UsageScreen(onBack)
         Route.Mcp -> ToggleListScreen(ToggleListKind.MCP, onBack)
@@ -304,9 +317,8 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         null -> when (entry.tab) {
             Tab.HOME -> HomeScreen(onOpen = nav::push, onSelectTab = nav::select)
             Tab.SESSIONS -> SessionsScreen(onOpen = nav::push)
-            Tab.WORKSPACE -> WorkspaceScreen()
+            Tab.WORKSPACE -> WorkspaceScreen(onOpen = nav::push)
             Tab.MANAGE -> ManageScreen(onOpen = nav::push)
-            Tab.SETTINGS -> SettingsScreen(onOpen = nav::push)
         }
     }
 }

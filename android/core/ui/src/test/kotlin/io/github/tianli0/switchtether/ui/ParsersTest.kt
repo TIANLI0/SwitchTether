@@ -60,6 +60,22 @@ class MarkdownParserTest {
         val b = MarkdownParser.parse("```\nstreaming code")
         assertEquals(MdBlock.Code(null, "streaming code"), b.single())
     }
+
+    @Test
+    fun markdownImagesAndBoldFallbackWork() {
+        val blocks = MarkdownParser.parse("![diagram](data:image/png;base64,AAA)\n\n**中文粗体**：[wiki](https://en.wikipedia.org/wiki/Foo_(bar))")
+        assertTrue(blocks[0] is MdBlock.Image)
+        val img = blocks[0] as MdBlock.Image
+        assertEquals("diagram", img.alt)
+        val colors = io.github.tianli0.switchtether.ui.markdown.InlineColors(
+            link = androidx.compose.ui.graphics.Color.Blue,
+            codeText = androidx.compose.ui.graphics.Color.Black,
+            codeBackground = androidx.compose.ui.graphics.Color.LightGray,
+        )
+        val rendered = io.github.tianli0.switchtether.ui.markdown.InlineMarkdown.render("**中文粗体** and ***both***", colors)
+        assertTrue(rendered.spanStyles.any { it.item.fontWeight == androidx.compose.ui.text.font.FontWeight.Bold })
+        assertTrue(rendered.spanStyles.any { it.item.fontStyle == androidx.compose.ui.text.font.FontStyle.Italic })
+    }
 }
 
 class UnifiedDiffTest {

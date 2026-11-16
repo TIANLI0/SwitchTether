@@ -40,6 +40,7 @@ import io.github.suqi8.coui.kmp.basic.ExpandArrow
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.RotatingProgressIndicator
 import io.github.suqi8.coui.kmp.basic.Text
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
@@ -60,9 +61,9 @@ fun Modifier.segment(position: SegmentPosition, radius: Dp = 16.dp, color: Color
     val shape = when (position) {
         SegmentPosition.Single -> RoundedCornerShape(r)
         SegmentPosition.First -> RoundedCornerShape(topStart = r, topEnd = r)
-        SegmentPosition.Middle -> RoundedCornerShape(0.dp)
+        SegmentPosition.Middle -> SquircleShape(0.dp)
         SegmentPosition.Last -> RoundedCornerShape(bottomStart = r, bottomEnd = r)
-        SegmentPosition.None -> RoundedCornerShape(0.dp)
+        SegmentPosition.None -> SquircleShape(0.dp)
     }
     return this.clip(shape).background(color)
 }
@@ -186,7 +187,7 @@ fun CollapsibleRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(iconTint.copy(alpha = 0.10f)),
+            Modifier.size(28.dp).clip(SquircleShape(10.dp)).background(iconTint.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) { Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp)) }
         Spacer(Modifier.size(10.dp))
@@ -202,10 +203,10 @@ fun CollapsibleRow(
     }
 }
 
-/** Accent-bordered card for things that need the user (approvals, questions). */
+/** Accent-bordered COUI17 squircle card for things that need the user (approvals, questions). */
 @Composable
 fun AttentionCard(modifier: Modifier = Modifier, color: Color = COUITheme.colorScheme.primary, active: Boolean = true, content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = SquircleShape(20.dp)
     Column(
         modifier
             .fillMaxWidth()
@@ -216,10 +217,10 @@ fun AttentionCard(modifier: Modifier = Modifier, color: Color = COUITheme.colorS
     ) { content() }
 }
 
-/** Plain rounded card used by timeline items (diffs, plans, errors). */
+/** Plain COUI17 squircle card used by timeline items (diffs, plans, errors). */
 @Composable
 fun TimelineCard(modifier: Modifier = Modifier, border: Color? = null, padding: Dp = 12.dp, content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = SquircleShape(18.dp)
     Column(
         modifier
             .fillMaxWidth()
@@ -256,7 +257,7 @@ fun InputPill(
         modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(SquircleShape(24.dp))
             .background(scheme.surfaceContainer)
             .padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -308,20 +309,50 @@ fun RoundIconButton(icon: ImageVector, label: String, onClick: () -> Unit, modif
     ) { Icon(icon, contentDescription = null, tint = if (enabled) tint else tint.copy(alpha = 0.4f), modifier = Modifier.size(22.dp)) }
 }
 
-/** Compact chip for the session header status row: optional dot + text, full radius. */
+/**
+ * Capsule for the session header. A state capsule ([dot] given) is tinted with that state's colour
+ * (soft fill, coloured dot, readable text); a plain one sits on the neutral card colour. No outline.
+ * With [onClick] it is a button.
+ */
 @Composable
-fun InfoChip(text: String, modifier: Modifier = Modifier, dot: Color? = null, color: Color = COUITheme.colorScheme.onSurfaceSecondary) {
+fun InfoChip(
+    text: String,
+    modifier: Modifier = Modifier,
+    dot: Color? = null,
+    color: Color = COUITheme.colorScheme.onSurfaceSecondary,
+    icon: ImageVector? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    val fill = if (dot != null) dot.copy(alpha = 0.14f) else COUITheme.colorScheme.surfaceContainer
+    val label = if (dot != null) COUITheme.colorScheme.onSurface else color
+    val shape = RoundedCornerShape(50)
     Row(
         modifier
-            .clip(RoundedCornerShape(50))
-            .background(COUITheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .heightIn(min = 24.dp)
+            .clip(shape)
+            .background(fill)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(horizontal = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (dot != null) {
-            StatusDot(dot, size = 7.dp)
-            Spacer(Modifier.size(6.dp))
+            StatusDot(dot, size = 6.dp)
+            Spacer(Modifier.size(5.dp))
         }
-        Text(text, style = COUITheme.textStyles.footnote1, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = label, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.size(4.dp))
+        }
+        Text(text, style = COUITheme.textStyles.footnote2, fontWeight = FontWeight.Medium, color = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Quiet "icon + number" figure for the stats line under the capsules (no outline, no fill). */
+@Composable
+fun StatFigure(icon: ImageVector, text: String, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.size(4.dp))
+        Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1)
     }
 }

@@ -65,7 +65,7 @@ fun SessionRow(
             // "Codex Desktop" already names the agent; "VS Code" / "终端" do not.
             agent.takeUnless { session.isAttached && session.origin == "desktop_app" },
             if (session.isAttached) io.github.tianli0.switchtether.ui.common.clientLabel(session.origin, session.agent) else null,
-            session.project?.takeIf { it != title },
+            io.github.tianli0.switchtether.ui.common.sessionProjectName(session)?.takeIf { it != title },
             session.gitBranch,
         ).joinToString(" · "),
         // Right column: relative time over the small origin / waiting tags, so a row stays two lines.

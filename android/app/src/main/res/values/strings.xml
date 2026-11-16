@@ -161,6 +161,12 @@
     <string name="render_resolved">%1$s · by %2$s</string>
     <string name="render_control_unavailable">Answer on the computer: this control is %1$s for this session.</string>
     <string name="render_question">Question</string>
+    <string name="render_question_other">Other (custom answer)</string>
+    <string name="render_question_input_hint">Type your answer…</string>
+    <string name="render_image_preview">Image preview</string>
+    <string name="composer_attach_image">Attach image</string>
+    <string name="notif_battery_unrestricted">Unrestricted (boot and background reconnect enabled)</string>
+    <string name="notif_battery_restricted">Optimized — allow unrestricted battery for reliable boot &amp; background reconnect</string>
     <string name="render_answered">Answered</string>
     <string name="render_submit_answer">Submit answer</string>
     <string name="render_subagent">Sub-agent</string>
@@ -379,4 +385,13 @@
     <string name="usage_log_source">Source</string>
     <string name="usage_log_id">Request ID</string>
     <string name="usage_last_sync">Session logs synced %1$s (computer time)</string>
+    <string name="manage_agents_section">Agents on the computer</string>
+    <string name="notif_battery_fix_title">Allow background running</string>
+    <string name="notif_battery_fix_summary">Battery saving may delay “task finished” alerts. Tap to exempt SwitchTether.</string>
+    <string name="new_session_options">Options</string>
+    <string name="new_session_model_default">Default model</string>
+    <string name="new_session_note">Starts a new session on the computer that you can control from here. Sessions you started in a terminal or VS Code stay as they are.</string>
+    <string name="perm_default_short">Ask first</string>
+    <string name="perm_accept_edits_short">Auto-edit</string>
+    <string name="perm_plan_short">Plan only</string>
 </resources>

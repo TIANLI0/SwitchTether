@@ -1006,14 +1006,55 @@ impl AgentHub {
         text: &str,
         client_id: Option<&str>,
     ) -> ApiResult<Value> {
+        self.send_message_with_images(id, text, &[], client_id)
+            .await
+    }
+
+    pub async fn send_message_with_images(
+        &self,
+        id: &str,
+        text: &str,
+        images: &[managed::ImageAttachment],
+        client_id: Option<&str>,
+    ) -> ApiResult<Value> {
         let m = self.managed_or_blocked(id)?;
-        if text.trim().is_empty() || text.len() > 200_000 {
-            return Err(ApiError::validation("message must be 1..200000 bytes"));
+        if (text.trim().is_empty() && images.is_empty()) || text.len() > 200_000 {
+            return Err(ApiError::validation(
+                "message must be 1..200000 bytes (or include images)",
+            ));
+        }
+        if images.len() > 4 {
+            return Err(ApiError::validation("at most 4 images per message"));
+        }
+        let mut total_b64 = 0usize;
+        for img in images {
+            if !matches!(
+                img.media_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+            ) {
+                return Err(ApiError::validation(format!(
+                    "unsupported image mediaType '{}'",
+                    img.media_type
+                )));
+            }
+            if img.data_base64.is_empty() || img.data_base64.len() > 4 * 1024 * 1024 {
+                return Err(ApiError::validation("image payload too large"));
+            }
+            total_b64 += img.data_base64.len();
+        }
+        if total_b64 > 8 * 1024 * 1024 {
+            return Err(ApiError::validation("total image payload exceeds limit"));
+        }
+        if !images.is_empty() && !m.supports_images() {
+            return Err(ApiError::unavailable_capability(
+                "BLOCKED",
+                "This session does not support image input.",
+            ));
         }
         if let Some(c) = client_id.filter(|c| !c.is_empty() && c.len() <= 128) {
             m.log().lock().expect_user_message(text, c);
         }
-        m.send_message(text).await?;
+        m.send_message_with_images(text, images).await?;
         Ok(json!({ "accepted": true }))
     }
 
@@ -1114,10 +1155,21 @@ impl AgentHub {
             .count()
     }
 
-    /// Kill every managed process (called when SwitchTether really quits).
+    /// Kill every managed process (called when SwitchTether really quits) and
+    /// honestly mark them as ended so connected phones don't treat them as live.
     pub fn shutdown(&self) {
-        for m in self.managed.read().values() {
-            m.kill();
+        let managed_ids: Vec<String> = self
+            .managed
+            .read()
+            .iter()
+            .filter(|(_, m)| m.origin() == "managed")
+            .map(|(id, m)| {
+                m.kill();
+                id.clone()
+            })
+            .collect();
+        for id in managed_ids {
+            self.publish_session(&id);
         }
     }
 
