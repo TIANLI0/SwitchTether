@@ -8,7 +8,7 @@ name = "switchtether"
 # Cargo version tracks the merged CC Switch upstream release (third-party
 # User-Agent/version headers depend on it). The SwitchTether product version
 # lives in tauri.conf.json / package.json.
-version = "4.0.31"
+version = "4.0.33"
 description = "SwitchTether: native Android remote control for AI coding agents, built on CC Switch"
 authors = ["Jason Young (CC Switch)", "SwitchTether contributors"]
 license = "MIT"
@@ -65,12 +65,10 @@ bytes = "1.5"
 prost = "0.14"
 axum = "0.7"
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors"] }
 hyper = { version = "1.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
 hyper-rustls = { version = "0.27", features = ["http1", "tls12", "ring", "webpki-tokio"] }
 http = "1"
-http-body = "1"
 http-body-util = "0.1"
 httparse = "1"
 tokio-rustls = "0.26"
@@ -124,6 +122,7 @@ windows = "0.61"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Security_Credentials",
     "Win32_Storage_FileSystem",
     "Win32_Graphics_Gdi",
     "Win32_System_Threading",
