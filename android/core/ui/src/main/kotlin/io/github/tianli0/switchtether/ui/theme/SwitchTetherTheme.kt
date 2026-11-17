@@ -108,8 +108,8 @@ object DevType {
 /**
  * App theme: COUITheme (ColorOS look) + developer colors.
  *
- * Glass blur is enabled only for the floating navigation capsule (the shell provides
- * `LocalBlurEnabled = false` to page content so dialogs/pages keep opaque fills).
+ * ColorOS 17 glass materials (title-bar buttons, dialogs, sheets, the navigation capsule) use
+ * coui17's blur; the library falls back to flat fills below Android 13 or with system blur off.
  * The Oplus-only native materials of coui17 (`LocalPlatform*MaterialEnabled`) are switched off so
  * the library never reflects into private `com.oplus.*` framework classes; the portable Compose
  * blur engine is used everywhere (see third_party/coui17/PATCHES.md).
@@ -148,7 +148,6 @@ fun SwitchTetherTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable (
     COUITheme(controller = controller) {
         CompositionLocalProvider(
             LocalDevColors provides if (dark) DevColors.Dark else DevColors.Light,
-            io.github.suqi8.coui.kmp.blur.LocalBlurEnabled provides false,
             LocalPlatformAppBarMaterialEnabled provides false,
             LocalPlatformBottomBarMaterialEnabled provides false,
             content = content,

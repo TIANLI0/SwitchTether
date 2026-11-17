@@ -541,9 +541,18 @@ private fun Composer(
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (state.canOfferContinue) {
-                    Button(onClick = onContinue, colors = ButtonDefaults.buttonColorsPrimary(), minHeight = 36.dp, modifier = Modifier.testTag("continue")) {
-                        Text(stringResource(R.string.continue_action), color = COUITheme.colorScheme.onPrimary, style = COUITheme.textStyles.button)
-                    }
+                    // COUI tinted text button (theme-coloured label on a light theme wash): an action
+                    // inside the bar, not a second primary button competing with the page.
+                    io.github.suqi8.coui.kmp.basic.TextButton(
+                        text = stringResource(R.string.continue_action),
+                        onClick = onContinue,
+                        minHeight = 36.dp,
+                        colors = io.github.suqi8.coui.kmp.basic.ButtonDefaults.textButtonColors(
+                            color = COUITheme.colorScheme.tertiaryContainer,
+                            textColor = COUITheme.colorScheme.onTertiaryContainer,
+                        ),
+                        modifier = Modifier.testTag("continue"),
+                    )
                 }
             }
             return@Column

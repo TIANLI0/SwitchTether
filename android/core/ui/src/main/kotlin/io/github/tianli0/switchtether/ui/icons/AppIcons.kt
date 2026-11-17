@@ -35,8 +35,8 @@ import com.adamglin.phosphoricons.regular.Plugs
 import com.adamglin.phosphoricons.regular.Plus
 import com.adamglin.phosphoricons.regular.PlusCircle
 import com.adamglin.phosphoricons.regular.PuzzlePiece
-import com.adamglin.phosphoricons.regular.PushPin
-import com.adamglin.phosphoricons.regular.PushPinSlash
+import com.adamglin.phosphoricons.regular.Broadcast
+import com.adamglin.phosphoricons.fill.Broadcast as BroadcastFill
 import com.adamglin.phosphoricons.regular.Question
 import com.adamglin.phosphoricons.regular.Robot
 import com.adamglin.phosphoricons.regular.Stack
@@ -100,8 +100,10 @@ object AppIcons {
     val Files: ImageVector get() = PhosphorIcons.Regular.Folder
     val Git: ImageVector get() = PhosphorIcons.Regular.GitBranch
     val ChevronRight: ImageVector get() = PhosphorIcons.Regular.CaretRight
-    val Pin: ImageVector get() = PhosphorIcons.Regular.PushPin
-    val Unpin: ImageVector get() = PhosphorIcons.Regular.PushPinSlash
+    /** Follow a task in the live notification (Fluid Cloud). */
+    val Pin: ImageVector get() = PhosphorIcons.Regular.Broadcast
+    /** Shown while a task is followed (tap to stop). */
+    val Unpin: ImageVector get() = PhosphorIcons.Fill.BroadcastFill
     val ArrowDown: ImageVector get() = PhosphorIcons.Regular.ArrowDown
     val Clock: ImageVector get() = PhosphorIcons.Regular.Clock
 

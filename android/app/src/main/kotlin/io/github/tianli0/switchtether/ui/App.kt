@@ -227,9 +227,10 @@ fun MainShell() {
             val showBar = top == null
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize().then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)) {
-                    // Glass only for the capsule: pages and dialogs keep opaque COUI fills.
+                    // ColorOS 17 materials (frosted title-bar buttons, dialogs, sheets) everywhere. coui17
+                    // itself falls back to flat fills below Android 13 or with system blur off.
                     CompositionLocalProvider(
-                        LocalBlurEnabled provides false,
+                        LocalBlurEnabled provides true,
                         LocalBottomBarSpace provides if (showBar) 96.dp else 0.dp,
                     ) {
                         AnimatedNavHost(nav) { Destination(nav, it) }

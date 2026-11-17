@@ -1183,6 +1183,10 @@ impl AgentHub {
             // read can land mid-write, so one missed tick is not an exit (it showed up on phones as
             // a burst of "ended" sessions right after Claude Code started).
             let mut missing: HashMap<String, u8> = HashMap::new();
+            // Last pushed title of each managed/attached Claude session. Claude Code writes the
+            // generated title to the transcript after the turn's last event, so no event-driven
+            // upsert ever carries it; it is picked up here.
+            let mut managed_titles: HashMap<String, Option<String>> = HashMap::new();
             let mut tick = tokio::time::interval(Duration::from_secs(4));
             loop {
                 tokio::select! {
@@ -1252,6 +1256,29 @@ impl AgentHub {
                     }
                 }
                 prev = now;
+
+                let claude_managed: Vec<(String, Arc<dyn ManagedSession>)> = hub
+                    .managed
+                    .read()
+                    .iter()
+                    .filter(|(_, m)| m.agent() == "claude_code")
+                    .map(|(k, m)| (k.clone(), m.clone()))
+                    .collect();
+                managed_titles.retain(|id, _| claude_managed.iter().any(|(k, _)| k == id));
+                for (id, m) in claude_managed {
+                    let summary = hub.managed_summary(&id, m.as_ref());
+                    match managed_titles.get(&id) {
+                        Some(t) if *t == summary.title => {}
+                        seen => {
+                            let first = seen.is_none();
+                            managed_titles.insert(id.clone(), summary.title.clone());
+                            // The first sighting only records the baseline; lists already have it.
+                            if !first {
+                                hub.bus.publish("session.upserted", json!(summary));
+                            }
+                        }
+                    }
+                }
             }
         });
     }

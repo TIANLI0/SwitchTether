@@ -168,7 +168,9 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                     }
                     roots.forEachIndexed { i, r ->
                         BasicComponent(
-                            title = r.name.ifBlank { r.path },
+                            // Desktop roots named after their full path read as the path twice: show the folder name.
+                            title = r.name.takeIf { it.isNotBlank() && it != r.path }
+                                ?: r.path.trimEnd('\\', '/').substringAfterLast('\\').substringAfterLast('/').ifBlank { r.path },
                             summary = r.path,
                             startAction = { RowIcon(AppIcons.Files) },
                             onClick = {

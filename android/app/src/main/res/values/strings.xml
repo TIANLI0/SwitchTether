@@ -84,7 +84,7 @@
     <string name="verify_no_stepup">Biometric confirmation is not set up for this pairing, so terminal and file writes will be unavailable.</string>
 
     <!-- Connection -->
-    <string name="conn_online">Connected to %1$s via %2$s</string>
+    <string name="conn_online">Connected · %2$s</string>
     <string name="conn_connecting">Connecting to %1$s…</string>
     <string name="conn_offline">Offline</string>
     <string name="conn_offline_retry">Offline · retrying in %1$d s</string>

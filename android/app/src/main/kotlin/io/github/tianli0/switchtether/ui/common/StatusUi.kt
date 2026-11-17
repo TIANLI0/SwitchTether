@@ -43,7 +43,7 @@ fun connectionText(state: ConnectionState): String {
         is ConnectionState.Online -> if (state.endpoint.host == io.github.tianli0.switchtether.remote.relay.RELAY_HOST) {
             stringResource(R.string.conn_via_relay, relayHostOf(state.desktop.relayUrl))
         } else {
-            stringResource(R.string.conn_online, state.desktop.name, state.endpoint.toString())
+            stringResource(R.string.conn_online, state.desktop.name, state.endpoint.host.let { h -> if (':' in h) "IPv6" else h })
         }
         is ConnectionState.Connecting -> stringResource(R.string.conn_connecting, state.desktop.name)
         is ConnectionState.Offline -> {
