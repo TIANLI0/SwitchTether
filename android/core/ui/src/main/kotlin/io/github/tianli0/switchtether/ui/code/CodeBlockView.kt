@@ -27,6 +27,7 @@ fun CodeBlockView(
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
     highlight: Boolean = true,
+    softWrap: Boolean = false,
 ) {
     val dev = LocalDevColors.current
     val text = remember(code, language, dev, highlight) {
@@ -43,11 +44,11 @@ fun CodeBlockView(
                 Text(language, style = DevType.label, color = dev.gutter)
             }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Row(Modifier.then(if (softWrap) Modifier else Modifier.horizontalScroll(rememberScrollState())).padding(horizontal = 10.dp, vertical = 8.dp)) {
             if (text != null) {
-                Text(text, style = DevType.code, color = dev.codeText, softWrap = false, maxLines = maxLines)
+                Text(text, style = DevType.code, color = dev.codeText, softWrap = softWrap, maxLines = maxLines)
             } else {
-                Text(code, style = DevType.code, color = dev.codeText, softWrap = false, maxLines = maxLines)
+                Text(code, style = DevType.code, color = dev.codeText, softWrap = softWrap, maxLines = maxLines)
             }
         }
     }

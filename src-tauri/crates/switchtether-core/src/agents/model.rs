@@ -59,10 +59,23 @@ pub struct SessionSummary {
 }
 
 impl SessionSummary {
+    /// Project name for a working directory: its folder name, except that agent worktrees
+    /// (`<project>/.claude/worktrees/<name>`, `<project>/.worktrees/<name>`) belong to the
+    /// project that contains them. Handles `/` and `\` regardless of the host OS.
     pub fn project_from_cwd(cwd: &str) -> Option<String> {
-        std::path::Path::new(cwd)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
+        let parts: Vec<&str> = cwd.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
+        let worktree_parent = parts
+            .windows(2)
+            .position(|w| matches!(w[0], ".claude" | ".codex" | ".cursor") && w[1] == "worktrees");
+        let name = match worktree_parent {
+            Some(i) if i > 0 => parts[i - 1],
+            _ => match parts.iter().position(|p| *p == ".worktrees") {
+                Some(i) if i > 0 => parts[i - 1],
+                _ => *parts.last()?,
+            },
+        };
+        let name = name.trim_end_matches(':');
+        (!name.is_empty()).then(|| name.to_string())
     }
 }
 
@@ -158,9 +171,10 @@ pub fn tool_category(name: &str) -> &'static str {
         "Read" | "view_image" => "read",
         "Grep" | "Glob" | "LS" | "ToolSearch" => "search",
         "WebFetch" | "WebSearch" | "web_search" => "web",
-        "Task" | "Agent" => "task",
+        "Task" | "Agent" | "spawn_agent" | "send_input" | "resume_agent" | "wait"
+        | "close_agent" => "task",
         "TodoWrite" | "update_plan" => "todo",
-        "AskUserQuestion" => "question",
+        "AskUserQuestion" | "request_user_input" => "question",
         "ExitPlanMode" | "EnterPlanMode" => "plan",
         _ => "other",
     }
@@ -179,6 +193,9 @@ pub fn tool_title(name: &str, input: &Value) -> String {
         "WebFetch" => s("url"),
         "WebSearch" => s("query"),
         "Task" | "Agent" => s("description"),
+        "spawn_agent" => s("message").or_else(|| s("agent_type")),
+        "send_input" => s("message").or_else(|| s("id")),
+        "resume_agent" | "close_agent" => s("id"),
         "shell" | "exec_command" | "local_shell" => input
             .get("command")
             .map(|c| match c {

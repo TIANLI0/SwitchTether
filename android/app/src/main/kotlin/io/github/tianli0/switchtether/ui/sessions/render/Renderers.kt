@@ -64,6 +64,7 @@ import io.github.tianli0.switchtether.remote.protocol.double
 import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.obj
 import io.github.tianli0.switchtether.remote.protocol.str
+import io.github.tianli0.switchtether.remote.session.InjectedText
 import io.github.tianli0.switchtether.remote.session.RenderItem
 import io.github.tianli0.switchtether.ui.code.CodeBlockView
 import io.github.tianli0.switchtether.ui.common.Formatters
@@ -83,6 +84,7 @@ import io.github.tianli0.switchtether.ui.diff.DiffView
 import io.github.tianli0.switchtether.ui.markdown.MarkdownView
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -167,8 +169,24 @@ private fun OutputBlock(eventId: String, text: String, truncated: Boolean, isErr
 fun UserMessage(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
     val imageItems = d["imageItems"].arr().orEmpty().mapNotNull { it.obj() }
-    val text = d.str("text").orEmpty()
+    val cleaned = remember(item.event) { InjectedText.clean(d.str("text").orEmpty()) }
+    val text = cleaned.text
+    // IDE context (opened file / selected lines): desktop-provided, else recovered from old events.
+    val context = remember(item.event) {
+        d["context"].arr().orEmpty().mapNotNull { it.obj() }.mapNotNull { c ->
+            c.str("path")?.let { InjectedText.Context(c.str("kind") ?: "file", it, c.str("lines")) }
+        }.ifEmpty { cleaned.context }
+    }
+    if (text.isBlank() && imageItems.isEmpty()) return
     Column(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalAlignment = Alignment.End) {
+        if (context.isNotEmpty()) {
+            SubtleMeta(
+                context.distinctBy { it.path to it.lines }.joinToString("  ·  ") { c ->
+                    c.fileName + (c.lines?.let { " L$it" } ?: "")
+                },
+                Modifier.padding(bottom = 3.dp, end = 4.dp),
+            )
+        }
         ChatBubble {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (imageItems.isNotEmpty()) ImageStrip(imageItems, ctx)
@@ -358,16 +376,21 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
     var open by rememberSaveable(item.key) { mutableStateOf(false) }
     val status = toolStatus(item)
     val result = item.attachedResult
+    val command = io.github.tianli0.switchtether.remote.session.ToolCommands.raw(d)
+    var wrapCommand by rememberSaveable(item.key) { mutableStateOf(true) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboard.current
+    val commandScope = androidx.compose.runtime.rememberCoroutineScope()
+    val copyLabel = stringResource(R.string.command_copy)
     Column(Modifier.fillMaxWidth()) {
         CollapsibleRow(
             icon = categoryIcon(d.str("category")),
             iconTint = if (status == StepStatus.Failed) dev.danger else COUITheme.colorScheme.primary,
-            title = d.str("title")?.takeIf { it.isNotBlank() } ?: d.str("name").orEmpty(),
+            title = io.github.tianli0.switchtether.ui.sessions.stepTitle(item),
             subtitle = listOfNotNull(d.str("name"), d.str("server")?.let { "@$it" }, shortClock(item.event.ts).ifEmpty { null }).joinToString(" · "),
             expanded = open,
             onToggle = { open = !open },
             toggleLabel = stringResource(R.string.render_toggle),
-            titleMaxLines = if (open) 6 else 1,
+            titleMaxLines = if (open) 4 else 2,
         ) {
             StepStatusIndicator(status, stepStatusLabel(status))
             if (item.hasChildren) {
@@ -382,8 +405,17 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                 val input = d["input"]
                 if (input != null && input.toString() != "{}") {
                     SectionLabel(stringResource(R.string.render_input))
-                    val command = input.obj()?.str("command")
-                    if (command != null) CodeBlockView(command, "bash") else CodeBlockView(prettyJson(input).take(PREVIEW_CHARS * 2), "json")
+                    if (command != null) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(text = stringResource(if (wrapCommand) R.string.command_scroll else R.string.command_wrap), onClick = { wrapCommand = !wrapCommand })
+                            TextButton(text = copyLabel, onClick = { commandScope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(copyLabel, command))) } })
+                        }
+                        SelectionContainer { CodeBlockView(command, "bash", softWrap = wrapCommand) }
+                        input.obj()?.str("cwd")?.let { cwd ->
+                            SectionLabel(stringResource(R.string.command_directory))
+                            SelectionContainer { CodeBlockView(cwd, null, softWrap = true) }
+                        }
+                    } else CodeBlockView(prettyJson(input).take(PREVIEW_CHARS * 2), "json")
                 }
                 if (result != null) {
                     SectionLabel(stringResource(R.string.render_output))
@@ -636,6 +668,28 @@ fun ApprovalResolved(item: RenderItem) {
 }
 
 @Composable
+private fun QuestionOption(title: String, summary: String?, selected: Boolean, multi: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val fill by androidx.compose.animation.animateColorAsState(
+        if (selected) COUITheme.colorScheme.primary.copy(alpha = if (LocalDevColors.current.isDark) 0.20f else 0.08f)
+        else COUITheme.colorScheme.surfaceVariant,
+        label = "question-selection",
+    )
+    val modifier = Modifier.fillMaxWidth().clip(SquircleShape(12.dp)).background(fill)
+    val inset = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+    if (multi) {
+        io.github.suqi8.coui.kmp.preference.CheckboxPreference(
+            title = title, summary = summary, checked = selected, enabled = enabled,
+            onCheckedChange = { onClick() }, modifier = modifier, insideMargin = inset,
+        )
+    } else {
+        io.github.suqi8.coui.kmp.preference.RadioButtonPreference(
+            title = title, summary = summary, selected = selected, enabled = enabled,
+            onClick = onClick, modifier = modifier, insideMargin = inset,
+        )
+    }
+}
+
+@Composable
 fun Question(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
     val resolution = item.resolution?.data
@@ -647,9 +701,8 @@ fun Question(item: RenderItem, ctx: RenderContext) {
     // question key -> free-text / "other" input
     val freeTexts = remember(item.key) { mutableStateMapOf<String, String>() }
     val otherChosen = remember(item.key) { mutableStateMapOf<String, Boolean>() }
-    val enabled = !resolved && ctx.answer.usable && ctx.online
+    val enabled = !resolved && ctx.answer.usable && ctx.online && !ctx.requestBusy
     val accent = COUITheme.colorScheme.primary
-    val otherTag = "__st_other__"
     AttentionCard(active = !resolved, color = accent) {
         AttentionHeader(AppIcons.Question, stringResource(if (resolved) R.string.render_question else R.string.render_question_needed), item.event.ts, if (resolved) COUITheme.colorScheme.onSurfaceVariantSummary else accent)
         questions.forEach { q ->
@@ -660,53 +713,25 @@ fun Question(item: RenderItem, ctx: RenderContext) {
             val isSecret = q.bool("isSecret") == true
             q.str("header")?.let { SubtleMeta(it, Modifier.padding(top = 10.dp)) }
             Text(q.str("question").orEmpty(), style = COUITheme.textStyles.body1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp))
-            opts.forEach { o ->
-                val label = o.str("label").orEmpty()
-                val sel = selections[key].orEmpty()
-                val selected = label in sel
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(SquircleShape(10.dp)).clickable(enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton) {
-                        if (multi) {
-                            selections[key] = if (selected) sel - label else sel + label
-                        } else {
+            if (!resolved) Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                opts.forEach { o ->
+                    val label = o.str("label").orEmpty()
+                    val sel = selections[key].orEmpty()
+                    val selected = label in sel && (multi || otherChosen[key] != true)
+                    QuestionOption(label, o.str("description"), selected, multi, enabled) {
+                        if (multi) selections[key] = if (selected) sel - label else sel + label
+                        else {
                             otherChosen[key] = false
                             selections[key] = setOf(label)
                         }
-                    },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (multi) {
-                        Checkbox(state = ToggleableState(selected), onClick = null, enabled = enabled)
-                    } else {
-                        RadioButton(selected = selected && otherChosen[key] != true, onClick = null, enabled = enabled)
-                    }
-                    Spacer(Modifier.size(8.dp))
-                    Column {
-                        Text(label, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
-                        o.str("description")?.let { Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary) }
                     }
                 }
-            }
-            if (allowOther && opts.isNotEmpty() && !resolved) {
-                val isOther = otherChosen[key] == true
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(SquircleShape(10.dp)).clickable(enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton) {
-                        if (multi) {
-                            otherChosen[key] = !isOther
-                        } else {
-                            otherChosen[key] = true
-                            selections[key] = emptySet()
-                        }
-                    },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (multi) {
-                        Checkbox(state = ToggleableState(isOther), onClick = null, enabled = enabled)
-                    } else {
-                        RadioButton(selected = isOther, onClick = null, enabled = enabled)
+                if (allowOther && opts.isNotEmpty() && !resolved) {
+                    val isOther = otherChosen[key] == true
+                    QuestionOption(stringResource(R.string.render_question_other), null, isOther, multi, enabled) {
+                        otherChosen[key] = if (multi) !isOther else true
+                        if (!multi) selections[key] = emptySet()
                     }
-                    Spacer(Modifier.size(8.dp))
-                    Text(stringResource(R.string.render_question_other), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
                 }
             }
             if ((opts.isEmpty() || otherChosen[key] == true) && !resolved) {
@@ -733,7 +758,7 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                 val opts = q["options"].arr().orEmpty()
                 val selOk = selections[key].orEmpty().isNotEmpty()
                 val freeOk = (opts.isEmpty() || otherChosen[key] == true) && freeTexts[key].orEmpty().isNotBlank()
-                selOk || freeOk
+                q.bool("required") == false || if (otherChosen[key] == true || opts.isEmpty()) freeOk else selOk
             }
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (cancellable) {
@@ -756,7 +781,13 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                                     val ft = freeTexts[key].orEmpty().trim()
                                     if (ft.isNotEmpty()) picked += ft
                                 }
-                                put(key, picked.joinToString(", "))
+                                if (picked.isNotEmpty()) {
+                                    val values = picked.map { label ->
+                                        q["options"].arr().orEmpty().mapNotNull { it.obj() }.firstOrNull { it.str("label") == label }?.str("value") ?: label
+                                    }
+                                    if (ctx.agent == "codex" && q.bool("multiSelect") == true) put(key, JsonArray(values.map(::JsonPrimitive)))
+                                    else put(key, values.joinToString(", "))
+                                }
                             }
                         }
                         ctx.onAnswerAction(d.str("requestId").orEmpty(), answers, "submit")
@@ -770,7 +801,6 @@ fun Question(item: RenderItem, ctx: RenderContext) {
             if (!ctx.answer.usable) BlockedNote(ctx.answer, ctx.capabilityReason)
         }
     }
-    val _unused = otherTag
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -778,20 +808,80 @@ fun Question(item: RenderItem, ctx: RenderContext) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
+private fun durationLabel(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(1)
+    return if (s < 60) stringResource(R.string.duration_seconds, s.toInt())
+    else stringResource(R.string.duration_minutes, (s / 60).toInt(), (s % 60).toInt())
+}
+
+/**
+ * A sub-agent launched by the Agent/Task tool. Background agents start `running` and are updated
+ * in place when their task notification arrives (status, summary, result, tool uses, duration).
+ * The arrow opens the result; nested steps, when the desktop sends any, have their own toggle.
+ */
+@Composable
 fun Subagent(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
+    val dev = LocalDevColors.current
     val status = StepStatus.parse(d.str("status"))
-    CollapsibleRow(
-        icon = AppIcons.SubAgent,
-        iconTint = COUITheme.colorScheme.primary,
-        title = d.str("description")?.takeIf { it.isNotBlank() } ?: stringResource(R.string.render_subagent),
-        subtitle = listOfNotNull(stringResource(R.string.render_subagent), d.str("agentType"), shortClock(item.event.ts).ifEmpty { null }).joinToString(" · "),
-        expanded = item.hasChildren && !ctx.isCollapsed(item.key),
-        onToggle = { if (item.hasChildren) ctx.onToggleCollapse(item.key) },
-        toggleLabel = if (ctx.isCollapsed(item.key)) stringResource(R.string.render_expand_sub) else stringResource(R.string.render_collapse_sub),
-        showArrow = item.hasChildren,
-    ) {
-        if (status != StepStatus.Unknown) StepStatusIndicator(status, stepStatusLabel(status))
+    val result = d.str("result")?.takeIf { it.isNotBlank() }
+    val summary = d.str("summary")?.takeIf { it.isNotBlank() }
+    val running = status == StepStatus.Running || status == StepStatus.Pending
+    val hasBody = result != null || summary != null || running
+    var open by rememberSaveable(item.key) { mutableStateOf(false) }
+    val subtitle = listOfNotNull(
+        d.str("agentType")?.takeIf { it.isNotBlank() } ?: stringResource(R.string.render_subagent),
+        if (d.bool("background") == true) stringResource(R.string.subagent_background) else null,
+        d.long("toolUses")?.takeIf { it > 0 }?.let { stringResource(R.string.subagent_tool_uses, it.toInt()) },
+        d.long("durationMs")?.takeIf { it > 0 }?.let { durationLabel(it) },
+        shortClock(item.event.ts).ifEmpty { null },
+    ).joinToString(" · ")
+    Column(Modifier.fillMaxWidth()) {
+        CollapsibleRow(
+            icon = AppIcons.SubAgent,
+            iconTint = if (status == StepStatus.Failed) dev.danger else COUITheme.colorScheme.primary,
+            title = d.str("description")?.takeIf { it.isNotBlank() } ?: stringResource(R.string.render_subagent),
+            subtitle = subtitle,
+            expanded = open,
+            onToggle = { if (hasBody) open = !open },
+            toggleLabel = stringResource(R.string.render_toggle),
+            titleMaxLines = if (open) 4 else 2,
+            showArrow = hasBody,
+        ) {
+            if (status != StepStatus.Unknown) StepStatusIndicator(status, stepStatusLabel(status))
+            if (item.hasChildren) {
+                TextButton(
+                    text = if (ctx.isCollapsed(item.key)) stringResource(R.string.render_expand_sub) else stringResource(R.string.render_collapse_sub),
+                    onClick = { ctx.onToggleCollapse(item.key) },
+                )
+            }
+        }
+        if (open && hasBody) {
+            Column(Modifier.padding(start = 50.dp, end = 12.dp, bottom = 10.dp)) {
+                if (summary != null && summary != result) {
+                    SectionLabel(stringResource(R.string.subagent_summary))
+                    Text(summary, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceSecondary)
+                }
+                if (result != null) {
+                    SectionLabel(stringResource(R.string.subagent_result))
+                    SelectionContainer { MarkdownView(result, onLinkClick = ctx.onLink) }
+                    if (d.bool("resultTruncated") == true) SubtleMeta(stringResource(R.string.subagent_result_truncated), Modifier.padding(top = 4.dp))
+                } else if (running) {
+                    Text(stringResource(R.string.subagent_waiting_result), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                    Spacer(Modifier.size(8.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+        } else if (!open && summary != null && !running) {
+            Text(
+                summary,
+                style = COUITheme.textStyles.footnote2,
+                color = if (status == StepStatus.Failed) dev.danger else COUITheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 50.dp, end = 12.dp, bottom = 8.dp),
+            )
+        }
     }
 }
 
@@ -839,6 +929,7 @@ fun SystemRow(item: RenderItem) {
                 // Known desktop notices are shown in the app language instead of the server's English.
                 "continued" -> stringResource(R.string.render_system_continued)
                 "turn_stopped" -> stringResource(R.string.render_system_turn_stopped)
+                "task_notification" -> stringResource(R.string.render_system_task, d.str("text").orEmpty())
                 "init" -> stringResource(R.string.render_system_init) + (d.str("text")?.substringAfter(" · ", "")?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
                 else -> stringResource(R.string.render_system, listOfNotNull(d.str("subtype"), d.str("text")).joinToString(": "))
             },

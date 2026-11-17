@@ -4,11 +4,12 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.ui.common.UiText
 
 import android.content.ContentResolver
-import android.content.ContentValues
 import android.net.Uri
-import android.os.Environment
-import android.provider.MediaStore
 import android.provider.OpenableColumns
+import io.github.tianli0.switchtether.files.DownloadRecord
+import io.github.tianli0.switchtether.files.FileKind
+import io.github.tianli0.switchtether.files.FileStore
+import io.github.tianli0.switchtether.files.FileTypes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.tianli0.switchtether.connection.ConnectionController
@@ -62,7 +63,18 @@ data class ConflictState(
     val diff: String get() = TextDiff.unified(desktopText.orEmpty(), mine)
 }
 
-data class TransferState(val label: String, val done: Long, val total: Long?, val error: String? = null, val finished: Boolean = false)
+/** [downloaded] is set when a download finished: the record the "Open" / "Manage downloads" actions work on. */
+data class TransferState(
+    val label: String,
+    val done: Long,
+    val total: Long?,
+    val error: String? = null,
+    val finished: Boolean = false,
+    val downloaded: DownloadRecord? = null,
+)
+
+/** A remote file opened from a local copy (cache, or the user's download): pdf / image / video / audio. */
+data class ViewerState(val path: String, val name: String, val kind: FileKind, val size: Long? = null, val modifiedMs: Long? = null)
 
 data class FilesUiState(
     val online: Boolean = false,
@@ -81,6 +93,8 @@ data class FilesUiState(
     val conflict: ConflictState? = null,
     val message: io.github.tianli0.switchtether.ui.common.UiText? = null,
     val transfer: TransferState? = null,
+    /** A media/binary file opened from a local (cache or download) copy; takes over the pane like [file]. */
+    val viewer: ViewerState? = null,
     // git
     val repo: String? = null,
     val git: Loadable<RepoStatus>? = null,
@@ -99,6 +113,7 @@ class FilesViewModel(
     private val conn: ConnectionController,
     private val gate: StepUpGate,
     private val resolverProvider: () -> ContentResolver,
+    private val store: FileStore? = null,
     private val defaultRepo: suspend () -> String?,
 ) : ViewModel() {
     private val _state = MutableStateFlow(FilesUiState())
@@ -169,12 +184,18 @@ class FilesViewModel(
             _state.update { it.copy(pendingSensitive = entry) }
             return
         }
+        // Sensitive files are never previewed from a local copy (the desktop refuses to download them);
+        // they keep the confirmed in-memory text read.
+        if (!entry.sensitive && store != null && FileTypes.kindOf(entry.name).isMedia) {
+            return openViewer(entry.path, entry.name, entry.size.takeIf { it > 0 }, entry.modifiedMs)
+        }
         openPath(entry.path, allowSensitive = entry.sensitive)
     }
 
     fun dismissSensitive() = _state.update { it.copy(pendingSensitive = null) }
 
     fun openPath(path: String, allowSensitive: Boolean = false) {
+        if (!allowSensitive && store != null && FileTypes.kindOf(path).isMedia) return openViewer(path, FileTypes.fileName(path), null, null)
         val api = api() ?: return
         _state.update { it.copy(file = Loadable.Loading, pendingSensitive = null, editing = false, conflict = null) }
         viewModelScope.launch {
@@ -184,6 +205,18 @@ class FilesViewModel(
     }
 
     fun closeFile() = _state.update { it.copy(file = null, editing = false, conflict = null) }
+
+    // ---- local viewing (cache) ---------------------------------------------------------------------------
+
+    /**
+     * Opens [path] in the local viewer. The viewer itself resolves a copy: an existing user download if there is
+     * one, else a temporary cache copy; opening never creates a download.
+     */
+    fun openViewer(path: String, name: String, size: Long?, modifiedMs: Long?) {
+        _state.update { it.copy(viewer = ViewerState(path, name, FileTypes.kindOf(name), size, modifiedMs), file = null, editing = false, conflict = null, pendingSensitive = null) }
+    }
+
+    fun closeViewer() = _state.update { it.copy(viewer = null) }
 
     fun startEdit() {
         val f = (_state.value.file as? Loadable.Ready)?.value ?: return
@@ -390,27 +423,21 @@ class FilesViewModel(
 
     fun dismissTransfer() = _state.update { it.copy(transfer = null) }
 
-    /** Download into the public Downloads collection via MediaStore (no storage permission needed). */
+    /**
+     * Explicit download into the public Downloads collection (`Downloads/SwitchTether`, MediaStore: no storage
+     * permission needed). Recorded in the download index so it can be opened and managed later; unlike a
+     * preview it is never evicted automatically.
+     */
     fun download(entry: FsEntry) {
-        val api = api() ?: return
+        val store = store ?: return
         uploadJob = viewModelScope.launch {
             _state.update { it.copy(transfer = TransferState(entry.name, 0, entry.size.takeIf { s -> s > 0 })) }
             try {
-                val uri = withContext(Dispatchers.IO) {
-                    val values = ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, entry.name)
-                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SwitchTether")
-                        put(MediaStore.Downloads.IS_PENDING, 1)
-                    }
-                    resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("cannot create download")
-                }
-                withContext(Dispatchers.IO) {
-                    resolver.openOutputStream(uri)!!.use { out ->
-                        api.download(entry.path, out) { n, total -> _state.update { it.copy(transfer = it.transfer?.copy(done = n, total = total)) } }
-                    }
-                    resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
-                }
-                _state.update { it.copy(transfer = it.transfer?.copy(finished = true)) }
+                val record = store.download(entry.path, entry.name) { n, total -> _state.update { it.copy(transfer = it.transfer?.copy(done = n, total = total)) } }
+                _state.update { it.copy(transfer = it.transfer?.copy(finished = true, downloaded = record)) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                _state.update { it.copy(transfer = it.transfer?.copy(error = "cancelled")) }
+                throw e
             } catch (e: Exception) {
                 _state.update { it.copy(transfer = it.transfer?.copy(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))) }
             }

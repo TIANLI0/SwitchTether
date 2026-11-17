@@ -17,6 +17,7 @@ pub struct CodexParser {
     n: u64,
     calls: HashMap<String, (String, Value, String)>,
     last_user_text: Option<String>,
+    subagents: HashMap<String, (String, Value)>,
     current_turn: Option<String>,
     pub thread_id: Option<String>,
     pub cwd: Option<String>,
@@ -366,6 +367,39 @@ impl CodexParser {
         let mut out = Vec::new();
         if let Some((eid, mut data, cts)) = self.calls.remove(&call_id) {
             data["status"] = json!(if is_error { "failed" } else { "completed" });
+            let result = match &raw {
+                Value::String(text) => serde_json::from_str::<Value>(text).unwrap_or(Value::Null),
+                other => other.clone(),
+            };
+            if data["name"] == "spawn_agent" {
+                if let Some(id) = s(&result, "agent_id") {
+                    let sa = json!({ "agentId": id, "agentType": data.pointer("/input/agent_type"),
+                        "description": data.pointer("/input/message").and_then(Value::as_str).map(|t| preview(t, 160).0), "status": "running" });
+                    self.subagents.insert(id.clone(), (eid.clone(), sa.clone()));
+                    let mut d = EventDraft::new(format!("cx-sa-{id}"), "subagent", ts, sa);
+                    d.parent_id = Some(eid.clone());
+                    out.push(d);
+                }
+            }
+            if let Some(states) = result.get("status").and_then(Value::as_object) {
+                for (id, status) in states {
+                    if let Some((parent, sa)) = self.subagents.get_mut(id) {
+                        sa["status"] = json!(if status.get("completed").is_some() {
+                            "completed"
+                        } else if status.get("errored").is_some() || status == "not_found" {
+                            "failed"
+                        } else if status == "shutdown" {
+                            "completed"
+                        } else {
+                            "running"
+                        });
+                        let mut d =
+                            EventDraft::new(format!("cx-sa-{id}"), "subagent", ts, sa.clone());
+                        d.parent_id = Some(parent.clone());
+                        out.push(d);
+                    }
+                }
+            }
             out.push(EventDraft::new(eid, "tool_call", cts, data));
         }
         let (pv, truncated) = preview(&text, PREVIEW_LIMIT);
@@ -491,5 +525,19 @@ mod tests {
         let ev = p.feed(&json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"p","output":{"content":"bad","success":false}}}));
         assert_eq!(ev[0].data["status"], "failed");
         assert!(p.feed(&json!({"type":"weird"})).is_empty());
+    }
+    #[test]
+    fn spawn_and_wait_preserve_the_subagent_group() {
+        let mut p = CodexParser::new();
+        p.feed(&json!({"type":"response_item","payload":{"type":"function_call","name":"spawn_agent","call_id":"spawn","arguments":"{\"message\":\"Review login\",\"agent_type\":\"explorer\"}"}}));
+        let events = p.feed(&json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"spawn","output":"{\"agent_id\":\"child\"}"}}));
+        let child = events.iter().find(|e| e.kind == "subagent").unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some("cx-tc-spawn"));
+        assert_eq!(child.data["description"], "Review login");
+        p.feed(&json!({"type":"response_item","payload":{"type":"function_call","name":"wait","call_id":"wait","arguments":"{}"}}));
+        let events = p.feed(&json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"wait","output":{"status":{"child":{"completed":"done"}}}}}));
+        let child = events.iter().find(|e| e.kind == "subagent").unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some("cx-tc-spawn"));
+        assert_eq!(child.data["status"], "completed");
     }
 }

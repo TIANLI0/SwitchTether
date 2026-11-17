@@ -104,6 +104,11 @@ private fun isRunning(item: RenderItem): Boolean {
 
 fun stepTitle(item: RenderItem): String {
     val d = item.event.data
+    if (d.str("category") == "shell") io.github.tianli0.switchtether.remote.session.ToolCommands.raw(d)?.let {
+        val preview = io.github.tianli0.switchtether.remote.session.ToolCommands.preview(it)
+        val title = d.str("title")
+        if (preview != it.trim() || title.isNullOrBlank() || it.startsWith(title.trimEnd('…'))) return preview
+    }
     return d.str("title")?.takeIf { it.isNotBlank() } ?: d.str("description")?.takeIf { it.isNotBlank() } ?: d.str("name").orEmpty()
 }
 

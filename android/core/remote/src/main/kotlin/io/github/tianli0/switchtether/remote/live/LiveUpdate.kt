@@ -79,6 +79,8 @@ object LiveReducer {
     }
 
     fun onEvent(s: PinnedSessionState, e: AgentEvent, now: Long): PinnedSessionState {
+        // Nested agent activity cannot close or restart the parent's turn.
+        if (e.parentId != null && e.kind !in setOf(EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION, EventKinds.APPROVAL_RESOLVED, EventKinds.FILE_CHANGE)) return s
         val d = e.data
         val n = when (e.kind) {
             EventKinds.TOOL_CALL -> if (d.str("status") == "running" || d.str("status") == "pending") {

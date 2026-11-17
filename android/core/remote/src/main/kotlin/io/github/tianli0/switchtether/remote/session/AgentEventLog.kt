@@ -66,7 +66,7 @@ class AgentEventLog private constructor(
                 if (rid != null && events.any { it.kind == EventKinds.APPROVAL_REQUEST && it.data.str("requestId") == rid }) continue
             }
             val ancestors = ancestorsOf(e, callsByCallId)
-            if (ancestors.any { it in collapsedParents }) continue
+            if (ancestors.any { it in collapsedParents || callsByCallId[it]?.id in collapsedParents }) continue
             out += RenderItem(
                 event = e,
                 depth = ancestors.size,
@@ -81,7 +81,9 @@ class AgentEventLog private constructor(
         }
         val parents = events.mapNotNullTo(HashSet()) { it.parentId }
         return out.map { item ->
-            val callId = item.event.data.str("callId")
+            // The callId alias addresses the tool call itself; a subagent row also carries the
+            // callId of the Agent call it hangs under, which must not make it its own parent.
+            val callId = item.event.data.str("callId").takeIf { item.event.kind == EventKinds.TOOL_CALL }
             if (item.event.id in parents || (callId != null && callId in parents)) {
                 item.copy(hasChildren = true)
             } else {
@@ -95,11 +97,8 @@ class AgentEventLog private constructor(
         var p = e.parentId
         while (p != null && p !in chain && chain.size < 8) {
             val parentEvent = byId[p] ?: callsByCallId[p]
-            // Record both the raw parent key (e.g. callId) and resolved event id so collapsing works either way.
+            // Each actual parent counts once, even when addressed through its callId alias.
             chain += p
-            if (parentEvent != null && parentEvent.id != p) {
-                chain += parentEvent.id
-            }
             p = parentEvent?.parentId
         }
         return chain

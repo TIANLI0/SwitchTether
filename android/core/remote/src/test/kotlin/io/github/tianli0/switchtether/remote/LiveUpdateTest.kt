@@ -189,4 +189,13 @@ echo done"}"""))
         assertTrue(spec.detail, spec.detail.contains("1,500 tokens"))
         assertTrue(spec.progressNote, spec.progressNote.startsWith("1/3"))
     }
+    @Test
+    fun childCompletionDoesNotCompleteThePinnedParent() {
+        val parent = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        val childDone = ev("status", """{"state":"completed"}""").copy(parentId = "spawn")
+        assertSame(parent, LiveReducer.onEvent(parent, childDone, 2_000))
+        val childQuestion = ev("question", """{"requestId":"child-q","questions":[]}""").copy(parentId = "spawn")
+        assertEquals(LivePhase.WAITING_INPUT, LiveReducer.onEvent(parent, childQuestion, 2_000).phase)
+    }
+
 }

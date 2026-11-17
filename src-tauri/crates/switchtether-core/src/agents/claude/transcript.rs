@@ -37,6 +37,8 @@ pub struct ClaudeParser {
     current_turn: Option<String>,
     result_count: usize,
     pub title: Option<String>,
+    /// `/rename` title (`custom-title`); always wins over the generated `ai-title`.
+    custom_title: Option<String>,
     pub model: Option<String>,
     pub cwd: Option<String>,
     pub git_branch: Option<String>,
@@ -48,27 +50,215 @@ pub struct ClaudeParser {
     pub cost_usd: Option<f64>,
     /// tool_use ids that have no result yet.
     pub open_tool_calls: Vec<String>,
+    /// Sub-agent rows by their Agent/Task call id, so a later `<task-notification>` (how a
+    /// background agent reports back) can update the row in place.
+    subagents: HashMap<String, SubagentRow>,
+    /// Sub-agent id (`agentId`, also the notification's `<task-id>`) -> Agent/Task call id.
+    agent_calls: HashMap<String, String>,
+}
+
+struct SubagentRow {
+    data: Value,
+    turn_id: Option<String>,
+    ts: String,
+}
+
+/// Longest sub-agent result kept on the row; the full text stays in the transcript.
+const SUBAGENT_RESULT_LIMIT: usize = 4000;
+
+/// Normalizes the sub-agent states Claude Code writes to the step states the clients know.
+fn subagent_status(raw: &str) -> &'static str {
+    match raw {
+        "async_launched" | "running" | "pending" => "running",
+        "completed" | "success" | "forked" => "completed",
+        "killed" | "stopped" | "cancelled" | "canceled" | "interrupted" => "interrupted",
+        _ => "failed",
+    }
+}
+
+/// Inner text of the first `<tag>…</tag>` in a task notification.
+fn xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    Some(text[start..end].trim()).filter(|t| !t.is_empty())
+}
+
+fn is_task_notification(rec: &Value, text: &str) -> bool {
+    rec.pointer("/origin/kind").and_then(|k| k.as_str()) == Some("task-notification")
+        || text.trim_start().starts_with("<task-notification>")
 }
 
 fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string())
 }
 
-/// Remove `<system-reminder>…</system-reminder>` blocks injected by the harness.
-fn strip_injected(text: &str) -> String {
+fn is_sidechain(rec: &Value) -> bool {
+    rec.get("isSidechain").and_then(|v| v.as_bool()) == Some(true)
+}
+
+fn rec_has_parent(rec: &Value) -> bool {
+    s(rec, "parent_tool_use_id").is_some_and(|p| !p.is_empty())
+}
+
+/// First non-empty line, trimmed; `None` when nothing usable is left.
+pub fn clean_title(raw: Option<String>) -> Option<String> {
+    raw?.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
+/// Title of a Claude Code conversation read from the end of its transcript: the last
+/// `custom-title` (`/rename`) wins over the last `ai-title`. Claude Code keeps this metadata
+/// within the last 64 KiB, so a 256 KiB tail is enough. Sub-agent records are ignored.
+pub fn tail_title(path: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const TAIL: u64 = 256 * 1024;
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let start = len.saturating_sub(TAIL);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines = text.lines();
+    if start > 0 {
+        lines.next(); // partial first line
+    }
+    let (mut custom, mut ai) = (None, None);
+    for line in lines {
+        let kind = if line.contains("\"custom-title\"") {
+            "custom-title"
+        } else if line.contains("\"ai-title\"") {
+            "ai-title"
+        } else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(|x| x.as_str()) != Some(kind)
+            || is_sidechain(&v)
+            || rec_has_parent(&v)
+        {
+            continue;
+        }
+        if kind == "custom-title" {
+            custom = clean_title(s(&v, "customTitle")).or(custom);
+        } else {
+            ai = clean_title(s(&v, "aiTitle")).or(ai);
+        }
+    }
+    custom.or(ai).or_else(|| {
+        // Conversations may have no generated title yet; read a bounded head for the first prompt.
+        use std::io::BufRead;
+        let f = std::fs::File::open(path).ok()?;
+        let mut parser = ClaudeParser::new();
+        for line in std::io::BufReader::new(f.take(1024 * 1024))
+            .lines()
+            .take(200)
+            .map_while(Result::ok)
+        {
+            if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                parser.feed(&v);
+                if parser.title.is_some() {
+                    return parser.title;
+                }
+            }
+        }
+        None
+    })
+}
+
+/// Blocks the harness or the IDE extension adds to a user turn. The user never typed them.
+const INJECTED_TAGS: &[&str] = &[
+    "system-reminder",
+    "ide_opened_file",
+    "ide_selection",
+    "ide_diagnostics",
+    "browser_instruction",
+];
+
+/// Removes every `<tag>…</tag>` block of `tag`, returning the remaining text and the blocks' inner
+/// texts. An unclosed block swallows the rest, like the harness does.
+fn take_blocks(text: &str, tag: &str) -> (String, Vec<String>) {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
     let mut out = String::with_capacity(text.len());
+    let mut found = Vec::new();
     let mut rest = text;
-    while let Some(start) = rest.find("<system-reminder>") {
+    while let Some(start) = rest.find(&open) {
         out.push_str(&rest[..start]);
-        match rest[start..].find("</system-reminder>") {
-            Some(end) => rest = &rest[start + end + "</system-reminder>".len()..],
+        let inner = &rest[start + open.len()..];
+        match inner.find(&close) {
+            Some(end) => {
+                found.push(inner[..end].trim().to_string());
+                rest = &inner[end + close.len()..];
+            }
             None => {
+                found.push(inner.trim().to_string());
                 rest = "";
             }
         }
     }
     out.push_str(rest);
-    out.trim().to_string()
+    (out, found)
+}
+
+/// Removes harness/IDE blocks from user text and returns what the IDE blocks said as context items for the clients
+/// (`{"kind":"file"|"selection","path":…,"lines":…}`), so the bubble shows only what the user wrote.
+fn strip_injected_with_context(text: &str) -> (String, Vec<Value>) {
+    let mut rest = text.to_string();
+    let mut context = Vec::new();
+    for tag in INJECTED_TAGS {
+        let (r, blocks) = take_blocks(&rest, tag);
+        rest = r;
+        for b in blocks {
+            match *tag {
+                // "The user opened the file <path> in the IDE. …"
+                "ide_opened_file" => {
+                    if let Some(p) = b
+                        .split_once("opened the file ")
+                        .and_then(|(_, r)| r.split_once(" in the IDE"))
+                        .map(|(p, _)| p.trim())
+                    {
+                        context.push(json!({ "kind": "file", "path": p }));
+                    }
+                }
+                // "The user selected the lines 17 to 20 from <path>:\n<code>…"
+                "ide_selection" => {
+                    let lines = b
+                        .split_once("the lines ")
+                        .and_then(|(_, r)| r.split_once(" from "))
+                        .map(|(l, _)| l.replace(" to ", "-"));
+                    let path = b
+                        .split_once(" from ")
+                        .map(|(_, r)| r.lines().next().unwrap_or("").trim_end_matches(':').trim());
+                    if let Some(p) = path.filter(|p| !p.is_empty()) {
+                        context.push(json!({ "kind": "selection", "path": p, "lines": lines }));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (rest.trim().to_string(), context)
+}
+
+/// Tool output without harness reminders; `<tool_use_error>` / `<persisted-output>` wrappers are
+/// unwrapped to their message.
+fn clean_tool_output(text: &str) -> String {
+    let (mut t, _) = take_blocks(text, "system-reminder");
+    for tag in ["tool_use_error", "persisted-output"] {
+        let open = format!("<{tag}>");
+        let close = format!("</{tag}>");
+        if t.contains(&open) {
+            t = t.replace(&open, "").replace(&close, "");
+        }
+    }
+    t.trim().to_string()
 }
 
 fn extract_image_items(content: &Value) -> Vec<Value> {
@@ -202,13 +392,30 @@ impl ClaudeParser {
             Some("system") => self.system(rec, &ts),
             Some("stream_event") => self.stream_event(rec, &ts),
             Some("result") => self.result(rec, &ts),
+            // Titles of the conversation itself. Records written by a sub-agent (sidechain /
+            // `parent_tool_use_id`) describe the sub-task, never the session.
             Some("ai-title") => {
-                self.title = s(rec, "aiTitle").or(self.title.take());
+                if !is_sidechain(rec) && !rec_has_parent(rec) {
+                    if let Some(t) = clean_title(s(rec, "aiTitle")) {
+                        if self.custom_title.is_none() {
+                            self.title = Some(t);
+                        }
+                    }
+                }
+                vec![]
+            }
+            Some("custom-title") => {
+                if !is_sidechain(rec) && !rec_has_parent(rec) {
+                    if let Some(t) = clean_title(s(rec, "customTitle")) {
+                        self.custom_title = Some(t.clone());
+                        self.title = Some(t);
+                    }
+                }
                 vec![]
             }
             Some("summary") => {
-                if self.title.is_none() {
-                    self.title = s(rec, "summary");
+                if self.title.is_none() && !is_sidechain(rec) {
+                    self.title = clean_title(s(rec, "summary"));
                 }
                 vec![]
             }
@@ -237,6 +444,13 @@ impl ClaudeParser {
         let content = msg.get("content").cloned().unwrap_or(Value::Null);
         let mut out = Vec::new();
 
+        // A background task reporting back. Claude Code delivers it as a user turn, but the user
+        // did not write it: it updates the sub-agent row and never becomes a message or a title.
+        let raw_text = content_text(&content);
+        if is_task_notification(rec, &raw_text) {
+            return self.task_notification(&uuid, &raw_text, ts);
+        }
+
         if rec.get("isCompactSummary").and_then(|v| v.as_bool()) == Some(true) {
             let (p, _) = preview(&content_text(&content), PREVIEW_LIMIT);
             out.push(EventDraft::new(
@@ -257,7 +471,9 @@ impl ClaudeParser {
                     out.extend(self.tool_result(
                         &call_id,
                         is_error,
-                        &tool_result_text(b.get("content").unwrap_or(&Value::Null)),
+                        &clean_tool_output(&tool_result_text(
+                            b.get("content").unwrap_or(&Value::Null),
+                        )),
                         rec.get("toolUseResult"),
                         ts,
                     ));
@@ -267,7 +483,7 @@ impl ClaudeParser {
 
         // Plain user text (string content or text blocks) or image-only user message.
         let raw = content_text(&content);
-        let text = strip_injected(&raw);
+        let (text, context) = strip_injected_with_context(&raw);
         let image_items = extract_image_items(&content);
         let images = match &content {
             Value::Array(b) => b
@@ -305,6 +521,14 @@ impl ClaudeParser {
                     json!({ "subtype": "command", "text": p }),
                 ));
             } else {
+                if self.title.is_none()
+                    && !is_sidechain(rec)
+                    && !rec_has_parent(rec)
+                    && !text.is_empty()
+                {
+                    self.title =
+                        clean_title(Some(preview(&crate::redact::redact_text(&text), 120).0));
+                }
                 self.current_turn = Some(uuid.clone());
                 let (p, truncated) = preview(&text, 64 * 1024);
                 let mut d = EventDraft::new(
@@ -315,6 +539,7 @@ impl ClaudeParser {
                         "text": p,
                         "images": images,
                         "imageItems": image_items,
+                        "context": context,
                         "source": "unknown",
                         "truncated": truncated
                     }),
@@ -442,28 +667,133 @@ impl ClaudeParser {
             }
             // Sub-agent result → subagent event (linked under the Task/Agent tool_call).
             if (name == "Task" || name == "Agent") && st.get("agentId").is_some() {
-                let desc = self
-                    .tools
-                    .get(call_id)
-                    .and_then(|tc| tc.data.get("title").and_then(|t| t.as_str()))
-                    .map(String::from);
-                let mut sa = EventDraft::new(
-                    format!("sa:{call_id}"),
-                    "subagent",
-                    ts,
-                    json!({
-                        "agentId": st.get("agentId"),
-                        "description": desc,
-                        "status": st.get("status").cloned().unwrap_or(json!("completed")),
-                        "callId": call_id,
-                    }),
-                );
-                sa.turn_id = turn;
-                sa.parent_id = Some(call_id.to_string());
-                out.push(sa);
+                out.push(self.subagent_started(call_id, is_error, text, st, turn, ts));
             }
         }
         out
+    }
+
+    /// The `subagent` row for an Agent/Task result. A background agent's result only says it was
+    /// launched (`async_launched`), so the row stays `running` until its task notification.
+    fn subagent_started(
+        &mut self,
+        call_id: &str,
+        is_error: bool,
+        text: &str,
+        st: &Value,
+        turn: Option<String>,
+        ts: &str,
+    ) -> EventDraft {
+        let input = self
+            .tools
+            .get(call_id)
+            .and_then(|tc| tc.data.get("input").cloned())
+            .unwrap_or(Value::Null);
+        let title = self.tools.get(call_id).and_then(|tc| s(&tc.data, "title"));
+        let agent_id = s(st, "agentId").unwrap_or_default();
+        let raw = s(st, "status").unwrap_or_else(|| "completed".into());
+        let background = raw == "async_launched"
+            || st.get("isAsync").and_then(Value::as_bool) == Some(true)
+            || input.get("run_in_background").and_then(Value::as_bool) == Some(true);
+        let status = if is_error || st.get("success").and_then(Value::as_bool) == Some(false) {
+            "failed"
+        } else {
+            subagent_status(&raw)
+        };
+        let mut data = json!({
+            "agentId": agent_id,
+            "description": s(&input, "description").or_else(|| s(st, "description")).or(title),
+            "agentType": s(&input, "subagent_type").or_else(|| s(st, "agentType")),
+            "model": s(st, "resolvedModel"),
+            "background": background,
+            "status": status,
+            "callId": call_id,
+        });
+        if status != "running" {
+            let (p, truncated) = preview(text.trim(), SUBAGENT_RESULT_LIMIT);
+            if !p.is_empty() {
+                data["result"] = json!(p);
+                data["resultTruncated"] = json!(truncated);
+            }
+        }
+        for (from, to) in [
+            ("totalTokens", "tokens"),
+            ("totalToolUseCount", "toolUses"),
+            ("totalDurationMs", "durationMs"),
+        ] {
+            if let Some(v) = st.get(from).and_then(Value::as_i64) {
+                data[to] = json!(v);
+            }
+        }
+        if !agent_id.is_empty() {
+            self.agent_calls.insert(agent_id, call_id.to_string());
+        }
+        self.subagents.insert(
+            call_id.to_string(),
+            SubagentRow {
+                data: data.clone(),
+                turn_id: turn.clone(),
+                ts: ts.to_string(),
+            },
+        );
+        let mut sa = EventDraft::new(format!("sa:{call_id}"), "subagent", ts, data);
+        sa.turn_id = turn;
+        sa.parent_id = Some(call_id.to_string());
+        sa
+    }
+
+    /// `<task-notification>`: a background agent (or background shell task) finished. Known
+    /// sub-agents are updated in place; anything else becomes a short system note.
+    fn task_notification(&mut self, uuid: &str, text: &str, ts: &str) -> Vec<EventDraft> {
+        let call_id = xml_tag(text, "tool-use-id")
+            .map(String::from)
+            .filter(|c| self.subagents.contains_key(c))
+            .or_else(|| xml_tag(text, "task-id").and_then(|t| self.agent_calls.get(t).cloned()));
+        let status = xml_tag(text, "status").map(subagent_status);
+        let summary = xml_tag(text, "summary").map(|t| preview(t, 300).0);
+        let Some(row) = call_id.as_deref().and_then(|c| self.subagents.get_mut(c)) else {
+            return vec![EventDraft::new(
+                format!("{uuid}:task"),
+                "system",
+                ts,
+                json!({
+                    "subtype": "task_notification",
+                    "status": status,
+                    "text": summary.unwrap_or_else(|| "Background task finished".into()),
+                }),
+            )];
+        };
+        let call_id = call_id.unwrap_or_default();
+        if let Some(st) = status {
+            row.data["status"] = json!(st);
+        }
+        if let Some(sm) = summary {
+            row.data["summary"] = json!(sm);
+        }
+        if let Some(r) = xml_tag(text, "result") {
+            let (p, truncated) = preview(r, SUBAGENT_RESULT_LIMIT);
+            row.data["result"] = json!(p);
+            row.data["resultTruncated"] = json!(truncated);
+        }
+        for (tag, key) in [
+            ("subagent_tokens", "tokens"),
+            ("tool_uses", "toolUses"),
+            ("duration_ms", "durationMs"),
+        ] {
+            if let Some(n) = xml_tag(text, tag).and_then(|v| v.parse::<i64>().ok()) {
+                row.data[key] = json!(n);
+            }
+        }
+        row.data["finishedAt"] = json!(ts);
+        let mut sa = EventDraft::new(
+            format!("sa:{call_id}"),
+            "subagent",
+            row.ts.clone(),
+            row.data.clone(),
+        );
+        sa.turn_id = row.turn_id.clone();
+        sa.parent_id = Some(call_id);
+        vec![sa]
     }
 
     fn assistant(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
@@ -879,5 +1209,174 @@ mod tests {
         assert!(p.feed(&json!("not an object")).is_empty());
         p.feed(&json!({"type":"ai-title","aiTitle":"My title"}));
         assert_eq!(p.title.as_deref(), Some("My title"));
+    }
+
+    #[test]
+    fn custom_title_beats_ai_title_and_subagents_never_title() {
+        let mut p = ClaudeParser::new();
+        p.feed(&json!({"type":"ai-title","aiTitle":"Generated\nsecond line"}));
+        assert_eq!(p.title.as_deref(), Some("Generated"));
+        p.feed(&json!({"type":"ai-title","isSidechain":true,"aiTitle":"Sub-agent task"}));
+        p.feed(&json!({"type":"ai-title","parent_tool_use_id":"t1","aiTitle":"Other sub-agent"}));
+        assert_eq!(p.title.as_deref(), Some("Generated"));
+        p.feed(&json!({"type":"custom-title","customTitle":"  My rename "}));
+        p.feed(&json!({"type":"ai-title","aiTitle":"Later generated"}));
+        assert_eq!(p.title.as_deref(), Some("My rename"));
+    }
+
+    #[test]
+    fn tail_title_reads_custom_then_ai_and_skips_sidechain() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("s.jsonl");
+        let base = [
+            r#"{"type":"ai-title","aiTitle":"First"}"#,
+            r#"{"type":"user","message":{"content":"hi"}}"#,
+            r#"{"type":"ai-title","aiTitle":"Latest"}"#,
+            r#"{"type":"ai-title","isSidechain":true,"aiTitle":"Sub"}"#,
+        ]
+        .join("\n");
+        std::fs::write(&f, &base).unwrap();
+        assert_eq!(tail_title(&f).as_deref(), Some("Latest"));
+        std::fs::write(
+            &f,
+            format!(
+                "{base}\n{}",
+                r#"{"type":"custom-title","customTitle":"Renamed"}"#
+            ),
+        )
+        .unwrap();
+        assert_eq!(tail_title(&f).as_deref(), Some("Renamed"));
+    }
+    #[test]
+    fn first_prompt_is_a_fallback_not_a_subagent_or_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let records = [
+            json!({"type":"user","isMeta":true,"message":{"content":"context"}}),
+            json!({"type":"user","isSidechain":true,"message":{"content":"child task"}}),
+            json!({"type":"user","message":{"content":"<command-name>/clear</command-name>"}}),
+            json!({"type":"user","message":{"content":"Fix login\nMore details"}}),
+        ];
+        std::fs::write(
+            &path,
+            records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        assert_eq!(tail_title(&path).as_deref(), Some("Fix login"));
+        let mut parser = ClaudeParser::new();
+        for record in records {
+            parser.feed(&record);
+        }
+        parser.feed(&json!({"type":"ai-title","aiTitle":"Generated title"}));
+        assert_eq!(parser.title.as_deref(), Some("Generated title"));
+    }
+
+    fn agent_call(id: &str, background: bool) -> Value {
+        json!({"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":id,"name":"Agent",
+            "input":{"description":"Scan files","prompt":"look","subagent_type":"Explore","run_in_background":background}}]}})
+    }
+
+    #[test]
+    fn background_subagent_is_updated_by_its_task_notification() {
+        let mut p = ClaudeParser::new();
+        p.feed(&json!({"type":"user","uuid":"u1","message":{"content":"Do it"}}));
+        p.feed(&agent_call("toolu_1", true));
+        let started = p.feed(&json!({"type":"user","uuid":"u2",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Async agent launched"}]},
+            "toolUseResult":{"agentId":"a77","status":"async_launched","isAsync":true,"resolvedModel":"haiku"}}));
+        let sa = started.iter().find(|d| d.kind == "subagent").unwrap();
+        assert_eq!(sa.id, "sa:toolu_1");
+        assert_eq!(sa.data["status"], "running");
+        assert_eq!(sa.data["agentType"], "Explore");
+        assert_eq!(sa.data["description"], "Scan files");
+        assert_eq!(sa.data["background"], true);
+        assert!(sa.data.get("result").is_none());
+
+        let text =
+            "<task-notification>\n<task-id>a77</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n\
+            <status>completed</status>\n<summary>Agent \"Scan files\" completed</summary>\n\
+            <result>Found **3** files</result>\n<usage><subagent_tokens>1200</subagent_tokens>\
+            <tool_uses>4</tool_uses><duration_ms>65000</duration_ms></usage>\n</task-notification>";
+        let done = p.feed(
+            &json!({"type":"user","uuid":"u3","origin":{"kind":"task-notification"},
+            "message":{"content":text}}),
+        );
+        assert_eq!(done.len(), 1, "a notification is not a user message");
+        let sa = &done[0];
+        assert_eq!((sa.id.as_str(), sa.kind), ("sa:toolu_1", "subagent"));
+        assert_eq!(sa.data["status"], "completed");
+        assert_eq!(sa.data["result"], "Found **3** files");
+        assert_eq!(sa.data["toolUses"], 4);
+        assert_eq!(sa.data["durationMs"], 65000);
+        assert_eq!(sa.turn_id.as_deref(), Some("u1"));
+        assert_eq!(p.title.as_deref(), Some("Do it"));
+    }
+
+    #[test]
+    fn task_notification_without_tool_use_id_resolves_by_task_id() {
+        let mut p = ClaudeParser::new();
+        p.feed(&agent_call("toolu_2", true));
+        p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"x"}]},
+            "toolUseResult":{"agentId":"b1","status":"async_launched"}}));
+        let out = p.feed(&json!({"type":"user","uuid":"n","message":{"content":
+            "<task-notification><task-id>b1</task-id><status>killed</status></task-notification>"}}));
+        assert_eq!(out[0].id, "sa:toolu_2");
+        assert_eq!(out[0].data["status"], "interrupted");
+    }
+
+    #[test]
+    fn unknown_task_notification_is_a_system_note_never_a_title() {
+        let mut p = ClaudeParser::new();
+        let out = p.feed(&json!({"type":"user","uuid":"n","origin":{"kind":"task-notification"},"message":{"content":
+            "<task-notification><task-id>bash9</task-id><status>completed</status><summary>Build finished</summary></task-notification>"}}));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, "system");
+        assert_eq!(out[0].data["subtype"], "task_notification");
+        assert_eq!(out[0].data["text"], "Build finished");
+        assert!(p.title.is_none());
+    }
+
+    #[test]
+    fn synchronous_subagent_carries_its_result_and_stats() {
+        let mut p = ClaudeParser::new();
+        p.feed(&agent_call("toolu_3", false));
+        let out = p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_3","content":"All good"}]},
+            "toolUseResult":{"agentId":"c1","status":"completed","totalTokens":900,"totalToolUseCount":2,"totalDurationMs":3000}}));
+        let sa = out.iter().find(|d| d.kind == "subagent").unwrap();
+        assert_eq!(sa.data["status"], "completed");
+        assert_eq!(sa.data["background"], false);
+        assert_eq!(sa.data["result"], "All good");
+        assert_eq!(sa.data["toolUses"], 2);
+    }
+
+    #[test]
+    fn ide_blocks_become_context_not_bubble_text_or_title() {
+        let mut p = ClaudeParser::new();
+        let text = "<ide_opened_file>The user opened the file d:/app/Main.kt in the IDE. This may or may not be related.</ide_opened_file><ide_selection>The user selected the lines 17 to 20 from d:/app/Main.kt:\nval x = 1</ide_selection><browser_instruction># Chrome\nlots</browser_instruction>Fix the dialog";
+        let out = p.feed(
+            &json!({"type":"user","uuid":"u","message":{"content":[{"type":"text","text":text}]}}),
+        );
+        let m = out.iter().find(|d| d.kind == "user_message").unwrap();
+        assert_eq!(m.data["text"], "Fix the dialog");
+        assert_eq!(m.data["context"][0]["kind"], "file");
+        assert_eq!(m.data["context"][0]["path"], "d:/app/Main.kt");
+        assert_eq!(m.data["context"][1]["lines"], "17-20");
+        assert_eq!(p.title.as_deref(), Some("Fix the dialog"));
+    }
+
+    #[test]
+    fn tool_output_drops_reminders_and_error_wrappers() {
+        assert_eq!(
+            clean_tool_output("<tool_use_error>Found 2 matches</tool_use_error>"),
+            "Found 2 matches"
+        );
+        assert_eq!(
+            clean_tool_output("ok\n<system-reminder>noise</system-reminder>"),
+            "ok"
+        );
     }
 }

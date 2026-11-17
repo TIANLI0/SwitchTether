@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -124,6 +125,7 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
     val busy by vm.commands.busy.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
     var pendingLink by remember { mutableStateOf<String?>(null) }
+    var viewingFile by remember { mutableStateOf<io.github.tianli0.switchtether.ui.files.RemoteFileRef?>(null) }
     var pendingApproval by remember { mutableStateOf<Triple<String, String, String>?>(null) }
     var viewingImage by remember { mutableStateOf<io.github.tianli0.switchtether.ui.sessions.render.ImagePreview?>(null) }
     var confirmInterrupt by remember { mutableStateOf(false) }
@@ -140,7 +142,7 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
     val agent = summary?.agent ?: "unknown"
     val agentLabel = Formatters.agentLabel(agent)
     val cancelLabel = stringResource(R.string.action_cancel)
-    val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent) {
+    val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent, summary?.cwd, busy) {
         val caps = state.detail.valueOrNull?.capabilities
         RenderContext(
             agent = agent,
@@ -149,6 +151,7 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
             answer = caps?.status(Capability.ANSWER_QUESTION) ?: CapStatus.UNKNOWN,
             capabilityReason = caps?.reason,
             online = state.online,
+            requestBusy = busy != null,
             onApprove = { rid, decision, label -> pendingApproval = Triple(rid, decision, label) },
             onAnswer = { rid, answers -> vm.answer(answerLabel, rid, answers) },
             onAnswerAction = { rid, answers, action ->
@@ -158,7 +161,16 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
             payloadOf = { vm.payloads[it] },
             onToggleCollapse = vm::toggleCollapse,
             isCollapsed = { it in vm.state.value.collapsed },
-            onLink = { pendingLink = it },
+            onLink = { link ->
+                // A link to a file on the desktop opens in the local viewer (pdf / image / video / audio / other app).
+                val path = io.github.tianli0.switchtether.files.FileTypes.resolveChatPath(link, summary?.cwd)
+                if (path != null) {
+                    val name = io.github.tianli0.switchtether.files.FileTypes.fileName(path)
+                    viewingFile = io.github.tianli0.switchtether.ui.files.RemoteFileRef(path, name, io.github.tianli0.switchtether.files.FileTypes.kindOf(name))
+                } else if (link.startsWith("https://") || link.startsWith("http://")) {
+                    pendingLink = link
+                }
+            },
             onLoadImageBytes = vm::loadImageBytes,
             onViewImage = { viewingImage = it },
         )
@@ -255,6 +267,16 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
     )
     viewingImage?.let { img ->
         ImageViewerDialog(preview = img, onLoadBytes = vm::loadImageBytes, onDismiss = { viewingImage = null })
+    }
+    viewingFile?.let { ref ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { viewingFile = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(Modifier.fillMaxSize().background(COUITheme.colorScheme.background).statusBarsPadding()) {
+                io.github.tianli0.switchtether.ui.files.RemoteFileViewer(ref, onBack = { viewingFile = null }, onManageDownloads = null)
+            }
+        }
     }
 }
 
@@ -469,6 +491,7 @@ private fun StepsHeader(row: TimelineRow.Steps, onToggle: (String) -> Unit) {
             iconTint = COUITheme.colorScheme.primary,
             title = pluralStringResource(R.plurals.session_steps, row.steps, row.steps),
             subtitle = row.latestTitle,
+            subtitleMaxLines = 2,
             expanded = row.expanded,
             onToggle = { onToggle(row.groupId) },
             toggleLabel = stringResource(R.string.render_toggle),
@@ -726,31 +749,22 @@ private fun ApprovalSheet(
             keyboard?.hide()
         }
     }
-    io.github.suqi8.coui.kmp.window.WindowDialog(
+    val decision = pending?.second.orEmpty()
+    val danger = decision == "deny" || decision == "abort"
+    io.github.suqi8.coui.kmp.window.WindowAlertDialog(
         show = pending != null,
         title = stringResource(R.string.approval_confirm_title),
-        onDismissRequest = onDismiss,
+        summary = stringResource(R.string.approval_confirm_body, pending?.third.orEmpty()),
+        confirmText = pending?.third.orEmpty(),
+        cancelText = stringResource(R.string.action_cancel),
+        onConfirm = onConfirm,
+        onCancel = onDismiss,
     ) {
         val d = request?.data
-        val decision = pending?.second.orEmpty()
-        val danger = decision == "deny" || decision == "abort"
-        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            d?.str("title")?.let { Text(it, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface) }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            d?.str("title")?.let { Text(it, style = COUITheme.textStyles.body1, color = if (danger) dev.danger else COUITheme.colorScheme.onSurface) }
             d?.str("toolName")?.let { Text(stringResource(R.string.render_tool, it), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary) }
             d?.str("command")?.let { io.github.tianli0.switchtether.ui.code.CodeBlockView(it, "bash", maxLines = 8) }
-            Text(
-                stringResource(R.string.approval_confirm_body, pending?.third.orEmpty()),
-                style = COUITheme.textStyles.body2,
-                color = if (danger) dev.danger else COUITheme.colorScheme.onSurfaceVariantSummary,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextButton(text = stringResource(R.string.action_cancel), onClick = onDismiss, modifier = Modifier.weight(1f))
-                Button(
-                    onClick = onConfirm,
-                    colors = if (danger) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColorsPrimary(),
-                    modifier = Modifier.weight(1f).testTag("approval-confirm"),
-                ) { Text(pending?.third.orEmpty(), color = if (danger) dev.danger else COUITheme.colorScheme.onPrimary) }
-            }
         }
     }
 }
@@ -770,6 +784,9 @@ private fun ImageViewerDialog(
     val bmp = remember(bytes) {
         bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
     }
+    val fileStore = appContainer().fileStore
+    val viewerContext = androidx.compose.ui.platform.LocalContext.current
+    val viewerScope = rememberCoroutineScope()
     var scale by remember(preview) { mutableStateOf(1f) }
     var offset by remember(preview) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val transformState = androidx.compose.foundation.gestures.rememberTransformableState { zoomChange, panChange, _ ->
@@ -816,6 +833,34 @@ private fun ImageViewerDialog(
                 onClick = onDismiss,
                 modifier = Modifier.align(Alignment.TopEnd).padding(20.dp),
             )
+            val remotePath = preview.path
+            if (remotePath != null) {
+                // Viewing is already cached in memory; keeping the file or handing it to another app is explicit.
+                val saved = stringResource(R.string.viewer_saved_to, io.github.tianli0.switchtether.files.FileStore.DOWNLOAD_FOLDER)
+                val noApp = stringResource(R.string.viewer_no_app)
+                Row(Modifier.align(Alignment.BottomCenter).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    RoundIconButton(
+                        icon = AppIcons.Download,
+                        label = stringResource(R.string.files_download),
+                        onClick = {
+                            viewerScope.launch {
+                                val msg = runCatching { fileStore.download(remotePath) }.fold({ saved }, { it.message ?: "" })
+                                android.widget.Toast.makeText(viewerContext, msg, android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    )
+                    TextButton(
+                        text = stringResource(R.string.viewer_open_with),
+                        onClick = {
+                            viewerScope.launch {
+                                runCatching { fileStore.resolve(remotePath) }.onSuccess {
+                                    io.github.tianli0.switchtether.ui.files.startSafely(viewerContext, fileStore.viewIntent(it), noApp)
+                                }.onFailure { android.widget.Toast.makeText(viewerContext, it.message ?: noApp, android.widget.Toast.LENGTH_SHORT).show() }
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }

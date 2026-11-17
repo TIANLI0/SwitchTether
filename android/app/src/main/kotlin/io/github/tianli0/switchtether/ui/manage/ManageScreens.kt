@@ -268,7 +268,7 @@ fun UsageScreen(onBack: () -> Unit) {
         )
         UsageContent(state, vm::load, vm::setMetric, onMoreLogs = vm::loadMoreLogs, onOpenLog = vm::openLog)
     }
-    RequestLogSheet(state.selectedLog, state.zone, onDismiss = { vm.openLog(null) })
+    RequestLogSheet(state.selectedLog, java.time.ZoneId.systemDefault(), onDismiss = { vm.openLog(null) })
 }
 
 @Composable
@@ -319,26 +319,43 @@ fun UsageContent(
             if (logs.isEmpty()) {
                 item {
                     PageCard {
-                        Text(
-                            stringResource(if (state.logsLoading || state.logsPage < 0) R.string.state_loading else R.string.usage_logs_empty),
-                            style = COUITheme.textStyles.body2,
-                            color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(16.dp),
-                        )
+                        if (state.logsError && !state.logsLoading) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                Text(stringResource(R.string.usage_logs_failed), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+                                TextButton(text = stringResource(R.string.action_retry), onClick = onMoreLogs)
+                            }
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
+                                val loading = state.logsLoading || state.logsPage < 0
+                                if (loading) {
+                                    io.github.suqi8.coui.kmp.basic.RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 16.dp, ringDiameter = 12.8.dp, strokeWidth = 2.dp)
+                                    Spacer(Modifier.size(8.dp))
+                                }
+                                Text(
+                                    stringResource(if (loading) R.string.state_loading else R.string.usage_logs_empty),
+                                    style = COUITheme.textStyles.body2,
+                                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                        }
                     }
                 }
             } else {
                 item(key = "logs") {
                     io.github.tianli0.switchtether.ui.common.GroupCard {
                         logs.forEachIndexed { i, l ->
-                            RequestLogRow(l, state.zone, io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, logs.size), onClick = { onOpenLog(l) })
+                            RequestLogRow(l, java.time.ZoneId.systemDefault(), io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, logs.size), onClick = { onOpenLog(l) })
                         }
                     }
                 }
                 if (state.logsHaveMore) {
                     item {
                         TextButton(
-                            text = if (state.logsLoading) stringResource(R.string.state_loading) else stringResource(R.string.usage_logs_more, logs.size, state.logsTotal),
+                            text = when {
+                                state.logsLoading -> stringResource(R.string.state_loading)
+                                state.logsError -> stringResource(R.string.usage_logs_failed_more)
+                                else -> stringResource(R.string.usage_logs_more, logs.size, state.logsTotal)
+                            },
                             onClick = onMoreLogs,
                             modifier = Modifier.fillMaxWidth().testTag("logs-more"),
                         )
@@ -509,6 +526,43 @@ private fun BreakdownTable(rows: List<UsageBreakdownRow>, showAvgCost: Boolean) 
     }
 }
 
+/** Desktop tier ids (`five_hour`, `seven_day_opus`, …) as readable window names. */
+@Composable
+private fun quotaTierLabel(name: String): String {
+    val model = name.substringAfter("seven_day_", "").takeIf { it.isNotEmpty() }
+        ?.replaceFirstChar { it.uppercase() }
+    return when {
+        name == "five_hour" -> stringResource(R.string.quota_tier_5h)
+        name == "seven_day" || name == "weekly_limit" -> stringResource(R.string.quota_tier_week)
+        model != null -> stringResource(R.string.quota_tier_week) + " · " + model
+        name == "monthly" || name == "30_day" -> stringResource(R.string.quota_tier_month)
+        name == "credits" -> stringResource(R.string.quota_tier_credits)
+        name.startsWith("gemini_") -> name.removePrefix("gemini_").split('_').joinToString(" ") { it.replaceFirstChar(Char::uppercase) }.let { "Gemini $it" }
+        else -> name.replace('_', ' ')
+    }
+}
+
+/** "Resets today 18:00 · in 3 h 20 min", in the device's time zone; null when unknown. */
+@Composable
+private fun quotaResetText(raw: String?): String? {
+    val at = Formatters.parseInstant(raw) ?: return raw?.takeIf { it.isNotBlank() }?.let { stringResource(R.string.quota_resets, it) }
+    val now = java.time.Instant.now()
+    val (days, clock) = Formatters.localDayAndTime(at, now)
+    val whenText = when (days) {
+        0 -> stringResource(R.string.quota_day_today, clock)
+        1 -> stringResource(R.string.quota_day_tomorrow, clock)
+        else -> clock
+    }
+    val mins = java.time.Duration.between(now, at).toMinutes()
+    val left = when {
+        mins <= 0 -> return stringResource(R.string.quota_reset_due)
+        mins < 60 -> stringResource(R.string.quota_left_minutes, mins.toInt())
+        mins < 24 * 60 -> stringResource(R.string.quota_left_hours, (mins / 60).toInt(), (mins % 60).toInt())
+        else -> stringResource(R.string.quota_left_days, (mins / 1440).toInt(), ((mins % 1440) / 60).toInt())
+    }
+    return stringResource(R.string.quota_resets_at, whenText, left)
+}
+
 @Composable
 private fun QuotaCard(q: QuotaView) {
     val dev = LocalDevColors.current
@@ -522,8 +576,25 @@ private fun QuotaCard(q: QuotaView) {
             Text(q.reason ?: stringResource(R.string.quota_no_reason), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
         } else {
             q.tiers.forEach { t ->
-                Text("${t.name}: ${t.utilizationPercent?.let { "%.0f%%".format(it) } ?: "—"}" + (t.resetsAt?.let { " · " + stringResource(R.string.quota_resets, it) } ?: ""), style = DevType.codeSmall, color = COUITheme.colorScheme.onSurface)
-                io.github.suqi8.coui.kmp.basic.LinearProgressIndicator(progress = ((t.utilizationPercent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
+                val pct = t.utilizationPercent
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    Text(quotaTierLabel(t.name), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                    Text(
+                        pct?.let { "%.0f%%".format(it) } ?: "—",
+                        style = COUITheme.textStyles.body2,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        color = when {
+                            pct == null -> COUITheme.colorScheme.onSurfaceVariantSummary
+                            pct >= 90 -> dev.danger
+                            pct >= 70 -> dev.warn
+                            else -> COUITheme.colorScheme.onSurface
+                        },
+                    )
+                }
+                io.github.suqi8.coui.kmp.basic.LinearProgressIndicator(progress = ((pct ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
+                quotaResetText(t.resetsAt)?.let {
+                    Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                }
             }
         }
     }

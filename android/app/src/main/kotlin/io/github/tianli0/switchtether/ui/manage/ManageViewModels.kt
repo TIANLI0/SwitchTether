@@ -127,6 +127,8 @@ data class UsageState(
     val logsTotal: Long = 0,
     val logsPage: Int = -1,
     val logsLoading: Boolean = false,
+    /** The last page request failed (shown with a retry instead of an endless spinner). */
+    val logsError: Boolean = false,
     /** Request shown in the detail sheet (refreshed from `/v1/usage/logs/{id}`). */
     val selectedLog: io.github.tianli0.switchtether.remote.protocol.RequestLog? = null,
     /** Last session-log scan on the computer (epoch ms), null if unknown. */
@@ -148,6 +150,7 @@ class UsageViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow(UsageState())
     val state: StateFlow<UsageState> = _state.asStateFlow()
+    private var logsJob: kotlinx.coroutines.Job? = null
 
     init {
         onOnline(conn) { load() }
@@ -188,7 +191,10 @@ class UsageViewModel(
         val first = if (st.preset == UsageRangePreset.ALL) runCatching { repo.usageFirstDateMs(st.app) }.getOrNull() else null
         val (from, to) = resolveUsageRange(st.preset, nowMs(), z, first)
         val app = st.app
-        _state.update { it.copy(fromSec = from, toSec = to, zone = z, logs = emptyList(), logsTotal = 0, logsPage = -1) }
+        // A request for the previous range must not hold the slot (it would be dropped on return and
+        // leave the list on "loading" forever).
+        logsJob?.cancel()
+        _state.update { it.copy(fromSec = from, toSec = to, zone = z, logs = if (it.logs == null) null else emptyList(), logsTotal = 0, logsPage = -1, logsLoading = false, logsError = false) }
         loadMoreLogs()
         viewModelScope.launch { val r = loadable { repo.usageSummary(from, to, app) }; _state.update { it.copy(summary = r) } }
         viewModelScope.launch { val r = loadable { repo.usageTrend(from, to, app) }; _state.update { it.copy(trend = r) } }
@@ -208,16 +214,17 @@ class UsageViewModel(
         if (st.logs == null || st.logsLoading || (st.logsPage >= 0 && !st.logsHaveMore)) return
         val page = st.logsPage + 1
         val (from, to, app) = Triple(st.fromSec, st.toSec, st.app)
-        _state.update { it.copy(logsLoading = true) }
-        viewModelScope.launch {
+        _state.update { it.copy(logsLoading = true, logsError = false) }
+        logsJob = viewModelScope.launch {
             val r = runCatching { repo.usageLogs(from, to, app, page) }
+            if (r.exceptionOrNull() is kotlinx.coroutines.CancellationException) return@launch
             _state.update { cur ->
-                if (cur.fromSec != from || cur.app != app) return@update cur.copy(logsLoading = false) // range changed meanwhile
+                if (cur.fromSec != from || cur.app != app) return@update cur // superseded; the new range loads its own page
                 r.fold(
                     onSuccess = { p -> cur.copy(logs = cur.logs.orEmpty() + p.data, logsTotal = p.total, logsPage = page, logsLoading = false) },
                     onFailure = { e ->
                         val missing = generateSequence(e) { it.cause }.any { (it as? io.github.tianli0.switchtether.remote.api.ApiException)?.httpStatus == 404 } || e is UnsupportedOperationException
-                        cur.copy(logs = if (missing) null else cur.logs, logsLoading = false)
+                        cur.copy(logs = if (missing) null else cur.logs, logsLoading = false, logsError = !missing)
                     },
                 )
             }

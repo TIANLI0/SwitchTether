@@ -124,6 +124,20 @@ class AgentEventLogTest {
     }
 
     @Test
+    fun subagentRowIsAChildOfItsAgentCallNotItsOwnParent() {
+        val items = AgentEventLog.of(
+            listOf(
+                e("c1", 1, "tool_call", """{"callId":"k1","name":"Agent","category":"task"}"""),
+                e("sa:k1", 2, "subagent", """{"callId":"k1","status":"running"}""", parent = "k1"),
+            ),
+        ).renderItems()
+        assertEquals(listOf("c1", "sa:k1"), items.map { it.key })
+        assertTrue(items[0].hasChildren)
+        assertEquals(1, items[1].depth)
+        assertTrue(!items[1].hasChildren)
+    }
+
+    @Test
     fun inPlaceResolvedRequestsAreNotPending() {
         val open = e("ap", 1, "approval_request", """{"requestId":"q1","options":[{"id":"allow","label":"Allow"}],"resolved":false}""")
         val q = e("qq", 2, "question", """{"requestId":"q2","questions":[]}""")

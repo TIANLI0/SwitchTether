@@ -115,6 +115,9 @@ class AppContainer(private val context: Context) {
     @Volatile var pairedServerIdCache: String? = null
         private set
 
+    /** Preview cache + explicit downloads of remote files (docs/ANDROID_UI.md "Downloads vs cache"). */
+    val fileStore = io.github.tianli0.switchtether.files.FileStore(context, serverId = { pairedServerIdCache }, api = { connection.apiOrNull() })
+
     init {
         appScope.launch { pairingStore.desktop.collect { pairedServerIdCache = it?.serverId } }
     }
@@ -243,6 +246,7 @@ class AppContainer(private val context: Context) {
         keys.deleteAllExcept(emptySet())
         draftStore.clearAll()
         money.clear()
+        fileStore.onServerForgotten() // temporary copies of that computer's files; user downloads stay
         clearCaches()
         stepUpGate.clear()
     }

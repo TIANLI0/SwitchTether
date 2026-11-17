@@ -35,6 +35,7 @@ data class RenderContext(
     val onLink: (String) -> Unit,
     val onLoadImageBytes: (suspend (path: String) -> ByteArray?)? = null,
     val onViewImage: ((ImagePreview) -> Unit)? = null,
+    val requestBusy: Boolean = false,
 )
 
 typealias EventRenderer = @Composable (item: RenderItem, ctx: RenderContext) -> Unit

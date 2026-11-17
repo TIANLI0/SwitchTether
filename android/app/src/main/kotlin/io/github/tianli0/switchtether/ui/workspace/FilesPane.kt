@@ -76,16 +76,27 @@ import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.components.FilterChip
 import io.github.tianli0.switchtether.ui.components.StatusPill
 import io.github.tianli0.switchtether.ui.diff.DiffView
+import io.github.tianli0.switchtether.ui.files.RemoteFileRef
+import io.github.tianli0.switchtether.ui.files.RemoteFileViewer
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
 @Composable
-fun FilesPane(state: FilesUiState, vm: FilesViewModel) {
+fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit = {}) {
     val file = state.file
+    val viewer = state.viewer
     when {
+        viewer != null -> {
+            BackHandler(onBack = vm::closeViewer)
+            RemoteFileViewer(
+                ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
+                onBack = vm::closeViewer,
+                onManageDownloads = onOpenDownloads,
+            )
+        }
         state.conflict != null -> ConflictScreen(state, vm)
         file != null -> FileScreen(state, vm)
-        else -> Browser(state, vm)
+        else -> Browser(state, vm, onOpenDownloads)
     }
     state.message?.let { msg ->
         ConfirmDialog(show = true, title = stringResource(R.string.files_title), message = msg.resolve(), confirmText = stringResource(R.string.action_ok), onConfirm = vm::clearMessage, onDismiss = vm::clearMessage)
@@ -103,7 +114,7 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel) {
 }
 
 @Composable
-private fun Browser(state: FilesUiState, vm: FilesViewModel) {
+private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
     var nameDialog by remember { mutableStateOf<String?>(null) } // "file" | "folder" | "rename"
     var target by remember { mutableStateOf<FsEntry?>(null) }
     var confirmDelete by remember { mutableStateOf<FsEntry?>(null) }
@@ -160,6 +171,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
                             stringResource(R.string.files_new_folder) to { if (listing != null) nameDialog = "folder" },
                             stringResource(R.string.files_upload) to { if (listing != null) picker.launch(arrayOf("*/*")) },
                             stringResource(R.string.files_hidden) to { vm.toggleHidden() },
+                            stringResource(R.string.files_downloads_manage) to onOpenDownloads,
                         )
                         ListPopupColumn {
                             menuItems.forEachIndexed { idx, (label, act) ->
@@ -179,7 +191,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
                 }
             }
         }
-        state.transfer?.let { TransferRow(it, vm) }
+        state.transfer?.let { TransferRow(it, vm, onOpenDownloads) }
         val results = state.results
         if (results != null) {
             LoadableContent(results, onRetry = vm::search) { hits ->
@@ -303,14 +315,21 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel) {
 }
 
 @Composable
-private fun TransferRow(t: TransferState, vm: FilesViewModel) {
+private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val store = io.github.tianli0.switchtether.ui.appContainer().fileStore
+    val noApp = stringResource(R.string.viewer_no_app)
     GroupCard {
         Column(Modifier.padding(16.dp)) {
             Text(t.label + " · " + Formatters.bytes(t.done) + (t.total?.let { " / " + Formatters.bytes(it) } ?: ""), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
             if (t.error == null && !t.finished) LinearProgressIndicator(progress = t.total?.let { if (it > 0) t.done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 t.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.weight(1f)) }
                 if (t.finished) Text(stringResource(R.string.files_done), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.ok, modifier = Modifier.weight(1f))
+                t.downloaded?.let { r ->
+                    TextButton(text = stringResource(R.string.files_transfer_open), onClick = { io.github.tianli0.switchtether.ui.files.startSafely(context, store.viewIntent(store.asLocal(r)), noApp) })
+                    TextButton(text = stringResource(R.string.viewer_manage), onClick = onOpenDownloads)
+                }
                 if (t.error == null && !t.finished) TextButton(text = stringResource(R.string.action_cancel), onClick = vm::cancelTransfer) else TextButton(text = stringResource(R.string.action_close), onClick = vm::dismissTransfer)
             }
         }
@@ -340,7 +359,7 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
                 }
             }
         }
-        state.transfer?.let { TransferRow(it, vm) }
+        state.transfer?.let { TransferRow(it, vm, {}) }
         LoadableContent(state.file!!, onRetry = { (state.file as? Loadable.Ready)?.value?.path?.let(vm::openPath) }) { f ->
             val dev = LocalDevColors.current
             Text(
@@ -356,7 +375,10 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
                     modifier = Modifier.fillMaxSize().padding(8.dp).background(dev.codeBackground).padding(8.dp).testTag("editor"),
                 )
             } else if (f.text == null) {
-                Text(stringResource(R.string.files_binary), modifier = Modifier.padding(16.dp), color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                Column(Modifier.padding(16.dp)) {
+                    Text(stringResource(R.string.files_binary), color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                    TextButton(text = stringResource(R.string.files_view_binary), onClick = { vm.openViewer(f.path, f.path.substringAfterLast('\\').substringAfterLast('/'), f.size.takeIf { it > 0 }, f.modifiedMs) })
+                }
             } else {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 24.dp + LocalBottomBarSpace.current)) {
                     CodeBlockView(f.text.orEmpty(), f.language ?: SyntaxHighlighter.languageForPath(f.path))

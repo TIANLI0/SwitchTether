@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Viewer (pdf / image / video / audio from a local copy) -->
+    <string name="viewer_loading">Fetching from your computer… %1$s</string>
+    <string name="viewer_failed">Couldn\'t open the file: %1$s</string>
+    <string name="viewer_too_large">This file is larger than the %1$s preview limit. Download it instead.</string>
+    <string name="viewer_open_with">Open with…</string>
+    <string name="viewer_share">Share</string>
+    <string name="viewer_refresh">Reload from computer</string>
+    <string name="viewer_saved_copy">Saved on this phone</string>
+    <string name="viewer_temp_copy">Temporary preview, cleared automatically</string>
+    <string name="viewer_saving">Downloading… %1$s</string>
+    <string name="viewer_saved_to">Saved to Downloads/%1$s</string>
+    <string name="viewer_manage">Manage downloads</string>
+    <string name="viewer_no_app">No app can open this file</string>
+    <string name="viewer_no_viewer">No built-in viewer for this file type. Open it with another app, or download it.</string>
+    <string name="viewer_image_failed">This image can\'t be shown. Try opening it with another app.</string>
+    <string name="viewer_pdf_failed">This PDF can\'t be shown here (it may be encrypted or damaged). Try opening it with another app.</string>
+    <string name="viewer_pdf_page">%1$d / %2$d</string>
+    <string name="viewer_play">Play</string>
+    <string name="viewer_pause">Pause</string>
+    <string name="viewer_media_error">Playback failed (%1$s)</string>
+    <string name="files_view_binary">Preview or open with another app</string>
+    <string name="files_transfer_open">Open</string>
+    <string name="files_downloads_manage">Downloads &amp; storage</string>
+
+    <!-- Downloads & storage -->
+    <string name="downloads_title">Downloads &amp; storage</string>
+    <string name="downloads_settings_summary">Files you downloaded, and the temporary preview cache</string>
+    <string name="downloads_section_saved">Downloads</string>
+    <string name="downloads_saved_hint">Files you chose to download. They are kept in Downloads/%1$s until you delete them here, and are not removed by clearing the cache.</string>
+    <string name="downloads_empty">Nothing downloaded yet. Use Download on the Files page to keep a file on this phone.</string>
+    <plurals name="downloads_total">
+        <item quantity="one">%1$d file · %2$s</item>
+        <item quantity="other">%1$d files · %2$s</item>
+    </plurals>
+    <string name="downloads_open">Open</string>
+    <string name="downloads_delete">Delete</string>
+    <string name="downloads_select">Select</string>
+    <string name="downloads_done">Done</string>
+    <string name="downloads_select_all">Select all</string>
+    <string name="downloads_delete_selected">Delete %1$d</string>
+    <string name="downloads_delete_all">Delete all downloads</string>
+    <string name="downloads_delete_confirm_title">Delete downloads?</string>
+    <plurals name="downloads_delete_confirm">
+        <item quantity="one">%1$d file will be removed from this phone. The file on your computer is not affected.</item>
+        <item quantity="other">%1$d files will be removed from this phone. The files on your computer are not affected.</item>
+    </plurals>
+    <string name="downloads_delete_all_confirm">All %1$d downloaded files will be removed from this phone. The files on your computer are not affected.</string>
+    <plurals name="downloads_delete_failed">
+        <item quantity="one">%1$d file couldn\'t be deleted by this app. Remove it in your Files app.</item>
+        <item quantity="other">%1$d files couldn\'t be deleted by this app. Remove them in your Files app.</item>
+    </plurals>
+    <string name="downloads_section_cache">Preview cache</string>
+    <string name="downloads_cache_title">Temporary preview files</string>
+    <string name="downloads_cache_summary">%1$s used · limit %2$s</string>
+    <string name="downloads_cache_clear">Clear cache</string>
+    <string name="downloads_cache_clear_confirm">Temporary preview copies will be removed and fetched again when needed. Your downloads are not affected.</string>
+    <string name="downloads_cache_hint">Opening a file to look at it only makes a temporary copy here. It is removed automatically when space is needed, and when you unpair this phone.</string>
+    <string name="viewer_text_truncated">Only the beginning of this large file is shown.</string>
+    <string name="command_scroll">Horizontal scroll</string>
+    <string name="command_wrap">Wrap lines</string>
+    <string name="command_copy">Copy full command</string>
+    <string name="command_directory">Working directory</string>
+</resources>

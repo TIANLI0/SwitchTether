@@ -198,10 +198,16 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             item {
                 PageCard {
                     ArrowPreference(
+                        title = stringResource(R.string.downloads_title),
+                        summary = stringResource(R.string.downloads_settings_summary),
+                        onClick = { onOpen(Route.Downloads) },
+                        cardListPosition = CardListPosition.Head,
+                    )
+                    ArrowPreference(
                         title = stringResource(R.string.settings_clear_cache),
                         summary = stringResource(R.string.settings_clear_cache_summary),
                         onClick = { confirmClear = true },
-                        cardListPosition = CardListPosition.Full,
+                        cardListPosition = CardListPosition.Tail,
                     )
                 }
             }
@@ -440,6 +446,7 @@ val LICENSES = listOf(
     LicenseEntry("Kotlin stdlib, kotlinx.coroutines, kotlinx.serialization", "Apache-2.0", "JetBrains s.r.o."),
     LicenseEntry("OkHttp / Okio", "Apache-2.0", "Square, Inc."),
     LicenseEntry("ZXing core", "Apache-2.0", "ZXing authors"),
+    LicenseEntry("AndroidX Media3 ExoPlayer (video / audio preview)", "Apache-2.0", "The Android Open Source Project"),
     LicenseEntry("material-color-utilities (com.materialkolor)", "Apache-2.0", "Google LLC / Jordon de Hoog"),
     LicenseEntry("material3-window-size-class (JetBrains)", "Apache-2.0", "JetBrains s.r.o."),
     LicenseEntry("Phosphor Icons (com.adamglin:phosphor-icon 1.0.0)", "MIT", "Icons by Phosphor Icons (Helena Zhang, Tobias Fried); Compose port by Adam Glin"),

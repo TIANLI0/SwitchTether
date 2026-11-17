@@ -1,0 +1,54 @@
+{
+  "id": "cx-ask-demo",
+  "seq": 12,
+  "sessionId": "codex:demo",
+  "ts": "2026-11-17T10:00:00Z",
+  "kind": "question",
+  "parentId": null,
+  "streaming": false,
+  "data": {
+    "requestId": "cx-42",
+    "cancellable": true,
+    "resolved": false,
+    "questions": [
+      {
+        "id": "target",
+        "header": "Target",
+        "question": "Choose a target",
+        "multiSelect": false,
+        "allowOther": true,
+        "isSecret": false,
+        "options": [
+          {
+            "label": "Staging",
+            "description": "Test environment"
+          }
+        ]
+      },
+      {
+        "id": "checks",
+        "question": "Choose checks",
+        "multiSelect": true,
+        "required": false,
+        "allowOther": false,
+        "options": [
+          {
+            "label": "Unit, integration",
+            "value": "tests"
+          },
+          {
+            "label": "Lint",
+            "value": "lint"
+          }
+        ]
+      },
+      {
+        "id": "note",
+        "question": "Add a note",
+        "multiSelect": false,
+        "allowOther": true,
+        "options": []
+      }
+    ]
+  }
+}

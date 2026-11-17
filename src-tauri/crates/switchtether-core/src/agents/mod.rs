@@ -40,6 +40,9 @@ use managed::ManagedSession;
 use model::{Capabilities, Control, EventDraft, Liveness, Origin, SessionSummary};
 use store::SessionLog;
 
+/// (mtime, length, title) of a transcript when its title was last read.
+type TitleCacheEntry = (Option<std::time::SystemTime>, u64, Option<String>);
+
 pub const MAX_LOADED_SESSIONS: usize = 16;
 pub const MAX_TRANSCRIPT_BYTES: u64 = 96 * 1024 * 1024;
 const TAIL_INTERVAL: Duration = Duration::from_millis(800);
@@ -107,6 +110,8 @@ pub struct AgentHub {
     codex_bin: Option<PathBuf>,
     loaded: Mutex<HashMap<String, Loaded>>,
     index_cache: Mutex<Option<(Instant, Arc<Vec<IndexedSession>>)>>,
+    /// Claude transcript path -> (mtime, len, title); avoids re-reading unchanged transcripts.
+    title_cache: Mutex<HashMap<PathBuf, TitleCacheEntry>>,
     ttys: RwLock<HashMap<String, Arc<attached_tty::AttachedTty>>>,
 }
 
@@ -141,6 +146,7 @@ impl AgentHub {
             codex_bin: codex::managed::find_codex_bin(),
             loaded: Mutex::new(HashMap::new()),
             index_cache: Mutex::new(None),
+            title_cache: Mutex::new(HashMap::new()),
             ttys: RwLock::new(HashMap::new()),
         })
     }
@@ -364,6 +370,25 @@ impl AgentHub {
         })
     }
 
+    /// Conversation title of a Claude transcript (`/rename` > generated), cached per file version.
+    fn claude_title(&self, path: &Path) -> Option<String> {
+        let meta = std::fs::metadata(path).ok()?;
+        let key = (meta.modified().ok(), meta.len());
+        if let Some((m, l, t)) = self.title_cache.lock().get(path) {
+            if (*m, *l) == key {
+                return t.clone();
+            }
+        }
+        let title =
+            claude::transcript::tail_title(path).map(|title| crate::redact::redact_text(&title));
+        let mut cache = self.title_cache.lock();
+        if cache.len() > 512 {
+            cache.clear();
+        }
+        cache.insert(path.to_path_buf(), (key.0, key.1, title.clone()));
+        title
+    }
+
     async fn index(&self) -> Arc<Vec<IndexedSession>> {
         if let Some((at, v)) = self.index_cache.lock().as_ref() {
             if at.elapsed() < Duration::from_secs(15) {
@@ -377,12 +402,43 @@ impl AgentHub {
 
     fn managed_summary(&self, id: &str, m: &dyn ManagedSession) -> SessionSummary {
         let cwd = m.cwd().to_string_lossy().into_owned();
+        // Claude Code writes `custom-title` (`/rename`) and the generated `ai-title` only to the
+        // transcript, never to stream-json or the terminal, so the parser of a managed or attached
+        // session only ever knows the first prompt. The transcript title wins.
+        let transcript_title = if m.agent() == "claude_code" {
+            m.native_session_id()
+                .and_then(|n| self.claude.transcript_path(Some(&cwd), &n))
+                .and_then(|p| self.claude_title(&p))
+        } else {
+            None
+        };
         SessionSummary {
             id: id.to_string(),
             agent: m.agent().into(),
             origin: origin_of(m.origin()),
             native_id: m.native_session_id().unwrap_or_default(),
-            title: m.title(),
+            title: transcript_title
+                .or_else(|| m.title())
+                .or_else(|| {
+                    self.index_cache.lock().as_ref().and_then(|(_, items)| {
+                        items
+                            .iter()
+                            .find(|s| {
+                                Some(s.session_id.as_str()) == m.native_session_id().as_deref()
+                            })
+                            .and_then(|s| s.title.clone())
+                    })
+                })
+                .or_else(|| {
+                    m.log()
+                        .lock()
+                        .iter()
+                        .find(|e| e.kind == "user_message" && e.parent_id.is_none())
+                        .and_then(|e| e.data.get("text").and_then(Value::as_str))
+                        .and_then(|t| {
+                            claude::transcript::clean_title(Some(model::preview(t, 120).0))
+                        })
+                }),
             project: SessionSummary::project_from_cwd(&cwd),
             cwd: Some(cwd),
             liveness: m.liveness(),
@@ -415,6 +471,7 @@ impl AgentHub {
     }
 
     pub async fn list(&self, q: &SessionQuery) -> (Vec<SessionSummary>, Option<String>) {
+        let indexed = self.index().await;
         let mut out: Vec<SessionSummary> = Vec::new();
         let managed: Vec<(String, Arc<dyn ManagedSession>)> = self
             .managed
@@ -437,12 +494,24 @@ impl AgentHub {
             }
             live_ids.insert(l.session_id.clone());
             let cwd = l.cwd.clone();
+            // The registry `name` is an auto-generated project slug ("myapp-3f"), not the task
+            // title; the real title (`/rename` or Claude's generated one) lives in the transcript.
+            let transcript = self.claude.transcript_path(cwd.as_deref(), &l.session_id);
+            // An idle session without a transcript is a process that has not been used yet
+            // (see the live observer): nothing to list.
+            if transcript.is_none()
+                && !matches!(l.status.as_deref(), Some("busy" | "waiting"))
+                && l.waiting_for.is_none()
+            {
+                continue;
+            }
+            let title = transcript.and_then(|p| self.claude_title(&p));
             out.push(SessionSummary {
                 id: format!("claude:{}", l.session_id),
                 agent: "claude_code".into(),
                 origin: l.origin(),
                 native_id: l.session_id.clone(),
-                title: l.name.clone(),
+                title,
                 project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
                 cwd,
                 liveness: Liveness::Live,
@@ -459,7 +528,7 @@ impl AgentHub {
                 source_path: None,
             });
         }
-        for s in self.index().await.iter() {
+        for s in indexed.iter() {
             let agent = agent_of_provider(&s.provider_id);
             if (agent == "claude_code" && live_ids.contains(&s.session_id))
                 || managed_native.contains(&s.session_id)
@@ -471,12 +540,22 @@ impl AgentHub {
             } else {
                 s.provider_id.as_str()
             };
+            let title = if agent == "claude_code" {
+                s.source_path
+                    .as_deref()
+                    .and_then(|p| self.claude_title(Path::new(p)))
+            } else {
+                None
+            }
+            .or_else(|| s.title.clone())
+            .or_else(|| s.summary.clone())
+            .and_then(|t| claude::transcript::clean_title(Some(t)));
             out.push(SessionSummary {
                 id: format!("{prefix}:{}", s.session_id),
                 agent,
                 origin: Origin::Unknown,
                 native_id: s.session_id.clone(),
-                title: s.title.clone().or(s.summary.clone()),
+                title,
                 project: s
                     .project_dir
                     .as_deref()
@@ -1098,7 +1177,12 @@ impl AgentHub {
     ) {
         let hub = Arc::downgrade(self);
         tokio::spawn(async move {
-            let mut prev: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+            type ObservedState = (Option<String>, Option<String>, Option<String>);
+            let mut prev: HashMap<String, ObservedState> = HashMap::new();
+            // Ticks a published session has been missing. Registry files are rewritten often and a
+            // read can land mid-write, so one missed tick is not an exit (it showed up on phones as
+            // a burst of "ended" sessions right after Claude Code started).
+            let mut missing: HashMap<String, u8> = HashMap::new();
             let mut tick = tokio::time::interval(Duration::from_secs(4));
             loop {
                 tokio::select! {
@@ -1118,28 +1202,54 @@ impl AgentHub {
                     .values()
                     .filter_map(|m| m.native_session_id())
                     .collect();
-                let mut now: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+                let mut now = HashMap::new();
                 for l in live
                     .iter()
                     .filter(|l| !managed_native.contains(&l.session_id))
                 {
                     let id = format!("claude:{}", l.session_id);
-                    let state = (l.status.clone(), l.waiting_for.clone());
+                    let transcript = hub.claude.transcript_path(l.cwd.as_deref(), &l.session_id);
+                    // A process that just started registers an empty session first (no prompt, no
+                    // transcript) and often switches to the resumed conversation right after.
+                    // Nothing to show yet, so it is not announced until it has a transcript or work.
+                    let working = matches!(l.status.as_deref(), Some("busy" | "waiting"))
+                        || l.waiting_for.is_some();
+                    if transcript.is_none() && !working && !prev.contains_key(&id) {
+                        continue;
+                    }
+                    let title = transcript.and_then(|p| hub.claude_title(&p));
+                    let state = (l.status.clone(), l.waiting_for.clone(), title.clone());
                     if prev.get(&id) != Some(&state) {
                         hub.bus.publish(
                             "session.upserted",
                             json!({
                                 "id": id, "agent": "claude_code", "origin": l.origin(),
                                 "liveness": "live", "status": l.status, "waitingFor": l.waiting_for,
-                                "cwd": l.cwd, "title": l.name, "control": "observe",
+                                "nativeId": l.session_id, "createdAtMs": l.started_at_ms,
+                                "cwd": l.cwd, "project": l.cwd.as_deref().and_then(SessionSummary::project_from_cwd),
+                                "title": title, "control": "observe",
                             }),
                         );
                     }
                     now.insert(id, state);
                 }
-                for id in prev.keys().filter(|k| !now.contains_key(*k)) {
-                    hub.bus
-                        .publish("session.removed", json!({ "id": id, "liveness": "ended" }));
+                // Seen this tick: no longer missing.
+                missing.retain(|id, _| !now.contains_key(id));
+                let gone: Vec<(String, ObservedState)> = prev
+                    .into_iter()
+                    .filter(|(k, _)| !now.contains_key(k))
+                    .collect();
+                for (id, state) in gone {
+                    let n = missing.entry(id.clone()).or_insert(0);
+                    *n += 1;
+                    if *n >= 2 {
+                        missing.remove(&id);
+                        hub.bus
+                            .publish("session.removed", json!({ "id": id, "liveness": "ended" }));
+                    } else {
+                        // Keep it for one more tick; reappearing with the same state publishes nothing.
+                        now.insert(id, state);
+                    }
                 }
                 prev = now;
             }
@@ -1179,7 +1289,8 @@ impl AgentHub {
         let hub = Arc::downgrade(self);
         let mut rx = self.bus.subscribe();
         tokio::spawn(async move {
-            let mut last: HashMap<String, (String, Option<String>)> = HashMap::new();
+            let mut last: HashMap<String, (String, Option<String>, Option<String>)> =
+                HashMap::new();
             loop {
                 let frame = tokio::select! {
                     _ = cancel.cancelled() => break,
@@ -1193,7 +1304,9 @@ impl AgentHub {
                 if frame.topic != "session.event"
                     || !matches!(
                         frame.data.get("kind").and_then(|k| k.as_str()),
-                        Some("status" | "approval_request" | "question")
+                        Some(
+                            "status" | "approval_request" | "question" | "user_message" | "system"
+                        )
                     )
                 {
                     continue;
@@ -1205,7 +1318,11 @@ impl AgentHub {
                 let m = hub.managed.read().get(id).cloned();
                 if let Some(m) = m {
                     let summary = hub.managed_summary(id, m.as_ref());
-                    let key = (summary.status.clone(), summary.waiting_for.clone());
+                    let key = (
+                        summary.status.clone(),
+                        summary.waiting_for.clone(),
+                        summary.title.clone(),
+                    );
                     if last.get(id) != Some(&key) {
                         last.insert(id.to_string(), key);
                         hub.bus.publish("session.upserted", json!(summary));
@@ -1299,7 +1416,7 @@ fn attached_caps(s: &SessionSummary) -> Capabilities {
         live_events: on(CapStatus::Partial),
         send_message: on(CapStatus::Partial),
         approve: on(CapStatus::Partial),
-        answer_question: on(CapStatus::Untested),
+        answer_question: on(CapStatus::Partial),
         interrupt: on(CapStatus::Partial),
         continue_session: None,
         reason: (!live).then(|| "The process on the computer has exited.".into()),
@@ -1321,7 +1438,7 @@ fn managed_caps() -> Capabilities {
         live_events: Some(CapStatus::Verified),
         send_message: Some(CapStatus::Verified),
         approve: Some(CapStatus::Verified),
-        answer_question: Some(CapStatus::Untested),
+        answer_question: Some(CapStatus::Partial),
         interrupt: Some(CapStatus::Verified),
         continue_session: None,
         reason: None,

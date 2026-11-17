@@ -18,9 +18,11 @@ android {
         minSdk = 29
         // Android 17. Local network access needs ACCESS_LOCAL_NETWORK (requested at runtime).
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 4
+        versionName = "0.1.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // 64-bit ARM (ARMv8) devices only; smaller APK.
+        ndk { abiFilters += "arm64-v8a" }
         // Self-update source: public GitHub releases of TIANLI0/SwitchTether. The API base can be
         // overridden for local end-to-end tests (`-PupdateApiBase=http://10.0.2.2:8765`, debug only).
         buildConfigField("String", "UPDATE_REPO", "\"TIANLI0/SwitchTether\"")
@@ -115,6 +117,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.camera.core)

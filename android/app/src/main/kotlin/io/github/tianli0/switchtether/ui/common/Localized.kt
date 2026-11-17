@@ -75,22 +75,17 @@ fun clientLabel(origin: String, agent: String): String = when (origin) {
     else -> origin
 }
 
-/**
- * Project folder name for a session (from `project`, else basename of `cwd`).
- */
+/** Project (codebase) a session belongs to; see [io.github.tianli0.switchtether.domain.SessionNaming]. */
 fun sessionProjectName(s: io.github.tianli0.switchtether.remote.protocol.SessionSummary): String? =
-    s.project?.trim()?.takeIf { it.isNotBlank() }
-        ?: s.cwd?.trimEnd('/', '\\')?.substringAfterLast('/')?.substringAfterLast('\\')?.trim()?.takeIf { it.isNotBlank() }
+    io.github.tianli0.switchtether.domain.SessionNaming.projectName(s)
 
 /**
- * Title shown for a session: its own cleaned first-line title, else the project / working-directory
- * name, else "未命名会话". Raw native ids are only shown in the info sheet.
+ * Title shown for a session: the agent's own conversation title, else "未命名会话". The project is
+ * a separate line and never stands in for the task title. Raw native ids are only in the info sheet.
  */
 @Composable
 fun sessionDisplayTitle(s: io.github.tianli0.switchtether.remote.protocol.SessionSummary): String =
-    s.title?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.takeIf { it.isNotBlank() }
-        ?: sessionProjectName(s)
-        ?: stringResource(R.string.session_unnamed)
+    io.github.tianli0.switchtether.domain.SessionNaming.title(s) ?: stringResource(R.string.session_unnamed)
 
 /** Badge for a session SwitchTether is attached to through the opt-in wrapper: "已接管 · VS Code". */
 @Composable

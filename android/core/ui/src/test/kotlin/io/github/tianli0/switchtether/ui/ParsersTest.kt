@@ -10,6 +10,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MarkdownParserTest {
+
+    @Test
+    fun sourceLinksAreClickableWithoutEnablingArbitraryAppSchemes() {
+        val links = io.github.tianli0.switchtether.ui.markdown.InlineMarkdown
+        assertTrue(links.isSupportedLink("D:/project/a.rs:12"))
+        assertTrue(links.isSupportedLink("file:///C:/project/a.kt#L12"))
+        assertTrue(links.isSupportedLink("src/main.rs"))
+        org.junit.Assert.assertFalse(links.isSupportedLink("javascript:alert(1)"))
+        org.junit.Assert.assertFalse(links.isSupportedLink("intent://app"))
+        org.junit.Assert.assertFalse(links.isSupportedLink("#section"))
+    }
+
     @Test
     fun blocks() {
         val md = """

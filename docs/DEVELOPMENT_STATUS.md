@@ -1,6 +1,6 @@
 # Development status
 
-Last updated: 2026-11-14. Statuses: **DONE** (implemented and covered by passing automated
+Last updated: 2026-11-17. Statuses: **DONE** (implemented and covered by passing automated
 tests or recorded live verification), **PARTIAL**, **BLOCKED** (upstream limitation, evidence
 in docs/research), **UNTESTED**, **TODO**.
 
@@ -76,3 +76,71 @@ in docs/research), **UNTESTED**, **TODO**.
 2. `cargo run -p switchtether-core --example dev_server` (headless server) / `dev_client`.
 3. `pnpm vitest run tests/components/RemoteSection.test.tsx tests/config`.
 4. `cd android && ./gradlew testDebugUnitTest :app:assembleDebug`.
+
+
+## Android task fixes (2026-11-17)
+
+Implemented in the working tree, including existing uncommitted file-viewer/title work:
+
+- Native/indexed task titles and first-prompt fallback, including initial Codex thread metadata and
+  rename updates; live Claude updates no longer send registry slugs as task titles.
+- Codex subagent source spellings, nested streaming output and rollout spawn/wait groups; corrected
+  callId-alias depth; child outcomes cannot end the parent task's notification.
+- Codex choice/free-text questions, optional fields, secret input, multi-select arrays, option values,
+  cancel, busy/complete gating. Answer capability is PARTIAL, never marked VERIFIED for this pass.
+- COUI question preferences, centered standard approval confirmation, opaque dialog theme defaults,
+  animated running badges and selection states, readable long-command preview/full wrapping/copy.
+- Source links route to the desktop file reader (relative cwd, file://, line anchors); common code
+  files are previewed in memory. Existing media/download management remains integrated.
+- Startup replay is ignored for notifications; restored inactive Live Update pins are cleared silently.
+
+Validation on Windows with JDK 21:
+
+| Check | Result |
+|---|---|
+| `cargo test -p switchtether-core` | 86 unit + 3 attach integration + 13 TLS/API integration passed |
+| `cargo clippy -p switchtether-core --all-targets -- -D warnings` | Passed |
+| `:core:remote:test testDebugUnitTest :app:assembleDebug` | 179 passed, 1 existing skipped test; Debug APK built |
+| New Compose interaction cases | 5 passed: light/dark custom answers and long commands; Codex multi-select |
+| Visual review | API 32 Robolectric non-shader light/dark captures, synthetic task data only |
+
+No phone/emulator was connected during this pass. Real-device rendering, background notification
+arrival and live Codex question replies remain untested end-to-end; automated evidence is not a
+VERIFIED claim for those capabilities. No agent process was restarted and no agent configuration
+was modified. No commit or release publication was made.
+
+
+## Local 0.1.2 packages (2026-11-17)
+
+Product versions updated together in package.json, tauri.conf.json, FluentSetup defaults and Android
+(versionCode 3). Cargo's upstream compatibility version remains 4.0.33 by design.
+
+- Windows x64: `node scripts/package-windows.mjs` succeeded, FluentSetup inspect/verify passed for
+  `SwitchTether-0.1.2-Setup.exe` (19,270,264 bytes, unsigned). Installer manifest version: 0.1.2.
+- Android: `:app:assembleRelease :app:assembleDebug :core:remote:test testDebugUnitTest` succeeded.
+  Signed `SwitchTether-0.1.2-release.apk` (8,438,274 bytes), versionName 0.1.2 / versionCode 3.
+  apksigner verification passed; SHA-256 signing-certificate digest matches the existing 0.1.1 APK.
+- `pnpm typecheck` and `pnpm vitest run tests/config` passed (1,219 configuration tests).
+- Both packages and `SwitchTether-0.1.2-SHA256SUMS.txt` copied to the Windows Downloads known folder
+  (`D:/Downloads`); copied-file SHA-256 checks passed. Previous downloads preserved.
+- No installation, app/agent restart, Git commit or public release publication was performed.
+
+## Local 0.1.3 packages (2026-11-17)
+
+Changes since 0.1.2: COUI17 dialog buttons visible in light theme without blur (coui patch 0003);
+Claude managed/attached session titles read from the transcript (`custom-title` > `ai-title`);
+background sub-agents updated by `<task-notification>` (status/summary/result/stats) instead of
+showing raw XML as a user message; IDE/harness blocks stripped from user text (`context` field);
+quota resets in the phone's time zone with countdown and readable tier names; request log no
+longer stuck on "loading"; no transient "ended" sessions from registry flicker or empty start-up
+sessions (2-tick grace, untranscribed idle sessions not announced).
+
+- Windows x64: `node scripts/package-windows.mjs` succeeded; FluentSetup verify OK for
+  `SwitchTether-0.1.3-Setup.exe` (19,282,448 bytes, unsigned).
+- Android: `:app:assembleRelease :app:assembleDebug :core:remote:test testDebugUnitTest` succeeded.
+  Signed `SwitchTether-0.1.3-release.apk` (8,457,406 bytes), versionName 0.1.3 / versionCode 4;
+  apksigner verifies (v3); signing-certificate digest equals 0.1.2.
+- Rust: core clippy/tests and desktop clippy / `test --lib switchtether` passed. `pnpm typecheck`
+  and `pnpm vitest run tests/config` (1,219 tests) passed.
+- Copied with `SwitchTether-0.1.3-SHA256SUMS.txt` to `D:/Downloads`; checksums verified; earlier
+  versions kept. Not installed on a device; no commit or public release.

@@ -148,6 +148,7 @@ fun SwitchTetherTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable (
     COUITheme(controller = controller) {
         CompositionLocalProvider(
             LocalDevColors provides if (dark) DevColors.Dark else DevColors.Light,
+            io.github.suqi8.coui.kmp.blur.LocalBlurEnabled provides false,
             LocalPlatformAppBarMaterialEnabled provides false,
             LocalPlatformBottomBarMaterialEnabled provides false,
             content = content,

@@ -656,3 +656,57 @@ new-message pill, 60 predictive back mid-gesture.
 - Terminal cell width assumes a monospace font; CJK double-width glyphs may drift slightly.
 - Re-pairing while already paired via a deep link is not supported (unpair first).
 - `ui` component registry has only two built-in components.
+
+### 13.13 Local files: viewing, downloads vs cache
+
+Two different things, never mixed (`app/.../files/`):
+
+| | **Cache** (preview) | **Download** (keep) |
+|---|---|---|
+| Made by | just opening a file to look at it | an explicit "Download" |
+| Where | `cacheDir/remote-files/<key>/<name>` | public `Downloads/SwitchTether` (MediaStore, no storage permission) + `filesDir/downloads-index.json` |
+| Lifetime | automatic: LRU above 200 MB; reused only while server + path + size + mtime match (a copy made without size/mtime, e.g. from a chat link, is trusted for 10 min); cleared by "Clear cache", unpair, revoke | until the user deletes it in **Downloads & storage**; not touched by clearing the cache or unpairing |
+| Shown to the user as | nothing ("temporary preview") | a list entry with open / share / delete |
+| Opened from | `FileProvider` (`<cache-path>` only) | its MediaStore `content://` URI |
+
+`FileStore.resolve()` order: existing user download of the same file → fresh cache copy → stream the file into
+the cache (never into memory; refuses above the cache cap). Sensitive files are never previewed from a local
+copy (the desktop's `fs/download` refuses them); they keep the confirmed in-memory text read.
+
+Viewers (`ui/files/FileViewers.kt`, shared by the Files page, chat links and the downloads list): images
+(zoom/pan, decoded down-sampled), PDF (`PdfRenderer`, lazily rendered pages), video/audio (Media3 ExoPlayer
+only, no Media3 UI), everything else and text-less binaries via "Open with…" / "Share" through a read-only
+`FileProvider` or MediaStore URI (never `file://`). A link in chat that points at a desktop path opens the
+viewer; an image's viewer offers Download and Open with.
+
+**Downloads & storage** (Settings → Storage, and the Files page menu / transfer row) lists downloads with
+total size, multi-select delete, delete all (confirmed) and cache size with Clear cache. Deleting only touches
+URIs recorded in the index (the ones this app created); rows removed elsewhere are pruned on open, and files
+the system refuses to delete (e.g. after a reinstall) are reported and dropped from the list.
+
+
+## Task interaction corrections (2026-11-17)
+
+- Titles: attached/managed summaries use native thread names, indexed titles, then the first actual
+  user prompt; Claude live pushes no longer replace a task title with the registry slug.
+- Codex children: accept both `source.subagent` and `source.subAgent`; keep streamed child output
+  under its parent; rollout spawn/wait results retain child identity. A callId alias counts as one
+  ancestor, not two. Child outcomes do not complete the parent's notification / Live Update.
+- Questions: COUI RadioButtonPreference / CheckboxPreference rows with animated selection fills,
+  optional fields, secret input, custom answers and cancellation. Multi-select answers use arrays
+  for Codex and preserve commas / option values. Submit is disabled while an answer is sending.
+  Answer capabilities are PARTIAL (protocol round-trip + Compose tests; live agent/device untested).
+- Confirmation: approvals use the centered COUI WindowAlertDialog and its standard button bar;
+  opaque page/dialog materials are provided at the theme root, including dialogs outside MainShell.
+- Long commands: collapsed steps show two lines of actual command after a recognized shell launcher;
+  expansion retains the full original command, defaults to line wrapping, offers horizontal scroll
+  and Copy full command, and displays the working directory. No command is rewritten for execution.
+- Chat source links: relative paths resolve against the desktop session cwd; file:// and source-line
+  suffixes work. Text is read through fs/read into memory, media uses the existing preview cache;
+  arbitrary application schemes remain inert and the desktop file policy still applies.
+- Startup notifications: ignore pre-start transcript event replay and remove restored inactive pins
+  without posting a finished card. Waiting requests remain actionable. Running task badges use the
+  COUI rotating indicator; selection fills and disclosure arrows animate with Compose duration scale.
+
+Regression evidence for this pass is recorded in docs/DEVELOPMENT_STATUS.md. Screenshot fixtures
+use synthetic data only; API 32 software captures exercise the non-shader fallback of COUI.

@@ -145,6 +145,8 @@ class NotificationEngine(
     /** User-visible texts; the app supplies localized resources, tests use [NotifyText.English]. */
     private val t: NotifyText = NotifyText.English,
 ) {
+    // REST hydration / reconnect replay must never announce a historical turn again.
+    private val startedAtMs = nowMs()
     private val seen = LinkedHashSet<String>()
     private val lastStatus = HashMap<String, String>()
     private val lastLive = HashMap<String, Boolean>()
@@ -176,6 +178,10 @@ class NotificationEngine(
     private fun closeTurn(sid: String): Int? = if (openTurn.remove(sid)) turn[sid] ?: 0 else null
 
     fun onSessionEvent(e: AgentEvent, session: SessionSummary?): NotifyIntent? {
+        // A child agent finishing is not the parent task finishing. Child requests still need attention.
+        if (e.parentId != null && e.kind !in setOf(EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION, EventKinds.APPROVAL_RESOLVED)) return null
+        val at = runCatching { java.time.Instant.parse(e.ts).toEpochMilli() }.getOrNull()
+        if (at != null && at < startedAtMs) return null
         val sid = e.sessionId
         val name = sessionName(session, sid)
         return when (e.kind) {
@@ -231,7 +237,7 @@ class NotificationEngine(
     }
 
     private fun interruptTurn(sid: String, s: SessionSummary?, name: String, title: String, detail: String): NotifyIntent? {
-        val n = closeTurn(sid) ?: (turn[sid] ?: 0)
+        val n = closeTurn(sid) ?: return null
         if (recentLocal(sid, LocalAction.INTERRUPT, LocalAction.STOP)) return null
         return build(NotifyType.SESSION_INTERRUPTED, "interrupt:$sid:$n", s, sid, title, detail)
     }
@@ -243,6 +249,7 @@ class NotificationEngine(
         val wasLive = lastLive.put(s.id, s.isLive)
         if (s.status == "busy") busySince.putIfAbsent(s.id, nowMs()) else { busySince.remove(s.id); longRunningNotified.remove(s.id) }
         val name = sessionName(s, s.id)
+        if (s.liveness == "ended" && wasLive != true) return null
         // Process gone while the session was working or waiting: report it (unless the phone stopped it).
         if (wasLive == true && !s.isLive) {
             val n = closeTurn(s.id)

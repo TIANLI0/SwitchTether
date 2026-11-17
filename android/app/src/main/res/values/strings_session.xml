@@ -129,4 +129,13 @@
     <string name="stat_plan">Plan %1$d/%2$d</string>
     <string name="stat_steps">%1$d steps</string>
     <string name="stat_files">%1$d files</string>
+    <string name="subagent_background">Background</string>
+    <string name="subagent_tool_uses">%1$d tool calls</string>
+    <string name="subagent_result">Result</string>
+    <string name="subagent_summary">Summary</string>
+    <string name="subagent_waiting_result">Running in the background. Its result appears here when it finishes.</string>
+    <string name="subagent_result_truncated">Result shortened. The full text is in the desktop transcript.</string>
+    <string name="render_system_task">Background task: %1$s</string>
+    <string name="duration_seconds">%1$ds</string>
+    <string name="duration_minutes">%1$dm %2$ds</string>
 </resources>

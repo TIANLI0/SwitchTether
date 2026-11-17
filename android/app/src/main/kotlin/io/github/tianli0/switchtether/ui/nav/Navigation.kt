@@ -14,6 +14,7 @@ sealed interface Route {
     data object NewSession : Route
     data class Terminal(val id: String?) : Route
     data object Files : Route
+    data object Downloads : Route
     data object Git : Route
     data object PickFolder : Route
     data object Providers : Route

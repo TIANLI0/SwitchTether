@@ -57,6 +57,7 @@ fun SessionRow(
                 modifier = Modifier.padding(end = 12.dp),
                 size = if (compact) 32.dp else 40.dp,
                 statusColor = if (session.isLive) sessionStatusColor(session.status) else null,
+                running = session.isLive && session.status == "busy",
             )
         },
         // Attached sessions name their client here ("Codex · Codex Desktop"), so the tag stays short

@@ -113,8 +113,10 @@ class AttachedCodexScreenshotTest {
     }
 
     private fun assertAttachedChrome() {
-        // Title falls back to the working-directory slug; the badge names the client.
-        rule.onNodeWithText("fix-flaky-login-test").assertExists()
+        // No conversation title yet: shown as unnamed, and the project is NOT used as the task
+        // title (it appears in the subtitle instead); the badge names the client.
+        rule.onNodeWithText("未命名会话").assertExists()
+        rule.onNodeWithText("fix-flaky-login-test", substring = true).assertExists()
         rule.onNodeWithText("已接管 · Codex Desktop").assertExists()
         rule.onNodeWithTag("send").assertExists()
         // Full control: no read-only / blocked tip and no "continue on phone".

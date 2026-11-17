@@ -25,6 +25,7 @@ androidx-core = "1.17.0"
 androidx-lifecycle = "2.10.0"
 androidx-fragment = "1.8.9"
 androidx-datastore = "1.2.1"
+androidx-media3 = "1.9.0"
 androidx-work = "2.12.0"
 androidx-biometric = "1.1.0"
 androidx-camera = "1.6.2"
@@ -62,6 +63,7 @@ androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "androidx-lifecycle" }
 androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "androidx-datastore" }
+androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "androidx-media3" }
 androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidx-biometric" }
 androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "androidx-camera" }
 androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "androidx-camera" }

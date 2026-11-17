@@ -173,6 +173,7 @@ fun CollapsibleRow(
     iconTint: Color = COUITheme.colorScheme.onSurfaceSecondary,
     titleColor: Color = COUITheme.colorScheme.onSurface,
     titleMaxLines: Int = 1,
+    subtitleMaxLines: Int = 1,
     showArrow: Boolean = true,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
@@ -194,7 +195,7 @@ fun CollapsibleRow(
         Column(Modifier.weight(1f)) {
             Text(title, style = COUITheme.textStyles.body2, color = titleColor, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) {
-                Text(subtitle, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = subtitleMaxLines, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(Modifier.size(6.dp))

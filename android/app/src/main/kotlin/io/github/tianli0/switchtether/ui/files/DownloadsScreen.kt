@@ -1,0 +1,262 @@
+package io.github.tianli0.switchtether.ui.files
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.suqi8.coui.kmp.basic.BasicComponent
+import io.github.suqi8.coui.kmp.basic.BasicComponentDefaults
+import io.github.suqi8.coui.kmp.basic.Icon
+import io.github.suqi8.coui.kmp.basic.SmallTitle
+import io.github.suqi8.coui.kmp.basic.Text
+import io.github.suqi8.coui.kmp.basic.TextButton
+import io.github.suqi8.coui.kmp.basic.cardListPositionOf
+import io.github.suqi8.coui.kmp.theme.COUITheme
+import io.github.tianli0.switchtether.R
+import io.github.tianli0.switchtether.files.DownloadRecord
+import io.github.tianli0.switchtether.files.FileCache
+import io.github.tianli0.switchtether.files.FileStore
+import io.github.tianli0.switchtether.files.FileTypes
+import io.github.tianli0.switchtether.ui.appContainer
+import io.github.tianli0.switchtether.ui.common.AppBottomSheet
+import io.github.tianli0.switchtether.ui.common.ConfirmDialog
+import io.github.tianli0.switchtether.ui.common.Formatters
+import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.switchtether.ui.common.Page
+import io.github.tianli0.switchtether.ui.common.ToolbarIcon
+import io.github.tianli0.switchtether.ui.common.pageListPadding
+import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.icons.AppIcons
+import io.github.tianli0.switchtether.ui.theme.DevType
+import io.github.tianli0.switchtether.ui.theme.LocalDevColors
+import kotlinx.coroutines.launch
+
+private sealed interface PendingDelete {
+    data class Some(val ids: Set<String>) : PendingDelete
+    data object All : PendingDelete
+}
+
+/**
+ * "Downloads & storage": the one place that manages what the app keeps on this phone — the files the user
+ * downloaded (Downloads/SwitchTether) and the temporary preview cache — with clear wording for the difference.
+ */
+@Composable
+fun DownloadsScreen(onBack: () -> Unit) {
+    val store = appContainer().fileStore
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val items by store.downloads.collectAsStateWithLifecycle()
+    val cacheBytes by store.cacheBytes.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { store.refresh() }
+
+    var selecting by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var viewing by remember { mutableStateOf<DownloadRecord?>(null) }
+    var actionsFor by remember { mutableStateOf<DownloadRecord?>(null) }
+    var pending by remember { mutableStateOf<PendingDelete?>(null) }
+    var confirmClearCache by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val noApp = stringResource(R.string.viewer_no_app)
+
+    BackHandler(enabled = viewing != null || selecting) {
+        if (viewing != null) viewing = null else { selecting = false; selected = emptySet() }
+    }
+    // A record that vanished (deleted here or elsewhere) closes its viewer.
+    LaunchedEffect(items) { if (viewing != null && items.none { it.id == viewing?.id }) viewing = null }
+
+    viewing?.let { r ->
+        Page(title = r.name, onBack = { viewing = null }, large = false) {
+            val local = remember(r) { store.asLocal(r) }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(text = stringResource(R.string.viewer_open_with), onClick = { startSafely(context, store.viewIntent(local), noApp) })
+                TextButton(text = stringResource(R.string.viewer_share), onClick = { startSafely(context, store.shareIntent(local), noApp) })
+            }
+            Text(Formatters.bytes(r.size) + " · " + stringResource(R.string.viewer_saved_copy), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.gutter, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+            LocalFileBody(local, FileTypes.kindOf(r.name), Modifier.weight(1f).fillMaxWidth())
+        }
+        return
+    }
+
+    Page(
+        title = stringResource(R.string.downloads_title),
+        onBack = onBack,
+        large = false,
+        actions = {
+            if (items.isNotEmpty()) {
+                TextButton(
+                    text = stringResource(if (selecting) R.string.downloads_done else R.string.downloads_select),
+                    onClick = { selecting = !selecting; selected = emptySet() },
+                )
+            }
+        },
+    ) {
+        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 4.dp)) {
+            item { SmallTitle(stringResource(R.string.downloads_section_saved)) }
+            item {
+                Text(
+                    stringResource(R.string.downloads_saved_hint, FileStore.DOWNLOAD_FOLDER),
+                    style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                )
+            }
+            if (items.isEmpty()) {
+                item { Text(stringResource(R.string.downloads_empty), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
+            } else {
+                item {
+                    Text(
+                        pluralStringResource(R.plurals.downloads_total, items.size, items.size, Formatters.bytes(items.sumOf { it.size })),
+                        style = DevType.label, color = LocalDevColors.current.gutter, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 6.dp),
+                    )
+                }
+                item {
+                    GroupCard {
+                        items.forEachIndexed { i, r ->
+                            BasicComponent(
+                                title = r.name,
+                                summary = listOf(Formatters.bytes(r.size), Formatters.dateTime(r.savedAtMs)).joinToString(" · "),
+                                startAction = {
+                                    if (selecting) SelectDot(r.id in selected) else Icon(AppIcons.File, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(18.dp))
+                                },
+                                endActions = {
+                                    if (!selecting) ToolbarIcon(AppIcons.More, stringResource(R.string.files_actions, r.name), { actionsFor = r })
+                                },
+                                onClick = {
+                                    if (selecting) selected = if (r.id in selected) selected - r.id else selected + r.id
+                                    else if (FileTypes.kindOf(r.name).isMedia) viewing = r
+                                    else startSafely(context, store.viewIntent(store.asLocal(r)), noApp)
+                                },
+                                cardListPosition = cardListPositionOf(i, items.size),
+                            )
+                        }
+                    }
+                }
+                item {
+                    if (selecting) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                text = stringResource(R.string.downloads_select_all),
+                                onClick = { selected = if (selected.size == items.size) emptySet() else items.map { it.id }.toSet() },
+                            )
+                            TextButton(
+                                text = stringResource(R.string.downloads_delete_selected, selected.size),
+                                enabled = selected.isNotEmpty(),
+                                onClick = { pending = PendingDelete.Some(selected) },
+                            )
+                        }
+                    } else {
+                        TextButton(text = stringResource(R.string.downloads_delete_all), onClick = { pending = PendingDelete.All }, modifier = Modifier.padding(horizontal = 8.dp))
+                    }
+                }
+            }
+            item { SmallTitle(stringResource(R.string.downloads_section_cache)) }
+            item {
+                GroupCard {
+                    BasicComponent(
+                        title = stringResource(R.string.downloads_cache_title),
+                        summary = stringResource(R.string.downloads_cache_summary, Formatters.bytes(cacheBytes), Formatters.bytes(FileCache.DEFAULT_MAX_BYTES)),
+                        endActions = { TextButton(text = stringResource(R.string.downloads_cache_clear), onClick = { confirmClearCache = true }, enabled = cacheBytes > 0) },
+                    )
+                }
+            }
+            item {
+                Text(
+                    stringResource(R.string.downloads_cache_hint),
+                    style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            notice?.let { n -> item { Text(n, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.padding(16.dp)) } }
+        }
+    }
+
+    actionsFor?.let { r ->
+        AppBottomSheet(show = true, title = r.name, onDismissRequest = { actionsFor = null }) {
+            val opts = listOf(
+                stringResource(R.string.downloads_open) to {
+                    actionsFor = null
+                    if (FileTypes.kindOf(r.name).isMedia) viewing = r else startSafely(context, store.viewIntent(store.asLocal(r)), noApp)
+                },
+                stringResource(R.string.viewer_share) to { actionsFor = null; startSafely(context, store.shareIntent(store.asLocal(r)), noApp) },
+                stringResource(R.string.downloads_delete) to { actionsFor = null; pending = PendingDelete.Some(setOf(r.id)) },
+            )
+            GroupCard {
+                opts.forEachIndexed { i, (label, act) ->
+                    BasicComponent(
+                        title = label,
+                        titleColor = BasicComponentDefaults.titleColor(color = if (i == opts.lastIndex) LocalDevColors.current.danger else COUITheme.colorScheme.onSurface),
+                        onClick = act,
+                        cardListPosition = cardListPositionOf(i, opts.size),
+                    )
+                }
+            }
+        }
+    }
+
+    val p = pending
+    ConfirmDialog(
+        show = p != null,
+        title = stringResource(R.string.downloads_delete_confirm_title),
+        message = when (p) {
+            is PendingDelete.Some -> pluralStringResource(R.plurals.downloads_delete_confirm, p.ids.size, p.ids.size)
+            PendingDelete.All -> stringResource(R.string.downloads_delete_all_confirm, items.size)
+            null -> ""
+        },
+        confirmText = stringResource(R.string.downloads_delete),
+        onConfirm = {
+            val req = p
+            pending = null
+            scope.launch {
+                val failed = when (req) {
+                    is PendingDelete.Some -> store.delete(req.ids)
+                    PendingDelete.All -> store.deleteAllDownloads()
+                    null -> 0
+                }
+                selecting = false
+                selected = emptySet()
+                notice = if (failed > 0) context.resources.getQuantityString(R.plurals.downloads_delete_failed, failed, failed) else null
+            }
+        },
+        onDismiss = { pending = null },
+    )
+    ConfirmDialog(
+        show = confirmClearCache,
+        title = stringResource(R.string.downloads_cache_clear),
+        message = stringResource(R.string.downloads_cache_clear_confirm),
+        confirmText = stringResource(R.string.downloads_cache_clear),
+        onConfirm = { confirmClearCache = false; scope.launch { store.clearCache() } },
+        onDismiss = { confirmClearCache = false },
+    )
+}
+
+@Composable
+private fun SelectDot(on: Boolean) {
+    Box(
+        Modifier.size(20.dp).clip(CircleShape).background(if (on) COUITheme.colorScheme.primary else COUITheme.colorScheme.surfaceContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (on) Text("✓", style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onPrimary, maxLines = 1, overflow = TextOverflow.Clip)
+    }
+}

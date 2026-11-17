@@ -326,7 +326,7 @@
     <string name="usage_success_n">成功 %1$s</string>
     <string name="usage_trend_hourly">按小时</string>
     <string name="usage_trend_daily">按天</string>
-    <string name="usage_tz_note">日期与小时按电脑的时区划分，与电脑端一致。</string>
+    <string name="usage_tz_note">按天、按小时的统计使用电脑的时区，与电脑端一致；请求时间和额度重置时间按本机时区显示。</string>
     <string name="usage_unknown_provider">未知供应商</string>
     <string name="usage_session_provider">%1$s · 会话日志</string>
     <string name="usage_session_account_provider">%1$s · 账号（OAuth）</string>
@@ -379,4 +379,17 @@
     <string name="perm_default_short">逐项确认</string>
     <string name="perm_accept_edits_short">自动编辑</string>
     <string name="perm_plan_short">仅规划</string>
+    <string name="quota_tier_5h">5 小时额度</string>
+    <string name="quota_tier_week">每周额度</string>
+    <string name="quota_tier_month">每月额度</string>
+    <string name="quota_tier_credits">点数</string>
+    <string name="quota_day_today">今天 %1$s</string>
+    <string name="quota_day_tomorrow">明天 %1$s</string>
+    <string name="quota_resets_at">%1$s 重置 · 还有 %2$s</string>
+    <string name="quota_reset_due">即将重置</string>
+    <string name="quota_left_minutes">%1$d 分钟</string>
+    <string name="quota_left_hours">%1$d 小时 %2$d 分</string>
+    <string name="quota_left_days">%1$d 天 %2$d 小时</string>
+    <string name="usage_logs_failed">请求日志加载失败。</string>
+    <string name="usage_logs_failed_more">加载失败，点按重试</string>
 </resources>

@@ -131,4 +131,17 @@ class NotificationTurnTest {
         assertEquals("claude:x", done!!.sessionId)
         assertEquals("Mine finished", done.title)
     }
+    @Test
+    fun historicalReplayAndChildOutcomesDoNotFinishTheParent() {
+        val e = engine()
+        val oldRunning = ev("old-running", 1, "status", """{"state":"running"}""").copy(ts = java.time.Instant.ofEpochMilli(now - 10_000).toString())
+        assertNull(e.onSessionEvent(oldRunning, S))
+        assertNull(e.onSessionEvent(oldRunning.copy(id = "old-done", data = ProtocolJson.parseToJsonElement("""{"state":"idle"}""").jsonObject), S))
+        assertNull(e.onSessionUpsert(S.copy(liveness = "ended", status = "busy")))
+        assertNull(e.onSessionUpsert(S.copy(liveness = "ended", status = "idle")))
+        e.onSessionUpsert(S.copy(status = "busy"))
+        assertNull(e.onSessionEvent(ev("child", 2, "status", """{"state":"completed"}""").copy(parentId = "spawn"), S))
+        assertEquals(NotifyType.TASK_COMPLETED, e.onSessionUpsert(S.copy(status = "idle"))?.type)
+    }
+
 }

@@ -31,3 +31,21 @@ All patches live in `patches/` and are re-applied by `sync_coui17.py` in file-na
   for `SheetCloseCapsule(text = …)`.
 - **Resulting behaviour:** SwitchTether provides `stringResource(R.string.action_close)` at the root
   (`SwitchTetherRoot`), so every sheet's close capsule follows the app locale ("Close" / "关闭").
+
+## 0003-dialog-button-fill-without-blur.patch
+
+- **File:** `coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/layout/DialogButtonBar.kt`
+- **Upstream behaviour:** `DialogButtonBarDefaults.buttonFill()` always returned the *frosted-panel*
+  capsule recipe (`#AAFFFFFF` light / `#33FFFFFF` dark). When the dialog panel falls back to its
+  flat fill (no backdrop, `LocalBlurEnabled = false`, system blur off, or API < 33) the light panel
+  is plain white, so the 67% white capsule disappears and the cancel/confirm buttons read as bare
+  text, while in dark theme the capsule stays visible. Light and dark dialogs looked different.
+- **Change (smallest possible):** `buttonFill()` returns the non-blur recipe the native style names,
+  `?couiColorContainer8` (`#14000000` / `#1AFFFFFF`, the existing `disabledButtonFill()`), whenever
+  `LocalBackdrop.current == null || !isBlurEnabled()` — the same condition `couiGlassSurface` uses to
+  choose the flat fallback. The frosted path is unchanged.
+- **Resulting behaviour:** SwitchTether pages run with `LocalBlurEnabled = false`, so every
+  `WindowAlertDialog` now shows grey (light) / translucent white (dark) capsules, matching the
+  ColorOS 17 non-blur dialog in both themes.
+- **Checked:** applies to the pinned `0fc9b44` and to upstream `main` `433ba6a` (2026-11-17), which
+  has no fix of its own for this.

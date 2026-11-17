@@ -215,6 +215,9 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `POST /v1/sessions/{id}/approvals/{requestId}` `{commandId, decision: "allow"|"allow_session"|"deny"|"abort", message?, updatedInput?}`
   - `409 conflict` with `details.resolvedBy` if the request was already answered (by the desktop or another device).
 - `POST /v1/sessions/{id}/answers/{requestId}` `{commandId, answers?, action?: "submit"|"cancel"|"decline"}` — Agent questions & elicitations (single-select, multi-select, free text, cancel/decline).
+  `answers` is keyed by question `id` (fallback: question text). Codex multi-select values are arrays of strings;
+  single-select / free text are strings, with commas preserved. Claude keeps its string answer format.
+  Option `value`, when present, is submitted instead of its display label. See `agent_question.json`.
 - `POST /v1/sessions/{id}/stop` `{commandId}` — stops a managed session's process (history stays readable).
 
 Control endpoints return `422 capability_unavailable` with `details.status` =
@@ -276,6 +279,8 @@ Session-level `capabilities` override the agent defaults (e.g. a managed session
 | Field | Values |
 |---|---|
 | `agent` | `claude_code`, `codex`, or any CC Switch session provider id (`gemini`, `opencode`, …) — history only |
+| `title` | The task title: Codex's thread name (including initial resume metadata and subsequent renames), else its indexed title / first prompt. Claude Code's `/rename` title (`custom-title`), else its generated `ai-title`, else the first prompt; `null` when none exists yet. Never the project name and never the registry slug in `~/.claude/sessions/<pid>.json`. Records written by sub-agents are ignored. Sub-agent work is nested under its tool call and is not a session |
+| `project` | Folder of `cwd`; an agent worktree (`<project>/.claude/worktrees/<name>`) maps to its containing project |
 | `origin` | `cli`, `vscode`, `desktop_app`, `managed` (started by SwitchTether), `unknown` |
 | `managed` | `true` only for sessions SwitchTether started. A session of the user's own process that SwitchTether is attached to through an opt-in takeover hook has its real origin, `managed: false` and `control: "full"` |
 | `terminalId` | optional; set for sessions running in the user's terminal window (`st-claude` / `st-codex`). The id of an **external** terminal (`/v1/terminals`, `external: true`) mirroring that window; prompts are answered there |
@@ -301,12 +306,12 @@ Session ids are opaque; the prefix is informative only.
   **updated in place** (same `id`, same `seq`, new `data`) — e.g. a tool call moving from
   `running` to `completed`, or streaming text growing. Live updates arrive on the event
   stream as topic `session.event` with `data = AgentEvent`; clients replace by `id`.
-- `parentId` links sub-agent events to the sub-agent's `tool_call`.
+- `parentId` links sub-agent events to their parent tool or subagent event. A child status/completion must not change the parent's task state or emit a parent completion notification.
 - Unknown `kind` values must be rendered with the generic fallback.
 
 | kind | data |
 |---|---|
-| `user_message` | `{ text, images, imageItems?, source: "desktop"|"phone"|"unknown", clientId? }` — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
+| `user_message` | `{ text, images, imageItems?, context?: [{kind: "file"|"selection", path, lines?}], source: "desktop"|"phone"|"unknown", clientId? }` — `text` never contains harness/IDE blocks (`<system-reminder>`, `<ide_opened_file>`, `<ide_selection>`, `<browser_instruction>`); what the IDE blocks said is in `context`. Background-task reports (`<task-notification>`) are never user messages — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
 | `assistant_message` | `{ text (Markdown), model? }` |
 | `reasoning` | `{ text, summary: bool }` — only when the agent actually exposes it |
 | `tool_call` | `{ callId, name, title, category, input, status, server?, tool? }` — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted` |
@@ -315,8 +320,8 @@ Session ids are opaque; the prefix is informative only.
 | `plan` | `{ items: [{ text, status: "pending"|"in_progress"|"completed" }] }` |
 | `approval_request` | `{ requestId, kind: "command"|"file_change"|"tool"|"network"|"other", title, detail, command?, cwd?, toolName?, input?, options: [{ id, label }] , resolved: false }` |
 | `approval_resolved` | `{ requestId, decision, by: "phone"|"desktop"|"other" }` |
-| `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, allowOther?, isSecret?, options: [{ label, description }] }] }` |
-| `subagent` | `{ agentId, description, status }` |
+| `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, required?, allowOther?, isSecret?, options: [{ label, description, value? }] }] }` |
+| `subagent` | `{ agentId, description, agentType?, model?, background, status: "running"|"completed"|"failed"|"interrupted", callId, summary?, result?, resultTruncated?, tokens?, toolUses?, durationMs?, finishedAt? }` — id `sa:<callId>`, `parentId` = the Agent/Task call. A background agent starts `running` and is updated in place when its task notification arrives. A notification for anything else (background shell, monitor) is a `system` event with `subtype: "task_notification"`, `{status?, text}` |
 | `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail? }` |
 | `error` | `{ message }` |
 | `system` | `{ subtype, text }` (compaction, retries, informational) |

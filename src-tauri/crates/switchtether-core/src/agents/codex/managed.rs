@@ -157,7 +157,8 @@ impl CodexConn {
 
     fn subagent_parent_id(t: &Value) -> Option<String> {
         s(t, "parentThreadId").or_else(|| {
-            t.pointer("/source/subAgent/thread_spawn/parent_thread_id")
+            t.pointer("/source/subagent/thread_spawn/parent_thread_id")
+                .or_else(|| t.pointer("/source/subAgent/thread_spawn/parent_thread_id"))
                 .and_then(|x| x.as_str())
                 .map(String::from)
         })
@@ -238,6 +239,13 @@ impl CodexConn {
                 let method = s(&v, "method");
                 match (v.get("id"), method) {
                     (Some(id), None) => {
+                        if let Some(thread) = v.pointer("/result/thread") {
+                            if let Some(t) =
+                                s(thread, "id").and_then(|id| self.threads.lock().get(&id).cloned())
+                            {
+                                t.on_thread_metadata(thread);
+                            }
+                        }
                         // Reply to one of our requests.
                         if let Some(id) = id.as_str() {
                             if let Some(tx) = self.replies.lock().remove(id) {
@@ -261,6 +269,15 @@ impl CodexConn {
                         }
                     }
                     (None, Some(m)) => {
+                        if m == "thread/started" {
+                            if let Some(thread) = v.pointer("/params/thread") {
+                                if let Some(t) = s(thread, "id")
+                                    .and_then(|id| self.threads.lock().get(&id).cloned())
+                                {
+                                    t.on_thread_metadata(thread);
+                                }
+                            }
+                        }
                         if let Some((t, subagent_tid)) = self.thread_of(&v) {
                             if let Some(tid) = subagent_tid {
                                 t.on_subagent_notification(
@@ -414,6 +431,8 @@ fn elicitation_to_questions(params: &Value) -> Vec<Value> {
                 "multiSelect": multi,
                 "allowOther": allow_other,
                 "isSecret": false,
+                "required": params.pointer("/requestedSchema/required").and_then(Value::as_array)
+                    .is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some(k))),
                 "options": options,
                 "schemaType": ty,
             })
@@ -566,6 +585,7 @@ impl ManagedCodex {
         {
             let mut st = me.state.lock();
             st.thread_id = started.get("thread").and_then(|t| s(t, "id"));
+            st.title = started.get("thread").and_then(|t| s(t, "name"));
             if let Some(m) = s(&started, "model") {
                 st.model = Some(m);
             }
@@ -862,7 +882,7 @@ impl ManagedCodex {
                             "id": id,
                             "header": q.get("header"),
                             "question": q.get("question"),
-                            "multiSelect": false,
+                            "multiSelect": q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false),
                             "allowOther": is_other,
                             "isSecret": is_secret,
                             "options": opts,
@@ -1338,6 +1358,28 @@ impl ManagedCodex {
                     e.data["status"] = json!(mapped);
                 });
             }
+            "item/agentMessage/delta" => {
+                let (Some(item_id), Some(delta)) = (s(&p, "itemId"), s(&p, "delta")) else {
+                    return;
+                };
+                let eid = format!("cx-item-{item_id}");
+                let mut log = self.log.lock();
+                let existing = log
+                    .get(&eid)
+                    .and_then(|e| e.data["text"].as_str())
+                    .unwrap_or("");
+                let mut draft = EventDraft::new(
+                    &eid,
+                    "assistant_message",
+                    crate::util::now_rfc3339(),
+                    json!({ "text": format!("{existing}{delta}") }),
+                );
+                draft.parent_id = Some(sa_id);
+                draft.turn_id = s(&p, "turnId");
+                draft.streaming = true;
+                log.upsert(draft, true);
+            }
+            "item/commandExecution/outputDelta" => self.on_notification(method, p),
             "item/started" | "item/completed" => {
                 if let Some(item) = p.get("item") {
                     let done = method == "item/completed";
@@ -1353,6 +1395,15 @@ impl ManagedCodex {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn on_thread_metadata(&self, thread: &Value) {
+        if let Some(title) =
+            s(thread, "name").and_then(|t| crate::agents::claude::transcript::clean_title(Some(t)))
+        {
+            self.state.lock().title = Some(title);
+            self.system("Conversation title updated");
         }
     }
 
@@ -1456,6 +1507,7 @@ impl ManagedCodex {
             }
             "thread/name/updated" => {
                 self.state.lock().title = s(&p, "name").or(s(&p, "threadName"));
+                self.system("Conversation title updated");
             }
             "serverRequest/resolved" => {
                 // Another client (or Codex itself) resolved a request.
@@ -1920,6 +1972,17 @@ mod version_tests {
         assert_eq!(super::parse_version(""), (0, 0, 0));
     }
 
+    #[test]
+    fn subagent_source_accepts_both_wire_spellings() {
+        for key in ["subagent", "subAgent"] {
+            let thread = serde_json::json!({"source": {key: {"thread_spawn": {"parent_thread_id": "parent"}}}});
+            assert_eq!(
+                super::CodexConn::subagent_parent_id(&thread).as_deref(),
+                Some("parent")
+            );
+        }
+    }
+
     #[tokio::test]
     async fn codex_user_input_elicitation_and_subagent_routing() {
         use super::*;
@@ -1942,6 +2005,14 @@ mod version_tests {
             .lock()
             .insert("th-parent".into(), parent.clone());
 
+        conn.on_frame(json!({"t":"out", "line": json!({"id":1,"result":{"thread":{"id":"th-parent","name":"Fix login"}}}).to_string()})).await;
+        assert_eq!(parent.title().as_deref(), Some("Fix login"));
+        parent.on_notification(
+            "thread/name/updated",
+            json!({"threadId":"th-parent", "threadName":"Renamed task"}),
+        );
+        assert_eq!(parent.title().as_deref(), Some("Renamed task"));
+
         // 1. Subagent thread discovered via thread/started is NOT returned as a top-level thread.
         let sub_frame = json!({
             "t": "out",
@@ -1950,7 +2021,7 @@ mod version_tests {
                 "params": {
                     "thread": {
                         "id": "th-child",
-                        "parentThreadId": "th-parent",
+                        "source": { "subagent": { "thread_spawn": { "parent_thread_id": "th-parent" } } },
                         "agentRole": "explorer",
                         "agentNickname": "Scout"
                     }
@@ -1999,7 +2070,7 @@ mod version_tests {
                         "isOther": true,
                         "isSecret": false,
                         "options": [{ "label": "staging", "description": "Staging" }]
-                    }]
+                    }, {"id":"checks", "question":"Choose checks", "multiSelect":true, "options":[{"label":"Unit, integration"},{"label":"Lint"}]}]
                 }),
             )
             .await;
@@ -2015,7 +2086,7 @@ mod version_tests {
                 "answer",
                 None,
                 None,
-                Some(json!({ "q1": "staging" })),
+                Some(json!({ "q1": "staging", "checks": ["Unit, integration", "Lint"] })),
                 "phone",
             )
             .await
@@ -2025,6 +2096,10 @@ mod version_tests {
         let inner: Value = serde_json::from_str(inj_v["line"].as_str().unwrap()).unwrap();
         assert_eq!(inner["id"], 42);
         assert_eq!(inner["result"]["answers"]["q1"]["answers"][0], "staging");
+        assert_eq!(
+            inner["result"]["answers"]["checks"]["answers"],
+            json!(["Unit, integration", "Lint"])
+        );
         conn.on_frame(json!({ "t": "accepted", "line": inj_v["line"] }))
             .await;
         assert!(ans_task.await.unwrap().is_ok());

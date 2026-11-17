@@ -48,6 +48,7 @@ class LiveUpdates(
     private val enabled: () -> Boolean,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    private val startedAtMs = clock()
     private val prefs = context.getSharedPreferences("live_pins", Context.MODE_PRIVATE)
     private val states = ConcurrentHashMap<String, PinnedSessionState>()
     private val posted = ConcurrentHashMap<String, Int>()
@@ -59,6 +60,7 @@ class LiveUpdates(
     private val text = ResourceLiveText(context)
     private val unpinned = ConcurrentHashMap.newKeySet<String>()
     private val manualPins = ConcurrentHashMap.newKeySet<String>()
+    private val restoredPins = ConcurrentHashMap.newKeySet<String>()
     private val pinnedAt = ConcurrentHashMap<String, Long>()
 
     /** Running tasks that currently have no slot, newest activity first when a slot frees. */
@@ -97,7 +99,10 @@ class LiveUpdates(
                     "session.upserted" -> runCatching { ProtocolJson.decodeFromJsonElement(SessionSummary.serializer(), (data["session"] as? JsonObject) ?: data) }.getOrNull()
                         ?.let(::onUpsert)
                     "session.event" -> runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()
-                        ?.let { e -> mutate(e.sessionId) { LiveReducer.onEvent(it, e, clock()) } }
+                        ?.let { e ->
+                            val at = runCatching { java.time.Instant.parse(e.ts).toEpochMilli() }.getOrNull()
+                            if (at == null || at >= startedAtMs) mutate(e.sessionId) { LiveReducer.onEvent(it, e, clock()) }
+                        }
                     "session.removed" -> (data["sessionId"] ?: data["id"])?.toString()?.trim('"')?.let { unpin(it, userInitiated = false) }
                 }
             }
@@ -116,6 +121,8 @@ class LiveUpdates(
     private fun loadServerState(serverId: String) {
         currentServerId = serverId
         _pins.value = prefs.getStringSet(key(serverId), emptySet()).orEmpty().toSet()
+        restoredPins.clear()
+        restoredPins.addAll(_pins.value)
         unpinned.clear()
         unpinned.addAll(prefs.getStringSet(unpinnedKey(serverId), emptySet()).orEmpty())
         manualPins.clear()
@@ -126,6 +133,11 @@ class LiveUpdates(
     }
 
     private fun onUpsert(s: SessionSummary) {
+        // A persisted pin is a subscription, not evidence of a turn completing now.
+        if (restoredPins.remove(s.id) && (!s.isLive || s.status !in setOf("busy", "waiting") && s.waitingFor == null)) {
+            unpin(s.id, userInitiated = false, refill = false)
+            return
+        }
         if (s.id !in _pins.value) {
             if (s.isLive) liveSeen[s.id] = s else liveSeen.remove(s.id)
             maybeAutoPin(s)
@@ -192,8 +204,12 @@ class LiveUpdates(
     private suspend fun refresh(id: String) {
         val api = conn.apiOrNull() ?: return
         val detail = runCatching { api.session(id) }.getOrNull() ?: return
-        detail.pendingRequests.forEach { e -> mutate(id) { LiveReducer.onEvent(it, e, clock()) } }
+        if (!detail.summary.isLive) {
+            unpin(id, userInitiated = false, refill = false)
+            return
+        }
         onUpsert(detail.summary)
+        detail.pendingRequests.forEach { e -> mutate(id) { LiveReducer.onEvent(it, e, clock()) } }
     }
 
     /** Pins a session; false when [MAX_PINS] are already pinned. */
@@ -219,7 +235,7 @@ class LiveUpdates(
         pinnedAt[summary.id] = clock()
         setPins(_pins.value + summary.id)
         states[summary.id] = LiveReducer.onUpsert(
-            PinnedSessionState(summary.id, summary.title ?: summary.project ?: summary.id, summary.agent, phase = LivePhase.DONE, phaseSinceMs = 0),
+            PinnedSessionState(summary.id, io.github.tianli0.switchtether.domain.SessionNaming.title(summary) ?: io.github.tianli0.switchtether.domain.SessionNaming.projectName(summary) ?: summary.id, summary.agent, phase = LivePhase.DONE, phaseSinceMs = 0),
             summary,
             clock(),
         ).let { if (it.phase == LivePhase.DONE && summary.status != "busy") it.copy(phaseSinceMs = 0) else it }

@@ -29,6 +29,15 @@ class ProtocolFixturesTest {
     }
 
     @Test
+    fun codexQuestionFixture() {
+        val event = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.AgentEvent.serializer(), fixture("agent_question.json"))
+        assertEquals("question", event.kind)
+        val questions = event.data["questions"] as kotlinx.serialization.json.JsonArray
+        assertEquals("true", questions[1].jsonObject["multiSelect"].toString())
+        assertEquals("false", questions[1].jsonObject["required"].toString())
+    }
+
+    @Test
     fun hello() {
         val h = ProtocolJson.decodeFromString(Hello.serializer(), fixture("hello.json"))
         assertEquals(1, h.protocolVersion)

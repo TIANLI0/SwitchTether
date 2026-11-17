@@ -31,6 +31,8 @@ import io.github.suqi8.coui.kmp.basic.MaterialStrokeParams
 import io.github.suqi8.coui.kmp.basic.SpotLightDefaults
 import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.TextButtonColors
+import io.github.suqi8.coui.kmp.blur.LocalBackdrop
+import io.github.suqi8.coui.kmp.blur.isBlurEnabled
 import io.github.suqi8.coui.kmp.core.ExperimentalCOUIApi
 import io.github.suqi8.coui.kmp.theme.COUITheme
 
@@ -710,9 +712,18 @@ object DialogButtonBarDefaults {
      * blue-tinted (44,49,55) one in Settings — 20% white either way, the `#33FFFFFF` of the recipe.
      * Using the light value in dark theme renders the capsule at (185,185,185), so light the white
      * label all but disappears.
+     *
+     * Both values describe a capsule over the *frosted* panel. When the panel falls back to its
+     * flat fill (no backdrop, blur switched off, or no runtime shaders) the capsule takes the
+     * non-blur recipe the style itself names, `?couiColorContainer8`: a 67% white layer over the
+     * white light fallback panel would be invisible, while the dark one would still show.
      */
     @Composable
-    fun buttonFill(): Color = if (isDarkPanel()) DarkButtonFill else LightButtonFill
+    fun buttonFill(): Color = when {
+        !isFrostedPanel() -> disabledButtonFill()
+        isDarkPanel() -> DarkButtonFill
+        else -> LightButtonFill
+    }
 
     /**
      * The fill of a disabled non-recommended capsule.
@@ -739,6 +750,10 @@ object DialogButtonBarDefaults {
     /** The capsule recipes switch on the night configuration, read here off the theme background. */
     @Composable
     private fun isDarkPanel(): Boolean = COUITheme.colorScheme.background.luminance() < 0.5f
+
+    /** Mirrors the condition under which `couiGlassSurface` paints the panel blurred. */
+    @Composable
+    private fun isFrostedPanel(): Boolean = LocalBackdrop.current != null && isBlurEnabled()
 
     /**
      * The colours of an ordinary (non-recommended) capsule: the translucent fill with the

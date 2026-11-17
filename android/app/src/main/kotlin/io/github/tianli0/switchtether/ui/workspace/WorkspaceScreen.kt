@@ -81,7 +81,7 @@ private fun terminalViewModel(): TerminalViewModel =
 private fun filesViewModel(): FilesViewModel {
     val context = LocalContext.current
     return containerViewModel { c ->
-        FilesViewModel(c.connection, c.stepUpGate, { context.applicationContext.contentResolver }) {
+        FilesViewModel(c.connection, c.stepUpGate, { context.applicationContext.contentResolver }, c.fileStore) {
             c.sessions.list(SessionQuery()).items.firstOrNull { it.isLive && it.cwd != null }?.cwd
         }
     }
@@ -211,11 +211,11 @@ fun TerminalPage(initialId: String?, onBack: () -> Unit) {
 }
 
 @Composable
-fun FilesPage(onBack: () -> Unit) {
+fun FilesPage(onBack: () -> Unit, onOpenDownloads: () -> Unit = {}) {
     val vm = filesViewModel()
     val st by vm.state.collectAsStateWithLifecycle()
     Page(title = stringResource(R.string.ws_files), onBack = onBack, large = false, modifier = Modifier.imePadding()) {
-        FilesPane(st, vm)
+        FilesPane(st, vm, onOpenDownloads)
     }
 }
 

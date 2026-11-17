@@ -212,13 +212,21 @@ object InlineMarkdown {
         }
         if (pDepth != 0) return null
         val text = s.substring(start + 1, k)
-        val url = s.substring(k + 2, j).trim().substringBefore(' ').removePrefix("<").removeSuffix(">")
+        val target = s.substring(k + 2, j).trim()
+        val url = if (target.startsWith("<") && target.contains('>')) target.substringAfter('<').substringBeforeLast('>') else target.substringBefore(' ')
         return Triple(text, url, j + 1)
     }
 
+    /** Desktop files are handled by the caller; unknown application schemes stay inert. */
+    fun isSupportedLink(url: String): Boolean = url.isNotBlank() && (
+        url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://") ||
+            (!url.startsWith("#") && !url.startsWith("//") && !Regex("^[A-Za-z][A-Za-z0-9+.-]*:").containsMatchIn(url)) ||
+            Regex("^[A-Za-z]:[\\\\/]").containsMatchIn(url)
+        )
+
     private fun AnnotatedString.Builder.appendLink(text: String, url: String, colors: InlineColors, onLink: ((String) -> Unit)?) {
         val style = TextLinkStyles(SpanStyle(color = colors.link, textDecoration = TextDecoration.Underline))
-        if (onLink != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+        if (onLink != null && isSupportedLink(url)) {
             pushLink(LinkAnnotation.Clickable(tag = url, styles = style) { onLink(url) })
             append(text)
             pop()

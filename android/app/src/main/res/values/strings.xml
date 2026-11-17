@@ -341,7 +341,7 @@
     <string name="usage_success_n">success %1$s</string>
     <string name="usage_trend_hourly">By hour</string>
     <string name="usage_trend_daily">By day</string>
-    <string name="usage_tz_note">Days and hours follow the computer\'s time zone, like the desktop app.</string>
+    <string name="usage_tz_note">Daily and hourly totals follow the computer\'s time zone, like the desktop app. Request times and quota resets use this phone\'s time zone.</string>
     <string name="usage_unknown_provider">Unknown provider</string>
     <string name="usage_session_provider">%1$s · session logs</string>
     <string name="usage_session_account_provider">%1$s · account (OAuth)</string>
@@ -394,4 +394,17 @@
     <string name="perm_default_short">Ask first</string>
     <string name="perm_accept_edits_short">Auto-edit</string>
     <string name="perm_plan_short">Plan only</string>
+    <string name="quota_tier_5h">5-hour window</string>
+    <string name="quota_tier_week">Weekly</string>
+    <string name="quota_tier_month">Monthly</string>
+    <string name="quota_tier_credits">Credits</string>
+    <string name="quota_day_today">today %1$s</string>
+    <string name="quota_day_tomorrow">tomorrow %1$s</string>
+    <string name="quota_resets_at">Resets %1$s · in %2$s</string>
+    <string name="quota_reset_due">Resetting now</string>
+    <string name="quota_left_minutes">%1$d min</string>
+    <string name="quota_left_hours">%1$d h %2$d min</string>
+    <string name="quota_left_days">%1$d d %2$d h</string>
+    <string name="usage_logs_failed">Could not load the request log.</string>
+    <string name="usage_logs_failed_more">Loading failed. Tap to retry</string>
 </resources>

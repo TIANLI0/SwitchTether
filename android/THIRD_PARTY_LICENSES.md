@@ -14,6 +14,7 @@ Settings → About → Open source licenses (`LicensesScreen`).
 | ↳ COUI-Kit (`ItosEO/COUI-Kit`) ported files | — | MPL-2.0 | `kit/**` files keep their MPL-2.0 headers |
 | Compose Multiplatform foundation (`org.jetbrains.compose.foundation`) | 1.11.1 | Apache-2.0 | resolves to androidx.compose 1.11.2 |
 | AndroidX Compose UI / foundation / runtime | 1.11.2 | Apache-2.0 | |
+| AndroidX Media3 ExoPlayer (`androidx.media3:media3-exoplayer`) | 1.9.0 | Apache-2.0 | In-app video / audio preview of downloaded or cached files; no UI module, no network use |
 | JetBrains `material3-window-size-class` | 1.9.0 | Apache-2.0 | coui-ui dependency |
 | `com.materialkolor:material-color-utilities` | 5.0.0 | Apache-2.0 | coui-ui dependency |
 | `androidx.navigationevent:navigationevent-compose` | 1.1.2 | Apache-2.0 | coui-ui dependency |

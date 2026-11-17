@@ -21,14 +21,16 @@ val ClaudeBrand = Color(0xFFD97757)
  * LobeHub Icons (MIT), see android/third_party/brand-icons/NOTICE.md.
  */
 @Composable
-fun AgentBadge(agent: String, modifier: Modifier = Modifier, size: Dp = 28.dp, statusColor: Color? = null) {
+fun AgentBadge(agent: String, modifier: Modifier = Modifier, size: Dp = 28.dp, statusColor: Color? = null, running: Boolean = false) {
     val label = Formatters.agentLabel(agent)
-    when (agent) {
-        "claude_code", "claude" ->
-            AgentAvatar(painterResource(R.drawable.ic_agent_claude), ClaudeBrand, label, modifier, size, statusColor)
-        "codex" ->
-            AgentAvatar(painterResource(R.drawable.ic_agent_openai), COUITheme.colorScheme.onSurface, label, modifier, size, statusColor)
-        else ->
-            AgentAvatar(rememberVectorPainter(AppIcons.SubAgent), COUITheme.colorScheme.primary, label, modifier, size, statusColor)
+    androidx.compose.foundation.layout.Box(modifier) {
+        if (running) io.github.suqi8.coui.kmp.basic.RotatingProgressIndicator(
+            color = COUITheme.colorScheme.primary, size = size, ringDiameter = size, strokeWidth = 1.5.dp,
+        )
+        when (agent) {
+            "claude_code", "claude" -> AgentAvatar(painterResource(R.drawable.ic_agent_claude), ClaudeBrand, label, Modifier, size, statusColor)
+            "codex" -> AgentAvatar(painterResource(R.drawable.ic_agent_openai), COUITheme.colorScheme.onSurface, label, Modifier, size, statusColor)
+            else -> AgentAvatar(rememberVectorPainter(AppIcons.SubAgent), COUITheme.colorScheme.primary, label, Modifier, size, statusColor)
+        }
     }
 }

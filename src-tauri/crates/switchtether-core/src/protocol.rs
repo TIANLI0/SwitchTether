@@ -83,6 +83,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(resp.verification_code.len(), 6);
+        let question: crate::agents::model::AgentEvent = serde_json::from_str(
+            &std::fs::read_to_string(root.join("agent_question.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(question.kind, "question");
+        assert_eq!(question.data["questions"][1]["multiSelect"], true);
+        assert_eq!(question.data["questions"][1]["required"], false);
     }
 
     #[test]
