@@ -89,9 +89,41 @@ class FakeSessionRepository : SessionRepository {
         text: String,
         commandId: String,
         images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput>,
+        attachments: List<String>,
     ): CommandOutcome {
         sent += commandId to text
+        sentAttachments[commandId] = attachments
         return nextOutcome(commandId)
+    }
+
+    /** commandId -> attachment ids of each sent message. */
+    val sentAttachments = mutableMapOf<String, List<String>>()
+    /** attachment id -> bytes received (fake desktop store). */
+    val uploads = mutableMapOf<String, ByteArray>()
+    private val announced = mutableMapOf<String, Long>()
+    val cancelledAttachments = mutableListOf<String>()
+    /** Answers `beginAttachment` with this exception instead (e.g. 404 from an old desktop). */
+    var attachmentError: Exception? = null
+
+    override suspend fun beginAttachment(id: String, name: String, size: Long, mediaType: String?): io.github.tianli0.switchtether.remote.protocol.AttachmentView {
+        attachmentError?.let { throw it }
+        val aid = "att-${announced.size + 1}"
+        announced[aid] = size
+        uploads[aid] = ByteArray(0)
+        return io.github.tianli0.switchtether.remote.protocol.AttachmentView(aid, name, size, 0, false, mediaType.orEmpty())
+    }
+
+    override suspend fun uploadAttachmentChunk(id: String, attachmentId: String, offset: Long, bytes: ByteArray): io.github.tianli0.switchtether.remote.protocol.AttachmentView {
+        val have = uploads.getValue(attachmentId)
+        check(offset == have.size.toLong()) { "offset" }
+        val now = have + bytes
+        uploads[attachmentId] = now
+        val size = announced.getValue(attachmentId)
+        return io.github.tianli0.switchtether.remote.protocol.AttachmentView(attachmentId, "", size, now.size.toLong(), now.size.toLong() == size, "")
+    }
+
+    override suspend fun cancelAttachment(id: String, attachmentId: String) {
+        cancelledAttachments += attachmentId
     }
 
     override suspend fun interrupt(id: String, commandId: String) = nextOutcome(commandId)

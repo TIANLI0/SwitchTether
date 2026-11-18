@@ -5470,8 +5470,10 @@
       "verify": "확인 코드(휴대폰과 일치해야 함):",
       "newCode": "새 코드",
       "step1": "휴대폰에서 SwitchTether를 엽니다.",
-      "step2": "'컴퓨터 추가'를 누르고 이 코드를 스캔합니다.",
+      "step2": "'컴퓨터 추가'를 누르고 이 코드를 스캔하거나, '근처 컴퓨터'에서 이 컴퓨터를 선택하고 아래 페어링 코드를 입력합니다.",
       "step3": "두 화면의 확인 코드가 같은지 확인합니다.",
+      "codeLabel": "페어링 코드",
+      "codeHint": "스캔할 수 없을 때: 휴대폰의 '근처 컴퓨터'에서 이 컴퓨터를 선택(또는 주소 입력)한 뒤 이 코드를 입력합니다.",
       "computer": "컴퓨터",
       "addresses": "주소",
       "done": "완료"
@@ -5527,6 +5529,13 @@
         "label": "터미널 · st-claude / st-codex",
         "description": "st-claude와 st-codex 명령을 추가합니다({{dir}}). 휴대폰에서 제어할 세션은 claude / codex 대신 이 명령으로 시작하세요. claude와 codex 자체는 그대로입니다.",
         "enabledToast": "켰습니다. 새 터미널에서 st-claude 또는 st-codex를 실행하세요."
+      },
+      "dsh": {
+        "label": "DeepSeek Harness · Web",
+        "description": "dsh 자체 플러그인 관리(dsh plugin)로 SwitchTether 브리지 플러그인을 web 프로필에 설치합니다. 이후 휴대폰에서 dsh web의 세션에 메시지 전송, 중단, 승인을 할 수 있습니다(웹과 휴대폰 중 먼저 답한 쪽이 적용). 먼저 프로필의 매니페스트와 패치 파일을 백업하고, 끄면 dsh plugin remove로 제거합니다. dsh web을 다시 시작하면 적용됩니다. DeepSeek Harness 데스크톱 앱은 지원하지 않습니다.",
+        "unavailable": "DeepSeek Harness(dsh)를 찾을 수 없습니다.",
+        "noProfile": "DeepSeek Harness의 web 프로필이 아직 초기화되지 않았습니다. 먼저 dsh web을 한 번 실행하세요.",
+        "enabledToast": "켰습니다. dsh web을 다시 시작하면 그곳에서 연 세션을 휴대폰에서 이어받을 수 있습니다."
       }
     },
     "basedOn": "CC Switch v{{version}} 기반",

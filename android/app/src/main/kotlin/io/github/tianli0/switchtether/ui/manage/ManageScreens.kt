@@ -268,7 +268,7 @@ fun UsageScreen(onBack: () -> Unit) {
         )
         UsageContent(state, vm::load, vm::setMetric, onMoreLogs = vm::loadMoreLogs, onOpenLog = vm::openLog)
     }
-    RequestLogSheet(state.selectedLog, java.time.ZoneId.systemDefault(), onDismiss = { vm.openLog(null) })
+    RequestLogSheet(state.selectedLog, state.zone, onDismiss = { vm.openLog(null) })
 }
 
 @Composable
@@ -344,7 +344,7 @@ fun UsageContent(
                 item(key = "logs") {
                     io.github.tianli0.switchtether.ui.common.GroupCard {
                         logs.forEachIndexed { i, l ->
-                            RequestLogRow(l, java.time.ZoneId.systemDefault(), io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, logs.size), onClick = { onOpenLog(l) })
+                            RequestLogRow(l, state.zone, io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, logs.size), onClick = { onOpenLog(l) })
                         }
                     }
                 }

@@ -95,6 +95,10 @@ data class FilesUiState(
     val transfer: TransferState? = null,
     /** A media/binary file opened from a local (cache or download) copy; takes over the pane like [file]. */
     val viewer: ViewerState? = null,
+    /** Leaving the editor with unsaved changes asks first. */
+    val confirmDiscard: Boolean = false,
+    /** Pull-to-refresh of the current folder is running (the list stays visible). */
+    val refreshing: Boolean = false,
     // git
     val repo: String? = null,
     val git: Loadable<RepoStatus>? = null,
@@ -144,7 +148,8 @@ class FilesViewModel(
 
     fun browse(path: String) {
         val api = api() ?: return
-        _state.update { it.copy(listing = Loadable.Loading, results = null) }
+        // Opening a folder always shows that folder: drop a file / viewer left open from before.
+        _state.update { it.copy(listing = Loadable.Loading, results = null, file = null, viewer = null, editing = false, conflict = null, confirmDiscard = false) }
         viewModelScope.launch {
             val r = loadable { api.fsList(path, _state.value.showHidden) }
             _state.update { it.copy(listing = r) }
@@ -159,6 +164,37 @@ class FilesViewModel(
     fun currentDir(): String? = (_state.value.listing as? Loadable.Ready)?.value?.path
 
     fun setQuery(q: String) = _state.update { it.copy(query = q) }
+
+    /** Leaves search: the folder list comes back. */
+    fun clearSearch() = _state.update { it.copy(query = "", results = null) }
+
+    /** Reloads the current folder in place (pull-to-refresh). */
+    fun refreshListing() {
+        val api = api() ?: return
+        val path = currentDir() ?: return loadRoots()
+        if (_state.value.refreshing) return
+        _state.update { it.copy(refreshing = true) }
+        viewModelScope.launch {
+            val r = loadable { api.fsList(path, _state.value.showHidden) }
+            _state.update { it.copy(listing = r, refreshing = false) }
+        }
+    }
+
+    /** The editor has changes that are not on the desktop yet. */
+    val hasUnsavedEdits: Boolean
+        get() = _state.value.let { st -> st.editing && st.editText != (st.file as? Loadable.Ready)?.value?.text.orEmpty() }
+
+    /** Back from a file: unsaved edits ask first; otherwise leave the editor, then the file. */
+    fun requestCloseFile() {
+        when {
+            hasUnsavedEdits -> _state.update { it.copy(confirmDiscard = true) }
+            _state.value.editing -> cancelEdit()
+            else -> closeFile()
+        }
+    }
+
+    fun discardEdits() = _state.update { it.copy(confirmDiscard = false, editing = false) }
+    fun keepEditing() = _state.update { it.copy(confirmDiscard = false) }
 
     fun setSearchContent(v: Boolean) = _state.update { it.copy(searchContent = v) }
 

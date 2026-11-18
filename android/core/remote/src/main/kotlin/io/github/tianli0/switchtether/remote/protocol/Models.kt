@@ -40,8 +40,9 @@ data class Hello(
 
 @Serializable
 data class PairRequest(
-    val pairingId: String,
-    val secret: String,
+    /** QR / link pairing: session id + one-time secret (null when pairing by [code]). */
+    val pairingId: String? = null,
+    val secret: String? = null,
     val deviceName: String,
     val platform: String = "android",
     val osVersion: String? = null,
@@ -49,6 +50,8 @@ data class PairRequest(
     val protocolVersion: Int = CLIENT_PROTOCOL_VERSION,
     /** Base64 (standard) SubjectPublicKeyInfo DER of the Keystore step-up key, or null. */
     val stepUpPublicKey: String? = null,
+    /** Code pairing: the 6-digit code shown on the desktop. */
+    val code: String? = null,
 )
 
 @Serializable
@@ -160,6 +163,10 @@ data class StatusView(
     val platform: String? = null,
     val deviceId: String? = null,
     val stepUpGrants: List<StepUpGrant> = emptyList(),
+    /** The desktop's current address candidates (merged into the stored hosts on connect). */
+    val hosts: List<String> = emptyList(),
+    /** Wake-on-LAN targets of the desktop's LAN interfaces. */
+    val wake: List<io.github.tianli0.switchtether.remote.wake.WakeTarget> = emptyList(),
 )
 
 @Serializable
@@ -351,6 +358,23 @@ data class SendMessageBody(
     val commandId: String,
     val text: String,
     val images: List<ImageInput> = emptyList(),
+    /** Ids of files uploaded with `POST /v1/sessions/{id}/attachments` (newer desktops). */
+    val attachments: List<String> = emptyList(),
+)
+
+/** `POST /v1/sessions/{id}/attachments`: announce a file attached to the next message. */
+@Serializable
+data class BeginAttachmentBody(val name: String, val size: Long, val mediaType: String? = null)
+
+/** Upload state of an attachment; `complete` once every byte arrived. */
+@Serializable
+data class AttachmentView(
+    val attachmentId: String = "",
+    val name: String = "",
+    val size: Long = 0,
+    val received: Long = 0,
+    val complete: Boolean = false,
+    val mediaType: String = "",
 )
 
 @Serializable

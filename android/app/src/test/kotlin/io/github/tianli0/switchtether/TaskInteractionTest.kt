@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether
 
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -94,15 +97,23 @@ class TaskInteractionTest {
         val data = """{"callId":"c1","name":"shell","title":"long wrapper","category":"shell","status":"completed","input":{"command":${ProtocolJson.encodeToString(kotlinx.serialization.serializer<String>(), command)},"cwd":"D:/projects/SwitchTether"}}"""
         val item = AgentEventLog.of(listOf(event("cmd", 1, "tool_call", data))).renderItems().single()
         rule.setContent { SwitchTetherTheme(mode) {
-            Column(Modifier.fillMaxSize().background(COUITheme.colorScheme.surface).verticalScroll(rememberScrollState()).padding(12.dp)) { ToolCall(item, context()) }
+            // The app provides these labels at its root (SwitchTetherRoot).
+            androidx.compose.runtime.CompositionLocalProvider(
+                io.github.tianli0.switchtether.ui.code.LocalCodeCopyLabel provides "Copy",
+                io.github.tianli0.switchtether.ui.code.LocalCodeWrapLabels provides ("Wrap lines" to "Horizontal scroll"),
+            ) {
+                Column(Modifier.fillMaxSize().background(COUITheme.colorScheme.surface).verticalScroll(rememberScrollState()).padding(12.dp)) { ToolCall(item, context()) }
+            }
         } }
         rule.onNodeWithText("Get-Content", substring = true).performClick()
-        rule.onNodeWithText("Copy full command").assertExists()
+        // Wrap and copy are icons in the command block's header, not text buttons above it.
+        rule.onAllNodesWithContentDescription("Copy").onFirst().assertExists()
+        rule.onNodeWithText("Copy full command").assertDoesNotExist()
         rule.onNodeWithText(command).assertExists()
         rule.onNodeWithText("Working directory").assertExists()
         screenshot("long-command-${mode.name.lowercase()}")
-        rule.onNodeWithText("Horizontal scroll").performClick()
-        rule.onNodeWithText("Wrap lines").assertExists()
+        rule.onNodeWithContentDescription("Horizontal scroll").performClick()
+        rule.onNodeWithContentDescription("Wrap lines").assertExists()
     }
     @Test fun commandLight() = command(ThemeMode.LIGHT)
     @Test fun commandDark() = command(ThemeMode.DARK)

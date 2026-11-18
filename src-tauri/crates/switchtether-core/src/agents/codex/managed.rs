@@ -1825,6 +1825,11 @@ impl ManagedSession for ManagedCodex {
             e.data["resolved"] = json!(true);
             e.data["decision"] = json!(decision);
             e.data["by"] = json!(by);
+            if matches!(decision, "answer" | "allow") {
+                if let Some(a) = &answers {
+                    crate::agents::model::record_answers(&mut e.data, a);
+                }
+            }
         });
         if self.pending.lock().is_empty() {
             self.set_status("busy");

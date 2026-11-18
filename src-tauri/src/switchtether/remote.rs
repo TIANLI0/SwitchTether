@@ -416,6 +416,7 @@ impl RemoteRuntime {
                 .build();
         Ok(json!({
             "pairingId": offer.pairing_id,
+            "code": offer.code,
             "uri": offer.uri,
             "expiresAt": offer.expires_at,
             "qrSvg": svg,

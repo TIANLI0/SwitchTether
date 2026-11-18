@@ -680,3 +680,31 @@ async fn server_restart_keeps_devices() {
         "revocation must survive restart"
     );
 }
+
+#[tokio::test]
+async fn pairing_with_code_and_status_reports_hosts() {
+    let f = start().await;
+    let offer = f.handle.ctx.pairing.create(vec![], 1, &f.server_fp, "x");
+    let body = |code: &str| json!({"code": code, "deviceName":"P","platform":"android","protocolVersion":1});
+    // A wrong code is refused like a wrong secret.
+    let wrong = if offer.code == "000000" {
+        "000001"
+    } else {
+        "000000"
+    };
+    let (s, _) = Client::new(&f).post("/v1/pair", body(wrong)).await;
+    assert_eq!(s, 403);
+    let c = Client::new(&f);
+    let spaced = format!("{} {}", &offer.code[..3], &offer.code[3..]);
+    let (s, v) = c.post("/v1/pair", body(&spaced)).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["serverFingerprint"], f.server_fp);
+    let (s, v) = c.get("/v1/status").await;
+    assert_eq!(s, 200, "{v}");
+    assert!(v["hosts"].is_array(), "{v}");
+    assert!(v["wake"].is_array(), "{v}");
+    // Single use.
+    let (s, _) = Client::new(&f).post("/v1/pair", body(&offer.code)).await;
+    assert_eq!(s, 410);
+    f.handle.shutdown().await;
+}

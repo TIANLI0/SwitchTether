@@ -41,6 +41,9 @@ pub struct ManagedClaudeOptions {
     pub resume_from: Option<String>,
     /// With `resume_from`: start a fork (new session id) instead of continuing it.
     pub fork: bool,
+    /// Extra directories Claude Code may read without asking (`--add-dir`): the folder of files
+    /// attached from the phone.
+    pub add_dirs: Vec<PathBuf>,
 }
 
 struct Pending {
@@ -57,6 +60,9 @@ pub struct ManagedClaude {
     parser: Mutex<ClaudeParser>,
     stdin: tokio::sync::Mutex<Option<ChildStdin>>,
     child: Mutex<Option<Child>>,
+    /// Pid of the spawned process (managed mode). The process also registers itself in Claude
+    /// Code's live registry, where it must not show up as a second, observe-only session.
+    pid: Option<u32>,
     pending: Mutex<HashMap<String, Pending>>,
     /// request ids already answered → who answered (for 409 details).
     resolved: Mutex<HashMap<String, String>>,
@@ -88,6 +94,9 @@ struct State {
 impl ManagedClaude {
     pub fn native_session_id(&self) -> Option<String> {
         self.state.lock().native_session_id.clone()
+    }
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
     }
     pub fn status(&self) -> &'static str {
         self.state.lock().status
@@ -150,12 +159,16 @@ impl ManagedClaude {
             cmd.args(["--permission-mode", pm]);
         }
         if let Some(r) = &options.resume_from {
-            // Always fork: resuming a session in place while another process
-            // might hold it would interleave two writers in one transcript.
+            // Same conversation by default ("恢复会话"); the hub refuses that while the
+            // original process is busy / waiting, so two writers never interleave in one
+            // transcript. A fork (new id, same history) is the opt-in alternative.
             cmd.args(["--resume", r]);
             if options.fork {
                 cmd.arg("--fork-session");
             }
+        }
+        for d in options.add_dirs.iter().filter(|d| d.is_dir()) {
+            cmd.arg("--add-dir").arg(d);
         }
         cmd.current_dir(&options.cwd)
             .env("CLAUDE_CODE_ENTRYPOINT", "sdk-switchtether")
@@ -174,7 +187,11 @@ impl ManagedClaude {
             .take()
             .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
         let stderr = child.stderr.take();
+        let pid = child.id();
         let now = crate::util::now_ms();
+        // Continuing in place keeps the conversation id, so it is known before the first turn:
+        // lists and the live registry match the session at once instead of after the next prompt.
+        let native_session_id = options.resume_from.clone().filter(|_| !options.fork);
         let me = Arc::new(Self {
             id,
             options,
@@ -182,6 +199,7 @@ impl ManagedClaude {
             parser: Mutex::new(ClaudeParser::new()),
             stdin: tokio::sync::Mutex::new(stdin),
             child: Mutex::new(Some(child)),
+            pid,
             pending: Mutex::new(HashMap::new()),
             resolved: Mutex::new(HashMap::new()),
             replies: Mutex::new(HashMap::new()),
@@ -189,7 +207,7 @@ impl ManagedClaude {
             state: Mutex::new(State {
                 status: "idle",
                 liveness: Liveness::Live,
-                native_session_id: None,
+                native_session_id,
                 created_at_ms: now,
                 last_active_at_ms: now,
             }),
@@ -259,11 +277,13 @@ impl ManagedClaude {
                 permission_mode: None,
                 resume_from: None,
                 fork: false,
+                add_dirs: Vec::new(),
             },
             log,
             parser: Mutex::new(ClaudeParser::new()),
             stdin: tokio::sync::Mutex::new(None),
             child: Mutex::new(None),
+            pid: None,
             pending: Mutex::new(HashMap::new()),
             resolved: Mutex::new(HashMap::new()),
             replies: Mutex::new(HashMap::new()),
@@ -528,6 +548,9 @@ impl ManagedClaude {
         self.resolved
             .lock()
             .insert(request_id.to_string(), by.to_string());
+        let shown_answers = answers
+            .clone()
+            .filter(|_| matches!(decision, "allow" | "answer"));
         let response = match decision {
             "allow" | "allow_session" | "answer" => {
                 let mut input = updated_input.unwrap_or_else(|| pending.input.clone());
@@ -585,6 +608,9 @@ impl ManagedClaude {
             e.data["resolved"] = json!(true);
             e.data["decision"] = json!(decision);
             e.data["by"] = json!(by);
+            if let Some(a) = &shown_answers {
+                crate::agents::model::record_answers(&mut e.data, a);
+            }
         });
         if self.pending.lock().is_empty() {
             self.set_status("busy");

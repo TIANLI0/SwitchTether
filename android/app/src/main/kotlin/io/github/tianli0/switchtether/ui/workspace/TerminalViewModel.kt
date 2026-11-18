@@ -49,6 +49,8 @@ data class TerminalUiState(
     val fontSp: Int = 12,
     val scrollback: List<TermLine> = emptyList(),
     val scrollbackTotal: Int = 0,
+    /** Every earlier line is loaded (the "load earlier output" button goes away). */
+    val scrollbackDone: Boolean = false,
     val busy: Boolean = false,
     val online: Boolean = false,
 )
@@ -63,8 +65,10 @@ class TerminalViewModel(
     private val gate: StepUpGate,
     private val stepUpAvailable: () -> Boolean,
     private val onKill: (String) -> Unit = {},
+    initialFontSp: Int = 12,
+    private val saveFontSp: (Int) -> Unit = {},
 ) : ViewModel() {
-    private val _state = MutableStateFlow(TerminalUiState())
+    private val _state = MutableStateFlow(TerminalUiState(fontSp = initialFontSp.coerceIn(8, 22)))
     val state: StateFlow<TerminalUiState> = _state.asStateFlow()
     private var ws: WebSocket? = null
     private var streamGen = 0
@@ -94,7 +98,8 @@ class TerminalViewModel(
     }
 
     /** Step-up then `POST /v1/terminals` (idempotent by commandId). */
-    fun create(shell: String?) {
+    /** [size]: the grid the terminal will be shown in; else the last measured one. */
+    fun create(shell: String?, size: Pair<Int, Int>? = null) {
         val api = conn.apiOrNull() ?: return
         if (!stepUpAvailable()) {
             _state.update { it.copy(link = TermLink.NO_STEP_UP_KEY) }
@@ -106,7 +111,7 @@ class TerminalViewModel(
                 _state.update { it.copy(busy = false, link = TermLink.NEEDS_STEP_UP) }
                 return@launch
             }
-            val (cols, rows) = lastSize ?: (80 to 24)
+            val (cols, rows) = size ?: lastSize ?: (80 to 24)
             val out = Commands.run { id -> api.createTerminal(CreateTerminalBody(id, shell, null, cols, rows)) }
             when (out) {
                 is CommandOutcome.Succeeded -> {
@@ -125,7 +130,7 @@ class TerminalViewModel(
 
     fun select(id: String) {
         if (_state.value.selectedId == id && _state.value.link == TermLink.OPEN) return
-        _state.update { it.copy(selectedId = id, screen = TermScreen(), scrollback = emptyList(), scrollbackTotal = 0) }
+        _state.update { it.copy(selectedId = id, screen = TermScreen(), scrollback = emptyList(), scrollbackTotal = 0, scrollbackDone = false) }
         connect(id)
     }
 
@@ -243,7 +248,10 @@ class TerminalViewModel(
 
     private fun resizeMsg(c: Int, r: Int) = buildJsonObject { put("type", "resize"); put("cols", c); put("rows", r) }.toString()
 
-    fun fontSize(delta: Int) = _state.update { it.copy(fontSp = (it.fontSp + delta).coerceIn(8, 22)) }
+    fun fontSize(delta: Int) {
+        _state.update { it.copy(fontSp = (it.fontSp + delta).coerceIn(8, 22)) }
+        saveFontSp(_state.value.fontSp)
+    }
 
     /** Loads up to [count] more scrollback lines above the screen (`GET …/scrollback`). */
     fun loadScrollback(count: Int = 200) {
@@ -256,11 +264,11 @@ class TerminalViewModel(
                 val end = (total - have).coerceAtLeast(0)
                 val start = (end - count).coerceAtLeast(0)
                 if (end <= 0) {
-                    _state.update { it.copy(scrollbackTotal = total) }
+                    _state.update { it.copy(scrollbackTotal = total, scrollbackDone = true) }
                     return@launch
                 }
                 val page = api.terminalScrollback(id, start, end - start)
-                _state.update { it.copy(scrollback = page.lines + it.scrollback, scrollbackTotal = total) }
+                _state.update { it.copy(scrollback = page.lines + it.scrollback, scrollbackTotal = total, scrollbackDone = start == 0) }
             } catch (e: ApiException) {
                 _state.update { it.copy(error = "${e.code}: ${e.body.message}") }
             } catch (e: Exception) {

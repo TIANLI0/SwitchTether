@@ -135,6 +135,101 @@ pub fn read_registry(claude_dir: &Path) -> Vec<LiveClaudeSession> {
     out
 }
 
+/// OS change notifications for the registry directory (ReadDirectoryChangesW / inotify /
+/// FSEvents): a message arrives when a `<pid>.json` file is created, rewritten or removed, so
+/// nothing runs while no session changes. `None` when the directory does not exist (yet) or the
+/// platform refuses a watch; callers then rely on polling. The watcher stops when dropped.
+pub fn watch_registry(
+    claude_dir: &Path,
+) -> Option<(
+    notify::RecommendedWatcher,
+    tokio::sync::mpsc::UnboundedReceiver<()>,
+)> {
+    use notify::Watcher;
+    let dir = claude_dir.join("sessions");
+    if !dir.is_dir() {
+        return None;
+    }
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let relevant = match res {
+            // Only registry files; `<pid>.<hash>.key` files are neither read nor reacted to.
+            Ok(ev) => ev.paths.iter().any(|p| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy())
+                    .is_some_and(|n| n.ends_with(".json") && n.matches('.').count() == 1)
+            }),
+            // An overflowed or failed watch: let the caller re-read rather than miss a change.
+            Err(_) => true,
+        };
+        if relevant {
+            let _ = tx.send(());
+        }
+    })
+    .ok()?;
+    watcher
+        .watch(&dir, notify::RecursiveMode::NonRecursive)
+        .ok()?;
+    Some((watcher, rx))
+}
+
+/// `(file name, modified, len)` of every `<pid>.json` registry file, sorted.
+pub type RegistryStamp = Vec<(String, Option<std::time::SystemTime>, u64)>;
+
+pub fn registry_stamp(claude_dir: &Path) -> RegistryStamp {
+    let Ok(rd) = std::fs::read_dir(claude_dir.join("sessions")) else {
+        return Vec::new();
+    };
+    let mut out: RegistryStamp = rd
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".json") || name.matches('.').count() != 1 {
+                return None;
+            }
+            let meta = e.metadata().ok()?;
+            Some((name, meta.modified().ok(), meta.len()))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Updates a full session list with fresh registry entries, matched by process: a process that
+/// switched conversations (`/resume`) or changed status takes the registry's values; a process
+/// only in the registry is new; a listed process whose pid has exited is dropped. Entries without
+/// a pid cannot be matched and are kept as they are.
+pub fn merge_registry(
+    full: Vec<LiveClaudeSession>,
+    registry: Vec<LiveClaudeSession>,
+) -> Vec<LiveClaudeSession> {
+    let mut out: Vec<LiveClaudeSession> = Vec::with_capacity(full.len().max(registry.len()));
+    for s in full {
+        match s.pid {
+            Some(pid) => {
+                if let Some(r) = registry.iter().find(|r| r.pid == Some(pid)) {
+                    let mut r = r.clone();
+                    if r.entrypoint.is_none() {
+                        r.entrypoint = s.entrypoint.clone();
+                    }
+                    out.push(r);
+                } else if pid_alive(pid) {
+                    // Still running but without a readable registry file this time (mid-rewrite,
+                    // or a setup without the registry): keep the last known state.
+                    out.push(s);
+                }
+            }
+            None => out.push(s),
+        }
+    }
+    for r in registry {
+        if !out.iter().any(|o| o.pid.is_some() && o.pid == r.pid) {
+            out.push(r);
+        }
+    }
+    out
+}
+
 #[cfg(unix)]
 pub fn pid_alive(pid: u32) -> bool {
     // Signal 0 checks existence without sending anything.
@@ -257,6 +352,50 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].session_id, "live");
         assert_eq!(v[0].origin(), Origin::Vscode);
+    }
+
+    #[test]
+    fn registry_updates_the_full_list_per_process() {
+        let me = std::process::id();
+        let entry = |pid: u32, sid: &str, status: &str| LiveClaudeSession {
+            pid: Some(pid),
+            session_id: sid.into(),
+            cwd: None,
+            started_at_ms: None,
+            kind: None,
+            entrypoint: None,
+            status: Some(status.into()),
+            waiting_for: None,
+            name: None,
+        };
+        let mut listed = entry(me, "fresh", "idle");
+        listed.entrypoint = Some("cli".into());
+        let full = vec![listed, entry(4_294_967_000, "exited", "idle")];
+        // The process resumed another conversation and started working; a new process appeared.
+        let registry = vec![entry(me, "resumed", "busy"), entry(7, "new", "idle")];
+        let v = merge_registry(full, registry);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].session_id, "resumed");
+        assert_eq!(v[0].status.as_deref(), Some("busy"));
+        assert_eq!(
+            v[0].entrypoint.as_deref(),
+            Some("cli"),
+            "kept from the full list"
+        );
+        assert_eq!(v[1].session_id, "new");
+    }
+
+    #[test]
+    fn registry_stamp_changes_with_a_rewrite() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("1.json"), r#"{"status":"idle"}"#).unwrap();
+        std::fs::write(dir.join("1.abc.key"), "secret").unwrap();
+        let a = registry_stamp(tmp.path());
+        assert_eq!(a.len(), 1, "key files are not part of the stamp");
+        std::fs::write(dir.join("1.json"), r#"{"status":"busy!"}"#).unwrap();
+        assert_ne!(a, registry_stamp(tmp.path()));
     }
 
     #[test]

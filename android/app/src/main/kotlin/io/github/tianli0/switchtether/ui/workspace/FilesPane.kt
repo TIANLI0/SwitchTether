@@ -99,8 +99,33 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
         else -> Browser(state, vm, onOpenDownloads)
     }
     state.message?.let { msg ->
-        ConfirmDialog(show = true, title = stringResource(R.string.files_title), message = msg.resolve(), confirmText = stringResource(R.string.action_ok), onConfirm = vm::clearMessage, onDismiss = vm::clearMessage)
+        if (msg.res in QUIET_MESSAGES) {
+            // Success needs no decision: a toast, not a two-button dialog.
+            val text = msg.resolve()
+            val context = androidx.compose.ui.platform.LocalContext.current
+            androidx.compose.runtime.LaunchedEffect(msg) {
+                android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+                vm.clearMessage()
+            }
+        } else {
+            io.github.suqi8.coui.kmp.window.WindowAlertDialog(
+                show = true,
+                title = stringResource(R.string.files_title),
+                summary = msg.resolve(),
+                confirmText = stringResource(R.string.action_ok),
+                onConfirm = vm::clearMessage,
+                onCancel = vm::clearMessage,
+            )
+        }
     }
+    ConfirmDialog(
+        show = state.confirmDiscard,
+        title = stringResource(R.string.files_discard_title),
+        message = stringResource(R.string.files_discard_body),
+        confirmText = stringResource(R.string.files_discard),
+        onConfirm = vm::discardEdits,
+        onDismiss = vm::keepEditing,
+    )
     state.pendingSensitive?.let { e ->
         ConfirmDialog(
             show = true,
@@ -123,7 +148,15 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     var searchExpanded by rememberSaveable { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::upload) }
     val listing = (state.listing as? Loadable.Ready)?.value
-    BackHandler(enabled = listing?.parent != null) { listing?.parent?.let(vm::browse) }
+    // Back closes search results first, then goes up a folder.
+    BackHandler(enabled = state.results != null || listing?.parent != null) {
+        if (state.results != null) {
+            vm.clearSearch()
+            searchExpanded = false
+        } else {
+            listing?.parent?.let(vm::browse)
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         (state.roots as? Loadable.Ready)?.value?.takeIf { it.size > 1 }?.let { roots ->
             val currentPath = listing?.path.orEmpty()
@@ -149,7 +182,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 label = stringResource(R.string.files_search),
                 cancelText = stringResource(R.string.action_cancel),
                 onCancel = {
-                    vm.setQuery("")
+                    vm.clearSearch()
                     searchExpanded = false
                 },
                 insideMargin = DpSize(0.dp, 4.dp),
@@ -164,7 +197,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 )
             } else {
                 Box {
-                    ToolbarIcon(AppIcons.Add, stringResource(R.string.files_new_file), { showMoreMenu = true })
+                    ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { showMoreMenu = true })
                     WindowListPopup(show = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
                         val menuItems = listOf(
                             stringResource(R.string.files_new_file) to { if (listing != null) nameDialog = "file" },
@@ -215,6 +248,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
             null -> Unit
             else -> LoadableContent(l, onRetry = { vm.currentDir()?.let(vm::browse) ?: vm.loadRoots() }) { list ->
                 val crumbs = remember(list.path) { buildBreadcrumbs(list.path) }
+                io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = vm::refreshListing, topAppBarScrollBehavior = null) {
                 LazyColumn(Modifier.fillMaxSize().testTag("file-list"), contentPadding = pageListPadding(top = 4.dp)) {
                     if (crumbs.isNotEmpty()) {
                         item(key = "crumbs") {
@@ -253,6 +287,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                     }
                     if (list.truncated || list.blocked > 0) item { Text(stringResource(R.string.new_session_listing_note, list.blocked), style = DevType.label, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
                 }
+                }
             }
         }
     }
@@ -279,6 +314,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     }
     nameDialog?.let { kind ->
         var name by remember(kind) { mutableStateOf(if (kind == "rename") target?.name.orEmpty() else "") }
+        val invalidName = name.contains('/') || name.contains('\\')
         WindowDialog(
             show = true,
             title = stringResource(if (kind == "folder") R.string.files_new_folder else if (kind == "file") R.string.files_new_file else R.string.files_rename),
@@ -286,13 +322,18 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         ) {
             Column(Modifier.fillMaxWidth()) {
                 Box(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
-                    TextInput(name, { name = it }, stringResource(R.string.files_name))
+                    Column {
+                        TextInput(name, { name = it }, stringResource(R.string.files_name))
+                        if (invalidName) {
+                            Text(stringResource(R.string.files_name_invalid), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(top = 4.dp, start = 4.dp))
+                        }
+                    }
                 }
                 DialogButtonBar(
                     negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = { nameDialog = null }),
                     positive = DialogButtonBarAction(
                         text = stringResource(R.string.action_ok),
-                        enabled = name.trim().isNotEmpty(),
+                        enabled = name.trim().isNotEmpty() && !invalidName,
                         onClick = {
                             val n = name.trim()
                             if (n.isNotEmpty() && !n.contains('/') && !n.contains('\\')) {
@@ -338,10 +379,10 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
 
 @Composable
 private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
-    BackHandler { if (state.editing) vm.cancelEdit() else vm.closeFile() }
+    BackHandler(onBack = vm::requestCloseFile)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), { if (state.editing) vm.cancelEdit() else vm.closeFile() })
+            ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), vm::requestCloseFile)
             val f = (state.file as? Loadable.Ready)?.value
             Text(
                 f?.path?.substringAfterLast('\\')?.substringAfterLast('/') ?: "",
@@ -444,3 +485,6 @@ private fun buildBreadcrumbs(path: String): List<Pair<String, String>> {
     }
     return out
 }
+
+/** Outcome messages that only report success: shown as a toast instead of a dialog. */
+private val QUIET_MESSAGES = setOf(R.string.files_msg_saved, R.string.files_msg_saved_as, R.string.files_msg_ok, R.string.files_msg_cancelled)

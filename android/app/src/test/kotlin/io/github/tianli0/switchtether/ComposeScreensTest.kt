@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasText
@@ -43,7 +44,13 @@ class ComposeScreensTest {
     private val fp = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
     private val link = PairingLink.parse("switchtether://pair?v=1&h=10.0.2.2,192.168.1.20&p=47615&fp=$fp&id=p1&s=${"A".repeat(43)}&n=DESKTOP-01")
 
-    private fun onboarding(state: PairingUiState, linkText: String = "", secure: Boolean = true, events: MutableList<String> = mutableListOf()) {
+    private fun onboarding(
+        state: PairingUiState,
+        linkText: String = "",
+        secure: Boolean = true,
+        events: MutableList<String> = mutableListOf(),
+        nearby: List<io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop> = emptyList(),
+    ) {
         rule.setContent {
             SwitchTetherTheme {
                 OnboardingContent(
@@ -59,9 +66,35 @@ class ComposeScreensTest {
                     onBack = { events += "back" },
                     onDone = { events += "done" },
                     onRejectCodes = { events += "reject" },
+                    onPickNearby = { events += "nearby:${it.host}" },
+                    onEnterAddress = { events += "address" },
+                    onSubmitCode = { a, c -> events += "code:$a:$c" },
+                    nearbyOverride = nearby,
                 )
             }
         }
+    }
+
+    @Test
+    fun nearbyComputerAndTypedAddressLeadToCodeEntry() {
+        val events = mutableListOf<String>()
+        val pc = io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop("svc", "id", "DESKTOP-01", fp, "192.168.8.4", 47615)
+        onboarding(PairingUiState.Intro, events = events, nearby = listOf(pc))
+        rule.onNodeWithTag("nearby-${fp.take(8)}").performScrollTo().performClick()
+        rule.onNodeWithTag("enter-address").performScrollTo().performClick()
+        assertEquals(listOf("nearby:192.168.8.4", "address"), events)
+    }
+
+    @Test
+    fun codeEntryNeedsSixDigitsAndWarnsToCompareCodes() {
+        val events = mutableListOf<String>()
+        onboarding(PairingUiState.EnterCode(null, null, 47615, null, manual = true), events = events)
+        rule.onNodeWithText("Without the QR code", substring = true).assertExists()
+        rule.onNodeWithTag("pair-code-submit").assertIsNotEnabled()
+        rule.onNodeWithTag("pair-address").performTextInput("192.168.8.4")
+        rule.onNodeWithTag("pair-code-input").performTextInput("12a3456")
+        rule.onNodeWithTag("pair-code-submit").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(listOf("code:192.168.8.4:123456"), events)
     }
 
     @Test
@@ -69,7 +102,8 @@ class ComposeScreensTest {
         val events = mutableListOf<String>()
         onboarding(PairingUiState.Intro, events = events)
         rule.onNodeWithText("Scan pairing QR code").performScrollTo().assertIsDisplayed().performClick()
-        rule.onNodeWithTag("use-link").assertIsNotEnabled() // nothing pasted yet
+        rule.onNodeWithTag("use-link").assertDoesNotExist() // nothing pasted yet: a paste button instead
+        rule.onNodeWithTag("paste-link").assertExists()
         rule.onNodeWithText("How this connection is protected").assertExists()
         assertEquals(listOf("scan"), events)
     }

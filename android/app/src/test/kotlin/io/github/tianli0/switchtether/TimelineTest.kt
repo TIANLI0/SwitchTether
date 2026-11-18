@@ -54,4 +54,21 @@ class TimelineTest {
     fun unresolvedApprovalsArePending() {
         assertEquals(listOf("ap"), pendingRequestKeys(log.renderItems()))
     }
+
+    @Test
+    fun backgroundShellStaysRunningAfterItsStartedResult() {
+        val bg = AgentEventLog.of(
+            listOf(
+                event("u1", 1, "user_message", """{"text":"build"}"""),
+                event("b1", 2, "tool_call", """{"callId":"cb1","name":"Bash","title":"cargo build","category":"shell","status":"running","background":true,"taskId":"x"}"""),
+                event("rb1", 3, "tool_result", """{"callId":"cb1","isError":false,"text":"Command running in background with ID: x."}"""),
+                call("t9", 4), result("t9", 5),
+            ),
+        )
+        val items = bg.renderItems()
+        val bgItem = items.first { it.event.id == "b1" }
+        assertEquals(io.github.tianli0.switchtether.ui.components.StepStatus.Running, io.github.tianli0.switchtether.ui.sessions.render.toolStatus(bgItem))
+        val steps = buildTimeline(items, emptySet()).filterIsInstance<TimelineRow.Steps>().single()
+        assertTrue("a running background shell keeps the step block running", steps.running)
+    }
 }

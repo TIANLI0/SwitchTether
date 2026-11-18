@@ -60,6 +60,7 @@ object Formatters {
     fun agentLabel(agent: String): String = when (agent) {
         "claude_code", "claude" -> "Claude Code"
         "codex" -> "Codex"
+        "dsh" -> "DeepSeek Harness"
         "gemini" -> "Gemini"
         "opencode" -> "OpenCode"
         else -> agent.replace('_', ' ').replaceFirstChar { it.uppercase() }

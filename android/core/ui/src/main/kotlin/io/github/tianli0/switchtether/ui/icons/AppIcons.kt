@@ -17,6 +17,10 @@ import com.adamglin.phosphoricons.regular.ChartBar
 import com.adamglin.phosphoricons.regular.Check
 import com.adamglin.phosphoricons.regular.ClipboardText
 import com.adamglin.phosphoricons.regular.Copy
+import com.adamglin.phosphoricons.regular.X
+import com.adamglin.phosphoricons.regular.TextAlignLeft
+import com.adamglin.phosphoricons.regular.ArrowsHorizontal
+import com.adamglin.phosphoricons.regular.Image
 import com.adamglin.phosphoricons.regular.DotsThreeVertical
 import com.adamglin.phosphoricons.regular.DownloadSimple
 import com.adamglin.phosphoricons.regular.Eye
@@ -87,6 +91,11 @@ object AppIcons {
     val Interrupt: ImageVector get() = PhosphorIcons.Regular.StopCircle
     val More: ImageVector get() = PhosphorIcons.Regular.DotsThreeVertical
     val Copy: ImageVector get() = PhosphorIcons.Regular.Copy
+    val Close: ImageVector get() = PhosphorIcons.Regular.X
+    /** Code block: wrap long lines / scroll sideways. */
+    val WrapLines: ImageVector get() = PhosphorIcons.Regular.TextAlignLeft
+    val ScrollSideways: ImageVector get() = PhosphorIcons.Regular.ArrowsHorizontal
+    val Image: ImageVector get() = PhosphorIcons.Regular.Image
     val Paste: ImageVector get() = PhosphorIcons.Regular.ClipboardText
     val Edit: ImageVector get() = PhosphorIcons.Regular.PencilSimple
     val Delete: ImageVector get() = PhosphorIcons.Regular.Trash

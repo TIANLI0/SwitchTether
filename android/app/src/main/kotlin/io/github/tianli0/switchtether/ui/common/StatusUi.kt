@@ -20,6 +20,7 @@ import io.github.tianli0.switchtether.ui.components.Banner
 import io.github.tianli0.switchtether.ui.theme.DevColors
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun connectionColor(state: ConnectionState, dev: DevColors = LocalDevColors.current): Color = when (state) {
@@ -73,12 +74,31 @@ fun ConnectionBanner(state: ConnectionState, onRetry: () -> Unit, modifier: Modi
     // Online (direct or through the relay) is never a banner: the path is shown once, on the
     // Home connection card and in Manage → computer details.
     if (state is ConnectionState.Online) return
+    // The computer reported Wake-on-LAN targets: "唤醒并重试" sends magic packets on this network
+    // (only effective when the phone is on the computer's LAN and the computer allows it), then retries.
+    val wake = (state as? ConnectionState.Offline)?.desktop?.wake.orEmpty()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     Banner(
         text = connectionText(state),
         color = connectionColor(state),
         modifier = modifier,
-        action = if (state is ConnectionState.Offline) stringResource(R.string.action_retry) else null,
-        onAction = onRetry,
+        action = when {
+            state !is ConnectionState.Offline -> null
+            wake.isNotEmpty() -> stringResource(R.string.conn_wake_action)
+            else -> stringResource(R.string.action_retry)
+        },
+        onAction = {
+            if (wake.isEmpty()) {
+                onRetry()
+            } else {
+                scope.launch {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        io.github.tianli0.switchtether.remote.wake.WakeOnLan.send(wake)
+                    }
+                    onRetry()
+                }
+            }
+        },
     )
 }
 

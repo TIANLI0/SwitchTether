@@ -72,6 +72,7 @@ fun clientLabel(origin: String, agent: String): String = when (origin) {
     "vscode" -> "VS Code"
     "desktop_app" -> if (agent == "codex") "Codex Desktop" else "Claude Desktop"
     "cli", "terminal" -> stringResource(R.string.client_terminal)
+    "dsh_web" -> "DeepSeek Harness Web"
     else -> origin
 }
 
@@ -100,7 +101,9 @@ fun resolutionLabel(decision: String?, by: String?): String {
         "allow_session" -> stringResource(R.string.decision_allow_session)
         "deny" -> stringResource(R.string.decision_deny)
         "abort" -> stringResource(R.string.decision_abort)
-        null -> stringResource(R.string.render_answered)
+        // Questions: the answer itself is shown on the card; this line only says where.
+        null, "answer", "submit" -> stringResource(R.string.render_answered)
+        "cancel", "cancelled" -> stringResource(R.string.decision_cancelled)
         else -> decision
     }
     val b = when {

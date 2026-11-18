@@ -11,6 +11,10 @@ enum class Tab { HOME, SESSIONS, WORKSPACE, MANAGE }
 /** Detail destinations pushed above the tabs. */
 sealed interface Route {
     data class SessionDetail(val sessionId: String, val title: String?) : Route
+    /** A Claude Code sub-agent's own steps; [agentId] inside [sessionId]. */
+    data class Subagent(val sessionId: String, val agentId: String, val title: String?, val agent: String = "claude_code") : Route
+    /** All sub-agents of a session as a branch tree. */
+    data class SubagentTree(val sessionId: String, val agent: String = "claude_code") : Route
     data object NewSession : Route
     data class Terminal(val id: String?) : Route
     data object Files : Route
@@ -67,6 +71,12 @@ class NavViewModel : ViewModel() {
     fun push(r: Route) {
         val s = stacks.getValue(tab)
         if (s.lastOrNull() != r) s.add(r)
+    }
+
+    /** Replaces the current page (e.g. a session that was resumed opens in its place). */
+    fun replace(r: Route) {
+        val s = stacks.getValue(tab)
+        if (s.isEmpty()) s.add(r) else s[s.lastIndex] = r
     }
 
     /** @return false when there is nothing to pop (let the system handle back). */

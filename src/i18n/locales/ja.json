@@ -5470,8 +5470,10 @@
       "verify": "確認コード（スマホの表示と一致するはずです）:",
       "newCode": "新しいコード",
       "step1": "スマートフォンで SwitchTether を開きます。",
-      "step2": "「コンピューターを追加」をタップしてこのコードを読み取ります。",
+      "step2": "「コンピューターを追加」をタップしてこのコードを読み取るか、「近くのコンピューター」でこのコンピューターを選び、下のペアリングコードを入力します。",
       "step3": "両方の画面の確認コードが一致することを確かめます。",
+      "codeLabel": "ペアリングコード",
+      "codeHint": "読み取れない場合：スマートフォンの「近くのコンピューター」でこのコンピューターを選ぶ（またはアドレスを入力する）と、このコードを入力できます。",
       "computer": "コンピューター",
       "addresses": "アドレス",
       "done": "完了"
@@ -5527,6 +5529,13 @@
         "label": "ターミナル · st-claude / st-codex",
         "description": "st-claude と st-codex コマンドを追加します（{{dir}}）。スマートフォンから操作したいセッションは claude / codex の代わりにこれらで起動します。claude と codex 自体は変わりません。",
         "enabledToast": "オンにしました。新しいターミナルで st-claude または st-codex を実行してください。"
+      },
+      "dsh": {
+        "label": "DeepSeek Harness · Web",
+        "description": "dsh 標準のプラグイン管理（dsh plugin）で SwitchTether ブリッジプラグインを web プロファイルに入れます。以後、スマートフォンから dsh web のセッションにメッセージ送信・中断・承認ができます（Web とスマートフォンで先に答えた方が有効）。事前にプロファイルのマニフェストとパッチを退避し、オフにすると dsh plugin remove で削除します。dsh web の再起動後に有効になります。DeepSeek Harness デスクトップ版は対象外です。",
+        "unavailable": "DeepSeek Harness（dsh）が見つかりません。",
+        "noProfile": "DeepSeek Harness の web プロファイルが未初期化です。先に dsh web を一度起動してください。",
+        "enabledToast": "有効にしました。dsh web を再起動すると、そこで開いたセッションをスマートフォンから引き継げます。"
       }
     },
     "basedOn": "CC Switch v{{version}} ベース",

@@ -7,6 +7,10 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -104,20 +108,26 @@ fun OnboardingScreen(revokedReason: Pair<String, String?>?) {
         onSubmitLink = { vm.submitLink() },
         onScan = vm::startScan,
         onScanned = vm::onScanned,
-        onPair = {
-            // Android 17: pairing over a LAN address needs ACCESS_LOCAL_NETWORK. Explain + ask first;
-            // pairing continues either way (a VPN/Tailscale address may still work).
-            val link = (state as? PairingUiState.Confirm)?.link
-            if (link != null && link.hosts.any(io.github.tianli0.switchtether.remote.pairing.LocalNetwork::isLocal)) {
-                io.github.tianli0.switchtether.ui.common.localNetworkAsk.value = io.github.tianli0.switchtether.ui.common.LocalNetworkAsk { vm.pair() }
-            } else {
-                vm.pair()
-            }
-        },
+        onPair = { withLocalNetwork(vm.pendingHosts()) { vm.pair() } },
+        onPickNearby = vm::pickNearby,
+        onEnterAddress = vm::enterAddress,
+        onSubmitCode = { address, code -> withLocalNetwork(vm.pendingHosts(address)) { vm.submitCode(address, code) } },
         onBack = vm::backToIntro,
         onDone = { container.onPaired() },
         onRejectCodes = { scope.launch { container.unpair(); container.pendingVerification.value = null; vm.backToIntro() } },
     )
+}
+
+/**
+ * Android 17: pairing over a LAN address needs ACCESS_LOCAL_NETWORK. Explain + ask first; pairing
+ * continues either way (a VPN/Tailscale address may still work).
+ */
+private fun withLocalNetwork(hosts: List<String>, action: () -> Unit) {
+    if (hosts.any(io.github.tianli0.switchtether.remote.pairing.LocalNetwork::isLocal)) {
+        io.github.tianli0.switchtether.ui.common.localNetworkAsk.value = io.github.tianli0.switchtether.ui.common.LocalNetworkAsk { action() }
+    } else {
+        action()
+    }
 }
 
 @Composable
@@ -134,6 +144,11 @@ fun OnboardingContent(
     onBack: () -> Unit,
     onDone: () -> Unit,
     onRejectCodes: () -> Unit,
+    onPickNearby: (io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop) -> Unit = {},
+    onEnterAddress: () -> Unit = {},
+    onSubmitCode: (address: String, code: String) -> Unit = { _, _ -> },
+    /** Overrides LAN discovery (tests / previews); null = live NSD results. */
+    nearbyOverride: List<io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop>? = null,
 ) {
     Column(
         Modifier
@@ -147,10 +162,11 @@ fun OnboardingContent(
     ) {
         Column(Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
             when (state) {
-                PairingUiState.Intro -> IntroContent(linkText, deviceSecure, revokedReason, onLinkTextChange, onSubmitLink, onScan)
+                PairingUiState.Intro -> IntroContent(linkText, deviceSecure, revokedReason, onLinkTextChange, onSubmitLink, onScan, onPickNearby, onEnterAddress, nearbyOverride)
                 PairingUiState.Scanning -> ScanContent(onScanned, onBack)
                 is PairingUiState.Confirm -> ConfirmContent(state.link, deviceSecure, onPair, onBack)
-                is PairingUiState.Pairing -> ProgressContent(state.link)
+                is PairingUiState.EnterCode -> CodeContent(state, deviceSecure, onSubmitCode, onBack)
+                is PairingUiState.Pairing -> ProgressContent(state.target)
                 is PairingUiState.LinkInvalid -> MessageContent(
                     title = stringResource(R.string.pair_invalid_title),
                     message = linkReasonText(state.reason, state.field),
@@ -158,8 +174,11 @@ fun OnboardingContent(
                 )
                 is PairingUiState.Failed -> MessageContent(
                     title = stringResource(R.string.pair_failed_title),
-                    message = pairingReasonText(state.reason) + (state.detail?.let { "\n\n$it" } ?: ""),
-                    primary = stringResource(R.string.action_retry) to onPair,
+                    message = pairingReasonText(state.reason, byCode = state.target is io.github.tianli0.switchtether.remote.pairing.PairingTarget.Code) +
+                        (state.detail?.let { "\n\n$it" } ?: ""),
+                    primary = stringResource(
+                        if (state.target is io.github.tianli0.switchtether.remote.pairing.PairingTarget.Code) R.string.pair_code_reenter else R.string.action_retry,
+                    ) to onPair,
                     secondary = stringResource(R.string.action_back) to onBack,
                 )
                 is PairingUiState.Done -> VerificationContent(state.result, onDone, onRejectCodes)
@@ -186,6 +205,9 @@ private fun IntroContent(
     onLinkTextChange: (String) -> Unit,
     onSubmitLink: () -> Unit,
     onScan: () -> Unit,
+    onPickNearby: (io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop) -> Unit,
+    onEnterAddress: () -> Unit,
+    nearbyOverride: List<io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop>?,
 ) {
     Title(stringResource(R.string.app_name), stringResource(R.string.onboarding_subtitle))
     if (revokedReason != null) {
@@ -213,7 +235,13 @@ private fun IntroContent(
         modifier = Modifier.fillMaxWidth().testTag("scan"),
         colors = ButtonDefaults.buttonColorsPrimary(),
     ) { Text(stringResource(R.string.onboarding_scan), color = COUITheme.colorScheme.onPrimary) }
-    NearbyDesktops()
+    NearbyDesktops(onPickNearby, nearbyOverride)
+    Spacer(Modifier.height(8.dp))
+    TextButton(
+        text = stringResource(R.string.pair_enter_address),
+        onClick = onEnterAddress,
+        modifier = Modifier.fillMaxWidth().testTag("enter-address"),
+    )
     Spacer(Modifier.height(20.dp))
     Text(stringResource(R.string.onboarding_paste_label), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
     Spacer(Modifier.height(6.dp))
@@ -228,12 +256,25 @@ private fun IntroContent(
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (linkText.isNotBlank()) onSubmitLink() }),
     )
     Spacer(Modifier.height(10.dp))
-    TextButton(
-        text = stringResource(R.string.onboarding_use_link),
-        onClick = onSubmitLink,
-        enabled = linkText.isNotBlank(),
-        modifier = Modifier.fillMaxWidth().testTag("use-link"),
-    )
+    if (linkText.isBlank()) {
+        // The link usually arrives through the clipboard (copied on the computer, synced or sent to the phone).
+        val context = androidx.compose.ui.platform.LocalContext.current
+        TextButton(
+            text = stringResource(R.string.onboarding_paste),
+            onClick = {
+                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                val clip = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.trim()
+                if (!clip.isNullOrEmpty()) onLinkTextChange(clip)
+            },
+            modifier = Modifier.fillMaxWidth().testTag("paste-link"),
+        )
+    } else {
+        TextButton(
+            text = stringResource(R.string.onboarding_use_link),
+            onClick = onSubmitLink,
+            modifier = Modifier.fillMaxWidth().testTag("use-link"),
+        )
+    }
 }
 
 @Composable
@@ -309,8 +350,80 @@ private fun Field(label: String, value: String, mono: Boolean = false) {
 }
 
 @Composable
-private fun ProgressContent(link: PairingLink) {
-    Title(stringResource(R.string.pairing_title), stringResource(R.string.pairing_progress, link.hosts.joinToString(", ")))
+private fun CodeContent(
+    state: PairingUiState.EnterCode,
+    deviceSecure: Boolean,
+    onSubmit: (address: String, code: String) -> Unit,
+    onBack: () -> Unit,
+) {
+    var address by remember(state.manual) { mutableStateOf("") }
+    var code by remember(state.host, state.manual) { mutableStateOf("") }
+    Title(stringResource(R.string.pair_code_title), stringResource(R.string.pair_code_subtitle))
+    if (state.manual) {
+        TextInput(
+            value = address,
+            onValueChange = { address = it },
+            label = stringResource(R.string.pair_address_label),
+            modifier = Modifier.fillMaxWidth().testTag("pair-address"),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
+        )
+        if (state.error == CodeError.INVALID_ADDRESS) ErrorLine(stringResource(R.string.pair_address_invalid))
+        Spacer(Modifier.height(12.dp))
+    } else {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(stringResource(R.string.field_desktop), state.desktopName ?: state.host.orEmpty())
+                Field(stringResource(R.string.field_addresses), "${state.host}:${state.port}")
+                state.fingerprint?.let { Field(stringResource(R.string.field_fingerprint), Fingerprints.grouped(it), mono = true) }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+    TextInput(
+        value = code,
+        onValueChange = { v -> code = v.filter { it.isDigit() }.take(6) },
+        label = stringResource(R.string.pair_code_label),
+        modifier = Modifier.fillMaxWidth().testTag("pair-code-input"),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done, autoCorrectEnabled = false),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (code.length == 6) onSubmit(address, code) }),
+    )
+    if (state.error == CodeError.INVALID_CODE) ErrorLine(stringResource(R.string.pair_code_invalid))
+    Spacer(Modifier.height(12.dp))
+    // Nothing vouches for this computer's certificate in advance on this path (the LAN
+    // advertisement is unauthenticated too): the verification code is the real check.
+    // A full sentence the user must read: wrapped text, not a one-line (marquee) tip.
+    Card(Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            Box(Modifier.padding(top = 6.dp).size(8.dp).clip(SquircleShape(4.dp)).background(LocalDevColors.current.warn))
+            Spacer(Modifier.width(10.dp))
+            Text(stringResource(R.string.pair_code_verify_warning), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+        }
+    }
+    if (!deviceSecure) {
+        Spacer(Modifier.height(10.dp))
+        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
+    }
+    Spacer(Modifier.height(20.dp))
+    Button(
+        onClick = { onSubmit(address, code) },
+        enabled = code.length == 6 && (!state.manual || address.isNotBlank()),
+        modifier = Modifier.fillMaxWidth().testTag("pair-code-submit"),
+        colors = ButtonDefaults.buttonColorsPrimary(),
+    ) {
+        Text(stringResource(R.string.confirm_pair), color = COUITheme.colorScheme.onPrimary)
+    }
+    Spacer(Modifier.height(8.dp))
+    TextButton(text = stringResource(R.string.action_cancel), onClick = onBack, modifier = Modifier.fillMaxWidth())
+}
+
+@Composable
+private fun ErrorLine(text: String) {
+    Text(text, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(top = 6.dp))
+}
+
+@Composable
+private fun ProgressContent(target: io.github.tianli0.switchtether.remote.pairing.PairingTarget) {
+    Title(stringResource(R.string.pairing_title), stringResource(R.string.pairing_progress, target.hosts.joinToString(", ")))
     Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
         io.github.suqi8.coui.kmp.basic.InfiniteProgressIndicator(size = 36.dp)
     }
@@ -371,12 +484,12 @@ fun linkReasonText(reason: PairingLink.Reason, field: String?): String = when (r
 }
 
 @Composable
-fun pairingReasonText(reason: PairingException.Reason): String = stringResource(
+fun pairingReasonText(reason: PairingException.Reason, byCode: Boolean = false): String = stringResource(
     when (reason) {
         PairingException.Reason.UNREACHABLE -> R.string.pair_err_unreachable
         PairingException.Reason.CERTIFICATE_MISMATCH -> R.string.pair_err_cert_mismatch
-        PairingException.Reason.EXPIRED -> R.string.pair_err_expired
-        PairingException.Reason.WRONG_SECRET -> R.string.pair_err_wrong_secret
+        PairingException.Reason.EXPIRED -> if (byCode) R.string.pair_err_code_expired else R.string.pair_err_expired
+        PairingException.Reason.WRONG_SECRET -> if (byCode) R.string.pair_err_wrong_code else R.string.pair_err_wrong_secret
         PairingException.Reason.RATE_LIMITED -> R.string.pair_err_rate_limited
         PairingException.Reason.REVOKED_CERT -> R.string.pair_err_revoked
         PairingException.Reason.INCOMPATIBLE_DESKTOP_TOO_OLD -> R.string.pair_err_desktop_old
@@ -388,13 +501,19 @@ fun pairingReasonText(reason: PairingException.Reason): String = stringResource(
 
 /**
  * "附近的电脑": SwitchTether desktops advertised on this network (NSD, only while this screen is
- * visible). Informational: pairing still requires the QR code / link with its one-time secret.
+ * visible). Tapping one asks for the 6-digit pairing code shown on that computer.
  */
 @Composable
-private fun NearbyDesktops() {
-    val discovery = appContainer().discovery
-    val nearby by androidx.compose.runtime.produceState(initialValue = emptyList<io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop>(), discovery) {
-        discovery.browse().collect { value = it.distinctBy { d -> d.fingerprint } }
+private fun NearbyDesktops(
+    onPick: (io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop) -> Unit,
+    override: List<io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop>?,
+) {
+    val nearby = override ?: run {
+        val discovery = appContainer().discovery
+        val live by androidx.compose.runtime.produceState(initialValue = emptyList<io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop>(), discovery) {
+            discovery.browse().collect { value = it.distinctBy { d -> d.fingerprint } }
+        }
+        live
     }
     if (nearby.isEmpty()) return
     Spacer(Modifier.height(20.dp))
@@ -403,7 +522,13 @@ private fun NearbyDesktops() {
     Card(Modifier.fillMaxWidth().testTag("nearby")) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             nearby.forEach { d ->
-                Column {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(SquircleShape(8.dp))
+                        .clickable { onPick(d) }
+                        .testTag("nearby-${d.fingerprint.take(8)}"),
+                ) {
                     Text(d.name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
                     Text("${d.host}:${d.port} · ${Fingerprints.short(d.fingerprint)}…", style = DevType.codeSmall, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                 }

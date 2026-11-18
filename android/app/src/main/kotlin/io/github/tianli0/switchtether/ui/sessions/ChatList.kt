@@ -189,7 +189,10 @@ fun OutgoingBubble(m: OutgoingMessage, onRetry: (String) -> Unit, onDelete: (Str
         horizontalAlignment = Alignment.End,
     ) {
         ChatBubble(Modifier.alpha(if (pending) 0.6f else 1f)) {
-            Text(m.text, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (m.attachmentNames.isNotEmpty()) io.github.tianli0.switchtether.ui.sessions.render.AttachmentNames(m.attachmentNames)
+                if (m.text.isNotBlank()) Text(m.text, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
+            }
         }
         Row(Modifier.padding(top = 3.dp, end = 4.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
             when (m.status) {

@@ -17,6 +17,8 @@ pub struct ClaudeObserver {
     pub claude_bin: Option<PathBuf>,
     cache: Mutex<Option<(Instant, Vec<LiveClaudeSession>)>>,
     use_cli: bool,
+    /// Fingerprint of the registry directory at the last [`Self::registry_changed`] call.
+    registry_stamp: Mutex<Option<live::RegistryStamp>>,
 }
 
 impl ClaudeObserver {
@@ -26,7 +28,36 @@ impl ClaudeObserver {
             use_cli: claude_bin.is_some(),
             claude_bin,
             cache: Mutex::new(None),
+            registry_stamp: Mutex::new(None),
         }
+    }
+
+    /// True when a registry file was added, removed or rewritten since the previous call. Only
+    /// directory metadata is read (no file contents, no process), so it can run every half second:
+    /// Claude Code rewrites its file on every status change (busy / idle / waiting).
+    pub fn registry_changed(&self) -> bool {
+        let now = live::registry_stamp(&self.claude_dir);
+        let mut last = self.registry_stamp.lock();
+        let changed = last.as_ref() != Some(&now);
+        *last = Some(now);
+        changed
+    }
+
+    /// Live sessions with statuses read from the registry right now: the last full list (see
+    /// [`Self::live_sessions`]) updated per process from the registry files. Used when the
+    /// registry changed, so a turn shorter than the full refresh interval is still seen.
+    pub async fn live_sessions_now(&self) -> Vec<LiveClaudeSession> {
+        let base = self.cache.lock().as_ref().map(|(_, v)| v.clone());
+        let base = match base {
+            Some(v) => v,
+            None => return self.live_sessions().await,
+        };
+        let merged = live::merge_registry(base, live::read_registry(&self.claude_dir));
+        // Keep the full list's timestamp: the next full refresh still happens on schedule.
+        if let Some((_, v)) = self.cache.lock().as_mut() {
+            *v = merged.clone();
+        }
+        merged
     }
 
     pub fn detect() -> Self {

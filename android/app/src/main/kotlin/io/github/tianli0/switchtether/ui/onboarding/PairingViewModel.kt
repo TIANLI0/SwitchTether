@@ -5,8 +5,11 @@ import androidx.lifecycle.viewModelScope
 import io.github.tianli0.switchtether.domain.PairingException
 import io.github.tianli0.switchtether.domain.PairingRepository
 import io.github.tianli0.switchtether.domain.PairingResult
+import io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop
+import io.github.tianli0.switchtether.remote.pairing.ManualAddress
 import io.github.tianli0.switchtether.remote.pairing.PairingLink
 import io.github.tianli0.switchtether.remote.pairing.PairingLinkException
+import io.github.tianli0.switchtether.remote.pairing.PairingTarget
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,11 +21,27 @@ sealed interface PairingUiState {
     data object Intro : PairingUiState
     data object Scanning : PairingUiState
     data class Confirm(val link: PairingLink) : PairingUiState
-    data class Pairing(val link: PairingLink) : PairingUiState
+
+    /**
+     * Pairing with the 6-digit code shown on the desktop: a computer picked from "附近的电脑"
+     * ([host] and [fingerprint] from its advertisement) or typed by address ([manual]).
+     */
+    data class EnterCode(
+        val desktopName: String?,
+        val host: String?,
+        val port: Int,
+        val fingerprint: String?,
+        val manual: Boolean,
+        val error: CodeError? = null,
+    ) : PairingUiState
+
+    data class Pairing(val target: PairingTarget) : PairingUiState
     data class Done(val result: PairingResult) : PairingUiState
     data class LinkInvalid(val reason: PairingLink.Reason, val field: String?) : PairingUiState
-    data class Failed(val link: PairingLink, val reason: PairingException.Reason, val detail: String?) : PairingUiState
+    data class Failed(val target: PairingTarget, val reason: PairingException.Reason, val detail: String?) : PairingUiState
 }
+
+enum class CodeError { INVALID_ADDRESS, INVALID_CODE }
 
 class PairingViewModel(
     private val repository: PairingRepository,
@@ -67,25 +86,75 @@ class PairingViewModel(
     /** QR result: anything that is not a pairing link is reported, scanning can be restarted. */
     fun onScanned(text: String) = submitLink(text)
 
-    fun pair() {
-        val link = when (val s = _state.value) {
-            is PairingUiState.Confirm -> s.link
-            is PairingUiState.Failed -> s.link
-            else -> return
+    /** "附近的电脑": pair the advertised computer with its pairing code. */
+    fun pickNearby(d: DiscoveredDesktop) {
+        _state.value = PairingUiState.EnterCode(d.name, d.host, d.port, d.fingerprint, manual = false)
+    }
+
+    /** No QR code and not found on the LAN: type the computer's address, then its pairing code. */
+    fun enterAddress() {
+        _state.value = PairingUiState.EnterCode(null, null, PairingLink.DEFAULT_PORT, null, manual = true)
+    }
+
+    /** Code screen submitted; [address] is used only when the address was typed by the user. */
+    fun submitCode(address: String, code: String) {
+        val s = _state.value as? PairingUiState.EnterCode ?: return
+        val (host, port) = if (s.manual) {
+            val a = ManualAddress.parse(address) ?: run {
+                _state.value = s.copy(error = CodeError.INVALID_ADDRESS)
+                return
+            }
+            a.host to a.port
+        } else {
+            (s.host ?: return) to s.port
         }
-        _state.value = PairingUiState.Pairing(link)
+        val normalized = PairingTarget.normalizeCode(code) ?: run {
+            _state.value = s.copy(error = CodeError.INVALID_CODE)
+            return
+        }
+        run(PairingTarget.Code(s.desktopName ?: host, listOf(host), port, s.fingerprint, normalized))
+    }
+
+    /** Hosts the next pairing attempt will contact (for the Android 17 local-network prompt). */
+    fun pendingHosts(address: String = ""): List<String> = when (val s = _state.value) {
+        is PairingUiState.Confirm -> s.link.hosts
+        is PairingUiState.Failed -> s.target.hosts
+        is PairingUiState.EnterCode -> listOfNotNull(if (s.manual) ManualAddress.parse(address)?.host else s.host)
+        else -> emptyList()
+    }
+
+    /** Confirm screen / retry after a failure. A failed code attempt goes back to the code screen. */
+    fun pair() {
+        when (val s = _state.value) {
+            is PairingUiState.Confirm -> run(PairingTarget.Link(s.link))
+            is PairingUiState.Failed -> when (val t = s.target) {
+                is PairingTarget.Link -> run(t)
+                is PairingTarget.Code -> _state.value = PairingUiState.EnterCode(
+                    desktopName = t.desktopName,
+                    host = t.hosts.firstOrNull(),
+                    port = t.port,
+                    fingerprint = t.fingerprint,
+                    manual = false,
+                )
+            }
+            else -> Unit
+        }
+    }
+
+    private fun run(target: PairingTarget) {
+        _state.value = PairingUiState.Pairing(target)
         job = viewModelScope.launch {
             _state.value = try {
-                val result = repository.pair(link, deviceName, osVersion, appVersion)
+                val result = repository.pair(target, deviceName, osVersion, appVersion)
                 _linkText.value = "" // the secret is single-use; never keep it around
                 onSuccess(result)
                 PairingUiState.Done(result)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: PairingException) {
-                PairingUiState.Failed(link, e.reason, e.detail)
+                PairingUiState.Failed(target, e.reason, e.detail)
             } catch (e: Exception) {
-                PairingUiState.Failed(link, PairingException.Reason.FAILED, e.message)
+                PairingUiState.Failed(target, PairingException.Reason.FAILED, e.message)
             }
         }
     }

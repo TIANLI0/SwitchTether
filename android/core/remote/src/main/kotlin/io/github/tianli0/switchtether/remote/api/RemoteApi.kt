@@ -180,6 +180,28 @@ class RemoteApi(
         return withContext(Dispatchers.Default) { parseEventPage(e, limit, after == null) }
     }
 
+    /** Claude Code sub-agents of a session as a flat list with parent links (empty when none). */
+    suspend fun subagentTree(sessionId: String): List<io.github.tianli0.switchtether.remote.session.SubagentNode> {
+        val e = getJson(url("v1/sessions", sessionId, "subagents"))
+        val arr = ((e as? JsonObject)?.get("agents") as? JsonArray) ?: return emptyList()
+        return arr.mapNotNull {
+            runCatching { ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.session.SubagentNode.serializer(), it) }.getOrNull()
+        }.filter { it.agentId.isNotEmpty() }
+    }
+
+    /** One sub-agent's own steps, newest page (read-only; the desktop tails its transcript). */
+    suspend fun subagentEvents(sessionId: String, agentId: String, limit: Int = 300): io.github.tianli0.switchtether.remote.session.SubagentPage {
+        val u = url("v1/sessions", sessionId, "subagents", agentId, "events").newBuilder()
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        val e = executeJson(Request.Builder().url(u).get().tagged().build())
+        val page = withContext(Dispatchers.Default) { parseEventPage(e, limit, true) }
+        val meta = ((e as? JsonObject)?.get("meta") as? JsonObject)?.let {
+            runCatching { ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.session.SubagentNode.serializer(), it) }.getOrNull()
+        }?.copy(agentId = agentId)
+        return io.github.tianli0.switchtether.remote.session.SubagentPage(page.events, meta, page.hasMoreBefore)
+    }
+
     suspend fun eventPayload(sessionId: String, eventId: String, offset: Long, limit: Int): PayloadChunk {
         val u = url("v1/sessions", sessionId, "events", eventId, "payload").newBuilder()
             .addQueryParameter("offset", offset.toString())
@@ -207,8 +229,28 @@ class RemoteApi(
         commandId: String,
         text: String,
         images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput> = emptyList(),
+        attachments: List<String> = emptyList(),
     ): CommandResponse =
-        command(commandId, url("v1/sessions", sessionId, "messages"), SendMessageBody(commandId, text, images))
+        command(commandId, url("v1/sessions", sessionId, "messages"), SendMessageBody(commandId, text, images, attachments))
+
+    /** Starts uploading a file for the next message of [sessionId] (desktop answers 404 when too old). */
+    suspend fun beginAttachment(sessionId: String, body: io.github.tianli0.switchtether.remote.protocol.BeginAttachmentBody): io.github.tianli0.switchtether.remote.protocol.AttachmentView =
+        decode(
+            io.github.tianli0.switchtether.remote.protocol.AttachmentView.serializer(),
+            executeJson(Request.Builder().url(url("v1/sessions", sessionId, "attachments")).post(encode(body)).tagged().build()),
+        )
+
+    /** One raw chunk (≤ 8 MiB) at [offset]; the last one completes the attachment. */
+    suspend fun uploadAttachmentChunk(sessionId: String, attachmentId: String, offset: Long, bytes: ByteArray): io.github.tianli0.switchtether.remote.protocol.AttachmentView {
+        val u = url("v1/sessions", sessionId, "attachments", attachmentId).newBuilder().addQueryParameter("offset", offset.toString()).build()
+        val req = Request.Builder().url(u).put(bytes.toRequestBody("application/octet-stream".toMediaType())).tagged().build()
+        val r = fetch(req)
+        if (!r.ok) throw toApiException(r)
+        return decode(io.github.tianli0.switchtether.remote.protocol.AttachmentView.serializer(), parseJson(r.text))
+    }
+
+    suspend fun cancelAttachment(sessionId: String, attachmentId: String): JsonElement =
+        executeJson(Request.Builder().url(url("v1/sessions", sessionId, "attachments", attachmentId)).delete().tagged().build())
 
     suspend fun interrupt(sessionId: String, commandId: String): CommandResponse =
         command(commandId, url("v1/sessions", sessionId, "interrupt"), CommandBody(commandId))

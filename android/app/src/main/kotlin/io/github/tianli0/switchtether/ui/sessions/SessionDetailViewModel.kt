@@ -71,6 +71,8 @@ data class SessionDetailState(
     val draft: String = "",
     /** Images attached to the current draft (encoded base64, sent once on send). */
     val attachedImages: List<io.github.tianli0.switchtether.remote.protocol.ImageInput> = emptyList(),
+    /** Files attached to the current draft, uploaded to the computer as soon as they are picked. */
+    val draftAttachments: List<DraftAttachment> = emptyList(),
     /** Managed session created by "continue on phone" (navigate to it once). */
     val continuedAs: io.github.tianli0.switchtether.remote.protocol.SessionSummary? = null,
     /** Messages sent from this phone and not echoed by the desktop yet (optimistic bubbles). */
@@ -142,12 +144,109 @@ class SessionDetailViewModel(
     private val drafts: DraftStore,
     /** Tells the notifier about the phone's own actions (no echo notification). */
     private val onLocalAction: (String, io.github.tianli0.switchtether.remote.notify.LocalAction) -> Unit = { _, _ -> },
+    /** Reads picked files for upload (tests run it on their own dispatcher). */
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
 ) : ViewModel() {
     private val _state = MutableStateFlow(SessionDetailState(sessionId, connection = conn.state.value))
     val state: StateFlow<SessionDetailState> = _state.asStateFlow()
 
     /** Full outputs loaded on demand via the payload endpoint (memory only). */
     val payloads = mutableStateMapOf<String, PayloadState>()
+
+    /** Branch lines of Claude Code sub-agents (agent id → latest steps), see [loadSubagentPreview]. */
+    val subagentPreviews = mutableStateMapOf<String, io.github.tianli0.switchtether.ui.sessions.render.SubagentPreview>()
+    private val previewFetchedAt = HashMap<String, Long>()
+    private val previewInFlight = HashSet<String>()
+
+    /** Fetches a sub-agent's latest steps; at most once per 2.5 s per agent, never twice at once. */
+    fun loadSubagentPreview(agentId: String) {
+        val now = System.currentTimeMillis()
+        if (agentId in previewInFlight || now - (previewFetchedAt[agentId] ?: 0L) < 2_500) return
+        previewInFlight += agentId
+        previewFetchedAt[agentId] = now
+        viewModelScope.launch {
+            try {
+                val page = repo.subagentEvents(sessionId, agentId, 200)
+                subagentPreviews[agentId] = io.github.tianli0.switchtether.ui.sessions.render.SubagentPreview.of(page.events)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (subagentPreviews[agentId] == null) {
+                    subagentPreviews[agentId] = io.github.tianli0.switchtether.ui.sessions.render.SubagentPreview(emptyList(), 0, error = true)
+                }
+            } finally {
+                previewInFlight -= agentId
+            }
+        }
+    }
+
+    private val uploadJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    private val outgoingAttachments = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
+    /**
+     * Attaches a picked file: it is uploaded to the computer at once (progress on its chip), so
+     * sending is instant. The agent receives it as a path on the computer.
+     */
+    fun addAttachment(name: String, size: Long, mediaType: String?, open: () -> java.io.InputStream?) {
+        val st = _state.value
+        if (st.draftAttachments.size >= MAX_ATTACHMENTS) return
+        val a = DraftAttachment(newCommandId(), name.ifBlank { "file" }, size, mediaType)
+        if (size > MAX_ATTACHMENT_BYTES || size <= 0) {
+            val failure = if (size <= 0) AttachmentFailure.EMPTY else AttachmentFailure.TOO_LARGE
+            _state.update { it.copy(draftAttachments = it.draftAttachments + a.copy(failure = failure)) }
+            return
+        }
+        _state.update { it.copy(draftAttachments = it.draftAttachments + a) }
+        uploadJobs[a.localId] = viewModelScope.launch {
+            try {
+                val begun = repo.beginAttachment(sessionId, a.name, size, mediaType)
+                updateAttachment(a.localId) { it.copy(attachmentId = begun.attachmentId) }
+                var complete = false
+                kotlinx.coroutines.withContext(ioDispatcher) {
+                    (open() ?: throw java.io.IOException("cannot read the file")).use { input ->
+                        val buf = ByteArray(ATTACHMENT_CHUNK)
+                        var offset = 0L
+                        while (true) {
+                            var n = 0
+                            while (n < buf.size) {
+                                val r = input.read(buf, n, buf.size - n)
+                                if (r < 0) break
+                                n += r
+                            }
+                            if (n == 0) break
+                            val v = repo.uploadAttachmentChunk(sessionId, begun.attachmentId, offset, buf.copyOf(n))
+                            offset = v.received
+                            complete = v.complete
+                            updateAttachment(a.localId) { it.copy(sent = v.received) }
+                            if (complete || n < buf.size) break
+                        }
+                    }
+                }
+                updateAttachment(a.localId) {
+                    if (complete) it.copy(ready = true) else it.copy(failure = AttachmentFailure.FAILED, detail = "the file changed while it was read")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val old = (e as? io.github.tianli0.switchtether.remote.api.ApiException)?.httpStatus == 404
+                val detail = UiError.from(e).detail ?: e.message
+                updateAttachment(a.localId) { it.copy(failure = if (old) AttachmentFailure.OLD_DESKTOP else AttachmentFailure.FAILED, detail = detail) }
+            } finally {
+                uploadJobs.remove(a.localId)
+            }
+        }
+    }
+
+    fun removeAttachment(localId: String) {
+        val a = _state.value.draftAttachments.firstOrNull { it.localId == localId } ?: return
+        uploadJobs.remove(localId)?.cancel()
+        _state.update { st -> st.copy(draftAttachments = st.draftAttachments.filterNot { it.localId == localId }) }
+        a.attachmentId?.let { id -> viewModelScope.launch { repo.cancelAttachment(sessionId, id) } }
+    }
+
+    private fun updateAttachment(localId: String, f: (DraftAttachment) -> DraftAttachment) {
+        _state.update { st -> st.copy(draftAttachments = st.draftAttachments.map { if (it.localId == localId) f(it) else it }) }
+    }
 
     /** In-memory cache of downloaded local images (never written to disk). */
     private val imageCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
@@ -179,6 +278,13 @@ class SessionDetailViewModel(
                 when (ch) {
                     is SessionChange.Event -> if (ch.event.sessionId == sessionId) applyEvents(listOf(ch.event))
                     is SessionChange.Upserted -> if (ch.session.id == sessionId) {
+                        val before = _state.value.detail.valueOrNull?.summary
+                        if (before != null && (before.liveness != ch.session.liveness || before.control != ch.session.control)) {
+                            // Resumed on the computer (or ended / taken over): capabilities and the
+                            // live tail change with it, so reload instead of patching the summary.
+                            load()
+                            return@collect
+                        }
                         _state.update { st ->
                             val d = st.detail.valueOrNull ?: return@update st
                             // A turn that ends without output (interrupted, failed) ends the wait too.
@@ -186,6 +292,8 @@ class SessionDetailViewModel(
                             st.copy(detail = Loadable.Ready(d.copy(summary = ch.session)), awaitingReply = st.awaitingReply && !turnEnded && ch.session.isLive).derive()
                         }
                     }
+                    // An observed process exited: the conversation stays readable as history.
+                    is SessionChange.Removed -> if (ch.id == sessionId && _state.value.detail.valueOrNull?.summary?.isLive == true) load()
                     else -> Unit
                 }
             }
@@ -397,16 +505,21 @@ class SessionDetailViewModel(
         val st = _state.value
         val text = st.draft.trim()
         val imgs = st.attachedImages
-        if ((text.isEmpty() && imgs.isEmpty()) || !(st.canSend || st.canQueue)) return
+        val files = st.draftAttachments
+        // Every picked file must be on the computer first; a failed one is removed by the user.
+        if (files.any { !it.ready }) return
+        if ((text.isEmpty() && imgs.isEmpty() && files.isEmpty()) || !(st.canSend || st.canQueue)) return
         val cmdId = newCommandId()
         if (imgs.isNotEmpty()) outgoingImages[cmdId] = imgs
+        if (files.isNotEmpty()) outgoingAttachments[cmdId] = files.mapNotNull { it.attachmentId }
         val msg = OutgoingMessage(
             commandId = cmdId,
-            text = text.ifEmpty { "[image]" },
+            text = text.ifEmpty { if (files.isNotEmpty()) "" else "[image]" },
+            attachmentNames = files.map { it.name },
             status = if (st.canSend) OutgoingStatus.SENDING else OutgoingStatus.WAITING_CONNECTION,
             afterSeq = st.log.maxSeq ?: 0,
         )
-        _state.update { it.derive(outgoing = it.outgoing + msg).copy(draft = "", attachedImages = emptyList(), sendTick = it.sendTick + 1) }
+        _state.update { it.derive(outgoing = it.outgoing + msg).copy(draft = "", attachedImages = emptyList(), draftAttachments = emptyList(), sendTick = it.sendTick + 1) }
         draftFlow.value = ""
         viewModelScope.launch { drafts.setDraft(sessionId, "") }
         if (st.canSend) deliver(msg.commandId)
@@ -433,11 +546,13 @@ class SessionDetailViewModel(
     private fun deliver(commandId: String) {
         val msg = _state.value.outgoing.firstOrNull { it.commandId == commandId } ?: return
         val imgs = outgoingImages[commandId].orEmpty()
+        val files = outgoingAttachments[commandId].orEmpty()
         setOutgoing(commandId, OutgoingStatus.SENDING, null)
         viewModelScope.launch {
-            when (val out = repo.sendMessage(sessionId, if (msg.text == "[image]" && imgs.isNotEmpty()) "" else msg.text, commandId, imgs)) {
+            when (val out = repo.sendMessage(sessionId, if (msg.text == "[image]" && imgs.isNotEmpty()) "" else msg.text, commandId, imgs, files)) {
                 is CommandOutcome.Succeeded, is CommandOutcome.InProgress -> {
                     outgoingImages.remove(commandId)
+                    outgoingAttachments.remove(commandId)
                     setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
                 }
                 is CommandOutcome.Rejected -> setOutgoing(commandId, OutgoingStatus.FAILED, out.error.body.message.ifBlank { out.error.code })

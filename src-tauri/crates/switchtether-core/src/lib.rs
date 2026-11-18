@@ -41,6 +41,7 @@ pub mod stepup;
 pub mod terminal;
 pub mod tls;
 pub mod util;
+pub mod wake;
 
 pub use error::{ApiError, ApiResult, ErrorCode};
 pub use server::{RemoteServer, RemoteServerConfig, RemoteServerHandle};

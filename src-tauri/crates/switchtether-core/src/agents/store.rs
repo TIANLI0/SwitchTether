@@ -84,6 +84,9 @@ impl SessionLog {
         if !self.index.contains_key(&d.id) {
             self.tag_client_id(&mut d);
         }
+        if d.kind == "user_message" {
+            split_attachment_block(&mut d);
+        }
         if let Some(p) = d.payload.clone() {
             self.store_payload(&d.id, p);
         }
@@ -181,6 +184,18 @@ impl SessionLog {
 
     pub fn iter(&self) -> impl Iterator<Item = &AgentEvent> {
         self.events.iter()
+    }
+}
+
+/// A message sent with phone attachments carries a block of paths (see `attachments::compose`);
+/// the timeline shows the user's own text and the files as `data.attachments` instead.
+fn split_attachment_block(d: &mut EventDraft) {
+    let Some(text) = d.data.get("text").and_then(|t| t.as_str()) else {
+        return;
+    };
+    if let Some((user, files)) = super::attachments::split(text) {
+        d.data["text"] = json!(user);
+        d.data["attachments"] = json!(files);
     }
 }
 

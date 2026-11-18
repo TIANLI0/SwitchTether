@@ -630,6 +630,25 @@ export function RemoteSection() {
               }
               onCheckedChange={(v) => void toggleTakeover("cli", v)}
             />
+            {takeover.dsh && (
+              <SettingsSwitchRow
+                label={t("remote.takeover.dsh.label")}
+                description={
+                  !takeover.dsh.available
+                    ? t("remote.takeover.dsh.unavailable")
+                    : !takeover.dsh.profileReady
+                      ? t("remote.takeover.dsh.noProfile")
+                      : t("remote.takeover.dsh.description")
+                }
+                checked={takeover.dsh.enabled}
+                disabled={
+                  (!takeover.dsh.enabled &&
+                    (!takeover.dsh.available || !takeover.dsh.profileReady)) ||
+                  takeoverBusy !== null
+                }
+                onCheckedChange={(v) => void toggleTakeover("dsh", v)}
+              />
+            )}
           </SettingsCard>
         </SettingsBlock>
       )}
@@ -783,6 +802,27 @@ export function RemoteSection() {
                     </li>
                   ))}
                 </ol>
+
+                {pairing.code && (
+                  <div className="rounded-panel border px-3 py-2.5">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-caption text-fg-3">
+                        {t("remote.pair.codeLabel")}
+                      </span>
+                      <span
+                        data-testid="pair-pin"
+                        className={`font-mono text-section font-semibold tabular-nums tracking-[0.2em] text-fg-1 ${
+                          secondsLeft > 0 ? "" : "line-through opacity-40"
+                        }`}
+                      >
+                        {pairing.code.slice(0, 3)} {pairing.code.slice(3)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-caption text-fg-3">
+                      {t("remote.pair.codeHint")}
+                    </p>
+                  </div>
+                )}
 
                 <dl className="space-y-2 rounded-panel bg-subtle px-3 py-2.5 text-caption">
                   <div className="flex gap-3">

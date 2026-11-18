@@ -532,9 +532,15 @@ same mark as the notification small icon (`ic_stat_notify`). Exports in `android
 
 ### 13.5 LAN discovery
 `NsdDiscovery` browses `_switchtether._tcp` (TXT `v`, `fp`, `id`, `n`) only while needed, with a
-multicast lock. Used as fallback when every stored host fails; a match must have the paired
-fingerprint, and the found address is stored (`lastGoodHost`, merged host list). "附近的电脑" on
-the pairing screen lists advertised computers.
+multicast lock. Used as fallback when every stored host fails — also while pairing from a QR code
+whose addresses no longer answer; a match must have the paired fingerprint, and the found address
+is stored (`lastGoodHost`, merged host list). "附近的电脑" on the pairing screen lists advertised
+computers; tapping one opens "输入配对码" (6 digits from the desktop's pairing dialog). "手动输入电脑
+地址" opens the same screen with an address field (`host`, `host:port`, `[v6]:port`); the
+certificate is recorded on first contact and pinned afterwards. The code screen always shows the
+"核对验证码" warning (wrapped text, not a one-line tip). On every connect the stored hosts become:
+working host, `/v1/status` `hosts`, older ones (max 8); `wake` targets are kept for "唤醒并重试" on
+the offline banner (UDP magic packet to the subnet broadcast and 255.255.255.255, ports 9 and 7).
 
 ### 13.6 Relay client (docs/RELAY.md)
 - Order: stored hosts → LAN discovery → relay. TCP (`tcp://`, default port 47700) or WebSocket
@@ -577,6 +583,10 @@ Updates only (no OPPO SDK).
   a 409 says "已在电脑上处理"; questions offer 回答), 已完成 / 出错 / 已中断 (promoted for 60 s, then
   demoted), 离线 (promoted only while a turn was running), session ended (final card, then the pin
   is removed). Swiping the card away is respected until the state changes.
+- Automatic follow is per run, not per session id (`AutoFollow` in `notify/LiveUpdates.kt`): a new
+  session, the next turn of a known one (idle → busy / waiting) and a conversation resumed after
+  its process ended are all followed again, since a follow ends with its task. A manual unpin of a
+  session stays respected.
 - Progress track (one model): one coloured segment per stage, **no points**: 运行 | 待确认 | 完成
   when the turn asked something, else 运行 | 完成 (segments sum to 100). **Always determinate**
   (ColorOS Fluid Cloud draws no bar for an indeterminate style): while running the tracker moves
@@ -710,3 +720,85 @@ the system refuses to delete (e.g. after a reinstall) are reported and dropped f
 
 Regression evidence for this pass is recorded in docs/DEVELOPMENT_STATUS.md. Screenshot fixtures
 use synthetic data only; API 32 software captures exercise the non-shader fallback of COUI.
+
+## 14. Usability pass (2026-11-18)
+
+Reviewed on the API 36 emulator against the dev server (observe-only on the desktop's real
+Claude data; managed test session in `android/build/e2e-cwd`).
+
+- **Home:** "运行中" now means working (busy); live-but-idle sessions are a separate "空闲" group
+  capped at 3 rows, with "查看全部 N 个活动会话" → Sessions tab. Pull-to-refresh.
+- **Session times (desktop):** observed live Claude sessions report the transcript's last write
+  as `lastActiveAtMs` (was "now", so every row read 刚刚 and the order was arbitrary).
+- **Session detail:** long titles scroll as a marquee (coui patch 0004, `LocalTopAppBarTitleMarquee`,
+  on for every page; the session info sheet opens from the status chip row); time before model in message headers (the time
+  was being cut); copy button on every code block (`LocalCodeCopyLabel`) and "复制回复" per reply;
+  image attach uses an image icon; the image viewer closes with ×; the read-only tip, once
+  dismissed, stays dismissed (`ui_hints`).
+- **Approvals:** 允许 / 拒绝 act on one tap (the card shows exactly what is approved; buttons are
+  disabled while a request is in flight). 本会话内始终允许 and 停止智能体 still confirm.
+  Verified: one tap → file written, card "已允许（在手机上）".
+- **Claude Code background tasks:** background `Bash` rows show "后台", stay running until the
+  task notification, then completed / failed (exit code) / interrupted (TaskStop); the finish
+  summary is shown when expanded. Notifications and user messages absorbed mid-turn
+  (`attachment` → `queued_command`) are parsed; before, both were dropped (the phone never showed
+  a message the user typed while the agent was working).
+- **New session:** one launcher state for the sheet, the page route and the folder picker (a
+  picked folder always reaches the launcher; Home's button opens the sheet). Agent, model per
+  agent, permission mode and the folder of the last phone-started session are remembered; recent models are chips. A disabled Start says why.
+- **Folder picker:** recent folders + all locations, "所有位置" from inside any folder, system
+  back = up → locations → sheet, loading/error states, a filter above 12 folders, lazy rows (no
+  300 cap), the button names the folder ("使用“e2e-cwd”").
+- **Terminal:** follows output only while at the bottom (scrolling up to read stops it; loading
+  earlier output keeps the position); ⏎ key; ⌨/⌨↓ toggles the keyboard; font size persists;
+  "load earlier output" disappears when everything is loaded; the page title is the terminal's
+  name with its folder.
+- **Files:** back from an edited file asks "放弃修改？"; opening a folder never shows a stale file;
+  cancelling search clears the results (they used to stay); back closes search first;
+  pull-to-refresh; success messages are toasts, errors stay dialogs; invalid names show an error;
+  the menu uses a "more" icon.
+- **Git:** empty state "尚未选择仓库" with "选择仓库"; commit rows say which file a tap shows (there
+  is no per-commit diff endpoint yet).
+- **Settings → 通知:** quiet hours use the system time picker (minutes too); muted agents and
+  projects are switches (projects from recent sessions) instead of comma-separated ids.
+- **Usage:** request-log times use the desktop's time zone like the rest of the page.
+- **Onboarding:** "从剪贴板粘贴" when the link field is empty.
+
+### 14.1 Running icon stays static
+A frame-animated running icon (step glyph in a turning arc, `animation-list`) was tried: it turned
+in the emulator's notification shade but did not work well on the real device, so it was removed.
+Running keeps the static step glyphs.
+
+### 14.2 Command blocks and the terminal page
+- Tool-call commands: the "横向查看 / 复制完整命令" buttons above the block are gone; the block's
+  own header has two small icons, wrap ↔ scroll sideways (`CodeBlockView(wrapToggle = true)`,
+  labels via `LocalCodeWrapLabels`) and copy.
+- Terminal page: title is the short shell name ("cmd", not `C:\WINDOWS\system32\cmd.exe`) with
+  the folder as subtitle; the row of five round buttons is gone (paste + a "more" menu in the page
+  toolbar: new terminal, copy screen, refresh, close); tabs only when there are several terminals;
+  "load earlier output" is a quiet line instead of a pill over the output.
+- A terminal created before its page measured itself (from the Workspace hub) gets a grid
+  estimated from the screen and font, so the shell's banner is not wrapped at a stale width.
+
+Not done: per-commit diff (needs a `git show <rev>` endpoint), removing exited terminals from the
+hub, search in Providers/MCP/Skills lists.
+
+## 15. Sub-agent branches (Claude Code)
+
+Modelled on Claude Code's own view of sub-agents (the `⎿` lines under a Task, expandable into the
+agent's transcript):
+
+- **Inline branch**: under a Claude Code sub-agent row, while it runs, its latest 3 top-level steps
+  as tree lines (`├─` / `└─`, monospace) with "… 之前还有 N 步"; refreshed every 3 s (one request per
+  agent, throttled to 2.5 s). Finished agents keep the one-line summary. Always a "查看过程 · N 步 ›"
+  link (or "查看过程" before the count is known; "没有过程记录" when the desktop has none).
+- **Sub-agent page** (`Route.Subagent`): title = description, subtitle = type · state; breadcrumb
+  "全部子 agent › 父 agent › 当前" (each crumb opens that level); the agent's steps with the normal
+  renderers, read-only (approvals/answers BLOCKED); nested sub-agent rows open the next level; "它启动
+  的子 agent" lists direct children as branch rows. Polls every 2 s until `finished` (or 2 min idle).
+- **Branch tree** (`Route.SubagentTree`, capsule "N 个子 agent" on the session page): every
+  sub-agent depth-first with connector rails (`│  ├─`), status dot (running / done / not finished),
+  type and time; tap opens the sub-agent page. Refreshes while any branch is running.
+- Codex: the same entry points (`Route.Subagent`/`SubagentTree` carry the agent id); the desktop serves the
+  events nested under the sub-agent row, so the nested rows in the main timeline and the page agree.
+

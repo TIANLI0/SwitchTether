@@ -68,7 +68,7 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 fun HomeScreen(onOpen: (Route) -> Unit, onSelectTab: (Tab) -> Unit) {
     val vm = containerViewModel { HomeViewModel(it.connection, it.sessions, it.management) }
     val state by vm.state.collectAsStateWithLifecycle()
-    HomeContent(state, onOpen, onSelectTab, onRetry = vm::retryConnection, onRefresh = vm::refresh)
+    HomeContent(state, onOpen, onSelectTab, onRetry = vm::retryConnection, onRefresh = vm::pullRefresh)
 }
 
 @Composable
@@ -78,6 +78,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
     Page(title = online?.desktop?.name ?: stringResource(R.string.tab_home), large = false) {
         // Only problems are shown (connecting / offline / revoked / incompatible), as a thin strip.
         io.github.tianli0.switchtether.ui.common.ConnectionBanner(state.connection, onRetry)
+        io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh, topAppBarScrollBehavior = null) {
         LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
             when (val s = state.sessions) {
                 Loadable.Loading -> item(key = "loading") { CompactNote(stringResource(R.string.state_loading)) }
@@ -95,12 +96,26 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                             GroupCard {
                                 BasicComponent(
                                     title = stringResource(R.string.home_no_live),
-                                    endActions = { TextButton(text = stringResource(R.string.new_session_title), onClick = { onOpen(Route.NewSession) }) },
+                                    endActions = { val c = io.github.tianli0.switchtether.ui.appContainer(); TextButton(text = stringResource(R.string.new_session_title), onClick = { c.newSessionReopen.value = true }) },
                                     cardListPosition = CardListPosition.Full,
                                 )
                             }
                         } else {
-                            SessionGroup(state.running.take(8), onOpen)
+                            SessionGroup(state.running.take(MAX_ROWS), onOpen)
+                        }
+                    }
+                    if (state.idle.isNotEmpty()) {
+                        item(key = "idle-h") { CompactTitle(stringResource(R.string.home_idle, state.idle.size)) }
+                        // Idle sessions are background: a few are enough here, the rest are one tap away.
+                        item(key = "idle") { SessionGroup(state.idle.take(MAX_IDLE_ROWS), onOpen) }
+                    }
+                    if (state.running.size > MAX_ROWS || state.idle.size > MAX_IDLE_ROWS) {
+                        item(key = "all-live") {
+                            TextButton(
+                                text = stringResource(R.string.home_see_all_live, state.live.size),
+                                onClick = { onSelectTab(Tab.SESSIONS) },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                            )
                         }
                     }
                     if (state.recent.isNotEmpty()) {
@@ -128,8 +143,12 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                 }
             }
         }
+        }
     }
 }
+
+private const val MAX_ROWS = 8
+private const val MAX_IDLE_ROWS = 3
 
 @Composable
 private fun SessionGroup(list: List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>, onOpen: (Route) -> Unit) {

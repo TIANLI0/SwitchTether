@@ -10,7 +10,9 @@ TODO list. Each item says what the user experiences.
    permission prompt or interrupt an existing session, and the phone shows them read-only.
    With a hook on (Settings → Remote, docs/AGENT_COMPATIBILITY.md §6b) only sessions started
    *after* turning it on are controllable; already running VS Code panels, Codex Desktop
-   windows and terminals stay observe-only. Codex Desktop takeover is Windows-only. Terminal
+   windows and terminals stay observe-only. Codex Desktop takeover is Windows-only. DeepSeek
+   Harness: the opt-in plugin covers `dsh web` (restart it after turning the switch on), not the
+   DeepSeek Harness desktop app; managed dsh sessions use the `acp` profile. Terminal
    sessions (`st-claude` / `st-codex`) answer prompts in the mirrored terminal view, not with
    approval cards. Turns sent from the phone into a VS Code panel run in that panel's process,
    but whether the extension's chat view redraws them is up to the extension (UNTESTED).
@@ -28,19 +30,31 @@ TODO list. Each item says what the user experiences.
    very old/new CLIs may differ.
 5. **A managed session cannot be shown on the desktop's Claude Code/Codex UI.** It is visible
    in SwitchTether (phone) and its transcript appears in the normal history afterwards.
-6. Continuing a Codex thread that might be open elsewhere is refused by design (single writer).
+6. Codex allows one writer per thread: while a thread is open elsewhere (Codex Desktop, another
+   app-server) Codex itself refuses to resume it and the phone shows the 409. Once it is closed
+   there, SwitchTether can continue it (docs/AGENT_COMPATIBILITY.md §6a).
 7. Third-party extension/plugin private UI state (e.g. VS Code editor tabs, extension webviews)
    is not available through any interface and is not rendered.
 
 ## Network and background
 
-8. No public relay: the phone must reach the desktop over LAN, Tailscale (your own Tailnet; it
-   still uses Tailscale's coordination servers) or a manually configured address.
-8a. No mDNS discovery yet: the QR code carries the candidate addresses (LAN, Tailscale). If
-    the computer's LAN address changes, the phone tries all stored candidates; otherwise
-    re-pair or enter the address manually. Tailscale addresses are stable.
+8. No hosted relay: away from the LAN the phone reaches the desktop over Tailscale (your own
+   Tailnet; it still uses Tailscale's coordination servers), a manually entered address, or an
+   optional **self-hosted** relay (docs/RELAY.md, off by default) that only forwards the
+   end-to-end TLS stream.
+8a. LAN discovery (mDNS `_switchtether._tcp`) needs multicast on the network. Where it is
+    blocked (guest Wi-Fi, client isolation, some routers, the Android emulator) "附近的电脑" stays
+    empty: pair by QR code or by typing the address plus the pairing code. A changed address
+    heals on its own as long as any path works once, because the phone replaces its stored
+    addresses with the desktop's current list (`/v1/status` → `hosts`) on every connection.
+8b. Pairing without the QR code (nearby computer or typed address + 6-digit code) cannot check
+    the desktop's certificate in advance; the verification code compared on both screens after
+    pairing is the protection against a machine-in-the-middle, and the app says so.
 9. When the desktop sleeps the phone shows "offline"; SwitchTether does not change sleep
-   settings. Wake-on-LAN is not implemented.
+   settings. "唤醒并重试" sends a Wake-on-LAN magic packet, which only helps while the phone is
+   on the computer's LAN and the computer's adapter / firmware already allow Wake-on-LAN
+   (SwitchTether never changes those). A sleeping computer cannot be woken from outside its
+   LAN (Tailscale, relay). Not yet verified against a real sleeping computer.
 10. Android background delivery is best effort: without FCM, notifications depend on the
     optional foreground connection service and vendor battery policies; Doze can delay them.
     Missed events are fetched after reconnecting (event replay) or by refreshing (resync).

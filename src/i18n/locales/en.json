@@ -5470,8 +5470,10 @@
       "verify": "Verification code (should match the phone):",
       "newCode": "New code",
       "step1": "Open SwitchTether on your phone.",
-      "step2": "Tap Add computer and scan this code.",
+      "step2": "Tap Add computer and scan this code, or pick this computer under Nearby computers and enter the pairing code below.",
       "step3": "Check that the verification code matches on both screens.",
+      "codeLabel": "Pairing code",
+      "codeHint": "When scanning is not possible: pick this computer under Nearby computers on the phone (or enter its address), then type this code.",
       "computer": "Computer",
       "addresses": "Address",
       "done": "Done"
@@ -5527,6 +5529,13 @@
         "label": "Terminal · st-claude / st-codex",
         "description": "Adds st-claude and st-codex commands ({{dir}}). Use them instead of claude / codex for sessions you want to reach from the phone; claude and codex themselves are unchanged.",
         "enabledToast": "Enabled. Open a new terminal and run st-claude or st-codex."
+      },
+      "dsh": {
+        "label": "DeepSeek Harness · Web",
+        "description": "Installs the SwitchTether bridge plugin into the dsh web profile with dsh's own plugin manager (dsh plugin). The phone can then message, interrupt and approve sessions in dsh web (the first answer, web or phone, wins). The profile's manifest and patch files are backed up first; turning it off runs dsh plugin remove. Takes effect when dsh web is restarted. The DeepSeek Harness desktop app is not supported.",
+        "unavailable": "DeepSeek Harness (dsh) was not found.",
+        "noProfile": "The DeepSeek Harness web profile is not set up yet: run dsh web once first.",
+        "enabledToast": "Enabled. Restart dsh web; sessions opened there can then be taken over from the phone."
       }
     },
     "basedOn": "Based on CC Switch v{{version}}",

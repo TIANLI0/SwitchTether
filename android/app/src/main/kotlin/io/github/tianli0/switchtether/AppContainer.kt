@@ -85,6 +85,7 @@ class AppContainer(private val context: Context) {
         store = pairingStore,
         baseClient = baseClient,
         relaySecrets = io.github.tianli0.switchtether.connection.KeystoreRelaySecrets,
+        discover = { fp, timeoutMs -> if (localNetwork.isGranted()) discovery.find(fp, timeoutMs) else emptyList() },
         onReplaced = { previous ->
             // Best effort: the old desktop keeps a record until revoked there; wipe our keys for it.
             keys.delete(previous.identityAlias)
@@ -146,6 +147,12 @@ class AppContainer(private val context: Context) {
 
     /** The new-session sheet was left for the folder picker page; reopen it when the picker closes. */
     val newSessionReopen = MutableStateFlow(false)
+    /** One-time hints the user has dismissed (e.g. the read-only session tip). */
+    val hintPrefs: android.content.SharedPreferences by lazy { context.getSharedPreferences("ui_hints", Context.MODE_PRIVATE) }
+    /** Terminal view preferences (font size only). */
+    val terminalPrefs: android.content.SharedPreferences by lazy { context.getSharedPreferences("terminal", Context.MODE_PRIVATE) }
+    /** Last launcher choices for a new managed session. */
+    val newSessionPrefs: io.github.tianli0.switchtether.ui.sessions.NewSessionPrefs by lazy { io.github.tianli0.switchtether.ui.sessions.SharedNewSessionPrefs(context) }
 
     /** Session id requested by a notification tap (consumed by the main shell). */
     val openSessionRequest = MutableStateFlow<String?>(null)

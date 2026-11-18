@@ -101,6 +101,10 @@ fun SwitchTetherRoot() {
       CompositionLocalProvider(
         io.github.suqi8.coui.kmp.layout.LocalSheetCloseLabel provides stringResource(R.string.action_close),
         io.github.tianli0.switchtether.ui.components.LocalExpandStateLabels provides (stringResource(R.string.state_expanded) to stringResource(R.string.state_collapsed)),
+        // Long page titles (session names) scroll instead of being cut (coui patch 0004).
+        io.github.suqi8.coui.kmp.basic.LocalTopAppBarTitleMarquee provides true,
+        io.github.tianli0.switchtether.ui.code.LocalCodeCopyLabel provides stringResource(R.string.action_copy),
+        io.github.tianli0.switchtether.ui.code.LocalCodeWrapLabels provides (stringResource(R.string.command_wrap) to stringResource(R.string.command_scroll)),
         io.github.tianli0.switchtether.domain.LocalMoney provides container.money.display.collectAsState().value,
       ) {
         io.github.tianli0.switchtether.ui.common.LocalNetworkPermissionHost()
@@ -297,12 +301,19 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
                 container.handoffSession.value = top.sessionId
                 onDispose { if (container.handoffSession.value == top.sessionId) container.handoffSession.value = null }
             }
-            SessionDetailScreen(top.sessionId, top.title, onBack, onOpenSession = { id, title -> nav.push(Route.SessionDetail(id, title)) })
+            // A resumed session takes this page's place, so back does not return to the old read-only view.
+            SessionDetailScreen(top.sessionId, top.title, onBack, onOpenSession = { id, title -> nav.replace(Route.SessionDetail(id, title)) }, onOpenRoute = nav::push)
         }
-        Route.NewSession -> NewSessionScreen(onBack, onPickFolder = { nav.push(Route.PickFolder) }, onCreated = { id, title ->
-            nav.back()
-            nav.push(Route.SessionDetail(id, title))
-        })
+        is Route.Subagent -> io.github.tianli0.switchtether.ui.sessions.SubagentScreen(top.sessionId, top.agentId, top.title, onBack, onOpen = nav::push, agent = top.agent)
+        is Route.SubagentTree -> io.github.tianli0.switchtether.ui.sessions.SubagentTreeScreen(top.sessionId, onBack, onOpen = nav::push, agent = top.agent)
+        // Every entry point opens the one launcher sheet (the folder picker returns to it).
+        Route.NewSession -> {
+            val container = appContainer()
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                nav.back()
+                container.newSessionReopen.value = true
+            }
+        }
         is Route.Terminal -> io.github.tianli0.switchtether.ui.workspace.TerminalPage(top.id, onBack)
         Route.Files -> io.github.tianli0.switchtether.ui.workspace.FilesPage(onBack, onOpenDownloads = { nav.push(Route.Downloads) })
         Route.Downloads -> io.github.tianli0.switchtether.ui.files.DownloadsScreen(onBack)

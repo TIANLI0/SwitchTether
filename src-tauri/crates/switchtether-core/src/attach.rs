@@ -108,6 +108,7 @@ fn origin_name(s: Option<&str>) -> &'static str {
         Some("vscode") => "vscode",
         Some("desktop_app") => "desktop_app",
         Some("cli") => "cli",
+        Some("dsh_web") => "dsh_web",
         _ => "unknown",
     }
 }
@@ -309,6 +310,71 @@ async fn serve(
             tty.mark_ended();
             terms.external_exited(&term.id, exit_code);
             hub.publish_session(&id);
+        }
+        ("plugin", Some("dsh")) => {
+            // The opt-in DeepSeek Harness bridge plugin (one connection per dsh host).
+            let conn = crate::agents::dsh::attached::DshPluginConn::new(tx);
+            loop {
+                let frame = tokio::select! {
+                    _ = cancel.cancelled() => None,
+                    f = read_frame(&mut rd, &mut buf) => f.ok().flatten(),
+                };
+                let Some(frame) = frame else { break };
+                let t = frame.get("t").and_then(|t| t.as_str()).unwrap_or("");
+                if t == "result" {
+                    conn.on_result(&frame);
+                    continue;
+                }
+                let Some(sid) = frame
+                    .get("sessionId")
+                    .and_then(|s| s.as_str())
+                    .filter(|s| !s.is_empty() && s.len() <= 200)
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                let existing = conn.sessions.lock().get(&sid).cloned();
+                let session = match existing {
+                    Some(s) => s,
+                    None if t == "session-closed" => continue,
+                    None => {
+                        let id = format!("attached:{}", crate::util::new_id());
+                        let s = crate::agents::dsh::attached::AttachedDsh::new(
+                            id.clone(),
+                            sid.clone(),
+                            conn.clone(),
+                            new_log(&id),
+                        );
+                        conn.sessions.lock().insert(sid.clone(), s.clone());
+                        hub.register_attached(id, s.clone());
+                        s
+                    }
+                };
+                let before = session.status();
+                match t {
+                    "activity" | "session" => session.touch(),
+                    "approval" => session.on_approval(&frame),
+                    "approval-done" => session.on_approval_done(&frame),
+                    "session-closed" => {
+                        session.mark_ended();
+                        conn.sessions.lock().remove(&sid);
+                    }
+                    _ => {}
+                }
+                if t == "session" || t == "session-closed" || session.status() != before {
+                    hub.publish_session(&session.id);
+                }
+            }
+            conn.on_disconnect();
+            let ids: Vec<String> = conn
+                .sessions
+                .lock()
+                .values()
+                .map(|s| s.id.clone())
+                .collect();
+            for id in ids {
+                hub.publish_session(&id);
+            }
         }
         _ => anyhow::bail!("unknown attach kind"),
     }

@@ -16,6 +16,11 @@
 //! - `cli`: `st-claude` / `st-codex` launchers in `~/.switchtether/bin`
 //!   (Windows: that folder is added to the user PATH). Plain `claude` /
 //!   `codex` are never redirected.
+//! - `dsh`: the SwitchTether bridge plugin in DeepSeek Harness's `web` profile, installed with
+//!   dsh's own `dsh plugin --profile web add link:<~/.switchtether/dsh-plugin>` and removed with
+//!   `dsh plugin --profile web remove`. The profile's manifest, patch and lock files are backed up
+//!   first. dsh refuses CLI plugin management for its Desktop (Electron) profile, so only
+//!   `dsh web` / CLI hosts are covered. Takes effect when dsh web is next started.
 
 use std::path::{Path, PathBuf};
 
@@ -61,6 +66,11 @@ struct TakeoverState {
     cli: bool,
     #[serde(default)]
     cli_path_added: bool,
+    #[serde(default)]
+    dsh: bool,
+    /// Backup of the dsh web profile's package.json taken when the bridge was enabled.
+    #[serde(default)]
+    dsh_manifest_backup: Option<String>,
 }
 
 fn load_state() -> TakeoverState {
@@ -472,6 +482,186 @@ fn cli_set(enable: bool, st: &mut TakeoverState) -> Result<Vec<Value>, String> {
     }
 }
 
+// ------------------------------------------------------------ DeepSeek Harness
+
+const DSH_PLUGIN: &str = "switchtether-dsh-bridge";
+const DSH_PROFILE: &str = "web";
+
+fn dsh_plugin_dir() -> PathBuf {
+    home().join("dsh-plugin")
+}
+
+fn dsh_profile_dir() -> PathBuf {
+    switchtether_core::agents::dsh::dsh_home()
+        .join("profiles")
+        .join(DSH_PROFILE)
+}
+
+/// Writes the plugin package (SwitchTether's own directory); the attach file path is baked in.
+fn write_dsh_plugin() -> Result<PathBuf, String> {
+    let dir = dsh_plugin_dir();
+    let lib = dir.join("lib");
+    std::fs::create_dir_all(&lib).map_err(|e| e.to_string())?;
+    let version = env!("CARGO_PKG_VERSION");
+    let attach = crate::switchtether::remote::remote_dir().join("attach.json");
+    let attach = serde_json::to_string(&attach.to_string_lossy()).unwrap();
+    let js = include_str!("dsh_plugin/index.js")
+        .replace("__ATTACH_FILE__", &attach)
+        .replace("__VERSION__", &serde_json::to_string(version).unwrap());
+    let pkg = include_str!("dsh_plugin/package.json").replace("__VERSION__", version);
+    std::fs::write(lib.join("index.js"), js).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("package.json"), pkg).map_err(|e| e.to_string())?;
+    std::fs::write(
+        dir.join("cordis.patch.yml"),
+        include_str!("dsh_plugin/cordis.patch.yml"),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Whether the profile manifest lists the bridge as a dependency and as an enabled bundle.
+fn dsh_plugin_installed() -> bool {
+    let Ok(text) = std::fs::read_to_string(dsh_profile_dir().join("package.json")) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    let dep = v.pointer(&format!("/dependencies/{DSH_PLUGIN}")).is_some();
+    let bundle = v
+        .pointer("/dsh/profile/bundles")
+        .and_then(Value::as_array)
+        .is_some_and(|b| b.iter().any(|x| x.as_str() == Some(DSH_PLUGIN)));
+    dep && bundle
+}
+
+fn run_dsh_plugin(bin: &Path, args: &[&str]) -> Result<String, String> {
+    let mut cmd = std::process::Command::new(bin);
+    cmd.args(["plugin", "--profile", DSH_PROFILE])
+        .args(args)
+        .current_dir(dsh_profile_dir())
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd
+        .output()
+        .map_err(|e| format!("could not run dsh: {e}"))?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if out.status.success() {
+        Ok(text)
+    } else {
+        Err(format!(
+            "`dsh plugin --profile {DSH_PROFILE} {}` failed: {}",
+            args.join(" "),
+            text.trim().chars().take(2000).collect::<String>()
+        ))
+    }
+}
+
+/// Same JSON once empty `dependencies` / `devDependencies` objects are ignored.
+fn manifest_equivalent(a: &Path, b: &Path) -> bool {
+    let read = |p: &Path| -> Option<Value> {
+        let mut v: Value = serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()?;
+        if let Some(o) = v.as_object_mut() {
+            for k in ["dependencies", "devDependencies"] {
+                if o.get(k)
+                    .and_then(Value::as_object)
+                    .is_some_and(|m| m.is_empty())
+                {
+                    o.remove(k);
+                }
+            }
+        }
+        Some(v)
+    };
+    matches!((read(a), read(b)), (Some(x), Some(y)) if x == y)
+}
+
+fn dsh_set(enable: bool, st: &mut TakeoverState) -> Result<Vec<Value>, String> {
+    let bin = switchtether_core::agents::dsh::managed::find_dsh_bin()
+        .ok_or("DeepSeek Harness (`dsh`) was not found on this computer")?;
+    let profile = dsh_profile_dir();
+    if enable {
+        if !profile.join("package.json").is_file() {
+            return Err(
+                "The DeepSeek Harness web profile is not initialised yet: run `dsh web` once, then try again"
+                    .into(),
+            );
+        }
+        if dsh_plugin_installed() {
+            st.dsh = true;
+            return Ok(vec![json!({ "result": "already" })]);
+        }
+        let backups = home().join("backups").join("dsh");
+        let mut saved = Vec::new();
+        for f in [
+            "package.json",
+            "cordis.patch.yml",
+            "pnpm-lock.yaml",
+            "compatibility.json",
+        ] {
+            let p = profile.join(f);
+            if p.is_file() {
+                let b = backup_to(&p, &backups, DSH_PROFILE)?;
+                if f == "package.json" {
+                    st.dsh_manifest_backup = Some(b.to_string_lossy().into_owned());
+                }
+                saved.push(b.to_string_lossy().into_owned());
+            }
+        }
+        let dir = write_dsh_plugin()?;
+        let spec = format!("link:{}", dir.to_string_lossy().replace('\\', "/"));
+        let log = run_dsh_plugin(&bin, &["add", &spec])?;
+        if !dsh_plugin_installed() {
+            return Err(format!(
+                "dsh did not enable the SwitchTether bundle: {}",
+                log.trim().chars().take(2000).collect::<String>()
+            ));
+        }
+        st.dsh = true;
+        Ok(vec![
+            json!({ "result": "enabled", "profile": DSH_PROFILE, "backups": saved,
+            "note": "Restart DeepSeek Harness web (`dsh web`) to load the bridge." }),
+        ])
+    } else {
+        if dsh_plugin_installed() || st.dsh {
+            if let Err(e) = run_dsh_plugin(&bin, &["remove", DSH_PLUGIN]) {
+                if dsh_plugin_installed() {
+                    return Err(e);
+                }
+            }
+        }
+        if dsh_plugin_installed() {
+            return Err(
+                "dsh still lists the SwitchTether bundle; remove it in dsh's plugin page".into(),
+            );
+        }
+        // pnpm drops an emptied `dependencies` object: when nothing else differs from the backup,
+        // put the original bytes back so the manifest is exactly as before.
+        let manifest = profile.join("package.json");
+        let restored = st
+            .dsh_manifest_backup
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|b| manifest_equivalent(b, &manifest))
+            .map(|b| std::fs::copy(&b, &manifest).is_ok())
+            .unwrap_or(false);
+        st.dsh = false;
+        st.dsh_manifest_backup = None;
+        Ok(vec![
+            json!({ "result": "disabled", "manifestRestored": restored,
+            "note": "Restart DeepSeek Harness web to unload the bridge." }),
+        ])
+    }
+}
+
 // ------------------------------------------------------------------ API
 
 pub fn status() -> Value {
@@ -506,6 +696,12 @@ pub fn status() -> Value {
             "enabled": codex_env.as_deref() == Some(shim_s.as_str()),
             "foreignValue": codex_env.filter(|v| *v != shim_s),
         },
+        "dsh": {
+            "available": switchtether_core::agents::dsh::managed::find_dsh_bin().is_some(),
+            "profileReady": dsh_profile_dir().join("package.json").is_file(),
+            "enabled": dsh_plugin_installed(),
+            "profile": DSH_PROFILE,
+        },
         "cli": {
             "available": true,
             "enabled": st.cli && launcher_paths().iter().all(|(p, _)| p.is_file()),
@@ -521,6 +717,7 @@ pub fn set(hook: &str, enabled: bool) -> Result<Value, String> {
         "vscode" => vscode_set(enabled, &mut st),
         "codex_desktop" => codex_set(enabled, &mut st),
         "cli" => cli_set(enabled, &mut st),
+        "dsh" => dsh_set(enabled, &mut st),
         other => Err(format!("unknown hook '{other}'")),
     };
     save_state(&st)?;
@@ -532,6 +729,43 @@ pub fn set(hook: &str, enabled: bool) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dsh_manifest_equivalence_ignores_only_empty_dependency_objects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.json");
+        let b = tmp.path().join("b.json");
+        std::fs::write(
+            &a,
+            r#"{"name":"p","dependencies":{},"dsh":{"profile":{"bundles":["x"]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &b,
+            "{
+  \"name\": \"p\",
+  \"dsh\": {\"profile\": {\"bundles\": [\"x\"]}}
+}
+",
+        )
+        .unwrap();
+        assert!(manifest_equivalent(&a, &b));
+        std::fs::write(
+            &b,
+            r#"{"name":"p","dsh":{"profile":{"bundles":["x","y"]}}}"#,
+        )
+        .unwrap();
+        assert!(
+            !manifest_equivalent(&a, &b),
+            "a bundle the user added is kept"
+        );
+        std::fs::write(
+            &b,
+            r#"{"name":"p","dependencies":{"z":"1"},"dsh":{"profile":{"bundles":["x"]}}}"#,
+        )
+        .unwrap();
+        assert!(!manifest_equivalent(&a, &b));
+    }
 
     #[test]
     fn wrapper_key_insert_and_remove_preserve_the_rest() {

@@ -75,7 +75,15 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
 @Composable
 private fun terminalViewModel(): TerminalViewModel =
-    containerViewModel { c -> TerminalViewModel(c.connection, c.stepUpGate, { c.pairingStoreStepUpEnabled() }, { id -> c.noteLocalAction(id, io.github.tianli0.switchtether.remote.notify.LocalAction.KILL_TERMINAL) }) }
+    containerViewModel { c -> TerminalViewModel(
+            c.connection,
+            c.stepUpGate,
+            { c.pairingStoreStepUpEnabled() },
+            { id -> c.noteLocalAction(id, io.github.tianli0.switchtether.remote.notify.LocalAction.KILL_TERMINAL) },
+            initialFontSp = c.terminalPrefs.getInt("font_sp", 12),
+            saveFontSp = { sp -> c.terminalPrefs.edit().putInt("font_sp", sp).apply() },
+        )
+    }
 
 @Composable
 private fun filesViewModel(): FilesViewModel {
@@ -108,7 +116,16 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
     }
     androidx.compose.runtime.LaunchedEffect(term.online) { if (term.online) termVm.refresh() }
     var showShells by remember { mutableStateOf(false) }
-    Page(title = stringResource(R.string.tab_workspace)) {
+    val sizeEstimate = rememberTerminalSizeEstimate(term.fontSp)
+    Page(
+        title = stringResource(R.string.tab_workspace),
+        actions = {
+            ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), {
+                termVm.refresh()
+                filesVm.loadRoots()
+            })
+        },
+    ) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { SmallTitle(stringResource(R.string.ws_terminals)) }
@@ -116,7 +133,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                 GroupCard {
                     term.terminals.forEachIndexed { i, t ->
                         BasicComponent(
-                            title = t.title.ifBlank { t.shell.ifBlank { t.id.take(8) } },
+                            title = shortShellName(t.title.ifBlank { t.shell.ifBlank { t.id.take(8) } }),
                             summary = listOfNotNull(t.shell.takeIf { it.isNotBlank() && it != t.title }, t.cwd.takeIf { it.isNotBlank() }?.substringAfterLast('/')?.substringAfterLast('\\')).joinToString(" · ").ifEmpty { null },
                             startAction = { RowIcon(AppIcons.Terminal) },
                             endActions = if (t.exited) ({ StatusPill(stringResource(R.string.ws_exited), LocalDevColors.current.neutral) }) else null,
@@ -144,7 +161,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                                         index = idx,
                                         onSelectedIndexChange = {
                                             showShells = false
-                                            termVm.create(sh.id.ifBlank { null })
+                                            termVm.create(sh.id.ifBlank { null }, sizeEstimate)
                                             onOpen(Route.Terminal(null))
                                         },
                                     )
@@ -207,8 +224,17 @@ fun TerminalPage(initialId: String?, onBack: () -> Unit) {
         vm.refresh()
         initialId?.let(vm::select)
     }
-    Page(title = stringResource(R.string.ws_terminals), onBack = onBack, large = false, modifier = Modifier.imePadding()) {
-        TerminalPane(st, vm)
+    val current = st.terminals.firstOrNull { it.id == st.selectedId }
+    val controller = remember { TerminalController() }
+    Page(
+        title = current?.let { t -> shortShellName(t.title.ifBlank { t.shell }) } ?: stringResource(R.string.ws_terminals),
+        subtitle = current?.cwd.orEmpty(),
+        onBack = onBack,
+        large = false,
+        actions = { TerminalActions(st, vm, controller) },
+        modifier = Modifier.imePadding(),
+    ) {
+        TerminalPane(st, vm, controller)
     }
 }
 
@@ -216,7 +242,14 @@ fun TerminalPage(initialId: String?, onBack: () -> Unit) {
 fun FilesPage(onBack: () -> Unit, onOpenDownloads: () -> Unit = {}) {
     val vm = filesViewModel()
     val st by vm.state.collectAsStateWithLifecycle()
-    Page(title = stringResource(R.string.ws_files), onBack = onBack, large = false, modifier = Modifier.imePadding()) {
+    val back: () -> Unit = {
+        when {
+            st.viewer != null -> vm.closeViewer()
+            st.file != null -> vm.requestCloseFile()
+            else -> onBack()
+        }
+    }
+    Page(title = stringResource(R.string.ws_files), onBack = back, large = false, modifier = Modifier.imePadding()) {
         FilesPane(st, vm, onOpenDownloads)
     }
 }
@@ -325,8 +358,9 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
         if (git == null) {
             GroupCard(Modifier.padding(top = 8.dp)) {
                 EmptyState(
-                    title = stringResource(R.string.git_repo),
-                    actionText = stringResource(R.string.git_repo),
+                    title = stringResource(R.string.git_no_repo),
+                    subtitle = stringResource(R.string.git_no_repo_hint),
+                    actionText = stringResource(R.string.git_choose_repo),
                     onActionClick = { showRepoDialog = true },
                     modifier = Modifier.padding(24.dp),
                 )
@@ -387,10 +421,13 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
                     item {
                         GroupCard {
                             val targetPath = openFileRel ?: st.entries.firstOrNull()?.path
+                            val showFileLabel = stringResource(R.string.git_show_file_at)
                             commits.take(50).forEachIndexed { i, c ->
                                 BasicComponent(
                                     title = c.subject,
-                                    summary = "${c.hash.take(8)} · ${c.author} · ${io.github.tianli0.switchtether.ui.common.relativeTime(c.timeMs)}",
+                                    // There is no per-commit diff endpoint: say which file a tap shows at that commit.
+                                    summary = "${c.hash.take(8)} · ${c.author} · ${io.github.tianli0.switchtether.ui.common.relativeTime(c.timeMs)}" +
+                                        (targetPath?.let { "\n" + showFileLabel.format(it.substringAfterLast('/').substringAfterLast('\\')) } ?: ""),
                                     cardListPosition = cardListPositionOf(i, minOf(50, commits.size)),
                                     onClick = if (targetPath != null) ({ vm.gitShow(c.hash, targetPath) }) else null,
                                 )

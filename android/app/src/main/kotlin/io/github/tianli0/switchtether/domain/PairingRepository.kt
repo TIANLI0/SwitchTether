@@ -8,6 +8,8 @@ import io.github.tianli0.switchtether.remote.api.RemoteApi
 import io.github.tianli0.switchtether.remote.pairing.HostRace
 import io.github.tianli0.switchtether.remote.pairing.NoReachableHostException
 import io.github.tianli0.switchtether.remote.pairing.PairingLink
+import io.github.tianli0.switchtether.remote.pairing.PairingTarget
+import io.github.tianli0.switchtether.remote.tls.RecordingServerTrustManager
 import io.github.tianli0.switchtether.remote.protocol.ErrorCodes
 import io.github.tianli0.switchtether.remote.protocol.Hello
 import io.github.tianli0.switchtether.remote.protocol.PairRequest
@@ -46,13 +48,21 @@ class PairingException(val reason: Reason, val detail: String? = null, cause: Th
 }
 
 interface PairingRepository {
-    suspend fun pair(link: PairingLink, deviceName: String, osVersion: String, appVersion: String): PairingResult
+    suspend fun pair(target: PairingTarget, deviceName: String, osVersion: String, appVersion: String): PairingResult
+
+    suspend fun pair(link: PairingLink, deviceName: String, osVersion: String, appVersion: String): PairingResult =
+        pair(PairingTarget.Link(link), deviceName, osVersion, appVersion)
 }
 
 /**
  * Pairing (docs/PROTOCOL.md §3): fresh Keystore identity (+ step-up key when the lock screen is
  * secure), race all host candidates with pinned mTLS `GET /v1/hello`, then `POST /v1/pair`.
  * Only after success is the pairing persisted; on failure the new keys are deleted.
+ *
+ * Addresses are not taken on trust from the QR code alone: when none of its hosts answers, the
+ * desktop is looked up on the LAN by its certificate fingerprint ([discover]). A [PairingTarget.Code]
+ * without a fingerprint (address typed by the user) records the certificate on first contact and
+ * pins it from then on; the verification code shown afterwards is the check.
  */
 class DefaultPairingRepository(
     private val keys: KeyProvider,
@@ -62,18 +72,36 @@ class DefaultPairingRepository(
     private val onReplaced: suspend (PairedDesktop) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
     private val relaySecrets: io.github.tianli0.switchtether.connection.RelaySecrets = io.github.tianli0.switchtether.connection.RelaySecrets.None,
+    /** LAN lookup by certificate fingerprint (NSD); null = not available. */
+    private val discover: (suspend (fingerprint: String, timeoutMs: Long) -> List<Endpoint>)? = null,
 ) : PairingRepository {
-    override suspend fun pair(link: PairingLink, deviceName: String, osVersion: String, appVersion: String): PairingResult {
+    override suspend fun pair(target: PairingTarget, deviceName: String, osVersion: String, appVersion: String): PairingResult {
         val identity = keys.createIdentity()
         val stepUpAlias = if (keys.isDeviceSecure()) keys.createStepUpKey() else null
         try {
-            val client = TlsClientFactory.create(identity, link.fingerprint, base = baseClient)
-            val endpoints = link.hosts.map { Endpoint(it, link.port) }
+            val endpoints = target.hosts.map { Endpoint(it, target.port) }
+            // Certificate pin: from the QR code / LAN advertisement, or recorded on first contact.
+            val fingerprint: String = target.fingerprint ?: try {
+                HostRace.first(endpoints) { ep ->
+                    val recorder = RecordingServerTrustManager()
+                    RemoteApi(TlsClientFactory.createRecording(identity, recorder, base = baseClient), ep).hello()
+                    recorder.fingerprint ?: error("no server certificate")
+                }.second
+            } catch (e: NoReachableHostException) {
+                throw PairingException(PairingException.Reason.UNREACHABLE, e.failures.joinToString { "${it.first}" }, e)
+            }
+            val client = TlsClientFactory.create(identity, fingerprint, base = baseClient)
             val (endpoint, hello) = try {
                 HostRace.first(endpoints) { ep -> RemoteApi(client, ep).hello() }
             } catch (e: NoReachableHostException) {
                 if (e.pinMismatch) throw PairingException(PairingException.Reason.CERTIFICATE_MISMATCH, cause = e)
-                throw PairingException(PairingException.Reason.UNREACHABLE, e.failures.joinToString { "${it.first}" }, e)
+                // The computer may have a new address since the QR code was made: look for the
+                // same certificate on the LAN before giving up.
+                val found = discover?.let { find ->
+                    runCatching { find(fingerprint, DISCOVERY_TIMEOUT_MS) }.getOrDefault(emptyList()).filter { it !in endpoints }
+                }.orEmpty()
+                val lan = if (found.isEmpty()) null else runCatching { HostRace.first(found) { ep -> RemoteApi(client, ep).hello() } }.getOrNull()
+                lan ?: throw PairingException(PairingException.Reason.UNREACHABLE, e.failures.joinToString { "${it.first}" }, e)
             }
             when (hello.compatibility()) {
                 Hello.Compatibility.DESKTOP_TOO_OLD -> throw PairingException(PairingException.Reason.INCOMPATIBLE_DESKTOP_TOO_OLD, hello.serverVersion)
@@ -83,8 +111,9 @@ class DefaultPairingRepository(
             val response = try {
                 RemoteApi(client, endpoint).pair(
                     PairRequest(
-                        pairingId = link.pairingId,
-                        secret = link.secret,
+                        pairingId = (target as? PairingTarget.Link)?.link?.pairingId,
+                        secret = (target as? PairingTarget.Link)?.link?.secret,
+                        code = (target as? PairingTarget.Code)?.code,
                         deviceName = deviceName.take(64),
                         osVersion = osVersion,
                         appVersion = appVersion,
@@ -107,26 +136,27 @@ class DefaultPairingRepository(
             // The fingerprint the server reports must be the one we pinned (defense in depth).
             val reported = runCatching { Fingerprints.fromHex(response.serverFingerprint.lowercase()) }.getOrNull()
             if (response.serverFingerprint.isNotEmpty() &&
-                (reported == null || !Fingerprints.constantTimeEquals(reported, Fingerprints.fromHex(link.fingerprint)))
+                (reported == null || !Fingerprints.constantTimeEquals(reported, Fingerprints.fromHex(fingerprint)))
             ) {
                 throw PairingException(PairingException.Reason.SERVER_FINGERPRINT_MISMATCH)
             }
             val previous = store.current()
             val desktop = PairedDesktop(
                 serverId = response.serverId.ifEmpty { hello.serverId },
-                name = response.serverName.ifEmpty { hello.serverName.ifEmpty { link.desktopName } },
-                fingerprint = link.fingerprint,
-                hosts = link.hosts,
+                name = response.serverName.ifEmpty { hello.serverName.ifEmpty { target.desktopName } },
+                fingerprint = fingerprint,
+                hosts = (listOf(endpoint.host) + target.hosts.filter { it != endpoint.host }).take(PairingLink.MAX_HOSTS),
                 lastGoodHost = endpoint.host,
-                port = link.port,
+                port = endpoint.port,
                 deviceId = response.deviceId,
                 identityAlias = identity.alias,
                 stepUpAlias = stepUpAlias.takeIf { response.stepUpEnabled },
                 stepUpEnabled = response.stepUpEnabled,
                 pairedAtMs = clock(),
-                relayUrl = link.relayUrl,
+                relayUrl = (target as? PairingTarget.Link)?.link?.relayUrl,
                 // Token + key are secrets: stored only Keystore-encrypted; no key → relay unusable.
-                relaySecret = link.relayKey?.let { relaySecrets.seal(io.github.tianli0.switchtether.connection.RelaySecret(link.relayToken, it)) },
+                // Code pairing has none; the relay settings arrive with GET /v1/relay on the first connect.
+                relaySecret = (target as? PairingTarget.Link)?.link?.let { l -> l.relayKey?.let { relaySecrets.seal(io.github.tianli0.switchtether.connection.RelaySecret(l.relayToken, it)) } },
             )
             store.save(desktop)
             if (!response.stepUpEnabled && stepUpAlias != null) keys.delete(stepUpAlias)
@@ -134,7 +164,7 @@ class DefaultPairingRepository(
             return PairingResult(
                 desktop = desktop,
                 serverCode = response.verificationCode,
-                localCode = Fingerprints.verificationCode(link.fingerprint, identity.fingerprint),
+                localCode = Fingerprints.verificationCode(fingerprint, identity.fingerprint),
                 stepUpEnabled = response.stepUpEnabled,
             )
         } catch (e: Throwable) {
@@ -145,3 +175,5 @@ class DefaultPairingRepository(
         }
     }
 }
+
+private const val DISCOVERY_TIMEOUT_MS = 4_000L

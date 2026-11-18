@@ -17,7 +17,32 @@ data class OutgoingMessage(
     /** Highest event seq known when it was sent: the fallback match only looks at newer events. */
     val afterSeq: Long,
     val error: String? = null,
+    /** Names of the files sent with it (shown on the bubble until the desktop echoes it). */
+    val attachmentNames: List<String> = emptyList(),
 )
+
+const val MAX_ATTACHMENTS = 10
+const val MAX_ATTACHMENT_BYTES = 64L * 1024 * 1024
+const val ATTACHMENT_CHUNK = 2 * 1024 * 1024
+
+enum class AttachmentFailure { TOO_LARGE, EMPTY, OLD_DESKTOP, FAILED }
+
+/** A file picked for the next message and its upload to the computer. */
+data class DraftAttachment(
+    val localId: String,
+    val name: String,
+    val size: Long,
+    val mediaType: String?,
+    /** Bytes the computer has confirmed. */
+    val sent: Long = 0,
+    val attachmentId: String? = null,
+    val ready: Boolean = false,
+    val failure: AttachmentFailure? = null,
+    val detail: String? = null,
+) {
+    val uploading: Boolean get() = !ready && failure == null
+    val isImage: Boolean get() = mediaType?.startsWith("image/") == true
+}
 
 enum class OutgoingStatus {
     /** POST in flight ("发送中"). */

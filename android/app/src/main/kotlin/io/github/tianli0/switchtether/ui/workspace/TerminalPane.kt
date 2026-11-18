@@ -36,6 +36,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -130,64 +132,109 @@ fun termLineAnnotated(line: TermLine, cursorX: Int?): AnnotatedString = buildAnn
     }
 }
 
+/** Dialog / popup state shared by the page toolbar ([TerminalActions]) and [TerminalPane]. */
+class TerminalController {
+    var showShells by mutableStateOf(false)
+    var confirmKill by mutableStateOf(false)
+}
+
+/** Short name of a shell or terminal title: "C:\\WINDOWS\\system32\\cmd.exe" -> "cmd". */
+fun shortShellName(raw: String): String =
+    raw.trim().trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+        .removeSuffix(".exe").removeSuffix(".EXE").ifBlank { raw }
+
+/**
+ * Grid size a terminal will get on this screen (full width, the height above the key row), used
+ * when one is created before its page has measured itself, so the shell's first output (banner,
+ * prompt) is not wrapped for a different width.
+ */
+@Composable
+fun rememberTerminalSizeEstimate(fontSp: Int): Pair<Int, Int> {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val window = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
+    return remember(fontSp, window, density) {
+        val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSp.sp, lineHeight = (fontSp * 1.25f).sp)
+        val cellW = measurer.measure("M".repeat(128), style).size.width / 128f
+        val cellH = measurer.measure("M", style).size.height.toFloat()
+        val w = window.width - with(density) { 40.dp.toPx() }
+        val h = window.height - with(density) { 300.dp.toPx() }
+        (w / cellW).toInt().coerceIn(20, 400) to (h / cellH).toInt().coerceIn(8, 200)
+    }
+}
+
+/** Page toolbar of a terminal: paste, and a menu with the rarer actions. */
+@Composable
+fun TerminalActions(state: TerminalUiState, vm: TerminalViewModel, controller: TerminalController) {
+    val clipboard = LocalClipboardManager.current
+    var menu by remember { mutableStateOf(false) }
+    // No terminal on screen yet: its size is not measured, so estimate it from the screen.
+    val estimate = rememberTerminalSizeEstimate(state.fontSp).takeIf { state.selectedId == null }
+    if (state.selectedId != null) {
+        ToolbarIcon(AppIcons.Paste, stringResource(R.string.term_paste), { clipboard.getText()?.text?.let(vm::paste) }, enabled = state.link == TermLink.OPEN)
+    }
+    Box {
+        ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { menu = true })
+        WindowListPopup(show = menu, onDismissRequest = { menu = false }) {
+            val items = buildList<Pair<String, () -> Unit>> {
+                add(stringResource(R.string.term_new) to { controller.showShells = true })
+                if (state.selectedId != null) {
+                    add(stringResource(R.string.term_copy_screen) to { clipboard.setText(AnnotatedString(state.screen.plainText())) })
+                    add(stringResource(R.string.action_refresh) to { vm.refresh() })
+                    add(stringResource(R.string.term_kill) to { controller.confirmKill = true })
+                }
+            }
+            ListPopupColumn {
+                items.forEachIndexed { idx, (label, act) ->
+                    DropdownImpl(
+                        text = label,
+                        optionSize = items.size,
+                        isSelected = false,
+                        index = idx,
+                        onSelectedIndexChange = {
+                            menu = false
+                            act()
+                        },
+                    )
+                }
+            }
+        }
+        WindowListPopup(show = controller.showShells, onDismissRequest = { controller.showShells = false }) {
+            val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
+            ListPopupColumn {
+                shells.forEachIndexed { idx, sh ->
+                    DropdownImpl(
+                        text = sh.name.ifBlank { sh.id },
+                        optionSize = shells.size,
+                        isSelected = false,
+                        index = idx,
+                        onSelectedIndexChange = {
+                            controller.showShells = false
+                            vm.create(sh.id.ifBlank { null }, estimate)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
+fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: TerminalController = remember { TerminalController() }) {
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
-    var showShells by remember { mutableStateOf(false) }
-    var confirmKill by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
-        // Tabs + actions
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) {
-                if (state.terminals.size > 1) {
-                    ChipTabGroup(
-                        tabs = state.terminals.map { ChipTabData(it.title.ifBlank { it.shell }.take(18)) },
-                        selectedIndex = state.terminals.indexOfFirst { it.id == state.selectedId }.coerceAtLeast(0),
-                        onSelectedChange = { vm.select(state.terminals[it].id) },
-                        contentPadding = PaddingValues(horizontal = 0.dp),
-                    )
-                } else {
-                    val active = state.terminals.firstOrNull { it.id == state.selectedId } ?: state.terminals.firstOrNull()
-                    if (active != null) {
-                        Text(
-                            active.title.ifBlank { active.shell },
-                            style = COUITheme.textStyles.body2,
-                            fontWeight = FontWeight.Medium,
-                            color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-            Box {
-                ToolbarIcon(AppIcons.Add, stringResource(R.string.term_new), { showShells = true }, enabled = state.online && !state.busy)
-                WindowListPopup(show = showShells, onDismissRequest = { showShells = false }) {
-                    val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
-                    ListPopupColumn {
-                        shells.forEachIndexed { idx, sh ->
-                            DropdownImpl(
-                                text = sh.name.ifBlank { sh.id },
-                                optionSize = shells.size,
-                                isSelected = false,
-                                index = idx,
-                                onSelectedIndexChange = {
-                                    showShells = false
-                                    vm.create(sh.id.ifBlank { null })
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-            if (state.selectedId != null) {
-                ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), { vm.refresh() })
-                ToolbarIcon(AppIcons.Copy, stringResource(R.string.term_copy_screen), { clipboard.setText(AnnotatedString(state.screen.plainText())) })
-                ToolbarIcon(AppIcons.Paste, stringResource(R.string.term_paste), { clipboard.getText()?.text?.let(vm::paste) }, enabled = state.link == TermLink.OPEN)
-                ToolbarIcon(AppIcons.Delete, stringResource(R.string.term_kill), { confirmKill = true })
-            }
+        // Tabs only when there is a choice; actions live in the page toolbar.
+        if (state.terminals.size > 1) {
+            ChipTabGroup(
+                tabs = state.terminals.map { ChipTabData(shortShellName(it.title.ifBlank { it.shell }).take(18)) },
+                selectedIndex = state.terminals.indexOfFirst { it.id == state.selectedId }.coerceAtLeast(0),
+                onSelectedChange = { vm.select(state.terminals[it].id) },
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
         }
         state.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = 16.dp)) }
         when {
@@ -208,7 +255,7 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
                         title = stringResource(R.string.term_empty),
                         subtitle = stringResource(R.string.workspace_security),
                         actionText = stringResource(R.string.term_new),
-                        onActionClick = { showShells = true },
+                        onActionClick = { controller.showShells = true },
                         modifier = Modifier.padding(vertical = 24.dp),
                     )
                 }
@@ -227,7 +274,15 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
                 } else if (state.link == TermLink.CLOSED) {
                     TextButton(text = stringResource(R.string.term_reconnect), onClick = { vm.connect() }, modifier = Modifier.padding(horizontal = 8.dp))
                 }
-                ExtraKeys(state, vm, onKeyboard = { focus.requestFocus(); keyboard?.show() })
+                val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                ExtraKeys(state, vm, imeVisible = imeVisible, onKeyboard = {
+                    if (imeVisible) {
+                        keyboard?.hide()
+                    } else {
+                        focus.requestFocus()
+                        keyboard?.show()
+                    }
+                })
                 HiddenInput(focus, onText = vm::typeText, onKey = vm::key)
                 if (WindowInsets.ime.getBottom(LocalDensity.current) == 0) {
                     Spacer(Modifier.height(LocalBottomBarSpace.current))
@@ -237,12 +292,12 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel) {
     }
     LaunchedEffect(state.link) { if (state.link == TermLink.OPEN) runCatching { focus.requestFocus() } }
     ConfirmDialog(
-        show = confirmKill,
+        show = controller.confirmKill,
         title = stringResource(R.string.term_kill),
         message = stringResource(R.string.term_kill_confirm),
         confirmText = stringResource(R.string.term_kill),
-        onConfirm = { confirmKill = false; vm.kill() },
-        onDismiss = { confirmKill = false },
+        onConfirm = { controller.confirmKill = false; vm.kill() },
+        onDismiss = { controller.confirmKill = false },
     )
 }
 
@@ -266,14 +321,30 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
         val cols = with(density) { ((maxWidth - 16.dp).toPx() / cellWidthPx).toInt() }
         val rows = with(density) { ((maxHeight - 8.dp).toPx() / cell.size.height).toInt() }
         LaunchedEffect(cols, rows) { onSize(cols, rows) }
-        LaunchedEffect(lines.size, state.screen.version) { if (lines.isNotEmpty()) listState.scrollToItem(lines.size) }
+        // Follow new output only while the user is at the bottom; scrolling up to read stops it.
+        var follow by remember { mutableStateOf(true) }
+        LaunchedEffect(listState) {
+            snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }.collect { (moving, more) -> if (moving) follow = !more }
+        }
+        LaunchedEffect(lines.size, state.screen.version) { if (lines.isNotEmpty() && follow) listState.scrollToItem(lines.size) }
+        // Earlier output is prepended: shift the position by what was added so the text stays put.
+        var prevScrollback by remember { mutableIntStateOf(state.scrollback.size) }
+        LaunchedEffect(state.scrollback.size) {
+            val added = state.scrollback.size - prevScrollback
+            prevScrollback = state.scrollback.size
+            if (added > 0 && !follow) listState.scrollToItem(listState.firstVisibleItemIndex + added, listState.firstVisibleItemScrollOffset)
+        }
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp)) {
             item(key = "sb") {
-                TextButton(
-                    text = stringResource(R.string.term_scrollback, state.scrollback.size),
-                    onClick = onLoadScrollback,
-                    modifier = Modifier.alpha(0.7f),
-                )
+                // A quiet line, not a button over the output.
+                if (!state.scrollbackDone) {
+                    Text(
+                        stringResource(R.string.term_scrollback_short),
+                        fontSize = 12.sp,
+                        color = TermFg.copy(alpha = 0.45f),
+                        modifier = Modifier.clip(SquircleShape(6.dp)).clickable(onClick = onLoadScrollback).padding(vertical = 6.dp, horizontal = 2.dp),
+                    )
+                }
             }
             itemsIndexed(lines, key = { i, _ -> i }) { i, line ->
                 val y = i - screenStart
@@ -293,9 +364,10 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
 }
 
 @Composable
-private fun ExtraKeys(state: TerminalUiState, vm: TerminalViewModel, onKeyboard: () -> Unit) {
+private fun ExtraKeys(state: TerminalUiState, vm: TerminalViewModel, imeVisible: Boolean, onKeyboard: () -> Unit) {
     val keys: List<Pair<String, () -> Unit>> = listOf(
-        "KB" to onKeyboard,
+        (if (imeVisible) "⌨↓" else "⌨") to onKeyboard,
+        "⏎" to { vm.key(TermKey.ENTER) },
         "^C" to { vm.typeText("\u0003") },
         "^D" to { vm.typeText("\u0004") },
         "Tab" to { vm.key(TermKey.TAB) },

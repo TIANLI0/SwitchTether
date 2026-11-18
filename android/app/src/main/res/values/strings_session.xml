@@ -77,16 +77,16 @@
     <string name="composer_readonly">Read-only on the phone</string>
     <string name="composer_send_unavailable">Sending is not available for this session</string>
 
-    <string name="continue_action">Continue on phone</string>
-    <string name="continue_title">Continue this session on the phone?</string>
-    <string name="continue_point_context">SwitchTether starts a managed %1$s session on the computer that carries on this conversation with the same context.</string>
-    <string name="continue_point_window">The original window on the computer won\'t show the turns you send from the phone.</string>
+    <string name="continue_action">Resume</string>
+    <string name="continue_title">Resume this session on the phone?</string>
+    <string name="continue_point_context">The same %1$s session continues on the computer: same record, same context, not a copy.</string>
+    <string name="continue_point_window">It is still open in a window on the computer; that window does not show what you send from the phone.</string>
     <string name="continue_point_busy">This isn\'t possible while the original session is busy or waiting on the computer (or, for Codex, while its thread is open elsewhere).</string>
-    <string name="continue_busy">The original session is still working. Wait until it is idle, then continue.</string>
-    <string name="continue_confirm">Continue</string>
-    <string name="continue_command">Continue session</string>
+    <string name="continue_busy">The session is running on the computer. Wait until it is idle, then resume.</string>
+    <string name="continue_confirm">Resume</string>
+    <string name="continue_command">Resume session</string>
 
-    <string name="continue_fork">Continue as a copy</string>
+    <string name="continue_fork">Continue as a copy instead (original record unchanged)</string>
     <string name="continue_fork_hint">A copy (Claude only) leaves the original session\'s transcript untouched.</string>
     <string name="continue_command_fork">Continue session as a copy</string>
 
@@ -97,7 +97,7 @@
     <string name="session_managed_chip">SwitchTether</string>
     <string name="state_expanded">Expanded</string>
     <string name="state_collapsed">Collapsed</string>
-    <string name="render_system_continued">Continued in SwitchTether. New turns run in a SwitchTether process; the original window on the computer does not show them.</string>
+    <string name="render_system_continued">Resumed from the phone. New turns run in SwitchTether on the computer.</string>
     <string name="render_system_init">Agent process started</string>
     <string name="option_allow">Allow</string>
     <string name="option_allow_session">Always allow in this session</string>
@@ -138,4 +138,27 @@
     <string name="render_system_task">Background task: %1$s</string>
     <string name="duration_seconds">%1$ds</string>
     <string name="duration_minutes">%1$dm %2$ds</string>
+    <string name="render_background_task">Background task</string>
+    <string name="subagent_view_process">View process</string>
+    <string name="subagent_view_process_steps">View process · %1$d steps</string>
+    <string name="subagent_process_unavailable">The process of this sub-agent is not available on the computer.</string>
+    <string name="subagent_main_session">All sub-agents</string>
+    <string name="subagent_older_omitted">Earlier steps are not shown.</string>
+    <string name="subagent_starting">Starting…</string>
+    <string name="subagent_no_steps">No steps recorded.</string>
+    <string name="subagent_children">Sub-agents it started</string>
+    <string name="subagent_following">Following live while it works.</string>
+    <string name="subagent_unfinished">Not finished</string>
+    <string name="subagent_tree_title">Sub-agents</string>
+    <string name="subagent_tree_empty">This session has not started any sub-agents.</string>
+    <string name="subagent_tree_note">Read only: sub-agents take no input. Branches show which agent started which.</string>
+    <plurals name="subagent_more_steps">
+        <item quantity="one">… %1$d earlier step</item>
+        <item quantity="other">… %1$d earlier steps</item>
+    </plurals>
+    <plurals name="subagent_chip">
+        <item quantity="one">%1$d sub-agent</item>
+        <item quantity="other">%1$d sub-agents</item>
+    </plurals>
+    <string name="decision_cancelled">Cancelled</string>
 </resources>

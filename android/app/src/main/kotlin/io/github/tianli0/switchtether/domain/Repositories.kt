@@ -57,12 +57,26 @@ interface SessionRepository {
     suspend fun events(id: String, before: Long? = null, after: Long? = null, limit: Int = 300): EventPage
     suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int = 64 * 1024): PayloadChunk
 
+    /** Claude Code sub-agents of a session, with parent links (branch tree). */
+    suspend fun subagentTree(id: String): List<io.github.tianli0.switchtether.remote.session.SubagentNode> = emptyList()
+
+    /** One sub-agent's own steps (read-only). */
+    suspend fun subagentEvents(id: String, agentId: String, limit: Int = 300): io.github.tianli0.switchtether.remote.session.SubagentPage =
+        throw UnsupportedOperationException("sub-agent transcripts")
+
     suspend fun sendMessage(
         id: String,
         text: String,
         commandId: String = newCommandId(),
         images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput> = emptyList(),
+        attachments: List<String> = emptyList(),
     ): CommandOutcome
+    /** Files for the next message: announce, then upload in chunks (see docs/PROTOCOL.md). */
+    suspend fun beginAttachment(id: String, name: String, size: Long, mediaType: String?): io.github.tianli0.switchtether.remote.protocol.AttachmentView =
+        throw UnsupportedOperationException("attachments")
+    suspend fun uploadAttachmentChunk(id: String, attachmentId: String, offset: Long, bytes: ByteArray): io.github.tianli0.switchtether.remote.protocol.AttachmentView =
+        throw UnsupportedOperationException("attachments")
+    suspend fun cancelAttachment(id: String, attachmentId: String) {}
     suspend fun interrupt(id: String, commandId: String = newCommandId()): CommandOutcome
     suspend fun resolveApproval(id: String, requestId: String, decision: String, commandId: String = newCommandId()): CommandOutcome
     suspend fun answer(
@@ -166,12 +180,28 @@ class RemoteSessionRepository(private val conn: ConnectionController) : SessionR
     override suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int) =
         conn.withApi { it.eventPayload(sessionId, eventId, offset, limit) }
 
+    override suspend fun subagentTree(id: String) = conn.withApi { it.subagentTree(id) }
+
+    override suspend fun subagentEvents(id: String, agentId: String, limit: Int) =
+        conn.withApi { it.subagentEvents(id, agentId, limit) }
+
     override suspend fun sendMessage(
         id: String,
         text: String,
         commandId: String,
         images: List<io.github.tianli0.switchtether.remote.protocol.ImageInput>,
-    ) = conn.command(commandId) { api, c -> api.sendMessage(id, c, text, images) }
+        attachments: List<String>,
+    ) = conn.command(commandId) { api, c -> api.sendMessage(id, c, text, images, attachments) }
+
+    override suspend fun beginAttachment(id: String, name: String, size: Long, mediaType: String?) =
+        conn.withApi { it.beginAttachment(id, io.github.tianli0.switchtether.remote.protocol.BeginAttachmentBody(name, size, mediaType)) }
+
+    override suspend fun uploadAttachmentChunk(id: String, attachmentId: String, offset: Long, bytes: ByteArray) =
+        conn.withApi { it.uploadAttachmentChunk(id, attachmentId, offset, bytes) }
+
+    override suspend fun cancelAttachment(id: String, attachmentId: String) {
+        runCatching { conn.withApi { it.cancelAttachment(id, attachmentId) } }
+    }
 
     override suspend fun interrupt(id: String, commandId: String) =
         conn.command(commandId) { api, c -> api.interrupt(id, c) }

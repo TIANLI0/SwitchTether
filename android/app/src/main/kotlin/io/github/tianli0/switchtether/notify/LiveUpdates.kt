@@ -66,6 +66,8 @@ class LiveUpdates(
     /** Running tasks that currently have no slot, newest activity first when a slot frees. */
     private val liveSeen = ConcurrentHashMap<String, SessionSummary>()
     private val knownLive = ConcurrentHashMap.newKeySet<String>()
+    /** Last seen run state per session (this app run), to notice a task starting again. */
+    private val runState = ConcurrentHashMap<String, AutoFollow.Run>()
     @Volatile private var baselineMs: Long = 0L
     @Volatile private var currentServerId: String = ""
 
@@ -103,7 +105,11 @@ class LiveUpdates(
                             val at = runCatching { java.time.Instant.parse(e.ts).toEpochMilli() }.getOrNull()
                             if (at == null || at >= startedAtMs) mutate(e.sessionId) { LiveReducer.onEvent(it, e, clock()) }
                         }
-                    "session.removed" -> (data["sessionId"] ?: data["id"])?.toString()?.trim('"')?.let { unpin(it, userInitiated = false) }
+                    "session.removed" -> (data["sessionId"] ?: data["id"])?.toString()?.trim('"')?.let {
+                        // The process exited; the same conversation resumed later is a new run to follow.
+                        runState[it] = AutoFollow.Run.ENDED
+                        unpin(it, userInitiated = false)
+                    }
                 }
             }
         }
@@ -143,6 +149,7 @@ class LiveUpdates(
             maybeAutoPin(s)
             return
         }
+        runState[s.id] = AutoFollow.runOf(s)
         mutate(s.id) { LiveReducer.onUpsert(it, s, clock()) }
         if (!s.isLive) scope.launch {
             // Session ended / process exited: the final card stays briefly, then the pin is removed.
@@ -152,16 +159,13 @@ class LiveUpdates(
     }
 
     private fun maybeAutoPin(s: SessionSummary) {
+        val prev = runState.put(s.id, AutoFollow.runOf(s))
         if (!autoPinPhoneSessions) return
         if (!s.isLive) return
         if (s.id in unpinned) return
         val isNew = knownLive.add(s.id)
         if (isNew) persistSet(knownKey(currentServerId), knownLive)
-        if (!isNew) return
-        val base = baselineMs
-        if (base == 0L) return
-        val created = s.createdAtMs
-        if (created != null && created < base - 5_000L) return
+        if (!AutoFollow.shouldFollow(s, prev, isNew, baselineMs)) return
         // The newest task takes the slot of the oldest automatic pin; with only manual pins left it waits.
         pin(s, manual = false)
     }
@@ -345,6 +349,42 @@ class LiveUpdates(
     companion object {
         const val MAX_PINS = 3
         const val THROTTLE_MS = 1_000L
+    }
+}
+
+/**
+ * When a session that is not followed should be followed automatically. A follow ends with its task
+ * (final card shown, process exited), so every new run is followed again: a new session, the next
+ * turn of a known one (idle → busy / waiting), or a conversation resumed after its process ended.
+ */
+internal object AutoFollow {
+    enum class Run { ENDED, IDLE, ACTIVE }
+
+    fun runOf(s: SessionSummary): Run = when {
+        !s.isLive -> Run.ENDED
+        s.status == "busy" || s.status == "waiting" || s.waitingFor != null -> Run.ACTIVE
+        else -> Run.IDLE
+    }
+
+    /**
+     * @param prev run state last seen in this app run (null: first sighting since the app started)
+     * @param isNew never seen live on this phone before
+     * @param baselineMs when auto-follow started recording (0: not yet; nothing is followed)
+     */
+    fun shouldFollow(s: SessionSummary, prev: Run?, isNew: Boolean, baselineMs: Long): Boolean {
+        if (!s.isLive || baselineMs == 0L) return false
+        if (isNew) {
+            // A session that existed before auto-follow started is history, not a new task.
+            val created = s.createdAtMs
+            return created == null || created >= baselineMs - 5_000L
+        }
+        return when (prev) {
+            // Resumed after its process ended (`claude --resume`, a reopened IDE tab).
+            Run.ENDED -> true
+            // Started working again (the next turn), or found working after the app restarted.
+            Run.IDLE, null -> runOf(s) == Run.ACTIVE
+            Run.ACTIVE -> false
+        }
     }
 }
 

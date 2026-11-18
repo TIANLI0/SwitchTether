@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -161,6 +162,27 @@ fun StepStatusIndicator(status: StepStatus, label: String, modifier: Modifier = 
  * A tappable one-line row: leading library icon, title, optional secondary line, trailing slot
  * and the COUI expand arrow. Used for tool steps, step groups and the thinking row.
  */
+/**
+ * Show / hide the child steps of a row (sub-agent, PTC dispatch): a small borderless text in the
+ * accent colour next to the status mark, not a filled button, so it never outweighs the row it
+ * belongs to. The touch target stays 40dp tall.
+ */
+@Composable
+fun SubStepsToggle(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = COUITheme.textStyles.footnote2,
+        fontWeight = FontWeight.Medium,
+        color = COUITheme.colorScheme.primary,
+        maxLines = 1,
+        modifier = modifier
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 11.dp),
+    )
+}
+
 @Composable
 fun CollapsibleRow(
     icon: ImageVector,
@@ -323,8 +345,12 @@ fun InfoChip(
     color: Color = COUITheme.colorScheme.onSurfaceSecondary,
     icon: ImageVector? = null,
     onClick: (() -> Unit)? = null,
+    /** Opaque colour under a chip floating over content: the tint is blended onto it so text
+     *  scrolling underneath never shows through. */
+    backdrop: Color? = null,
 ) {
-    val fill = if (dot != null) dot.copy(alpha = 0.14f) else COUITheme.colorScheme.surfaceContainer
+    val tint = if (dot != null) dot.copy(alpha = 0.14f) else COUITheme.colorScheme.surfaceContainer
+    val fill = if (backdrop != null) tint.compositeOver(backdrop) else tint
     val label = if (dot != null) COUITheme.colorScheme.onSurface else color
     val shape = RoundedCornerShape(50)
     Row(

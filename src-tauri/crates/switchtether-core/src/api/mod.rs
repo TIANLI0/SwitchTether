@@ -70,6 +70,8 @@ impl ApiContext {
         terminals: Arc<TerminalManager>,
         agents: Arc<AgentHub>,
     ) -> Arc<Self> {
+        // Files attached from the phone live in SwitchTether's own data directory.
+        agents.set_attachment_root(config.data_dir.join("attachments"));
         Arc::new(Self {
             config: RwLock::new(config),
             server_id,

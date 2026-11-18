@@ -36,6 +36,12 @@ data class RenderContext(
     val onLoadImageBytes: (suspend (path: String) -> ByteArray?)? = null,
     val onViewImage: ((ImagePreview) -> Unit)? = null,
     val requestBusy: Boolean = false,
+    /** Opens a Claude Code sub-agent's own steps ("查看过程"); null where that is unavailable. */
+    val onOpenSubagent: ((agentId: String, title: String?) -> Unit)? = null,
+    /** Latest steps of a sub-agent for the branch lines under its row (null until loaded). */
+    val subagentPreview: (agentId: String) -> SubagentPreview? = { null },
+    /** Asks for (or refreshes) [subagentPreview]; throttled by the owner. */
+    val onWantSubagentPreview: (agentId: String) -> Unit = {},
 )
 
 typealias EventRenderer = @Composable (item: RenderItem, ctx: RenderContext) -> Unit

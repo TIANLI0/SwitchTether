@@ -41,6 +41,8 @@ data class PairedDesktop(
     val relayToken: String? = null,
     /** Relay token + relay key, encrypted with a Keystore key (see KeystoreRelaySecrets). */
     val relaySecret: String? = null,
+    /** Wake-on-LAN targets last reported by the desktop (`GET /v1/status` → `wake`). Not secret. */
+    val wake: List<io.github.tianli0.switchtether.remote.wake.WakeTarget> = emptyList(),
 ) {
     /** Host candidates with the last successful one first. */
     fun orderedHosts(): List<String> = listOfNotNull(lastGoodHost) + hosts.filter { it != lastGoodHost }

@@ -87,6 +87,15 @@ switchtether://pair?v=1&h=192.168.1.20,100.88.1.7&p=47615&fp=<serverCertSha256>&
    - The device identity is bound to the **TLS client certificate fingerprint of this
      connection** — the secret only proves physical access to the desktop screen.
    - Wrong secret → `403 forbidden`; after 5 failures the pairing session is destroyed.
+   - **Pairing code** (no QR code): every pairing session also has a 6-digit `code`, shown on
+     the desktop next to the QR code. The phone sends `{ "code": "123456", "deviceName", … }`
+     instead of `pairingId` + `secret` (fixture `protocol/fixtures/pair_request_code.json`;
+     non-digits are ignored). Wrong code → `403 forbidden`; no active code → `410
+     pairing_expired`. Wrong codes are counted across all sessions: after 5, every active code
+     is disabled (the QR secrets stay valid) until a new pairing session is shown. The phone
+     knows the server certificate in advance only from the LAN advertisement (`fp` TXT) or not
+     at all (typed address: trust on first use, then pinned); the verification code compared
+     on both screens is the check on this path.
    - Global limit: 20 pairing attempts / minute / source IP → `429`.
    - Re-pairing an already-paired cert replaces the old record (same device id kept).
 
@@ -157,7 +166,9 @@ Topics: `session.upserted`, `session.removed`, `session.event`, `approval.reques
 ## 7. Resources (all require a paired, non-revoked device)
 
 ### 7.1 Status
-- `GET /v1/status` → server info, epoch/headSeq, network mode, connections, terminals, backend availability, active step-up grants.
+- `GET /v1/status` → server info, epoch/headSeq, network mode, connections, terminals, backend availability, active step-up grants,
+  `hosts` (current address candidates, same list as the pairing QR code; the phone merges them into its stored hosts on every connect)
+  and `wake` (`[{ mac, broadcast, address }]`, Wake-on-LAN targets of the private, non-Tailscale IPv4 LAN interfaces).
 - `GET /v1/capabilities` → per-agent capability matrix (see §8) and available terminal shells.
 - `GET /v1/device` → this device's record · `DELETE /v1/device` → the phone unpairs itself (same effect as revocation).
 
@@ -210,7 +221,8 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
   while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
   Session capabilities advertise this as `continueSession: "PARTIAL"`.
-- `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event)
+- `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}], attachments?: [attachmentId]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event; fixture `send_message_attachments.json`)
+- Attachments (feature `attachments`; any file type, ≤ 64 MiB each, ≤ 10 per message; same device and session only): `POST /v1/sessions/{id}/attachments` `{name, size, mediaType?}` → `AttachmentView` `{attachmentId, name, size, received, complete, mediaType}` (fixture `attachment_view.json`), then `PUT /v1/sessions/{id}/attachments/{attachmentId}?offset=` raw chunks ≤ 8 MiB in order (wrong offset → 409 with `details.received`), `DELETE …/{attachmentId}` discards it. Refused for sessions the phone cannot send to. Files are stored under the desktop's data directory (`<data dir>/attachments/<date>/<id>/<name>`, kept 7 days, 2 GiB cap) — never in the project. Every agent receives them the same way: the message text gets a block starting `[SwitchTether attachments: …]` with one absolute path per line; images ≤ 3 MiB are also inlined for agents that accept images (Claude Code, Codex). SwitchTether-started Claude Code sessions get `--add-dir <attachments dir>`; other agents may ask for permission to read the path.
 - `POST /v1/sessions/{id}/interrupt` `{commandId}`
 - `POST /v1/sessions/{id}/approvals/{requestId}` `{commandId, decision: "allow"|"allow_session"|"deny"|"abort", message?, updatedInput?}`
   - `409 conflict` with `details.resolvedBy` if the request was already answered (by the desktop or another device).
@@ -306,22 +318,35 @@ Session ids are opaque; the prefix is informative only.
   **updated in place** (same `id`, same `seq`, new `data`) — e.g. a tool call moving from
   `running` to `completed`, or streaming text growing. Live updates arrive on the event
   stream as topic `session.event` with `data = AgentEvent`; clients replace by `id`.
+- **Claude Code sub-agent branches** (read-only). Claude Code keeps each sub-agent's own transcript next to the session's
+  (`<session>/subagents/agent-<agentId>.jsonl` + `.meta.json`):
+  - `GET /v1/sessions/{id}/subagents` → `{ sessionId, agents: [{ agentId, description?, agentType?, toolUseId?, parentAgentId?,
+    spawnDepth?, finished?, updatedAtMs? }] }` — every sub-agent of the session, nested ones included; `parentAgentId` builds the
+    branch tree (null = started by the session). Metadata is whitelisted (never the prompt). Empty for other agents / none.
+  - `GET /v1/sessions/{id}/subagents/{agentId}/events?before&after&limit` → `{ sessionId, agentId, events, hasMore, lastSeq, meta }`:
+    the sub-agent's steps parsed like a session transcript (same event kinds), tailed on every request so a running sub-agent
+    can be followed by polling. `agentId` must match `[A-Za-z0-9_-]{1,64}` (`422`), unknown → `404`.
+  - **Codex** (and any adapter that emits `subagent` rows): the tree comes from the session log's `subagent` rows
+    (parent = nearest enclosing `subagent` row); a sub-agent's events are the events nested under its row (direct
+    children re-rooted). If none are nested and the agent is Codex, the child thread's own rollout
+    (`$CODEX_HOME/sessions/**/rollout-*-<thread id>.jsonl`) is read when present (UNTESTED: no such file on the
+    development machine).
 - `parentId` links sub-agent events to their parent tool or subagent event. A child status/completion must not change the parent's task state or emit a parent completion notification.
 - Unknown `kind` values must be rendered with the generic fallback.
 
 | kind | data |
 |---|---|
-| `user_message` | `{ text, images, imageItems?, context?: [{kind: "file"|"selection", path, lines?}], source: "desktop"|"phone"|"unknown", clientId? }` — `text` never contains harness/IDE blocks (`<system-reminder>`, `<ide_opened_file>`, `<ide_selection>`, `<browser_instruction>`); what the IDE blocks said is in `context`. Background-task reports (`<task-notification>`) are never user messages — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
+| `user_message` | `{ text, images, imageItems?, attachments?: [{name, path}], context?: [{kind: "file"|"selection", path, lines?}], source: "desktop"|"phone"|"unknown", clientId? }` — `attachments` lists files sent from the phone; the path block is removed from `text` — `text` never contains harness/IDE blocks (`<system-reminder>`, `<ide_opened_file>`, `<ide_selection>`, `<browser_instruction>`); what the IDE blocks said is in `context`. Background-task reports (`<task-notification>`) are never user messages — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
 | `assistant_message` | `{ text (Markdown), model? }` |
 | `reasoning` | `{ text, summary: bool }` — only when the agent actually exposes it |
-| `tool_call` | `{ callId, name, title, category, input, status, server?, tool? }` — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted` |
+| `tool_call` | `{ callId, name, title, category, input, status, server?, tool?, background?, taskId?, backgroundSummary?, exitCode?, finishedAt? }` — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted`. A background shell (Claude Code `Bash` with `run_in_background`; `background: true`, `taskId` = its `backgroundTaskId`) stays `running` after its "started" `tool_result` and is updated in place by its task notification (`completed`, or `failed` for a non-zero exit code, with `backgroundSummary`/`exitCode`), or set `interrupted` when a `TaskStop`/`KillShell` result names it |
 | `tool_result` | `{ callId, isError, text, truncated, bytes, exitCode? }` (`text` ≤ 8 KiB; full output via `…/payload`) |
 | `file_change` | `{ callId?, path, change: "add"|"modify"|"delete"|"rename", diff, additions, deletions, truncated }` |
 | `plan` | `{ items: [{ text, status: "pending"|"in_progress"|"completed" }] }` |
 | `approval_request` | `{ requestId, kind: "command"|"file_change"|"tool"|"network"|"other", title, detail, command?, cwd?, toolName?, input?, options: [{ id, label }] , resolved: false }` |
 | `approval_resolved` | `{ requestId, decision, by: "phone"|"desktop"|"other" }` |
 | `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, required?, allowOther?, isSecret?, options: [{ label, description, value? }] }] }` |
-| `subagent` | `{ agentId, description, agentType?, model?, background, status: "running"|"completed"|"failed"|"interrupted", callId, summary?, result?, resultTruncated?, tokens?, toolUses?, durationMs?, finishedAt? }` — id `sa:<callId>`, `parentId` = the Agent/Task call. A background agent starts `running` and is updated in place when its task notification arrives. A notification for anything else (background shell, monitor) is a `system` event with `subtype: "task_notification"`, `{status?, text}` |
+| `subagent` | `{ agentId, description, agentType?, model?, background, status: "running"|"completed"|"failed"|"interrupted", callId, summary?, result?, resultTruncated?, tokens?, toolUses?, durationMs?, finishedAt? }` — id `sa:<callId>`, `parentId` = the Agent/Task call. A background agent starts `running` and is updated in place when its task notification arrives. A notification for anything else (unknown task, monitor) is a `system` event with `subtype: "task_notification"`, `{status?, text}`. Task notifications and messages the user typed while the agent was busy are read both from `user` records and from mid-turn `attachment` records (`queued_command`, `commandMode` `task-notification` / `prompt`; the latter becomes a normal `user_message`) |
 | `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail? }` |
 | `error` | `{ message }` |
 | `system` | `{ subtype, text }` (compaction, retries, informational) |

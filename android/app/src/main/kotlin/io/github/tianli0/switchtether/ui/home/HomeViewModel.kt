@@ -26,15 +26,22 @@ data class HomeState(
     val sessions: Loadable<List<SessionSummary>> = Loadable.Loading,
     val usageToday: Loadable<UsageSummary> = Loadable.Loading,
     val usageMonth: Loadable<UsageSummary> = Loadable.Loading,
+    /** A pull-to-refresh is in flight (the list stays visible). */
+    val refreshing: Boolean = false,
 ) {
     val live: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }
     /** Live sessions that wait for the user (approval / question / input): shown first on Home. */
     val attention: List<SessionSummary> get() = live.filter { it.status == "waiting" || it.waitingFor != null }
     val waitingCount: Int get() = attention.size
-    /** Live sessions not already listed under [attention]. */
-    val running: List<SessionSummary> get() = live.filter { it.status != "waiting" && it.waitingFor == null }
+    private val notWaiting: List<SessionSummary> get() = live.filter { it.status != "waiting" && it.waitingFor == null }
+    /** Live sessions that are actually working (not waiting, not idle). */
+    val running: List<SessionSummary> get() = notWaiting.filter { !it.isIdle }
+    /** Live sessions sitting idle (process open, turn finished): listed apart so "running" means running. */
+    val idle: List<SessionSummary> get() = notWaiting.filter { it.isIdle }
     val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }.take(5)
 }
+
+private val SessionSummary.isIdle: Boolean get() = status == "idle" || status == "completed"
 
 class HomeViewModel(
     private val conn: ConnectionController,
@@ -80,10 +87,22 @@ class HomeViewModel(
         refreshUsage()
     }
 
-    private fun refreshSessions() {
+    private fun refreshSessions() = viewModelScope.launch {
+        val r = loadable { sessions.list(SessionQuery(), limit = 50).items }
+        _state.update { it.copy(sessions = r) }
+    }
+
+    /** Pull-to-refresh: reload sessions and usage, showing the indicator until the list is back. */
+    fun pullRefresh() {
+        if (_state.value.refreshing) return
+        _state.update { it.copy(refreshing = true) }
+        refreshUsage()
         viewModelScope.launch {
-            val r = loadable { sessions.list(SessionQuery(), limit = 50).items }
-            _state.update { it.copy(sessions = r) }
+            try {
+                refreshSessions().join()
+            } finally {
+                _state.update { it.copy(refreshing = false) }
+            }
         }
     }
 

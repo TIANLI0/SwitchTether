@@ -14,6 +14,7 @@ import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.rememberSplineBasedDecay
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -1700,6 +1701,12 @@ private fun TopAppBarLayout(
 }
 
 /**
+ * When true, a [SmallTopAppBar] title or subtitle that does not fit scrolls as a marquee instead of
+ * being cut with an ellipsis (text that fits stays still). Default false keeps upstream behaviour.
+ */
+val LocalTopAppBarTitleMarquee = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+/**
  * The base [Layout] for [SmallTopAppBar]. This function lays out a [SmallTopAppBar] navigation icon
  * (leading icon), a title (header), and action icons (trailing icons). Note that the navigation and
  * the actions are optional.
@@ -1790,14 +1797,20 @@ private fun SmallTopAppBarLayout(
             // Title: TextAppearance.COUI.Toolbar.SecondTitle (18dp, sans-serif-medium at
             // textFontWeight 550, viewStart alignment).
             Box(Modifier.layoutId("title")) {
+                val marquee = LocalTopAppBarTitleMarquee.current
                 Text(
                     text = title,
                     color = animatedTitleColor,
                     maxLines = 1,
                     fontSize = with(LocalDensity.current) { TopAppBarDefaults.ToolbarTitleTextSize.toSp() },
                     fontWeight = FontWeight(550),
-                    overflow = TextOverflow.Ellipsis,
+                    overflow = if (marquee) TextOverflow.Clip else TextOverflow.Ellipsis,
                     softWrap = false,
+                    modifier = if (marquee) {
+                        Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000)
+                    } else {
+                        Modifier
+                    },
                 )
             }
             Box(
@@ -1810,13 +1823,19 @@ private fun SmallTopAppBarLayout(
             if (subtitle.isNotEmpty()) {
                 // Subtitle: coui_toolbar_subtitle_text_size, single line.
                 Box(Modifier.layoutId("subtitle")) {
+                    val marquee = LocalTopAppBarTitleMarquee.current
                     Text(
                         text = subtitle,
                         color = animatedSubtitleColor,
                         style = COUITheme.textStyles.body2,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        overflow = if (marquee) TextOverflow.Clip else TextOverflow.Ellipsis,
                         softWrap = false,
+                        modifier = if (marquee) {
+                            Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000)
+                        } else {
+                            Modifier
+                        },
                     )
                 }
             }

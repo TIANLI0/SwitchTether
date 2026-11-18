@@ -180,6 +180,48 @@ pub fn tool_category(name: &str) -> &'static str {
     }
 }
 
+/// Stores what was answered on a question event (`data.answers`), so the card can show it after
+/// it is resolved. Answers to secret questions (`isSecret`) are never stored, only a mask.
+pub fn record_answers(data: &mut Value, answers: &Value) {
+    let Some(map) = answers.as_object() else {
+        return;
+    };
+    let secret: Vec<String> = data
+        .get("questions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|q| q.get("isSecret").and_then(Value::as_bool) == Some(true))
+        .filter_map(|q| {
+            q.get("id")
+                .or_else(|| q.get("question"))
+                .and_then(Value::as_str)
+                .map(String::from)
+        })
+        .collect();
+    let mut out = serde_json::Map::new();
+    for (k, v) in map {
+        let shown = if secret.iter().any(|s| s == k) {
+            Value::String("••••••".into())
+        } else {
+            match v {
+                Value::String(s) => Value::String(crate::redact::redact_text(s)),
+                Value::Array(a) => Value::Array(
+                    a.iter()
+                        .map(|x| match x {
+                            Value::String(s) => Value::String(crate::redact::redact_text(s)),
+                            other => other.clone(),
+                        })
+                        .collect(),
+                ),
+                other => other.clone(),
+            }
+        };
+        out.insert(k.clone(), shown);
+    }
+    data["answers"] = Value::Object(out);
+}
+
 /// Short human title for a tool call.
 pub fn tool_title(name: &str, input: &Value) -> String {
     let s = |k: &str| input.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -306,5 +348,29 @@ mod tests {
         let (p, t) = preview("中文中文", 4);
         assert!(t);
         assert_eq!(p, "中");
+    }
+}
+
+#[cfg(test)]
+mod answer_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn recorded_answers_mask_secret_questions() {
+        let mut data = json!({
+            "questions": [
+                { "id": "env", "question": "Which environment?" },
+                { "id": "token", "question": "API token?", "isSecret": true },
+                { "question": "Targets?" }
+            ]
+        });
+        record_answers(
+            &mut data,
+            &json!({ "env": "staging", "token": "sk-live-123456", "Targets?": ["a", "b"] }),
+        );
+        assert_eq!(data["answers"]["env"], "staging");
+        assert_eq!(data["answers"]["token"], "••••••");
+        assert_eq!(data["answers"]["Targets?"], json!(["a", "b"]));
     }
 }

@@ -68,4 +68,14 @@
     <string name="ws_files_open">Browse files</string>
     <string name="ws_git_open">Git</string>
     <string name="ws_git_hint">Status, diffs and history of a repository</string>
+    <string name="files_discard_title">Discard changes?</string>
+    <string name="files_discard_body">Your edits have not been saved to the computer.</string>
+    <string name="files_discard">Discard</string>
+    <string name="files_name_invalid">A name cannot contain / or \\.</string>
+    <string name="files_more">More actions</string>
+    <string name="git_no_repo">No repository selected</string>
+    <string name="git_no_repo_hint">Pick the folder of a Git repository on the computer.</string>
+    <string name="git_choose_repo">Choose repository</string>
+    <string name="git_show_file_at">Tap to view %s at this commit</string>
+    <string name="term_scrollback_short">↑ Load earlier output</string>
 </resources>

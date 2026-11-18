@@ -108,6 +108,7 @@ async fn main() -> anyhow::Result<()> {
     );
     println!("Data dir: {}", data_dir.display());
     println!("Pairing link (valid 5 minutes, single use):\n{}", offer.uri);
+    println!("Pairing code: {}", offer.code);
     println!("Press Ctrl+C to stop. Type 'pair' + Enter for a new pairing link.");
 
     let ctx2 = ctx.clone();
@@ -128,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
                     .pairing
                     .create(hosts, port_used, &fp, &ctx2.config.read().server_name);
                 println!("{}", o.uri);
+                println!("Pairing code: {}", o.code);
             }
             line.clear();
         }

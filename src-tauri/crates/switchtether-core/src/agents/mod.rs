@@ -10,8 +10,10 @@
 //!   `origin: managed`), which are fully controllable.
 
 pub mod attached_tty;
+pub mod attachments;
 pub mod claude;
 pub mod codex;
+pub mod dsh;
 pub mod managed;
 pub mod model;
 pub mod store;
@@ -36,6 +38,7 @@ use claude::transcript::ClaudeParser;
 use claude::ClaudeObserver;
 use codex::managed::{ManagedCodex, ManagedCodexOptions};
 use codex::rollout::CodexParser;
+use dsh::DshParser;
 use managed::ManagedSession;
 use model::{Capabilities, Control, EventDraft, Liveness, Origin, SessionSummary};
 use store::SessionLog;
@@ -46,8 +49,34 @@ type TitleCacheEntry = (Option<std::time::SystemTime>, u64, Option<String>);
 pub const MAX_LOADED_SESSIONS: usize = 16;
 pub const MAX_TRANSCRIPT_BYTES: u64 = 96 * 1024 * 1024;
 const TAIL_INTERVAL: Duration = Duration::from_millis(800);
+/// Metadata check of the Claude registry between full refreshes: a safety net when OS change
+/// notifications work, the only fast path when they do not.
+fn fallback_poll(watching: bool) -> Duration {
+    if watching {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_millis(500)
+    }
+}
 
-trait LineParser: Send {
+/// Next registry change notification; never resolves without a watch.
+async fn recv_change(
+    watch: &mut Option<(
+        notify::RecommendedWatcher,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+    )>,
+) -> Option<()> {
+    match watch.as_mut() {
+        Some((_, rx)) => rx.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// How long a published live session may be missing from the registry before it is reported
+/// ended (a read can land in the middle of a rewrite).
+const MISSING_GRACE: Duration = Duration::from_secs(5);
+
+pub(crate) trait LineParser: Send {
     fn feed(&mut self, v: &Value) -> Vec<EventDraft>;
 }
 impl LineParser for ClaudeParser {
@@ -61,17 +90,84 @@ impl LineParser for CodexParser {
     }
 }
 
-struct Tail {
+impl LineParser for DshParser {
+    fn feed(&mut self, v: &Value) -> Vec<EventDraft> {
+        DshParser::feed(self, v)
+    }
+}
+
+/// Last turn state of a DeepSeek Harness log, read without building events.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct DshTurnState {
+    /// A turn started and has not ended.
+    pub open: bool,
+    /// How the last ended turn ended (see `dsh::turn_end_kind`).
+    pub last_end: Option<String>,
+}
+
+struct DshTurnProbe(Arc<Mutex<DshTurnState>>);
+
+type DshTurnReader = (Tail, Arc<Mutex<DshTurnState>>);
+
+impl LineParser for DshTurnProbe {
+    fn feed(&mut self, v: &Value) -> Vec<EventDraft> {
+        match v.get("type").and_then(Value::as_str) {
+            Some("turn/start") => self.0.lock().open = true,
+            Some("turn/end") => {
+                let mut st = self.0.lock();
+                st.open = false;
+                st.last_end = Some(dsh::turn_end_kind(v.get("data").unwrap_or(&Value::Null)));
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+}
+
+/// Live state of an observed DeepSeek Harness session from its log's last turn and last write:
+/// a turn that is still open is working (a long tool call may write nothing for minutes); a
+/// finished one is idle shortly after, then the session counts as ended. `None`: not live.
+fn dsh_observed_status(turn: &DshTurnState, since_write: Duration) -> Option<&'static str> {
+    if turn.open {
+        (since_write < Duration::from_secs(10 * 60)).then_some("busy")
+    } else if since_write < Duration::from_secs(120) {
+        Some(if turn.last_end.as_deref() == Some("error") {
+            "error"
+        } else {
+            "idle"
+        })
+    } else {
+        None
+    }
+}
+
+pub(crate) struct Tail {
     path: PathBuf,
+    /// Bytes of the file consumed so far (compressed bytes for a zstd log).
     offset: u64,
     partial: Vec<u8>,
     parser: Box<dyn LineParser>,
+    /// The file is a sequence of zstd frames (DeepSeek Harness `*.jsonl.zstd`).
+    zstd: bool,
+    /// Compressed bytes of a frame still being written.
+    raw: Vec<u8>,
 }
 
 struct Loaded {
     log: Arc<Mutex<SessionLog>>,
     tail: Option<Tail>,
     last_access: Instant,
+}
+
+struct OwnedClaude {
+    native: Vec<String>,
+    pids: Vec<u32>,
+}
+
+impl OwnedClaude {
+    fn covers(&self, l: &claude::live::LiveClaudeSession) -> bool {
+        self.native.contains(&l.session_id) || l.pid.is_some_and(|p| self.pids.contains(&p))
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -108,11 +204,23 @@ pub struct AgentHub {
     pub claude: ClaudeObserver,
     managed: RwLock<HashMap<String, Arc<dyn ManagedSession>>>,
     codex_bin: Option<PathBuf>,
+    dsh_bin: Option<PathBuf>,
     loaded: Mutex<HashMap<String, Loaded>>,
+    /// DeepSeek Harness log path -> (len, is a sub-agent session) from its header.
+    dsh_children: Mutex<HashMap<String, (u64, bool)>>,
+    /// DeepSeek Harness log path -> incremental reader of its turn state (recently written logs).
+    dsh_turns: Mutex<HashMap<PathBuf, DshTurnReader>>,
+    /// Sink for readers that produce no events (`DshTurnProbe`).
+    probe_log: Arc<Mutex<SessionLog>>,
+    /// Claude Code sub-agent transcripts opened from the phone ("查看过程"), keyed
+    /// `<session id>|<agent id>`; tailed on each request, dropped when idle.
+    subagent_logs: Mutex<HashMap<String, Loaded>>,
     index_cache: Mutex<Option<(Instant, Arc<Vec<IndexedSession>>)>>,
     /// Claude transcript path -> (mtime, len, title); avoids re-reading unchanged transcripts.
     title_cache: Mutex<HashMap<PathBuf, TitleCacheEntry>>,
     ttys: RwLock<HashMap<String, Arc<attached_tty::AttachedTty>>>,
+    /// Files attached from the phone (set by the server with its data directory).
+    attachments: RwLock<Option<Arc<attachments::AttachmentStore>>>,
 }
 
 fn origin_of(name: &str) -> Origin {
@@ -144,10 +252,28 @@ impl AgentHub {
             claude,
             managed: RwLock::new(HashMap::new()),
             codex_bin: codex::managed::find_codex_bin(),
+            dsh_bin: dsh::managed::find_dsh_bin(),
             loaded: Mutex::new(HashMap::new()),
+            subagent_logs: Mutex::new(HashMap::new()),
+            dsh_children: Mutex::new(HashMap::new()),
+            dsh_turns: Mutex::new(HashMap::new()),
+            probe_log: Arc::new(Mutex::new(SessionLog::new("probe", None))),
             index_cache: Mutex::new(None),
             title_cache: Mutex::new(HashMap::new()),
             ttys: RwLock::new(HashMap::new()),
+            attachments: RwLock::new(None),
+        })
+    }
+
+    /// Where files attached from the phone are stored (`<data dir>/attachments`).
+    pub fn set_attachment_root(&self, root: PathBuf) {
+        let _ = std::fs::create_dir_all(&root);
+        *self.attachments.write() = Some(Arc::new(attachments::AttachmentStore::new(root)));
+    }
+
+    pub fn attachments(&self) -> ApiResult<Arc<attachments::AttachmentStore>> {
+        self.attachments.read().clone().ok_or_else(|| {
+            ApiError::unavailable_capability("BLOCKED", "attachments are not set up")
         })
     }
 
@@ -311,12 +437,15 @@ impl AgentHub {
         let agent = match prefix {
             "claude" => "claude_code",
             "codex" => "codex",
+            "dsh" => "dsh",
             _ => return None,
         };
         m.iter()
             .filter(|(_, s)| s.origin() != "managed" && s.agent() == agent)
             .filter(|(_, s)| s.liveness() == Liveness::Live)
-            .find(|(_, s)| s.native_session_id().as_deref() == Some(native))
+            .find(|(_, s)| {
+                s.native_session_id().as_deref().map(dsh::norm_id) == Some(dsh::norm_id(native))
+            })
             .map(|(k, s)| (k.clone(), s.clone()))
     }
 
@@ -356,6 +485,8 @@ impl AgentHub {
             { "agent": "codex", "origin": "managed", "capabilities": managed_caps(), "notes": "New threads on SwitchTether's own codex app-server (stdio), using the normal Codex config and login." },
             { "agent": "codex", "origin": "desktop_app", "capabilities": observed_caps("codex"), "notes": "Without the opt-in hook: observation of rollouts only." },
             { "agent": "codex", "origin": "desktop_app", "takeover": "CODEX_CLI_PATH", "capabilities": attached(false), "notes": "With the opt-in CODEX_CLI_PATH hook: every thread loaded in Codex Desktop can be messaged, approved and interrupted from the phone." },
+            { "agent": "dsh", "origin": "cli", "capabilities": observed_caps("dsh"), "notes": "DeepSeek Harness session logs ($DSH_HOME/sessions, zstd frames) tailed read-only; a log written in the last two minutes counts as live. Sub-agents are their own sessions (parentSession)." },
+            { "agent": "dsh", "origin": "managed", "capabilities": managed_caps(), "notes": "New or resumed sessions on SwitchTether's own `dsh --profile acp` process (ACP v1 over stdio): prompt, cancel and permission requests; the timeline is read from the persisted session log." },
         ])
     }
 
@@ -366,6 +497,8 @@ impl AgentHub {
             "codexHome": codex::codex_home().exists(),
             "managedSessions": self.managed.read().len(),
             "codexBin": self.codex_bin.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            "dshBin": self.dsh_bin.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            "dshHome": dsh::dsh_home().exists(),
             "loadedSessions": self.loaded.lock().len(),
         })
     }
@@ -470,6 +603,67 @@ impl AgentHub {
         }
     }
 
+    /// Claude sessions SwitchTether runs itself (managed or attached): their processes also appear
+    /// in Claude Code's live registry and must never be reported a second time as observed.
+    fn owned_claude(&self) -> OwnedClaude {
+        let m = self.managed.read();
+        OwnedClaude {
+            native: m.values().filter_map(|s| s.native_session_id()).collect(),
+            pids: m
+                .values()
+                .filter(|s| s.liveness() == Liveness::Live)
+                .filter_map(|s| s.pid())
+                .collect(),
+        }
+    }
+
+    /// Summary of a live Claude Code session started outside SwitchTether. `None` for a process
+    /// that has not been used yet (no transcript, idle): it often switches to a resumed
+    /// conversation right after starting, so there is nothing to show yet.
+    fn observed_live_summary(&self, l: &claude::live::LiveClaudeSession) -> Option<SessionSummary> {
+        let cwd = l.cwd.clone();
+        // The registry `name` is an auto-generated project slug ("myapp-3f"), not the task
+        // title; the real title (`/rename` or Claude's generated one) lives in the transcript.
+        let transcript = self.claude.transcript_path(cwd.as_deref(), &l.session_id);
+        if transcript.is_none()
+            && !matches!(l.status.as_deref(), Some("busy" | "waiting"))
+            && l.waiting_for.is_none()
+        {
+            return None;
+        }
+        // Last activity = the transcript's last write. "Now" made every live session read
+        // "just now" and left their order arbitrary.
+        let last_active = transcript
+            .as_deref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or_else(crate::util::now_ms);
+        let title = transcript.as_deref().and_then(|p| self.claude_title(p));
+        Some(SessionSummary {
+            id: format!("claude:{}", l.session_id),
+            agent: "claude_code".into(),
+            origin: l.origin(),
+            native_id: l.session_id.clone(),
+            title,
+            project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
+            cwd,
+            liveness: Liveness::Live,
+            status: l.status.clone().unwrap_or_else(|| "unknown".into()),
+            waiting_for: l.waiting_for.clone(),
+            control: Control::Observe,
+            created_at_ms: l.started_at_ms,
+            last_active_at_ms: Some(last_active),
+            model: None,
+            git_branch: None,
+            pid: l.pid,
+            managed: false,
+            terminal_id: None,
+            source_path: transcript.map(|p| p.to_string_lossy().into_owned()),
+        })
+    }
+
     pub async fn list(&self, q: &SessionQuery) -> (Vec<SessionSummary>, Option<String>) {
         let indexed = self.index().await;
         let mut out: Vec<SessionSummary> = Vec::new();
@@ -488,45 +682,15 @@ impl AgentHub {
         }
         let live = self.claude.live_sessions().await;
         let mut live_ids = std::collections::HashSet::new();
+        let owned = self.owned_claude();
         for l in &live {
-            if managed_native.contains(&l.session_id) {
+            if owned.covers(l) {
                 continue;
             }
             live_ids.insert(l.session_id.clone());
-            let cwd = l.cwd.clone();
-            // The registry `name` is an auto-generated project slug ("myapp-3f"), not the task
-            // title; the real title (`/rename` or Claude's generated one) lives in the transcript.
-            let transcript = self.claude.transcript_path(cwd.as_deref(), &l.session_id);
-            // An idle session without a transcript is a process that has not been used yet
-            // (see the live observer): nothing to list.
-            if transcript.is_none()
-                && !matches!(l.status.as_deref(), Some("busy" | "waiting"))
-                && l.waiting_for.is_none()
-            {
-                continue;
+            if let Some(summary) = self.observed_live_summary(l) {
+                out.push(summary);
             }
-            let title = transcript.and_then(|p| self.claude_title(&p));
-            out.push(SessionSummary {
-                id: format!("claude:{}", l.session_id),
-                agent: "claude_code".into(),
-                origin: l.origin(),
-                native_id: l.session_id.clone(),
-                title,
-                project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
-                cwd,
-                liveness: Liveness::Live,
-                status: l.status.clone().unwrap_or_else(|| "unknown".into()),
-                waiting_for: l.waiting_for.clone(),
-                control: Control::Observe,
-                created_at_ms: l.started_at_ms,
-                last_active_at_ms: Some(crate::util::now_ms()),
-                model: None,
-                git_branch: None,
-                pid: l.pid,
-                managed: false,
-                terminal_id: None,
-                source_path: None,
-            });
         }
         for s in indexed.iter() {
             let agent = agent_of_provider(&s.provider_id);
@@ -535,6 +699,22 @@ impl AgentHub {
             {
                 continue;
             }
+            // DeepSeek Harness sub-agents are sessions of their own; they are shown in their
+            // parent's branch view, never as top-level sessions.
+            if agent == "dsh" && self.dsh_is_child(s.source_path.as_deref()) {
+                continue;
+            }
+            // A recently written DeepSeek Harness log belongs to a session that is open right now:
+            // observe it live (read-only). Busy / idle comes from its last turn, so a stopped or
+            // finished turn is not reported as working.
+            let dsh_status = if agent == "dsh" {
+                s.source_path
+                    .as_deref()
+                    .and_then(|p| self.dsh_live_status(Path::new(p)))
+            } else {
+                None
+            };
+            let dsh_live = dsh_status.is_some();
             let prefix = if agent == "claude_code" {
                 "claude"
             } else {
@@ -561,10 +741,18 @@ impl AgentHub {
                     .as_deref()
                     .and_then(SessionSummary::project_from_cwd),
                 cwd: s.project_dir.clone(),
-                liveness: Liveness::Ended,
-                status: "ended".into(),
+                liveness: if dsh_live {
+                    Liveness::Live
+                } else {
+                    Liveness::Ended
+                },
+                status: dsh_status.unwrap_or("ended").into(),
                 waiting_for: None,
-                control: Control::History,
+                control: if dsh_live {
+                    Control::Observe
+                } else {
+                    Control::History
+                },
                 created_at_ms: s.created_at_ms,
                 last_active_at_ms: s.last_active_at_ms,
                 model: None,
@@ -688,7 +876,11 @@ impl AgentHub {
             }
             match next {
                 Some(n) => cursor = Some(n),
-                None => return self.claude_summary_from_transcript(id),
+                None => {
+                    return self
+                        .claude_summary_from_transcript(id)
+                        .or_else(|| dsh_summary_from_log(id))
+                }
             }
         }
     }
@@ -714,6 +906,16 @@ impl AgentHub {
             c.live_events = None;
         }
         c
+    }
+
+    /// A session just became live: a loaded log that cannot follow its transcript (loaded from
+    /// CC Switch's parser, or before the transcript existed) is dropped so the next read loads
+    /// it again with a tail.
+    fn follow_loaded(&self, s: &SessionSummary) {
+        let mut loaded = self.loaded.lock();
+        if loaded.get(&s.id).is_some_and(|l| l.tail.is_none()) {
+            loaded.remove(&s.id);
+        }
     }
 
     /// Ensure the session log is loaded (parsing its transcript if needed).
@@ -747,6 +949,10 @@ impl AgentHub {
                     Some(load_file(&p, Box::new(CodexParser::new()), &log)?)
                 }
                 _ => None,
+            },
+            "dsh" => match dsh_log_path(s) {
+                Some(p) => Some(load_file(&p, Box::new(DshParser::new()), &log)?),
+                None => None,
             },
             _ => None,
         };
@@ -796,7 +1002,9 @@ impl AgentHub {
                 }
             }
         }
-        let keep_tail = s.liveness == Liveness::Live;
+        // Ended transcripts are followed too: a conversation can be resumed on the computer at any
+        // time (`claude --resume`, `/resume`, `codex resume`), and a log opened as history must then
+        // show the new turns at once. A tail of an unchanged file costs one `stat` per tick.
         let mut loaded = self.loaded.lock();
         if loaded.len() >= MAX_LOADED_SESSIONS {
             if let Some(oldest) = loaded
@@ -811,7 +1019,7 @@ impl AgentHub {
             s.id.clone(),
             Loaded {
                 log: log.clone(),
-                tail: if keep_tail { tail } else { None },
+                tail,
                 last_access: Instant::now(),
             },
         );
@@ -856,6 +1064,333 @@ impl AgentHub {
         let lg = log.lock();
         let (events, more) = lg.page(before, after, limit);
         Ok(json!({ "sessionId": id, "events": events, "hasMore": more, "lastSeq": lg.last_seq() }))
+    }
+
+    /// Steps of one Claude Code sub-agent (read-only). Claude Code keeps each sub-agent's own
+    /// transcript next to the session's: `<session>.jsonl` → `<session>/subagents/agent-<id>.jsonl`
+    /// (+ `agent-<id>.meta.json`). Parsed with the normal transcript parser; tailed on every
+    /// request so a running sub-agent can be followed by polling.
+    pub async fn subagent_events(
+        &self,
+        id: &str,
+        agent_id: &str,
+        before: Option<u64>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> ApiResult<Value> {
+        if !valid_agent_id(agent_id) {
+            return Err(ApiError::validation("invalid sub-agent id"));
+        }
+        let s = self
+            .summary(id)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown session"))?;
+        if s.agent == "dsh" {
+            return self.dsh_subagent_events(&s, agent_id, before, after, limit);
+        }
+        if s.agent != "claude_code" {
+            return self.log_subagent_events(&s, agent_id, limit).await;
+        }
+        let dir = self.subagent_dir(id).await?;
+        let path = dir.join(format!("agent-{agent_id}.jsonl"));
+        if !path.is_file() {
+            return Err(ApiError::not_found("no transcript for this sub-agent"));
+        }
+        let key = format!("{id}|{agent_id}");
+        let log = {
+            let mut map = self.subagent_logs.lock();
+            map.retain(|_, l| l.last_access.elapsed() < Duration::from_secs(10 * 60));
+            match map.get_mut(&key) {
+                Some(l) => {
+                    l.last_access = Instant::now();
+                    if let Some(t) = l.tail.as_mut() {
+                        let _ = tail_file(t, &l.log, false);
+                    }
+                    l.log.clone()
+                }
+                None => {
+                    let log = Arc::new(Mutex::new(SessionLog::new(key.clone(), None)));
+                    let tail = load_file(&path, Box::new(ClaudeParser::new()), &log)?;
+                    if map.len() >= 16 {
+                        if let Some(oldest) = map
+                            .iter()
+                            .min_by_key(|(_, l)| l.last_access)
+                            .map(|(k, _)| k.clone())
+                        {
+                            map.remove(&oldest);
+                        }
+                    }
+                    map.insert(
+                        key.clone(),
+                        Loaded {
+                            log: log.clone(),
+                            tail: Some(tail),
+                            last_access: Instant::now(),
+                        },
+                    );
+                    log
+                }
+            }
+        };
+        let meta = subagent_meta(&dir, agent_id);
+        let lg = log.lock();
+        let (events, more) = lg.page(before, after, limit);
+        Ok(json!({
+            "sessionId": id,
+            "agentId": agent_id,
+            "events": events,
+            "hasMore": more,
+            "lastSeq": lg.last_seq(),
+            "meta": meta,
+        }))
+    }
+
+    /// All Claude Code sub-agents of a session as a tree (`parentAgentId` = null for those the
+    /// session started itself), from the sidecar metadata Claude Code writes next to each
+    /// sub-agent transcript. Empty when the session has none.
+    pub async fn subagent_tree(&self, id: &str) -> ApiResult<Value> {
+        let s = self
+            .summary(id)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown session"))?;
+        if s.agent == "dsh" {
+            return Ok(json!({ "sessionId": id, "agents": dsh_subagent_nodes(&s) }));
+        }
+        if s.agent != "claude_code" {
+            // Codex and other adapters: the `subagent` rows of the session's own log.
+            let log = self.ensure_loaded(&s).await?;
+            let agents = log_subagent_nodes(&log.lock());
+            return Ok(json!({ "sessionId": id, "agents": agents }));
+        }
+        let dir = match self.subagent_dir(id).await {
+            Ok(d) => d,
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => {
+                return Ok(json!({ "sessionId": id, "agents": [] }))
+            }
+            Err(e) => return Err(e),
+        };
+        let mut agents: Vec<Value> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                let Some(agent_id) = name
+                    .strip_prefix("agent-")
+                    .and_then(|n| n.strip_suffix(".jsonl"))
+                else {
+                    continue;
+                };
+                if !valid_agent_id(agent_id) {
+                    continue;
+                }
+                let updated = e
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64);
+                let mut o = match subagent_meta(&dir, agent_id) {
+                    Some(Value::Object(m)) => m,
+                    _ => serde_json::Map::new(),
+                };
+                o.insert("agentId".into(), json!(agent_id));
+                o.insert("updatedAtMs".into(), json!(updated));
+                agents.push(Value::Object(o));
+                if agents.len() >= 500 {
+                    break;
+                }
+            }
+        }
+        agents.sort_by_key(|a| a.get("updatedAtMs").and_then(Value::as_u64).unwrap_or(0));
+        Ok(json!({ "sessionId": id, "agents": agents }))
+    }
+
+    /// A sub-agent of a non-Claude session: the events nested under its `subagent` row in the
+    /// session log (Codex managed sessions stream child threads there). When the row has no
+    /// nested events and the agent is Codex, the child thread's own rollout
+    /// (`$CODEX_HOME/sessions/**/rollout-*-<thread id>.jsonl`) is read instead, if present.
+    async fn log_subagent_events(
+        &self,
+        s: &SessionSummary,
+        agent_id: &str,
+        limit: usize,
+    ) -> ApiResult<Value> {
+        let log = self.ensure_loaded(s).await?;
+        let (row, mut events) = {
+            let lg = log.lock();
+            let row = lg
+                .iter()
+                .find(|e| {
+                    e.kind == "subagent"
+                        && e.data.get("agentId").and_then(Value::as_str) == Some(agent_id)
+                })
+                .cloned()
+                .ok_or_else(|| ApiError::not_found("unknown sub-agent"))?;
+            (row.clone(), nested_under(&lg, &row.id))
+        };
+        if events.is_empty() && s.agent == "codex" {
+            if let Some(path) = find_codex_rollout(agent_id) {
+                let child = Arc::new(Mutex::new(SessionLog::new(
+                    format!("{}|{agent_id}", s.id),
+                    None,
+                )));
+                load_file(&path, Box::new(CodexParser::new()), &child)?;
+                events = child.lock().iter().cloned().collect();
+            }
+        }
+        let more = events.len() > limit;
+        if more {
+            events.drain(..events.len() - limit);
+        }
+        let finished = matches!(
+            row.data.get("status").and_then(Value::as_str),
+            Some("completed" | "failed" | "interrupted")
+        );
+        let meta = json!({
+            "agentType": row.data.get("agentType").filter(|v| v.is_string()),
+            "description": row.data.get("description").filter(|v| v.is_string()),
+            "toolUseId": row.data.get("callId").filter(|v| v.is_string()),
+            "finished": finished,
+        });
+        let last = events.iter().map(|e| e.seq).max().unwrap_or(0);
+        Ok(json!({
+            "sessionId": s.id,
+            "agentId": agent_id,
+            "events": events,
+            "hasMore": more,
+            "lastSeq": last,
+            "meta": meta,
+        }))
+    }
+
+    /// A DeepSeek Harness sub-agent is a session of its own (header `parentSession`): its log is
+    /// parsed and tailed like the session itself.
+    fn dsh_subagent_events(
+        &self,
+        s: &SessionSummary,
+        agent_id: &str,
+        before: Option<u64>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> ApiResult<Value> {
+        let path = dsh_log_path(s)
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+            .map(|dir| dsh::descendants(&dir, &s.native_id))
+            .and_then(|kids| kids.into_iter().find(|c| c.id == dsh::norm_id(agent_id)))
+            .map(|c| c.path)
+            .ok_or_else(|| ApiError::not_found("unknown sub-agent"))?;
+        let key = format!("{}|{agent_id}", s.id);
+        let log = {
+            let mut map = self.subagent_logs.lock();
+            map.retain(|_, l| l.last_access.elapsed() < Duration::from_secs(10 * 60));
+            match map.get_mut(&key) {
+                Some(l) => {
+                    l.last_access = Instant::now();
+                    if let Some(t) = l.tail.as_mut() {
+                        let _ = tail_file(t, &l.log, false);
+                    }
+                    l.log.clone()
+                }
+                None => {
+                    let log = Arc::new(Mutex::new(SessionLog::new(key.clone(), None)));
+                    let tail = load_file(&path, Box::new(DshParser::new()), &log)?;
+                    map.insert(
+                        key.clone(),
+                        Loaded {
+                            log: log.clone(),
+                            tail: Some(tail),
+                            last_access: Instant::now(),
+                        },
+                    );
+                    log
+                }
+            }
+        };
+        let node = dsh_subagent_nodes(s)
+            .into_iter()
+            .find(|n| n.get("agentId").and_then(Value::as_str) == Some(agent_id));
+        let lg = log.lock();
+        let (events, more) = lg.page(before, after, limit);
+        Ok(json!({
+            "sessionId": s.id,
+            "agentId": agent_id,
+            "events": events,
+            "hasMore": more,
+            "lastSeq": lg.last_seq(),
+            "meta": node,
+        }))
+    }
+
+    /// Whether a DeepSeek Harness log belongs to a sub-agent (header `parentSession`), cached.
+    /// Live status of an observed DeepSeek Harness log (see `dsh_observed_status`). Only logs
+    /// written in the last ten minutes are read, incrementally from where the last call stopped.
+    fn dsh_live_status(&self, path: &Path) -> Option<&'static str> {
+        let since_write = std::fs::metadata(path)
+            .ok()?
+            .modified()
+            .ok()?
+            .elapsed()
+            .unwrap_or_default();
+        if since_write >= Duration::from_secs(10 * 60) {
+            self.dsh_turns.lock().remove(path);
+            return None;
+        }
+        let state = {
+            let mut turns = self.dsh_turns.lock();
+            if turns.len() > 64 {
+                turns.clear();
+            }
+            let (tail, state) = turns.entry(path.to_path_buf()).or_insert_with(|| {
+                let st = Arc::new(Mutex::new(DshTurnState::default()));
+                (
+                    Tail::new(path.to_path_buf(), Box::new(DshTurnProbe(st.clone()))),
+                    st,
+                )
+            });
+            if let Err(e) = tail_file(tail, &self.probe_log, false) {
+                log::debug!("[dsh] turn state of {}: {e}", path.display());
+            }
+            let s = state.lock().clone();
+            s
+        };
+        dsh_observed_status(&state, since_write)
+    }
+
+    fn dsh_is_child(&self, path: Option<&str>) -> bool {
+        let Some(path) = path else { return false };
+        let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if let Some((l, child)) = self.dsh_children.lock().get(path) {
+            if *l == len || *l > 0 {
+                return *child; // the header never changes once written
+            }
+        }
+        let child = dsh::read_header(Path::new(path))
+            .is_some_and(|h| h.get("parentSession").and_then(Value::as_str).is_some());
+        let mut c = self.dsh_children.lock();
+        if c.len() > 20_000 {
+            c.clear();
+        }
+        c.insert(path.to_string(), (len, child));
+        child
+    }
+
+    async fn subagent_dir(&self, id: &str) -> ApiResult<PathBuf> {
+        let s = self
+            .summary(id)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown session"))?;
+        if s.agent != "claude_code" {
+            return Err(ApiError::not_found(
+                "sub-agent transcripts exist only for Claude Code",
+            ));
+        }
+        let main = s
+            .source_path
+            .clone()
+            .map(PathBuf::from)
+            .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+            .or_else(|| self.claude.transcript_path(s.cwd.as_deref(), &s.native_id))
+            .ok_or_else(|| ApiError::not_found("no transcript for this session"))?;
+        Ok(main.with_extension("").join("subagents"))
     }
 
     pub async fn payload(
@@ -911,6 +1446,24 @@ impl AgentHub {
                 Some("fork") => true,
                 Some(_) => return Err(ApiError::validation("mode must be continue or fork")),
             };
+            if !fork {
+                // Already continued here (a second tap, or a retry after a lost reply): follow
+                // that session instead of starting a second writer on the same conversation.
+                let running = self
+                    .managed
+                    .read()
+                    .iter()
+                    .find(|(_, m)| {
+                        m.origin() == "managed"
+                            && m.agent() == s.agent
+                            && m.liveness() == Liveness::Live
+                            && m.native_session_id().as_deref() == Some(s.native_id.as_str())
+                    })
+                    .map(|(k, m)| (k.clone(), m.clone()));
+                if let Some((id, m)) = running {
+                    return Ok(self.managed_summary(&id, m.as_ref()));
+                }
+            }
             if !fork
                 && s.liveness == Liveness::Live
                 && matches!(s.status.as_str(), "busy" | "waiting")
@@ -990,6 +1543,13 @@ impl AgentHub {
                         ))
                     }
                 };
+                // Files attached from the phone are readable without a permission prompt.
+                let add_dirs: Vec<PathBuf> = self
+                    .attachments
+                    .read()
+                    .as_ref()
+                    .map(|a| vec![a.root().to_path_buf()])
+                    .unwrap_or_default();
                 let (resume_from, fork) = match &continue_from {
                     Some((s, fork)) => (Some(s.native_id.clone()), *fork),
                     None => (None, false),
@@ -1003,6 +1563,7 @@ impl AgentHub {
                         permission_mode,
                         resume_from,
                         fork,
+                        add_dirs,
                     },
                     log,
                 )
@@ -1051,6 +1612,27 @@ impl AgentHub {
                     }
                 })?
             }
+            "dsh" => {
+                if matches!(&continue_from, Some((_, true))) {
+                    return Err(ApiError::validation(
+                        "fork is not supported for DeepSeek Harness",
+                    ));
+                }
+                let bin = self.dsh_bin.clone().ok_or_else(|| {
+                    ApiError::validation("DeepSeek Harness (`dsh`) was not found on this computer")
+                })?;
+                dsh::managed::ManagedDsh::spawn(
+                    id.clone(),
+                    dsh::managed::ManagedDshOptions {
+                        dsh_bin: bin,
+                        cwd,
+                        resume_session: continue_from.as_ref().map(|(s, _)| s.native_id.clone()),
+                    },
+                    log,
+                )
+                .await
+                .map_err(|e| ApiError::internal("start dsh", format!("{e:#}")))?
+            }
             other => {
                 return Err(ApiError::unavailable_capability(
                     "UNTESTED",
@@ -1065,6 +1647,11 @@ impl AgentHub {
         let summary = self.managed_summary(&id, session.as_ref());
         self.bus.publish("session.upserted", json!(summary));
         Ok(summary)
+    }
+
+    /// The phone may send messages (and attachments) to this session.
+    pub fn ensure_can_send(&self, id: &str) -> ApiResult<()> {
+        self.managed_or_blocked(id).map(|_| ())
     }
 
     fn managed_or_blocked(&self, id: &str) -> ApiResult<Arc<dyn ManagedSession>> {
@@ -1096,12 +1683,56 @@ impl AgentHub {
         images: &[managed::ImageAttachment],
         client_id: Option<&str>,
     ) -> ApiResult<Value> {
+        self.send_message_full(id, text, images, &[], "", client_id)
+            .await
+    }
+
+    /// A message from the phone: text, inline images (older phones) and uploaded attachments
+    /// (`attachment_ids`, see [`attachments`]). Attachments reach every agent as absolute paths
+    /// appended to the text; images among them are also inlined where the agent accepts images.
+    pub async fn send_message_full(
+        &self,
+        id: &str,
+        text: &str,
+        images: &[managed::ImageAttachment],
+        attachment_ids: &[String],
+        device_id: &str,
+        client_id: Option<&str>,
+    ) -> ApiResult<Value> {
         let m = self.managed_or_blocked(id)?;
-        if (text.trim().is_empty() && images.is_empty()) || text.len() > 200_000 {
+        let atts = if attachment_ids.is_empty() {
+            Vec::new()
+        } else {
+            self.attachments()?.resolve(device_id, id, attachment_ids)?
+        };
+        if (text.trim().is_empty() && images.is_empty() && atts.is_empty()) || text.len() > 200_000
+        {
             return Err(ApiError::validation(
-                "message must be 1..200000 bytes (or include images)",
+                "message must be 1..200000 bytes (or include images or attachments)",
             ));
         }
+        let mut images = images.to_vec();
+        if m.supports_images() {
+            use base64::Engine;
+            for a in atts
+                .iter()
+                .filter(|a| a.is_image() && a.size <= 3 * 1024 * 1024)
+            {
+                if images.len() >= 4 {
+                    break;
+                }
+                if let Ok(bytes) = std::fs::read(&a.path) {
+                    images.push(managed::ImageAttachment {
+                        media_type: a.media_type.clone(),
+                        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                        name: Some(a.name.clone()),
+                    });
+                }
+            }
+        }
+        let text = attachments::compose(text, &atts);
+        let text = text.as_str();
+        let images = images.as_slice();
         if images.len() > 4 {
             return Err(ApiError::validation("at most 4 images per message"));
         }
@@ -1166,10 +1797,13 @@ impl AgentHub {
         Ok(json!({ "stopped": true }))
     }
 
-    /// Poll live external sessions and publish changes (status, waitingFor,
+    /// Watch live external sessions and publish changes (status, waitingFor,
     /// appearance/disappearance) so phones can notify about e.g. a terminal
-    /// session waiting for a permission prompt. `active()` gates polling so
-    /// nothing is spawned while no phone is connected.
+    /// session waiting for a permission prompt. Claude Code rewrites its registry file on each
+    /// status change; an OS change notification for the registry directory triggers an immediate
+    /// re-read, so short turns are not missed and nothing runs while nothing changes. A metadata
+    /// check (every 2 s, or 0.5 s when no OS watch is available) catches lost notifications, and a
+    /// full refresh runs every 4 s. `active()` gates all of it while no phone is connected.
     pub fn start_live_watcher(
         self: &Arc<Self>,
         cancel: CancellationToken,
@@ -1179,61 +1813,83 @@ impl AgentHub {
         tokio::spawn(async move {
             type ObservedState = (Option<String>, Option<String>, Option<String>);
             let mut prev: HashMap<String, ObservedState> = HashMap::new();
-            // Ticks a published session has been missing. Registry files are rewritten often and a
-            // read can land mid-write, so one missed tick is not an exit (it showed up on phones as
-            // a burst of "ended" sessions right after Claude Code started).
-            let mut missing: HashMap<String, u8> = HashMap::new();
+            // Since when a published session has been missing. Registry files are rewritten often and
+            // a read can land mid-write, so one miss is not an exit (it showed up on phones as a
+            // burst of "ended" sessions right after Claude Code started).
+            let mut missing: HashMap<String, Instant> = HashMap::new();
             // Last pushed title of each managed/attached Claude session. Claude Code writes the
             // generated title to the transcript after the turn's last event, so no event-driven
             // upsert ever carries it; it is picked up here.
             let mut managed_titles: HashMap<String, Option<String>> = HashMap::new();
-            let mut tick = tokio::time::interval(Duration::from_secs(4));
+            let claude_dir = match hub.upgrade() {
+                Some(h) => h.claude.claude_dir.clone(),
+                None => return,
+            };
+            let mut watch = claude::live::watch_registry(&claude_dir);
+            let mut full = tokio::time::interval(Duration::from_secs(4));
+            let mut fast = tokio::time::interval(fallback_poll(watch.is_some()));
+            full.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            fast.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                tokio::select! {
+                let (full_tick, notified) = tokio::select! {
                     _ = cancel.cancelled() => break,
-                    _ = tick.tick() => {}
+                    _ = full.tick() => (true, false),
+                    _ = fast.tick() => (false, false),
+                    Some(()) = recv_change(&mut watch) => (false, true),
+                };
+                if notified {
+                    // One status change is several writes: settle briefly, then read once.
+                    tokio::time::sleep(Duration::from_millis(80)).await;
+                    if let Some((_, rx)) = watch.as_mut() {
+                        while rx.try_recv().is_ok() {}
+                    }
+                }
+                if full_tick && watch.is_none() {
+                    // The directory may appear after Claude Code's first run.
+                    watch = claude::live::watch_registry(&claude_dir);
+                    if watch.is_some() {
+                        fast = tokio::time::interval(fallback_poll(true));
+                        fast.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    }
                 }
                 if !active() {
                     continue;
                 }
                 let Some(hub) = hub.upgrade() else { break };
-                let live = hub.claude.live_sessions().await;
+                let changed = hub.claude.registry_changed();
+                let live = if full_tick {
+                    hub.claude.live_sessions().await
+                } else if changed || notified {
+                    hub.claude.live_sessions_now().await
+                } else {
+                    continue;
+                };
                 // A managed session's own process also appears in the Claude registry;
                 // it is reported once, under its `managed:` id, never as a second session.
-                let managed_native: Vec<String> = hub
-                    .managed
-                    .read()
-                    .values()
-                    .filter_map(|m| m.native_session_id())
-                    .collect();
+                let owned = hub.owned_claude();
                 let mut now = HashMap::new();
-                for l in live
-                    .iter()
-                    .filter(|l| !managed_native.contains(&l.session_id))
-                {
+                for l in live.iter().filter(|l| !owned.covers(l)) {
                     let id = format!("claude:{}", l.session_id);
-                    let transcript = hub.claude.transcript_path(l.cwd.as_deref(), &l.session_id);
-                    // A process that just started registers an empty session first (no prompt, no
-                    // transcript) and often switches to the resumed conversation right after.
-                    // Nothing to show yet, so it is not announced until it has a transcript or work.
-                    let working = matches!(l.status.as_deref(), Some("busy" | "waiting"))
-                        || l.waiting_for.is_some();
-                    if transcript.is_none() && !working && !prev.contains_key(&id) {
+                    let Some(summary) = hub.observed_live_summary(l) else {
+                        // Not announced yet (fresh process, see `observed_live_summary`); one that
+                        // was already announced stays until it really leaves the registry.
+                        if let Some(state) = prev.get(&id) {
+                            now.insert(id, state.clone());
+                        }
                         continue;
-                    }
-                    let title = transcript.and_then(|p| hub.claude_title(&p));
-                    let state = (l.status.clone(), l.waiting_for.clone(), title.clone());
+                    };
+                    let state = (
+                        l.status.clone(),
+                        l.waiting_for.clone(),
+                        summary.title.clone(),
+                    );
                     if prev.get(&id) != Some(&state) {
-                        hub.bus.publish(
-                            "session.upserted",
-                            json!({
-                                "id": id, "agent": "claude_code", "origin": l.origin(),
-                                "liveness": "live", "status": l.status, "waitingFor": l.waiting_for,
-                                "nativeId": l.session_id, "createdAtMs": l.started_at_ms,
-                                "cwd": l.cwd, "project": l.cwd.as_deref().and_then(SessionSummary::project_from_cwd),
-                                "title": title, "control": "observe",
-                            }),
-                        );
+                        if !prev.contains_key(&id) {
+                            // Started or resumed on the computer: a log opened earlier as history
+                            // follows the transcript from now on.
+                            hub.follow_loaded(&summary);
+                        }
+                        hub.bus.publish("session.upserted", json!(summary));
                     }
                     now.insert(id, state);
                 }
@@ -1244,18 +1900,20 @@ impl AgentHub {
                     .filter(|(k, _)| !now.contains_key(k))
                     .collect();
                 for (id, state) in gone {
-                    let n = missing.entry(id.clone()).or_insert(0);
-                    *n += 1;
-                    if *n >= 2 {
+                    let since = *missing.entry(id.clone()).or_insert_with(Instant::now);
+                    if since.elapsed() >= MISSING_GRACE {
                         missing.remove(&id);
                         hub.bus
                             .publish("session.removed", json!({ "id": id, "liveness": "ended" }));
                     } else {
-                        // Keep it for one more tick; reappearing with the same state publishes nothing.
+                        // Kept a little longer; reappearing with the same state publishes nothing.
                         now.insert(id, state);
                     }
                 }
                 prev = now;
+                if !full_tick {
+                    continue;
+                }
 
                 let claude_managed: Vec<(String, Arc<dyn ManagedSession>)> = hub
                     .managed
@@ -1343,6 +2001,25 @@ impl AgentHub {
                 };
                 let Some(hub) = hub.upgrade() else { break };
                 let m = hub.managed.read().get(id).cloned();
+                if m.is_none()
+                    && id.starts_with("dsh:")
+                    && frame.data.get("kind").and_then(|k| k.as_str()) == Some("status")
+                {
+                    // An observed DeepSeek Harness session open on the phone: its tailed log just
+                    // started or ended a turn; refresh its summary (busy / idle) at once.
+                    if let Some(summary) = hub.summary(id).await {
+                        let key = (
+                            summary.status.clone(),
+                            summary.waiting_for.clone(),
+                            summary.title.clone(),
+                        );
+                        if last.get(id) != Some(&key) {
+                            last.insert(id.to_string(), key);
+                            hub.bus.publish("session.upserted", json!(summary));
+                        }
+                    }
+                    continue;
+                }
                 if let Some(m) = m {
                     let summary = hub.managed_summary(id, m.as_ref());
                     let key = (
@@ -1404,17 +2081,19 @@ impl AgentHub {
 
 fn observed_caps(agent: &str) -> Capabilities {
     let known = agent == "claude_code" || agent == "codex";
+    let dsh = agent == "dsh";
     Capabilities {
         read_history: Some(if known { CapStatus::Verified } else { CapStatus::Partial }),
-        live_events: Some(if known { CapStatus::Partial } else { CapStatus::Blocked }),
+        live_events: Some(if known || dsh { CapStatus::Partial } else { CapStatus::Blocked }),
         send_message: Some(CapStatus::Blocked),
         approve: Some(CapStatus::Blocked),
         answer_question: Some(CapStatus::Blocked),
         interrupt: Some(CapStatus::Blocked),
-        continue_session: known.then_some(CapStatus::Partial),
+        continue_session: (known || dsh).then_some(CapStatus::Partial),
         reason: Some(match agent {
             "claude_code" => "The original Claude Code process (CLI / VS Code) cannot be controlled from another program. Use \"Continue on phone\": the same conversation continues in a SwitchTether process (only while the original is idle; the original window will not show the new turns).".into(),
             "codex" => "The original Codex process (CLI / Desktop) cannot be controlled from another program. Use \"Continue on phone\": the thread continues on SwitchTether's own app-server, which Codex allows only when the thread is not open elsewhere.".into(),
+            "dsh" => "A DeepSeek Harness window (web / desktop / terminal) cannot be controlled from another program without the opt-in plugin. Use \"Continue on phone\": the session is resumed on SwitchTether's own `dsh --profile acp` process once it is no longer active elsewhere.".into(),
             _ => "History only.".into(),
         }),
     }
@@ -1472,6 +2151,224 @@ fn managed_caps() -> Capabilities {
     }
 }
 
+/// `subagent` rows of a session log as tree nodes; the parent is the nearest enclosing
+/// `subagent` row (a sub-agent started by a sub-agent).
+fn log_subagent_nodes(lg: &SessionLog) -> Vec<Value> {
+    let by_id: HashMap<&str, &model::AgentEvent> = lg.iter().map(|e| (e.id.as_str(), e)).collect();
+    let mut out = Vec::new();
+    for e in lg.iter().filter(|e| e.kind == "subagent") {
+        let Some(agent_id) = e.data.get("agentId").and_then(Value::as_str) else {
+            continue;
+        };
+        let mut parent_agent: Option<String> = None;
+        let mut cur = e.parent_id.as_deref();
+        let mut hops = 0;
+        while let Some(pid) = cur {
+            let Some(p) = by_id.get(pid) else { break };
+            if p.kind == "subagent" {
+                parent_agent = p
+                    .data
+                    .get("agentId")
+                    .and_then(Value::as_str)
+                    .map(String::from);
+                break;
+            }
+            cur = p.parent_id.as_deref();
+            hops += 1;
+            if hops > 64 {
+                break;
+            }
+        }
+        let status = e.data.get("status").and_then(Value::as_str);
+        let updated = chrono::DateTime::parse_from_rfc3339(&e.ts)
+            .ok()
+            .map(|t| t.timestamp_millis());
+        out.push(json!({
+            "agentId": agent_id,
+            "description": e.data.get("description").filter(|v| v.is_string()),
+            "agentType": e.data.get("agentType").filter(|v| v.is_string()),
+            "toolUseId": e.data.get("callId").filter(|v| v.is_string()),
+            "parentAgentId": parent_agent,
+            "finished": matches!(status, Some("completed" | "failed" | "interrupted")),
+            "updatedAtMs": updated,
+        }));
+    }
+    out
+}
+
+/// Events whose parent chain reaches `root` (not `root` itself); direct children lose their
+/// parent link so they are top-level on the sub-agent's own page.
+fn nested_under(lg: &SessionLog, root: &str) -> Vec<model::AgentEvent> {
+    let by_id: HashMap<&str, &model::AgentEvent> = lg.iter().map(|e| (e.id.as_str(), e)).collect();
+    lg.iter()
+        .filter(|e| {
+            let mut cur = e.parent_id.as_deref();
+            let mut hops = 0;
+            while let Some(pid) = cur {
+                if pid == root {
+                    return true;
+                }
+                cur = by_id.get(pid).and_then(|p| p.parent_id.as_deref());
+                hops += 1;
+                if hops > 64 {
+                    break;
+                }
+            }
+            false
+        })
+        .map(|e| {
+            let mut e = e.clone();
+            if e.parent_id.as_deref() == Some(root) {
+                e.parent_id = None;
+            }
+            e
+        })
+        .collect()
+}
+
+/// A Codex child thread's own rollout, if Codex wrote one (`rollout-<time>-<thread id>.jsonl`).
+fn find_codex_rollout(thread_id: &str) -> Option<PathBuf> {
+    let root = codex::codex_home().join("sessions");
+    let suffix = format!("-{thread_id}.jsonl");
+    // sessions/YYYY/MM/DD/: newest days first, bounded walk.
+    let mut dirs = vec![root];
+    let mut seen = 0;
+    while let Some(d) = dirs.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        let mut subdirs = Vec::new();
+        for e in rd.flatten() {
+            seen += 1;
+            if seen > 20_000 {
+                return None;
+            }
+            let p = e.path();
+            if p.is_dir() {
+                subdirs.push(p);
+            } else if p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(&suffix))
+            {
+                return Some(p);
+            }
+        }
+        subdirs.sort();
+        dirs.extend(subdirs); // pop() takes the newest first
+    }
+    None
+}
+
+/// A DeepSeek Harness session that is not (yet) in CC Switch's index, read from its own log.
+fn dsh_summary_from_log(id: &str) -> Option<SessionSummary> {
+    let native = id.strip_prefix("dsh:")?;
+    let path = dsh::find_session_dir(native).and_then(|d| dsh::session_file(&d))?;
+    let header = dsh::read_header(&path)?;
+    let cwd = header
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let modified = std::fs::metadata(&path)
+        .ok()
+        .and_then(|m| m.modified().ok());
+    let live = modified
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|e| e < Duration::from_secs(120));
+    let (title, _) = dsh::child_summary(&path);
+    Some(SessionSummary {
+        id: id.to_string(),
+        agent: "dsh".into(),
+        origin: Origin::Unknown,
+        native_id: native.to_string(),
+        title,
+        project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
+        cwd,
+        liveness: if live {
+            Liveness::Live
+        } else {
+            Liveness::Ended
+        },
+        status: if live { "busy" } else { "ended" }.into(),
+        waiting_for: None,
+        control: if live {
+            Control::Observe
+        } else {
+            Control::History
+        },
+        created_at_ms: header.get("createdAt").and_then(Value::as_i64),
+        last_active_at_ms: modified
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64),
+        model: None,
+        git_branch: None,
+        pid: None,
+        managed: false,
+        terminal_id: None,
+        source_path: Some(path.to_string_lossy().into_owned()),
+    })
+}
+
+/// Log file of a DeepSeek Harness session: the indexed path, else its directory by id.
+fn dsh_log_path(s: &SessionSummary) -> Option<PathBuf> {
+    s.source_path
+        .clone()
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+        .or_else(|| dsh::find_session_dir(&s.native_id).and_then(|d| dsh::session_file(&d)))
+}
+
+/// Sub-agent tree of a DeepSeek Harness session from the child sessions' headers.
+fn dsh_subagent_nodes(s: &SessionSummary) -> Vec<Value> {
+    let Some(dir) = dsh_log_path(s).and_then(|p| p.parent().map(Path::to_path_buf)) else {
+        return Vec::new();
+    };
+    let kids = dsh::descendants(&dir, &s.native_id);
+    kids.iter()
+        .map(|c| {
+            // Label / model of the child from its own log (`subagent/descriptor`, title).
+            let (label, finished) = dsh::child_summary(&c.path);
+            json!({
+                "agentId": c.id,
+                "description": label,
+                "agentType": "subagent",
+                "parentAgentId": (c.parent != dsh::norm_id(&s.native_id)).then(|| c.parent.clone()),
+                "spawnDepth": c.depth,
+                "finished": finished,
+                "updatedAtMs": c.modified_ms,
+            })
+        })
+        .collect()
+}
+
+fn valid_agent_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Display fields of a sub-agent's sidecar metadata (`agent-<id>.meta.json`), whitelisted:
+/// never the prompt or anything else Claude Code may add later.
+fn subagent_meta(dir: &Path, agent_id: &str) -> Option<Value> {
+    let text = std::fs::read_to_string(dir.join(format!("agent-{agent_id}.meta.json"))).ok()?;
+    let m: Value = serde_json::from_str(&text).ok()?;
+    let mut o = serde_json::Map::new();
+    for k in ["agentType", "description", "toolUseId", "parentAgentId"] {
+        if let Some(v) = m.get(k).filter(|v| v.is_string()) {
+            o.insert(k.to_string(), v.clone());
+        }
+    }
+    if let Some(v) = m.get("finished").filter(|v| v.is_boolean()) {
+        o.insert("finished".into(), v.clone());
+    }
+    if let Some(v) = m.get("spawnDepth").filter(|v| v.is_u64()) {
+        o.insert("spawnDepth".into(), v.clone());
+    }
+    Some(Value::Object(o))
+}
+
 fn load_file(
     path: &Path,
     parser: Box<dyn LineParser>,
@@ -1479,12 +2376,20 @@ fn load_file(
 ) -> ApiResult<Tail> {
     let meta =
         std::fs::metadata(path).map_err(|_| ApiError::not_found("transcript file not found"))?;
-    let start = meta.len().saturating_sub(MAX_TRANSCRIPT_BYTES);
+    let zstd = path.extension().is_some_and(|e| e == "zstd");
+    // A zstd log can only be read from a frame boundary: always from the start.
+    let start = if zstd {
+        0
+    } else {
+        meta.len().saturating_sub(MAX_TRANSCRIPT_BYTES)
+    };
     let mut t = Tail {
         path: path.to_path_buf(),
         offset: start,
         partial: Vec::new(),
         parser,
+        zstd,
+        raw: Vec::new(),
     };
     if start > 0 {
         log.lock().upsert(
@@ -1496,12 +2401,32 @@ fn load_file(
     Ok(t)
 }
 
-fn tail_file(t: &mut Tail, log: &Arc<Mutex<SessionLog>>, publish: bool) -> std::io::Result<()> {
+impl Tail {
+    /// Follows `path` from its start (a zstd log is decoded frame by frame).
+    pub(crate) fn new(path: PathBuf, parser: Box<dyn LineParser>) -> Self {
+        let zstd = path.extension().is_some_and(|e| e == "zstd");
+        Self {
+            path,
+            offset: 0,
+            partial: Vec::new(),
+            parser,
+            zstd,
+            raw: Vec::new(),
+        }
+    }
+}
+
+pub(crate) fn tail_file(
+    t: &mut Tail,
+    log: &Arc<Mutex<SessionLog>>,
+    publish: bool,
+) -> std::io::Result<()> {
     let len = std::fs::metadata(&t.path)?.len();
     if len < t.offset {
         // Truncated/rewritten: start over from the beginning of the new file.
         t.offset = 0;
         t.partial.clear();
+        t.raw.clear();
     }
     if len == t.offset {
         return Ok(());
@@ -1511,7 +2436,15 @@ fn tail_file(t: &mut Tail, log: &Arc<Mutex<SessionLog>>, publish: bool) -> std::
     let mut buf = Vec::with_capacity((len - t.offset).min(MAX_TRANSCRIPT_BYTES) as usize);
     f.take(MAX_TRANSCRIPT_BYTES).read_to_end(&mut buf)?;
     t.offset += buf.len() as u64;
-    t.partial.extend_from_slice(&buf);
+    if t.zstd {
+        // Only complete frames are decoded; a half-written last frame waits in `raw`.
+        t.raw.extend_from_slice(&buf);
+        let (decoded, used) = dsh::decode_frames(&t.raw);
+        t.raw.drain(..used);
+        t.partial.extend_from_slice(&decoded);
+    } else {
+        t.partial.extend_from_slice(&buf);
+    }
     let mut lg = log.lock();
     let mut start = 0;
     while let Some(nl) = t.partial[start..].iter().position(|&b| b == b'\n') {
@@ -1554,6 +2487,472 @@ mod tests {
         tail_file(&mut t, &log, true).unwrap();
         assert_eq!(log.lock().len(), 2);
         assert_eq!(bus.head_seq(), 1, "tail events are published");
+    }
+
+    #[tokio::test]
+    async fn history_opened_before_a_resume_follows_new_turns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects").join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        let path = proj.join("old-1.jsonl");
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}
+",
+        )
+        .unwrap();
+        let bus = EventBus::new(64);
+        let hub = AgentHub::new(
+            bus.clone(),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        let s = hub.summary("claude:old-1").await.unwrap();
+        assert_eq!(s.liveness, Liveness::Ended);
+        let log = hub.ensure_loaded(&s).await.unwrap();
+        assert_eq!(log.lock().len(), 1);
+        // `claude --resume old-1` on the computer appends to the same transcript.
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        f.write_all(
+            b"{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{\"content\":\"again\"}}
+",
+        )
+        .unwrap();
+        hub.tail_once();
+        assert_eq!(log.lock().len(), 2, "the resumed turn reaches the open log");
+        assert!(bus.head_seq() >= 1, "and is published live");
+    }
+
+    #[tokio::test]
+    async fn subagent_transcripts_are_listed_as_a_tree_and_tailed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects").join("-tmp-x");
+        let sub = proj.join("s-1").join("subagents");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            proj.join("s-1.jsonl"),
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+        let rec = |uuid: &str, text: &str| {
+            format!("{{\"type\":\"user\",\"isSidechain\":true,\"agentId\":\"a1\",\"uuid\":\"{uuid}\",\"message\":{{\"content\":\"{text}\"}}}}\n")
+        };
+        std::fs::write(sub.join("agent-a1.jsonl"), rec("c1", "look around")).unwrap();
+        std::fs::write(
+            sub.join("agent-a1.meta.json"),
+            r#"{"agentType":"Explore","description":"Find files","toolUseId":"toolu_1","spawnDepth":1,"secretPrompt":"x"}"#,
+        )
+        .unwrap();
+        std::fs::write(sub.join("agent-a2.jsonl"), "").unwrap();
+        std::fs::write(
+            sub.join("agent-a2.meta.json"),
+            r#"{"description":"Nested","parentAgentId":"a1","spawnDepth":2,"finished":true}"#,
+        )
+        .unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(64),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        let tree = hub.subagent_tree("claude:s-1").await.unwrap();
+        let agents = tree["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 2);
+        let nested = agents.iter().find(|a| a["agentId"] == "a2").unwrap();
+        assert_eq!(nested["parentAgentId"], "a1");
+        assert_eq!(nested["spawnDepth"], 2);
+        let top = agents.iter().find(|a| a["agentId"] == "a1").unwrap();
+        assert!(top.get("secretPrompt").is_none(), "metadata is whitelisted");
+
+        let v = hub
+            .subagent_events("claude:s-1", "a1", None, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(v["events"].as_array().unwrap().len(), 1);
+        assert_eq!(v["meta"]["agentType"], "Explore");
+        // A running sub-agent appends; the next request sees it.
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(sub.join("agent-a1.jsonl"))
+            .unwrap()
+            .write_all(rec("c2", "more").as_bytes())
+            .unwrap();
+        let v = hub
+            .subagent_events("claude:s-1", "a1", None, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(v["events"].as_array().unwrap().len(), 2);
+        // Path traversal and unknown agents are refused.
+        assert!(hub
+            .subagent_events("claude:s-1", "../s-1", None, None, 50)
+            .await
+            .is_err());
+        assert!(hub
+            .subagent_events("claude:s-1", "nope", None, None, 50)
+            .await
+            .is_err());
+    }
+
+    #[test]
+    fn codex_subagents_come_from_the_session_log() {
+        let mut lg = SessionLog::new("codex:t1", None);
+        let mk = |id: &str, kind: &'static str, parent: Option<&str>, data: Value| {
+            let mut d = EventDraft::new(id, kind, "2026-11-18T10:00:00Z".to_string(), data);
+            d.parent_id = parent.map(String::from);
+            d
+        };
+        lg.upsert(
+            mk("call", "tool_call", None, json!({"name":"spawn_agent"})),
+            false,
+        );
+        lg.upsert(
+            mk(
+                "cx-sa-A",
+                "subagent",
+                Some("call"),
+                json!({"agentId":"A","description":"Child","status":"running"}),
+            ),
+            false,
+        );
+        lg.upsert(
+            mk(
+                "a1",
+                "assistant_message",
+                Some("cx-sa-A"),
+                json!({"text":"working"}),
+            ),
+            false,
+        );
+        lg.upsert(
+            mk("a2", "tool_call", Some("cx-sa-A"), json!({"name":"shell"})),
+            false,
+        );
+        lg.upsert(
+            mk("a2r", "tool_result", Some("a2"), json!({"output":"ok"})),
+            false,
+        );
+        lg.upsert(
+            mk(
+                "cx-sa-B",
+                "subagent",
+                Some("a2"),
+                json!({"agentId":"B","status":"completed"}),
+            ),
+            false,
+        );
+        lg.upsert(
+            mk("main", "assistant_message", None, json!({"text":"parent"})),
+            false,
+        );
+        let nodes = log_subagent_nodes(&lg);
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0]["parentAgentId"], Value::Null);
+        assert_eq!(nodes[1]["parentAgentId"], "A");
+        assert_eq!(nodes[1]["finished"], true);
+        let under = nested_under(&lg, "cx-sa-A");
+        let ids: Vec<_> = under.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["a1", "a2", "a2r", "cx-sa-B"]);
+        assert_eq!(under[0].parent_id, None, "direct children become top-level");
+        assert_eq!(under[2].parent_id.as_deref(), Some("a2"));
+    }
+
+    #[tokio::test]
+    async fn a_short_turn_between_full_refreshes_is_published() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects").join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(
+            proj.join("short-1.jsonl"),
+            "{}
+",
+        )
+        .unwrap();
+        let reg = tmp.path().join("sessions");
+        std::fs::create_dir_all(&reg).unwrap();
+        let pid = std::process::id();
+        let write = |status: &str| {
+            std::fs::write(
+                reg.join(format!("{pid}.json")),
+                format!(r#"{{"pid":{pid},"sessionId":"short-1","status":"{status}","entrypoint":"cli"}}"#),
+            )
+            .unwrap();
+        };
+        write("idle");
+        let bus = EventBus::new(256);
+        let mut rx = bus.subscribe();
+        let hub = Arc::new(AgentHub::new(
+            bus.clone(),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        ));
+        let cancel = CancellationToken::new();
+        hub.start_live_watcher(cancel.clone(), Arc::new(|| true));
+        // Let the first full refresh announce the idle session, then run a 0.3 s turn that falls
+        // between every polling tick (0 s / 2 s / 4 s): only the change notification can see it.
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        write("busy");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        write("idle");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cancel.cancel();
+        let mut statuses = Vec::new();
+        while let Ok(f) = rx.try_recv() {
+            if f.topic == "session.upserted" && f.data["id"] == "claude:short-1" {
+                statuses.push(f.data["status"].as_str().unwrap_or("").to_string());
+            }
+        }
+        assert_eq!(
+            statuses,
+            ["idle", "busy", "idle"],
+            "each change is pushed as it happens"
+        );
+    }
+
+    #[test]
+    fn observed_dsh_status_follows_the_last_turn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("session.v4.jsonl.zstd");
+        let frame = |line: &str| {
+            zstd::encode_all(
+                format!(
+                    "{line}
+"
+                )
+                .as_bytes(),
+                3,
+            )
+            .unwrap()
+        };
+        let append = |bytes: Vec<u8>| {
+            use std::io::Write;
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(&bytes)
+                .unwrap();
+        };
+        let hub = AgentHub::new(
+            EventBus::new(16),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(PathBuf::from("/nonexistent"), None),
+        );
+        append(frame(r#"{"type":"session","id":"s1","cwd":"/p"}"#));
+        append(frame(r#"{"type":"turn/start","seq":2,"time":1}"#));
+        assert_eq!(hub.dsh_live_status(&path), Some("busy"));
+        // Stopped by the user: idle at once, read incrementally from the last offset.
+        append(frame(
+            r#"{"type":"turn/end","seq":3,"time":2,"data":{"turn":1,"reason":{"kind":"aborted","reason":{"kind":"user"}}}}"#,
+        ));
+        assert_eq!(hub.dsh_live_status(&path), Some("idle"));
+        append(frame(r#"{"type":"turn/start","seq":4,"time":3}"#));
+        append(frame(
+            r#"{"type":"turn/end","seq":5,"time":4,"data":{"turn":2,"reason":{"kind":"error","error":{"message":"x"}}}}"#,
+        ));
+        assert_eq!(hub.dsh_live_status(&path), Some("error"));
+
+        let open = DshTurnState {
+            open: true,
+            last_end: None,
+        };
+        let done = DshTurnState {
+            open: false,
+            last_end: Some("completed".into()),
+        };
+        // A long tool call writes nothing for minutes but is still working.
+        assert_eq!(
+            dsh_observed_status(&open, Duration::from_secs(5 * 60)),
+            Some("busy")
+        );
+        assert_eq!(
+            dsh_observed_status(&open, Duration::from_secs(11 * 60)),
+            None
+        );
+        assert_eq!(
+            dsh_observed_status(&done, Duration::from_secs(30)),
+            Some("idle")
+        );
+        assert_eq!(
+            dsh_observed_status(&done, Duration::from_secs(3 * 60)),
+            None
+        );
+    }
+
+    /// A controllable session that records what the agent would receive.
+    struct FakeAgent {
+        images: bool,
+        log: Arc<Mutex<SessionLog>>,
+        sent: Mutex<Vec<(String, usize)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ManagedSession for FakeAgent {
+        fn agent(&self) -> &'static str {
+            if self.images {
+                "claude_code"
+            } else {
+                "dsh"
+            }
+        }
+        fn log(&self) -> Arc<Mutex<SessionLog>> {
+            self.log.clone()
+        }
+        fn cwd(&self) -> PathBuf {
+            PathBuf::from("/p")
+        }
+        fn native_session_id(&self) -> Option<String> {
+            None
+        }
+        fn status(&self) -> &'static str {
+            "idle"
+        }
+        fn liveness(&self) -> Liveness {
+            Liveness::Live
+        }
+        fn created_at_ms(&self) -> i64 {
+            0
+        }
+        fn last_active_at_ms(&self) -> i64 {
+            0
+        }
+        fn model(&self) -> Option<String> {
+            None
+        }
+        fn title(&self) -> Option<String> {
+            None
+        }
+        fn has_pending_requests(&self) -> bool {
+            false
+        }
+        fn supports_images(&self) -> bool {
+            self.images
+        }
+        async fn send_message(&self, text: &str) -> ApiResult<()> {
+            self.send_message_with_images(text, &[]).await
+        }
+        async fn send_message_with_images(
+            &self,
+            text: &str,
+            images: &[managed::ImageAttachment],
+        ) -> ApiResult<()> {
+            self.sent.lock().push((text.to_string(), images.len()));
+            // The agent echoes the prompt into its transcript like Claude Code / dsh do.
+            self.log.lock().upsert(
+                EventDraft::new("echo", "user_message", "t", json!({ "text": text })),
+                true,
+            );
+            Ok(())
+        }
+        async fn interrupt(&self) -> ApiResult<()> {
+            Ok(())
+        }
+        async fn respond(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<String>,
+            _: Option<Value>,
+            _: Option<Value>,
+            _: &str,
+        ) -> ApiResult<Value> {
+            Ok(Value::Null)
+        }
+        fn kill(&self) {}
+        fn origin(&self) -> &'static str {
+            "vscode"
+        }
+    }
+
+    #[tokio::test]
+    async fn attachments_reach_the_agent_as_paths_and_images_inline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(64),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(PathBuf::from("/nonexistent"), None),
+        );
+        hub.set_attachment_root(tmp.path().join("attachments"));
+        for (id, images) in [("cc", true), ("dsh", false)] {
+            let fake = Arc::new(FakeAgent {
+                images,
+                log: Arc::new(Mutex::new(SessionLog::new(id, None))),
+                sent: Mutex::new(Vec::new()),
+            });
+            hub.register_attached(id.into(), fake.clone());
+            let store = hub.attachments().unwrap();
+            let up = |name: &str, bytes: &[u8]| {
+                let v = store
+                    .begin("dev", id, name, bytes.len() as u64, None)
+                    .unwrap();
+                store.chunk("dev", id, &v.attachment_id, 0, bytes).unwrap();
+                v.attachment_id
+            };
+            let ids = vec![up("photo.png", b"PNG fake"), up("build.log", b"error: x")];
+            // Another device cannot use these uploads.
+            assert!(hub
+                .send_message_full(id, "看看", &[], &ids, "other", None)
+                .await
+                .is_err());
+            hub.send_message_full(id, "看看", &[], &ids, "dev", Some("c1"))
+                .await
+                .unwrap();
+            let (text, inline) = fake.sent.lock()[0].clone();
+            assert!(
+                text.starts_with(
+                    "看看
+
+[SwitchTether attachments:"
+                ),
+                "{text}"
+            );
+            let root = tmp.path().join("attachments");
+            for name in ["photo.png", "build.log"] {
+                let line = text.lines().find(|l| l.ends_with(name)).expect(name);
+                let path = Path::new(line.trim_start_matches("- "));
+                assert!(path.is_absolute() && path.starts_with(&root) && path.is_file());
+            }
+            assert_eq!(
+                inline,
+                if images { 1 } else { 0 },
+                "only image-capable agents get the image inline"
+            );
+            // The timeline shows the user's text and the files, matched to the phone's bubble.
+            let log = fake.log.clone();
+            let ev = log.lock().get("echo").cloned().unwrap();
+            assert_eq!(ev.data["text"], "看看");
+            assert_eq!(ev.data["attachments"].as_array().unwrap().len(), 2);
+            assert_eq!(ev.data["attachments"][1]["name"], "build.log");
+            assert_eq!(ev.data["clientId"], "c1");
+        }
+    }
+
+    #[test]
+    fn processes_owned_by_switchtether_are_not_observed_twice() {
+        let entry = |sid: &str, pid: Option<u32>| claude::live::LiveClaudeSession {
+            pid,
+            session_id: sid.into(),
+            cwd: None,
+            started_at_ms: None,
+            kind: None,
+            entrypoint: None,
+            status: None,
+            waiting_for: None,
+            name: None,
+        };
+        let owned = OwnedClaude {
+            native: vec!["continued".into()],
+            pids: vec![42],
+        };
+        assert!(owned.covers(&entry("continued", Some(7))));
+        // A fork has a new id that is only known after its first turn; the pid matches at once.
+        assert!(owned.covers(&entry("fresh-fork", Some(42))));
+        assert!(!owned.covers(&entry("users-own", Some(7))));
+        assert!(!owned.covers(&entry("users-own", None)));
     }
 
     #[tokio::test]

@@ -5470,8 +5470,10 @@
       "verify": "Doğrulama kodu (telefondakiyle aynı olmalı):",
       "newCode": "Yeni kod",
       "step1": "Telefonunda SwitchTether'i aç.",
-      "step2": "“Bilgisayar ekle”ye dokun ve bu kodu tara.",
+      "step2": "“Bilgisayar ekle”ye dokunup bu kodu tara ya da “Yakındaki bilgisayarlar”dan bu bilgisayarı seçip aşağıdaki eşleştirme kodunu gir.",
       "step3": "Doğrulama kodunun iki ekranda da aynı olduğunu kontrol et.",
+      "codeLabel": "Eşleştirme kodu",
+      "codeHint": "Tarama mümkün değilse: telefonda “Yakındaki bilgisayarlar”dan bu bilgisayarı seç (veya adresini gir) ve bu kodu yaz.",
       "computer": "Bilgisayar",
       "addresses": "Adres",
       "done": "Bitti"
@@ -5527,6 +5529,13 @@
         "label": "Terminal · st-claude / st-codex",
         "description": "st-claude ve st-codex komutlarını ekler ({{dir}}). Telefondan erişmek istediğin oturumlar için claude / codex yerine bunları kullan; claude ve codex'in kendisi değişmez.",
         "enabledToast": "Açıldı. Yeni bir terminal açıp st-claude veya st-codex çalıştır."
+      },
+      "dsh": {
+        "label": "DeepSeek Harness · Web",
+        "description": "SwitchTether köprü eklentisini dsh'nin kendi eklenti yöneticisiyle (dsh plugin) web profiline kurar. Ardından telefon, dsh web'deki oturumlara mesaj gönderebilir, onları durdurabilir ve onay isteklerini yanıtlayabilir (web ya da telefon, ilk yanıt geçerlidir). Profilin bildirim ve yama dosyaları önce yedeklenir; kapatınca dsh plugin remove çalışır. dsh web yeniden başlatılınca etkinleşir. DeepSeek Harness masaüstü uygulaması desteklenmez.",
+        "unavailable": "DeepSeek Harness (dsh) bulunamadı.",
+        "noProfile": "DeepSeek Harness web profili henüz kurulmadı: önce bir kez dsh web çalıştırın.",
+        "enabledToast": "Açıldı. dsh web'i yeniden başlatın; orada açılan oturumlar telefondan devralınabilir."
       }
     },
     "basedOn": "CC Switch v{{version}} tabanlı",

@@ -53,6 +53,8 @@ export interface RemoteStatus {
 
 export interface PairingOffer {
   pairingId: string;
+  /** 6-digit code for pairing without the QR code (phone picks the computer on the LAN). */
+  code: string;
   uri: string;
   expiresAt: string;
   qrSvg: string;
@@ -92,7 +94,7 @@ export interface RemoteTerminal {
   external?: boolean;
 }
 
-export type TakeoverHook = "vscode" | "codex_desktop" | "cli";
+export type TakeoverHook = "vscode" | "codex_desktop" | "cli" | "dsh";
 
 export interface TakeoverStatus {
   shimAvailable: boolean;
@@ -115,6 +117,13 @@ export interface TakeoverStatus {
     enabled: boolean;
     binDir: string;
     pathAdded: boolean;
+  };
+  /** DeepSeek Harness bridge plugin in the dsh `web` profile (absent on older builds). */
+  dsh?: {
+    available: boolean;
+    profileReady: boolean;
+    enabled: boolean;
+    profile: string;
   };
 }
 

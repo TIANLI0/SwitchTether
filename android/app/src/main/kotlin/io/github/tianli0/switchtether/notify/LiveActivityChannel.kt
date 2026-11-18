@@ -99,6 +99,7 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
 
     private fun smallIconFor(phase: LivePhase, step: io.github.tianli0.switchtether.remote.live.StepKind?): Int = when (phase) {
         // Running shows what the agent is doing (terminal, pencil, magnifier, …), never the app mark.
+        // Static on purpose: frame-animated icons were tried and did not work well on the device.
         LivePhase.RUNNING -> when (step) {
             null -> R.drawable.ic_step_think
             io.github.tianli0.switchtether.remote.live.StepKind.COMMAND -> R.drawable.ic_step_command

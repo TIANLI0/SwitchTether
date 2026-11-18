@@ -294,3 +294,83 @@ async fn tty_is_mirrored_as_external_terminal() {
 fn futures_lite_block<F: std::future::Future>(f: F) -> F::Output {
     tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(f))
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dsh_bridge_plugin_sessions_are_controllable() {
+    let env = setup().await;
+    let (mut plugin, ack) = Shim::connect(
+        env.port,
+        json!({"t":"hello","v":1,"token":env.token,"kind":"plugin","dialect":"dsh","pid":1,"version":"t"}),
+    )
+    .await;
+    assert_eq!(ack.unwrap()["t"], "welcome");
+    plugin
+        .send(json!({"t":"session","sessionId":"session-abc"}))
+        .await;
+    let hub = env.hub.clone();
+    assert!(
+        wait_for(|| {
+            let (items, _) = futures_lite_block(hub.list(&SessionQuery::default()));
+            items.iter().any(|s| s.agent == "dsh")
+        })
+        .await
+    );
+    let (items, _) = env.hub.list(&SessionQuery::default()).await;
+    let s = items.iter().find(|s| s.agent == "dsh").unwrap().clone();
+    // The user's dsh session is reachable by its dsh id too.
+    assert_eq!(env.hub.summary("dsh:abc").await.unwrap().id, s.id);
+
+    // A message from the phone becomes a prompt frame; the plugin's result completes it.
+    let hub = env.hub.clone();
+    let id = s.id.clone();
+    let send = tokio::spawn(async move { hub.send_message(&id, "hello dsh", None).await });
+    let prompt = plugin.recv().await.unwrap();
+    assert_eq!(prompt["t"], "prompt");
+    assert_eq!(prompt["sessionId"], "session-abc");
+    assert_eq!(prompt["text"], "hello dsh");
+    plugin
+        .send(json!({"t":"result","id":prompt["id"],"ok":true}))
+        .await;
+    send.await.unwrap().unwrap();
+
+    // An approval is shown on the phone; answering it sends the outcome to the plugin.
+    plugin.send(json!({"t":"approval","requestId":"dsh-ap-1","sessionId":"session-abc","toolName":"pwsh","reason":"Run cargo test","callId":"c1"})).await;
+    let hub = env.hub.clone();
+    let idc = s.id.clone();
+    assert!(
+        wait_for(|| futures_lite_block(hub.summary(&idc)).is_some_and(|s| s.status == "waiting"))
+            .await
+    );
+    env.hub
+        .respond(&s.id, "dsh-ap-1", "allow", None, None, None, "phone")
+        .await
+        .unwrap();
+    let approve = plugin.recv().await.unwrap();
+    assert_eq!(
+        approve,
+        json!({"t":"approve","requestId":"dsh-ap-1","outcome":"allowed-once"})
+    );
+
+    // Answered in the dsh UI first: the card resolves as answered on the computer.
+    plugin.send(json!({"t":"approval","requestId":"dsh-ap-2","sessionId":"session-abc","toolName":"edit"})).await;
+    plugin.send(json!({"t":"approval-done","requestId":"dsh-ap-2","sessionId":"session-abc","outcome":"rejected","by":"desktop"})).await;
+    let hub = env.hub.clone();
+    let idc = s.id.clone();
+    assert!(
+        wait_for(|| futures_lite_block(
+            hub.respond(&idc, "dsh-ap-2", "allow", None, None, None, "phone")
+        )
+        .is_err())
+        .await
+    );
+
+    // Disconnect: the session is no longer controllable (the user's dsh keeps running).
+    drop(plugin);
+    let hub = env.hub.clone();
+    let idc = s.id.clone();
+    assert!(
+        wait_for(|| futures_lite_block(hub.summary(&idc))
+            .is_some_and(|s| s.liveness != switchtether_core::agents::model::Liveness::Live))
+        .await
+    );
+}

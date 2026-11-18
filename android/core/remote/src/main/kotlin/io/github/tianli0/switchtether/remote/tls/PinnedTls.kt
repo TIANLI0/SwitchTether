@@ -90,6 +90,33 @@ class PinnedServerTrustManager(pinnedFingerprintHex: String) : X509ExtendedTrust
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }
 
+/**
+ * Trust on first use, for pairing with a computer whose certificate is not known in advance
+ * (address typed by the user, pairing code instead of QR code). Accepts any server certificate and
+ * records the leaf fingerprint; the caller then pins it for everything that follows, and the user
+ * must compare the verification code on both screens.
+ */
+class RecordingServerTrustManager : X509ExtendedTrustManager() {
+    @Volatile var fingerprint: String? = null
+        private set
+
+    private fun record(chain: Array<out X509Certificate>?) {
+        val leaf = chain?.firstOrNull() ?: throw CertificateException("empty server certificate chain")
+        fingerprint = Fingerprints.sha256Hex(leaf.encoded)
+    }
+
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = record(chain)
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, socket: Socket?) = record(chain)
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) = record(chain)
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) =
+        throw CertificateException("client role not supported")
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?, socket: Socket?) =
+        throw CertificateException("client role not supported")
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) =
+        throw CertificateException("client role not supported")
+    override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+}
+
 /** The desktop presented a certificate that does not match the pinned fingerprint. */
 class PinMismatchException : CertificateException("server certificate does not match the pinned fingerprint")
 
@@ -121,7 +148,27 @@ object TlsClientFactory {
         connectTimeoutMs: Long = 5_000,
         readTimeoutMs: Long = 20_000,
     ): OkHttpClient {
-        val trustManager = PinnedServerTrustManager(pinnedFingerprint)
+        return build(identity, PinnedServerTrustManager(pinnedFingerprint), base, connectTimeoutMs, readTimeoutMs)
+    }
+
+    /**
+     * Client that accepts any server certificate and records it in [recorder] (pairing by address /
+     * code only; see [RecordingServerTrustManager]). Never used after pairing.
+     */
+    fun createRecording(
+        identity: ClientIdentity,
+        recorder: RecordingServerTrustManager,
+        base: OkHttpClient? = null,
+        connectTimeoutMs: Long = 5_000,
+    ): OkHttpClient = build(identity, recorder, base, connectTimeoutMs, 20_000)
+
+    private fun build(
+        identity: ClientIdentity,
+        trustManager: X509ExtendedTrustManager,
+        base: OkHttpClient?,
+        connectTimeoutMs: Long,
+        readTimeoutMs: Long,
+    ): OkHttpClient {
         val sslContext = SSLContext.getInstance("TLSv1.3")
         sslContext.init(arrayOf(SingleIdentityKeyManager(identity)), arrayOf(trustManager), SecureRandom())
         val builder = base?.newBuilder() ?: OkHttpClient.Builder()

@@ -49,3 +49,15 @@ All patches live in `patches/` and are re-applied by `sync_coui17.py` in file-na
   ColorOS 17 non-blur dialog in both themes.
 - **Checked:** applies to the pinned `0fc9b44` and to upstream `main` `433ba6a` (2026-11-17), which
   has no fix of its own for this.
+
+## 0004-small-top-app-bar-title-marquee.patch
+
+- **File:** `coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/basic/TopAppBar.kt`
+- **Upstream behaviour:** the `SmallTopAppBar` title and subtitle are single lines cut with an
+  ellipsis, so a long session title or subtitle can never be read in full from the page header.
+- **Change (smallest possible):** a public `LocalTopAppBarTitleMarquee` composition local (default
+  `false`, so upstream behaviour is unchanged). When true the title and the subtitle use
+  `Modifier.basicMarquee` (repeats, 1.5 s initial delay, 2 s between runs) and `TextOverflow.Clip`;
+  text that fits does not move.
+- **Resulting behaviour:** SwitchTether provides `true` at the root (`SwitchTetherRoot`), so long
+  titles and subtitles on detail pages (session, terminal, files) scroll.

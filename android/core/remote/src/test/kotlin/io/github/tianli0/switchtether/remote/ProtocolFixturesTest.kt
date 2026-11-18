@@ -60,6 +60,28 @@ class ProtocolFixturesTest {
     }
 
     @Test
+    fun messageWithAttachmentsAndUploadStateRoundTrip() {
+        val body = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.SendMessageBody.serializer(), fixture("send_message_attachments.json"))
+        assertEquals(2, body.attachments.size)
+        val encoded = ProtocolJson.parseToJsonElement(ProtocolJson.encodeToString(io.github.tianli0.switchtether.remote.protocol.SendMessageBody.serializer(), body)).jsonObject
+        assertEquals(ProtocolJson.parseToJsonElement(fixture("send_message_attachments.json")).jsonObject, encoded)
+        val view = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.AttachmentView.serializer(), fixture("attachment_view.json"))
+        assertEquals(2_097_152L, view.received)
+        assertEquals(false, view.complete)
+        val back = ProtocolJson.parseToJsonElement(ProtocolJson.encodeToString(io.github.tianli0.switchtether.remote.protocol.AttachmentView.serializer(), view)).jsonObject
+        assertEquals(ProtocolJson.parseToJsonElement(fixture("attachment_view.json")).jsonObject, back)
+    }
+
+    @Test
+    fun codePairRequestRoundTrip() {
+        val req = ProtocolJson.decodeFromString(PairRequest.serializer(), fixture("pair_request_code.json"))
+        assertEquals("042917", req.code)
+        assertEquals(null, req.pairingId)
+        val encoded = ProtocolJson.parseToJsonElement(ProtocolJson.encodeToString(PairRequest.serializer(), req)).jsonObject
+        assertEquals(ProtocolJson.parseToJsonElement(fixture("pair_request_code.json")).jsonObject, encoded)
+    }
+
+    @Test
     fun pairRequestWithoutStepUpKeyOmitsField() {
         val req = PairRequest(pairingId = "p", secret = "s", deviceName = "d", stepUpPublicKey = null)
         val o = ProtocolJson.parseToJsonElement(ProtocolJson.encodeToString(PairRequest.serializer(), req)).jsonObject

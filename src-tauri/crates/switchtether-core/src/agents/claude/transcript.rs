@@ -55,6 +55,8 @@ pub struct ClaudeParser {
     subagents: HashMap<String, SubagentRow>,
     /// Sub-agent id (`agentId`, also the notification's `<task-id>`) -> Agent/Task call id.
     agent_calls: HashMap<String, String>,
+    /// Background shell task id (`backgroundTaskId`, the notification's `<task-id>`) -> Bash call id.
+    bg_shells: HashMap<String, String>,
 }
 
 struct SubagentRow {
@@ -392,6 +394,7 @@ impl ClaudeParser {
             Some("system") => self.system(rec, &ts),
             Some("stream_event") => self.stream_event(rec, &ts),
             Some("result") => self.result(rec, &ts),
+            Some("attachment") => self.attachment(rec, &ts),
             // Titles of the conversation itself. Records written by a sub-agent (sidechain /
             // `parent_tool_use_id`) describe the sub-task, never the session.
             Some("ai-title") => {
@@ -433,6 +436,42 @@ impl ClaudeParser {
             }
         }
         out
+    }
+
+    /// `attachment` records. A `queued_command` is input that arrived while the agent was busy:
+    /// a message the user typed mid-turn (`commandMode: "prompt"`) or a background task
+    /// reporting back (`commandMode: "task-notification"`). Both are absorbed into the running
+    /// turn, so no `user` record follows; everything else here is bookkeeping.
+    fn attachment(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
+        if is_sidechain(rec) {
+            return vec![];
+        }
+        let Some(a) = rec.get("attachment") else {
+            return vec![];
+        };
+        if a.get("type").and_then(Value::as_str) != Some("queued_command") {
+            return vec![];
+        }
+        let prompt = a.get("prompt").cloned().unwrap_or(Value::Null);
+        let text = content_text(&prompt);
+        let uuid = s(rec, "uuid").unwrap_or_else(crate::util::new_id);
+        let mode = a.get("commandMode").and_then(Value::as_str);
+        if mode == Some("task-notification")
+            || a.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification")
+            || text.trim_start().starts_with("<task-notification>")
+        {
+            return self.task_notification(&uuid, &text, ts);
+        }
+        if mode == Some("prompt") && !text.trim().is_empty() {
+            let synthetic = json!({
+                "type": "user",
+                "uuid": uuid,
+                "timestamp": ts,
+                "message": { "role": "user", "content": prompt },
+            });
+            return self.user(&synthetic, ts);
+        }
+        vec![]
     }
 
     fn user(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
@@ -572,15 +611,28 @@ impl ClaudeParser {
                         || text.contains("user rejected")
                         || text.contains("Permission denied by user")
                         || text.contains("was rejected"));
+                // `run_in_background`: the result only says the command started; it runs on
+                // until its `<task-notification>` (see `task_notification`).
+                let bg_task = structured
+                    .and_then(|s| s.get("backgroundTaskId"))
+                    .and_then(Value::as_str)
+                    .map(String::from);
                 tc.data["status"] = json!(if denied {
                     "denied"
                 } else if interrupted {
                     "interrupted"
                 } else if is_error {
                     "failed"
+                } else if bg_task.is_some() {
+                    "running"
                 } else {
                     "completed"
                 });
+                if let Some(task) = bg_task.filter(|_| !is_error) {
+                    tc.data["background"] = json!(true);
+                    tc.data["taskId"] = json!(task);
+                    self.bg_shells.insert(task, call_id.to_string());
+                }
                 let mut d = EventDraft::new(
                     tc.event_id.clone(),
                     "tool_call",
@@ -665,6 +717,25 @@ impl ClaudeParser {
                     out.push(fc);
                 }
             }
+            // TaskStop / KillShell stopped a background shell: no notification follows, so the
+            // shell's row is marked interrupted here.
+            if !is_error && matches!(name.as_str(), "TaskStop" | "KillShell" | "KillBash") {
+                let task = s(st, "task_id").or_else(|| s(st, "shell_id"));
+                if let Some(bg_call) = task.and_then(|t| self.bg_shells.remove(&t)) {
+                    if let Some(tc) = self.tools.get_mut(&bg_call) {
+                        tc.data["status"] = json!("interrupted");
+                        tc.data["finishedAt"] = json!(ts);
+                        let mut d = EventDraft::new(
+                            tc.event_id.clone(),
+                            "tool_call",
+                            tc.ts.clone(),
+                            tc.data.clone(),
+                        );
+                        d.turn_id = tc.turn_id.clone();
+                        out.push(d);
+                    }
+                }
+            }
             // Sub-agent result → subagent event (linked under the Task/Agent tool_call).
             if (name == "Task" || name == "Agent") && st.get("agentId").is_some() {
                 out.push(self.subagent_started(call_id, is_error, text, st, turn, ts));
@@ -745,6 +816,9 @@ impl ClaudeParser {
     /// `<task-notification>`: a background agent (or background shell task) finished. Known
     /// sub-agents are updated in place; anything else becomes a short system note.
     fn task_notification(&mut self, uuid: &str, text: &str, ts: &str) -> Vec<EventDraft> {
+        if let Some(d) = self.background_shell_finished(text, ts) {
+            return vec![d];
+        }
         let call_id = xml_tag(text, "tool-use-id")
             .map(String::from)
             .filter(|c| self.subagents.contains_key(c))
@@ -794,6 +868,48 @@ impl ClaudeParser {
         sa.turn_id = row.turn_id.clone();
         sa.parent_id = Some(call_id);
         vec![sa]
+    }
+
+    /// A background shell command (`Bash` with `run_in_background`) finished: its `tool_call`
+    /// row is updated in place (status, the notification's summary, exit code). Monitors and
+    /// other tasks without a known Bash call return None.
+    fn background_shell_finished(&mut self, text: &str, ts: &str) -> Option<EventDraft> {
+        let call_id = xml_tag(text, "tool-use-id")
+            .filter(|c| {
+                self.tools
+                    .get(*c)
+                    .is_some_and(|tc| tc.data.get("background") == Some(&json!(true)))
+            })
+            .map(String::from)
+            .or_else(|| xml_tag(text, "task-id").and_then(|t| self.bg_shells.get(t).cloned()))?;
+        let tc = self.tools.get_mut(&call_id)?;
+        let summary = xml_tag(text, "summary").map(|t| preview(t, 300).0);
+        // "Background command "…" completed (exit code 0)"
+        let exit_code = summary.as_deref().and_then(|t| {
+            let rest = &t[t.rfind("exit code ")? + "exit code ".len()..];
+            rest.trim_end_matches(')').trim().parse::<i64>().ok()
+        });
+        let status = match xml_tag(text, "status").map(subagent_status) {
+            Some("completed") if exit_code.is_some_and(|c| c != 0) => "failed",
+            Some(st) => st,
+            None => "completed",
+        };
+        tc.data["status"] = json!(status);
+        if let Some(sm) = summary {
+            tc.data["backgroundSummary"] = json!(sm);
+        }
+        if let Some(c) = exit_code {
+            tc.data["exitCode"] = json!(c);
+        }
+        tc.data["finishedAt"] = json!(ts);
+        let mut d = EventDraft::new(
+            tc.event_id.clone(),
+            "tool_call",
+            tc.ts.clone(),
+            tc.data.clone(),
+        );
+        d.turn_id = tc.turn_id.clone();
+        Some(d)
     }
 
     fn assistant(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
@@ -1314,6 +1430,77 @@ mod tests {
         assert_eq!(sa.data["durationMs"], 65000);
         assert_eq!(sa.turn_id.as_deref(), Some("u1"));
         assert_eq!(p.title.as_deref(), Some("Do it"));
+    }
+
+    fn bash_call(id: &str) -> Value {
+        json!({"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":id,"name":"Bash",
+            "input":{"command":"cargo build","description":"Build","run_in_background":true}}]}})
+    }
+
+    #[test]
+    fn background_shell_runs_until_its_notification() {
+        let mut p = ClaudeParser::new();
+        p.feed(&json!({"type":"user","uuid":"u1","message":{"content":"Build it"}}));
+        p.feed(&bash_call("toolu_b"));
+        let started = p.feed(&json!({"type":"user","uuid":"u2",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"Command running in background with ID: bg1."}]},
+            "toolUseResult":{"stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"bg1"}}));
+        let tc = started.iter().find(|d| d.kind == "tool_call").unwrap();
+        assert_eq!(tc.data["status"], "running");
+        assert_eq!(tc.data["background"], true);
+        assert_eq!(tc.data["taskId"], "bg1");
+
+        // Absorbed mid-turn: delivered as an attachment, not a user record.
+        let done = p.feed(&json!({"type":"attachment","uuid":"a1","timestamp":"2026-11-17T18:01:39.520Z",
+            "attachment":{"type":"queued_command","commandMode":"task-notification",
+            "prompt":"<task-notification>\n<task-id>bg1</task-id>\n<tool-use-id>toolu_b</tool-use-id>\n<status>completed</status>\n<summary>Background command \"Build\" completed (exit code 2)</summary>\n</task-notification>"}}));
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].kind, "tool_call");
+        assert_eq!(done[0].id, tc.id, "the same row is updated in place");
+        assert_eq!(done[0].data["status"], "failed", "non-zero exit code");
+        assert_eq!(done[0].data["exitCode"], 2);
+        assert_eq!(
+            done[0].data["backgroundSummary"],
+            "Background command \"Build\" completed (exit code 2)"
+        );
+        assert_eq!(p.title.as_deref(), Some("Build it"));
+    }
+
+    #[test]
+    fn task_stop_interrupts_the_background_shell() {
+        let mut p = ClaudeParser::new();
+        p.feed(&bash_call("toolu_b"));
+        p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"started"}]},
+            "toolUseResult":{"stdout":"","backgroundTaskId":"bg2"}}));
+        p.feed(&json!({"type":"assistant","message":{"id":"m3","content":[{"type":"tool_use","id":"toolu_s","name":"TaskStop","input":{"task_id":"bg2"}}]}}));
+        let out = p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_s","content":"Successfully stopped task: bg2"}]},
+            "toolUseResult":{"message":"Successfully stopped task: bg2","task_id":"bg2","task_type":"local_bash"}}));
+        let bg = out
+            .iter()
+            .find(|d| d.kind == "tool_call" && d.data["taskId"] == "bg2")
+            .expect("background row updated");
+        assert_eq!(bg.data["status"], "interrupted");
+    }
+
+    #[test]
+    fn mid_turn_prompt_attachment_is_a_user_message() {
+        let mut p = ClaudeParser::new();
+        p.feed(&json!({"type":"user","uuid":"u1","message":{"content":"First"}}));
+        let out = p.feed(&json!({"type":"attachment","uuid":"a2","timestamp":"2026-11-17T18:05:00Z",
+            "attachment":{"type":"queued_command","commandMode":"prompt","prompt":[{"type":"text","text":"Also do this"}]}}));
+        let um = out
+            .iter()
+            .find(|d| d.kind == "user_message")
+            .expect("user message");
+        assert_eq!(um.data["text"], "Also do this");
+        // Other attachments are bookkeeping.
+        assert!(p
+            .feed(&json!({"type":"attachment","uuid":"a3","attachment":{"type":"todo_reminder"}}))
+            .is_empty());
+        assert!(p
+            .feed(&json!({"type":"attachment","uuid":"a4","isSidechain":true,
+            "attachment":{"type":"queued_command","commandMode":"prompt","prompt":"sub"}}))
+            .is_empty());
     }
 
     #[test]

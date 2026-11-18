@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import androidx.compose.ui.graphics.compositeOver
+
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -114,7 +117,13 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.launch
 
 @Composable
-fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> Unit, onOpenSession: (String, String?) -> Unit = { _, _ -> }) {
+fun SessionDetailScreen(
+    sessionId: String,
+    initialTitle: String?,
+    onBack: () -> Unit,
+    onOpenSession: (String, String?) -> Unit = { _, _ -> },
+    onOpenRoute: (io.github.tianli0.switchtether.ui.nav.Route) -> Unit = {},
+) {
     val container = appContainer()
     val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -152,13 +161,23 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
             capabilityReason = caps?.reason,
             online = state.online,
             requestBusy = busy != null,
-            onApprove = { rid, decision, label -> pendingApproval = Triple(rid, decision, label) },
+            // The card already shows exactly what is being approved, so a plain allow / deny is one
+            // tap. Broader decisions (allow for the whole session, stop the agent) still confirm.
+            onApprove = { rid, decision, label ->
+                if (decision == "allow" || decision == "deny") vm.resolveApproval("$approveLabel: $label", rid, decision)
+                else pendingApproval = Triple(rid, decision, label)
+            },
             onAnswer = { rid, answers -> vm.answer(answerLabel, rid, answers) },
             onAnswerAction = { rid, answers, action ->
                 vm.answer(if (action == "cancel") cancelLabel else answerLabel, rid, answers, action)
             },
             onLoadPayload = vm::loadPayload,
             payloadOf = { vm.payloads[it] },
+            onOpenSubagent = if (agent in SUBAGENT_AGENTS) {
+                { aid, title -> onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.Subagent(sessionId, aid, title, agent)) }
+            } else null,
+            subagentPreview = { vm.subagentPreviews[it] },
+            onWantSubagentPreview = vm::loadSubagentPreview,
             onToggleCollapse = vm::toggleCollapse,
             isCollapsed = { it in vm.state.value.collapsed },
             onLink = { link ->
@@ -177,15 +196,22 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
     }
 
     val scope = rememberCoroutineScope()
-    val pickImage = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri != null) {
-            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                encodePickedImage(context, uri)?.let(vm::addImage)
+    // Picked photos and files are uploaded to the computer at once and reach the agent as paths.
+    val addPicked: (List<android.net.Uri>) -> Unit = { uris ->
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            uris.forEach { uri ->
+                val (name, size, mime) = pickedFileInfo(context, uri)
+                vm.addAttachment(name, size, mime) { context.contentResolver.openInputStream(uri) }
             }
         }
     }
+    val pickMedia = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACHMENTS),
+    ) { addPicked(it) }
+    val pickFiles = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
+    ) { addPicked(it) }
+    var showAttach by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.continuedAs?.id) {
         val created = state.continuedAs ?: return@LaunchedEffect
@@ -208,19 +234,37 @@ fun SessionDetailScreen(sessionId: String, initialTitle: String?, onBack: () -> 
         onRetryOutgoing = vm::retrySend,
         onDeleteOutgoing = vm::deleteOutgoing,
         onInterrupt = { confirmInterrupt = true },
-        onContinue = { showContinue = true },
+        // An ended session has no window on the computer that could disagree: resume at once.
+        // A session still open there gets the short explanation first.
+        onContinue = {
+            val s = state.detail.valueOrNull?.summary
+            if (s != null && !s.isLive) vm.continueOnPhone(continueLabel, false) else showContinue = true
+        },
         onRetryConnection = { container.connection.retryNow() },
         onOpenTerminal = { id -> container.openTerminalRequest.value = id },
+        onOpenSubagentTree = { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SubagentTree(sessionId, agent)) },
         pinned = pinned,
         onTogglePin = { state.detail.valueOrNull?.summary?.let { s -> io.github.tianli0.switchtether.ui.common.togglePin(context, s) } },
-        onPickImage = {
-            pickImage.launch(
+        onPickImage = { showAttach = true },
+        onRemoveImage = vm::removeImage,
+        onRemoveAttachment = vm::removeAttachment,
+    )
+
+    AttachSheet(
+        show = showAttach,
+        onImages = {
+            showAttach = false
+            pickMedia.launch(
                 androidx.activity.result.PickVisualMediaRequest(
-                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo,
                 ),
             )
         },
-        onRemoveImage = vm::removeImage,
+        onFiles = {
+            showAttach = false
+            pickFiles.launch(arrayOf("*/*"))
+        },
+        onDismiss = { showAttach = false },
     )
 
     ContinueSheet(
@@ -296,16 +340,21 @@ fun SessionDetailContent(
     onContinue: () -> Unit,
     onRetryConnection: () -> Unit,
     onOpenTerminal: (String) -> Unit = {},
+    onOpenSubagentTree: (() -> Unit)? = null,
     pinned: Boolean = false,
     onTogglePin: () -> Unit = {},
     onRetryOutgoing: (String) -> Unit = {},
     onDeleteOutgoing: (String) -> Unit = {},
     onPickImage: () -> Unit = {},
     onRemoveImage: (Int) -> Unit = {},
+    onRemoveAttachment: (String) -> Unit = {},
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
-    var tipDismissed by rememberSaveable { mutableStateOf(false) }
+    // The read-only tip explains once; the read-only composer bar keeps saying it afterwards.
+    val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val hints = remember(appCtx) { (appCtx as? io.github.tianli0.switchtether.SwitchTetherApp)?.container?.hintPrefs }
+    var tipDismissed by rememberSaveable { mutableStateOf(hints?.getBoolean("readonly_tip_dismissed", false) == true) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val displayTitle = summary?.let { io.github.tianli0.switchtether.ui.common.sessionDisplayTitle(it) } ?: initialTitle ?: stringResource(R.string.session_unnamed)
@@ -331,7 +380,6 @@ fun SessionDetailContent(
         modifier = Modifier.imePadding(),
     ) {
         ConnectionBanner(state.connection, onRetryConnection)
-        StatusChipRow(state, onClick = { showInfo = true }, onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } })
         val d = state.detail.valueOrNull
         if (d != null && state.online && !state.canSend) {
             val readOnly = !d.summary.managed && d.summary.origin != "managed" && d.summary.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL
@@ -340,7 +388,10 @@ fun SessionDetailContent(
                 text = tip,
                 visible = !tipDismissed,
                 startIcon = { Icon(AppIcons.Info, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceSecondary, modifier = Modifier.size(20.dp)) },
-                onClose = { tipDismissed = true },
+                onClose = {
+                    tipDismissed = true
+                    hints?.edit()?.putBoolean("readonly_tip_dismissed", true)?.apply()
+                },
                 title = null,
                 ignoreText = null,
                 onIgnore = null,
@@ -368,39 +419,66 @@ fun SessionDetailContent(
                 is Loadable.Failed -> ErrorState(ev.error.title(), ev.error.detail, stringResource(R.string.action_retry), onReload)
                 is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing)
             }
+            // Floats over the top of the conversation instead of taking a row of its own.
+            StatusChipRow(
+                state,
+                onClick = { showInfo = true },
+                onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
+                onOpenSubagents = onOpenSubagentTree?.takeIf {
+                    summary?.agent in SUBAGENT_AGENTS && state.log.events.any { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT }
+                },
+                subagentCount = state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT },
+                modifier = Modifier.align(Alignment.TopStart),
+            )
         }
-        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage)
+        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment)
     }
     SessionInfoSheet(show = showInfo, detail = state.detail.valueOrNull, activity = state.rollingStatus?.data?.takeIf { it.str("state") !in setOf("idle", "completed", null) }?.let { listOfNotNull(statusStateLabel(it.str("state")).ifEmpty { null }, it.str("detail")).joinToString(" · ") }, onDismiss = { showInfo = false })
 }
 
 /**
- * Under the app bar: one slim, transparent row of small capsules (what it is doing, who waits, how
- * it is attached, limits, branch, terminal). Tapping the row opens the full info sheet.
+ * Capsules floating over the top of the conversation (what it is doing, who waits, how it is
+ * attached, limits, branch, terminal): no background and no row of their own; messages scroll
+ * underneath. Only the capsules take touches; tapping them opens the full info sheet.
  */
 @Composable
-private fun StatusChipRow(state: SessionDetailState, onClick: () -> Unit, onOpenTerminal: (() -> Unit)?) {
+private fun StatusChipRow(
+    state: SessionDetailState,
+    onClick: () -> Unit,
+    onOpenTerminal: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    onOpenSubagents: (() -> Unit)? = null,
+    subagentCount: Int = 0,
+) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
     val terminalLabel = stringResource(R.string.open_terminal)
+    val bg = io.github.tianli0.switchtether.ui.common.pageContainerColor().compositeOver(COUITheme.colorScheme.background)
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(SquircleShape(16.dp))
+        modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(SquircleShape(16.dp))
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onClick).padding(vertical = 2.dp),
     ) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status))
-            else InfoChip(stringResource(R.string.badge_ended), dot = dev.neutral)
-            s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn) }
-            if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary)
+            if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status), backdrop = bg)
+            else InfoChip(stringResource(R.string.badge_ended), dot = dev.neutral, backdrop = bg)
+            s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn, backdrop = bg) }
+            if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary, backdrop = bg)
             // Full control is the normal case and needs no capsule; limits do.
-            if (s.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL) InfoChip(controlLabel(s.controlLevel), dot = controlColor(s.controlLevel))
-            s.gitBranch?.let { InfoChip(it, icon = AppIcons.Git, color = COUITheme.colorScheme.onSurfaceSecondary) }
+            if (s.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL) InfoChip(controlLabel(s.controlLevel), dot = controlColor(s.controlLevel), backdrop = bg)
+            s.gitBranch?.let { InfoChip(it, icon = AppIcons.Git, color = COUITheme.colorScheme.onSurfaceSecondary, backdrop = bg) }
             if (onOpenTerminal != null) {
-                InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel })
+                InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel }, backdrop = bg)
+            }
+            if (onOpenSubagents != null) {
+                val label = pluralStringResource(R.plurals.subagent_chip, subagentCount, subagentCount)
+                InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("subagent-tree"), backdrop = bg)
             }
         }
     }
 }
+
+/** Room above the first message so the floating capsules do not cover it at rest. */
+private val StatusChipInset = 32.dp
 
 @Composable
 private fun EventList(
@@ -427,11 +505,11 @@ private fun EventList(
         snapshotFlow { listState.firstVisibleItemIndex }.collect { if (it <= 1 && initialScrollDone) onLoadOlder() }
     }
     if (rows.isEmpty()) {
-        Text(stringResource(R.string.session_no_events), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(24.dp))
+        Text(stringResource(R.string.session_no_events), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp + StatusChipInset, bottom = 24.dp))
         return
     }
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(bottom = 8.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(top = StatusChipInset, bottom = 8.dp)) {
             item(key = "older") {
                 Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
                     when {
@@ -515,6 +593,7 @@ private fun Composer(
     onContinue: () -> Unit,
     onPickImage: () -> Unit = {},
     onRemoveImage: (Int) -> Unit = {},
+    onRemoveAttachment: (String) -> Unit = {},
 ) {
     val s = state.detail.valueOrNull?.summary
     Column(
@@ -601,19 +680,29 @@ private fun Composer(
                 }
             }
         }
+        if (state.draftAttachments.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 4.dp, bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                state.draftAttachments.forEach { a -> DraftAttachmentChip(a, onRemove = { onRemoveAttachment(a.localId) }) }
+            }
+        }
         Row(verticalAlignment = Alignment.Bottom) {
             val showInterrupt = state.canInterrupt && s != null && s.isLive && s.status != "idle"
             if (showInterrupt) {
                 RoundIconButton(AppIcons.Interrupt, stringResource(R.string.session_interrupt), onInterrupt, tint = LocalDevColors.current.danger, modifier = Modifier.testTag("interrupt"))
                 Spacer(Modifier.size(8.dp))
             }
-            val supportsImages = (state.canSend || state.canQueue) && s?.terminalId == null
-            if (supportsImages) {
+            // Files are uploaded right away, so attaching needs the connection (sending can still queue).
+            val supportsAttachments = (state.canSend || state.canQueue) && s?.terminalId == null
+            if (supportsAttachments) {
                 RoundIconButton(
-                    icon = AppIcons.File,
-                    label = stringResource(R.string.composer_attach_image),
+                    icon = AppIcons.Add,
+                    label = stringResource(R.string.composer_attach),
                     onClick = onPickImage,
-                    enabled = state.attachedImages.size < 4,
+                    enabled = state.online && state.draftAttachments.size < MAX_ATTACHMENTS,
+                    modifier = Modifier.testTag("attach"),
                 )
                 Spacer(Modifier.size(8.dp))
             }
@@ -630,7 +719,9 @@ private fun Composer(
                 // Sending never blocks the field: the bubble shows the message's own progress.
                 state = InputPillState(
                     enabled = state.canSend || state.canQueue,
-                    sendEnabled = (state.canSend || state.canQueue) && (state.draft.isNotBlank() || state.attachedImages.isNotEmpty()),
+                    sendEnabled = (state.canSend || state.canQueue) &&
+                        (state.draft.isNotBlank() || state.attachedImages.isNotEmpty() || state.draftAttachments.isNotEmpty()) &&
+                        state.draftAttachments.all { it.ready },
                     busy = false,
                 ),
                 modifier = Modifier.weight(1f),
@@ -639,6 +730,91 @@ private fun Composer(
             )
         }
     }
+}
+
+/** Photos or any file: both go to the computer and reach the agent as file paths. */
+@Composable
+private fun AttachSheet(show: Boolean, onImages: () -> Unit, onFiles: () -> Unit, onDismiss: () -> Unit) {
+    AppBottomSheet(show = show, title = stringResource(R.string.composer_attach), onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            GroupCard {
+                BasicComponent(
+                    title = stringResource(R.string.attach_photos),
+                    summary = stringResource(R.string.attach_photos_hint),
+                    startAction = { Icon(AppIcons.Image, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.padding(end = 12.dp).size(22.dp)) },
+                    onClick = onImages,
+                    cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Head,
+                )
+                BasicComponent(
+                    title = stringResource(R.string.attach_files),
+                    summary = stringResource(R.string.attach_files_hint),
+                    startAction = { Icon(AppIcons.File, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.padding(end = 12.dp).size(22.dp)) },
+                    onClick = onFiles,
+                    cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Tail,
+                )
+            }
+            Text(
+                stringResource(R.string.attach_where),
+                style = COUITheme.textStyles.footnote2,
+                color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(horizontal = 24.dp),
+            )
+        }
+    }
+}
+
+/** A picked file in the composer: name, upload progress or what went wrong, and remove. */
+@Composable
+private fun DraftAttachmentChip(a: DraftAttachment, onRemove: () -> Unit) {
+    val dev = LocalDevColors.current
+    val status = when (a.failure) {
+        AttachmentFailure.TOO_LARGE -> stringResource(R.string.attach_too_large)
+        AttachmentFailure.EMPTY -> stringResource(R.string.attach_empty)
+        AttachmentFailure.OLD_DESKTOP -> stringResource(R.string.attach_old_desktop)
+        AttachmentFailure.FAILED -> stringResource(R.string.attach_failed)
+        null -> if (a.ready) Formatters.bytes(a.size) else "${(a.sent * 100 / a.size.coerceAtLeast(1)).toInt()}%"
+    }
+    Row(
+        Modifier.heightIn(min = 40.dp).widthIn(max = 240.dp).clip(SquircleShape(12.dp))
+            .background(if (a.failure != null) dev.danger.copy(alpha = 0.10f) else COUITheme.colorScheme.surfaceContainer)
+            .padding(start = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (a.uploading) {
+            RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 16.dp, ringDiameter = 12.8.dp, strokeWidth = 2.dp)
+        } else {
+            Icon(if (a.isImage) AppIcons.Image else AppIcons.File, contentDescription = null, tint = if (a.failure != null) dev.danger else COUITheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.size(6.dp))
+        Column(Modifier.weight(1f, fill = false).padding(vertical = 4.dp)) {
+            Text(a.name, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(status, style = COUITheme.textStyles.footnote2, color = if (a.failure != null) dev.danger else COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1)
+        }
+        Box(
+            Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AppIcons.Close, contentDescription = stringResource(R.string.attach_remove), tint = COUITheme.colorScheme.onSurfaceSecondary, modifier = Modifier.size(14.dp))
+        }
+    }
+}
+
+/** Display name, size and type of a picked document or photo. */
+private fun pickedFileInfo(context: android.content.Context, uri: android.net.Uri): Triple<String, Long, String?> {
+    val resolver = context.contentResolver
+    var name: String? = null
+    var size = -1L
+    runCatching {
+        resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                name = c.getString(0)
+                if (!c.isNull(1)) size = c.getLong(1)
+            }
+        }
+    }
+    val mime = resolver.getType(uri)
+    val fallback = "file" + (mime?.let { android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }?.let { ".$it" } ?: "")
+    return Triple(name?.takeIf { it.isNotBlank() } ?: (uri.lastPathSegment ?: fallback), size, mime)
 }
 
 /** Bottom sheet with everything about the session that does not fit the chip row. */
@@ -700,7 +876,6 @@ private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boole
             listOf(
                 stringResource(R.string.continue_point_context, agentLabel),
                 stringResource(R.string.continue_point_window),
-                stringResource(R.string.continue_point_busy),
             ).forEach { line ->
                 Row(verticalAlignment = Alignment.Top) {
                     StatusDot(COUITheme.colorScheme.primary, Modifier.padding(top = 7.dp), size = 6.dp)
@@ -710,9 +885,6 @@ private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boole
             }
             if (originalBusy) {
                 Text(stringResource(R.string.continue_busy), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, fontWeight = FontWeight.Medium)
-            }
-            if (canFork) {
-                Text(stringResource(R.string.continue_fork_hint), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
             }
             Button(
                 onClick = { onConfirm(false) },
@@ -728,13 +900,13 @@ private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boole
                 }
             }
             if (canFork) {
-                Button(
+                // Resuming the same conversation is the normal path; a copy is the exception.
+                TextButton(
+                    text = stringResource(R.string.continue_fork),
                     onClick = { onConfirm(true) },
                     enabled = enabled && !originalBusy && !busy,
-                    colors = ButtonDefaults.buttonColors(),
-                    minHeight = 48.dp,
                     modifier = Modifier.fillMaxWidth().testTag("continue-fork"),
-                ) { Text(stringResource(R.string.continue_fork), color = COUITheme.colorScheme.onSurface) }
+                )
             }
         }
     }
@@ -837,10 +1009,10 @@ private fun ImageViewerDialog(
                 )
             }
             RoundIconButton(
-                icon = AppIcons.Back,
+                icon = AppIcons.Close,
                 label = stringResource(R.string.action_close),
                 onClick = onDismiss,
-                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp),
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(20.dp),
             )
             val remotePath = preview.path
             if (remotePath != null) {
@@ -872,33 +1044,4 @@ private fun ImageViewerDialog(
             }
         }
     }
-}
-
-private fun encodePickedImage(
-    context: android.content.Context,
-    uri: android.net.Uri,
-): io.github.tianli0.switchtether.remote.protocol.ImageInput? {
-    return runCatching {
-        val resolver = context.contentResolver
-        val raw = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size, opts)
-        val maxDim = 1600
-        var sample = 1
-        while (opts.outWidth / sample > maxDim || opts.outHeight / sample > maxDim) sample *= 2
-        val bmp = android.graphics.BitmapFactory.decodeByteArray(
-            raw,
-            0,
-            raw.size,
-            android.graphics.BitmapFactory.Options().apply { inSampleSize = sample },
-        ) ?: return null
-        val baos = java.io.ByteArrayOutputStream()
-        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, baos)
-        val encoded = android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
-        io.github.tianli0.switchtether.remote.protocol.ImageInput(
-            mediaType = "image/jpeg",
-            dataBase64 = encoded,
-            name = uri.lastPathSegment,
-        )
-    }.getOrNull()
 }

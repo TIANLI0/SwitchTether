@@ -96,7 +96,8 @@ fun buildTimeline(items: List<RenderItem>, expandedGroups: Set<String>): List<Ti
 private fun isRunning(item: RenderItem): Boolean {
     val st = item.event.data.str("status")
     return when (item.event.kind) {
-        EventKinds.TOOL_CALL -> (st == "running" || st == "pending") && item.attachedResult == null
+        // A background shell has its "started" result already and keeps running until its notification.
+        EventKinds.TOOL_CALL -> (st == "running" || st == "pending") && (item.attachedResult == null || item.event.data.bool("background") == true)
         EventKinds.SUBAGENT -> st == "running"
         else -> false
     }

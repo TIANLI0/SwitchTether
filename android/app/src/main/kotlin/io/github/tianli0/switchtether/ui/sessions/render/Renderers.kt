@@ -4,6 +4,8 @@ import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.platform.testTag
+import kotlinx.serialization.json.contentOrNull
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -177,7 +179,9 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
             c.str("path")?.let { InjectedText.Context(c.str("kind") ?: "file", it, c.str("lines")) }
         }.ifEmpty { cleaned.context }
     }
-    if (text.isBlank() && imageItems.isEmpty()) return
+    // Files sent from the phone: the desktop moves the path block out of the text into this list.
+    val files = remember(item.event) { d["attachments"].arr().orEmpty().mapNotNull { it.obj()?.str("name") } }
+    if (text.isBlank() && imageItems.isEmpty() && files.isEmpty()) return
     Column(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalAlignment = Alignment.End) {
         if (context.isNotEmpty()) {
             SubtleMeta(
@@ -190,6 +194,7 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
         ChatBubble {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (imageItems.isNotEmpty()) ImageStrip(imageItems, ctx)
+                if (files.isNotEmpty()) AttachmentNames(files)
                 if (text.isNotBlank()) MarkdownView(text, onLinkClick = ctx.onLink)
             }
         }
@@ -199,6 +204,22 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
             shortClock(item.event.ts).ifEmpty { null },
         ).joinToString(" · ")
         if (meta.isNotEmpty()) SubtleMeta(meta, Modifier.padding(top = 3.dp, end = 4.dp))
+    }
+}
+
+/** Files attached to a user message, one line each (icon by type, name). */
+@Composable
+fun AttachmentNames(names: List<String>) {
+    val label = stringResource(R.string.render_attachments)
+    Column(Modifier.semantics { contentDescription = label + ": " + names.joinToString() }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        names.forEach { n ->
+            val image = io.github.tianli0.switchtether.files.FileTypes.kindOf(n) == io.github.tianli0.switchtether.files.FileKind.IMAGE
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (image) AppIcons.Image else AppIcons.File, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.size(6.dp))
+                Text(n, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
@@ -212,11 +233,16 @@ fun AssistantMessage(item: RenderItem, ctx: RenderContext) {
             Spacer(Modifier.size(8.dp))
             Text(ctx.agentLabel, style = COUITheme.textStyles.footnote1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface)
             Spacer(Modifier.size(6.dp))
-            SubtleMeta(listOfNotNull(d.str("model"), shortClock(item.event.ts).ifEmpty { null }).joinToString(" · "), Modifier.weight(1f, fill = false))
+            // Time first: on a narrow row the model id is what gets cut, not the time.
+            SubtleMeta(listOfNotNull(shortClock(item.event.ts).ifEmpty { null }, d.str("model")).joinToString(" · "), Modifier.weight(1f, fill = false))
             if (item.event.streaming) {
                 val streamingLabel = stringResource(R.string.render_streaming)
                 Spacer(Modifier.size(6.dp))
                 RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 14.dp, ringDiameter = 11.2.dp, strokeWidth = 2.dp, modifier = Modifier.semantics { contentDescription = streamingLabel })
+            } else if (!d.str("text").isNullOrBlank()) {
+                // Selecting text inside a scrolling list is fiddly on a phone: one tap copies the whole reply.
+                Spacer(Modifier.weight(1f))
+                io.github.tianli0.switchtether.ui.code.CopyButton(d.str("text").orEmpty(), stringResource(R.string.message_copy))
             }
         }
         Column(Modifier.padding(start = 32.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -364,6 +390,9 @@ fun toolStatus(item: RenderItem): StepStatus {
     val res = item.attachedResult?.data ?: return st
     return when {
         res.bool("isError") == true -> StepStatus.Failed
+        // Background shell (`run_in_background`): the result only says it started; the call's own
+        // status follows the task until its notification.
+        item.event.data.bool("background") == true -> st
         st == StepStatus.Running || st == StepStatus.Pending || st == StepStatus.Unknown -> StepStatus.Completed
         else -> st
     }
@@ -377,16 +406,17 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
     val status = toolStatus(item)
     val result = item.attachedResult
     val command = io.github.tianli0.switchtether.remote.session.ToolCommands.raw(d)
-    var wrapCommand by rememberSaveable(item.key) { mutableStateOf(true) }
-    val clipboard = androidx.compose.ui.platform.LocalClipboard.current
-    val commandScope = androidx.compose.runtime.rememberCoroutineScope()
-    val copyLabel = stringResource(R.string.command_copy)
     Column(Modifier.fillMaxWidth()) {
         CollapsibleRow(
             icon = categoryIcon(d.str("category")),
             iconTint = if (status == StepStatus.Failed) dev.danger else COUITheme.colorScheme.primary,
             title = io.github.tianli0.switchtether.ui.sessions.stepTitle(item),
-            subtitle = listOfNotNull(d.str("name"), d.str("server")?.let { "@$it" }, shortClock(item.event.ts).ifEmpty { null }).joinToString(" · "),
+            subtitle = listOfNotNull(
+                d.str("name"),
+                d.str("server")?.let { "@$it" },
+                if (d.bool("background") == true) stringResource(R.string.subagent_background) else null,
+                shortClock(item.event.ts).ifEmpty { null },
+            ).joinToString(" · "),
             expanded = open,
             onToggle = { open = !open },
             toggleLabel = stringResource(R.string.render_toggle),
@@ -394,7 +424,7 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
         ) {
             StepStatusIndicator(status, stepStatusLabel(status))
             if (item.hasChildren) {
-                TextButton(
+                io.github.tianli0.switchtether.ui.components.SubStepsToggle(
                     text = if (ctx.isCollapsed(item.key)) stringResource(R.string.render_expand_sub) else stringResource(R.string.render_collapse_sub),
                     onClick = { ctx.onToggleCollapse(item.key) },
                 )
@@ -406,16 +436,17 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                 if (input != null && input.toString() != "{}") {
                     SectionLabel(stringResource(R.string.render_input))
                     if (command != null) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(text = stringResource(if (wrapCommand) R.string.command_scroll else R.string.command_wrap), onClick = { wrapCommand = !wrapCommand })
-                            TextButton(text = copyLabel, onClick = { commandScope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(copyLabel, command))) } })
-                        }
-                        SelectionContainer { CodeBlockView(command, "bash", softWrap = wrapCommand) }
+                        // Wrap / copy are small icons in the block's own header, not buttons above it.
+                        SelectionContainer { CodeBlockView(command, "bash", softWrap = true, wrapToggle = true) }
                         input.obj()?.str("cwd")?.let { cwd ->
                             SectionLabel(stringResource(R.string.command_directory))
                             SelectionContainer { CodeBlockView(cwd, null, softWrap = true) }
                         }
                     } else CodeBlockView(prettyJson(input).take(PREVIEW_CHARS * 2), "json")
+                }
+                d.str("backgroundSummary")?.let { summary ->
+                    SectionLabel(stringResource(R.string.render_background_task))
+                    Text(summary, style = COUITheme.textStyles.body2, color = if (status == StepStatus.Failed) dev.danger else COUITheme.colorScheme.onSurface)
                 }
                 if (result != null) {
                     SectionLabel(stringResource(R.string.render_output))
@@ -599,6 +630,32 @@ private fun ResolvedLine(text: String) {
     }
 }
 
+/** The answer given to a question, shown on the resolved card (one line per chosen value). */
+@Composable
+private fun AnsweredValue(values: List<String>) {
+    val dev = LocalDevColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(SquircleShape(12.dp))
+            .background(COUITheme.colorScheme.primary.copy(alpha = 0.08f))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag("question-answer"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        values.forEach { v ->
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(AppIcons.Done, contentDescription = null, tint = dev.ok, modifier = Modifier.padding(top = 2.dp).size(16.dp))
+                Spacer(Modifier.size(8.dp))
+                SelectionContainer {
+                    Text(v, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
@@ -713,6 +770,20 @@ fun Question(item: RenderItem, ctx: RenderContext) {
             val isSecret = q.bool("isSecret") == true
             q.str("header")?.let { SubtleMeta(it, Modifier.padding(top = 10.dp)) }
             Text(q.str("question").orEmpty(), style = COUITheme.textStyles.body1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp))
+            if (resolved) {
+                // What was answered: from the desktop (`data.answers`), else what this phone just sent.
+                val fromDesktop = (d["answers"].obj() ?: resolution?.get("answers").obj())?.let { a ->
+                    (a[key] ?: q.str("question")?.let { a[it] })?.let { v ->
+                        v.arr()?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: listOfNotNull((v as? JsonPrimitive)?.contentOrNull)
+                    }
+                }
+                val local = (selections[key].orEmpty().toList() + listOfNotNull(freeTexts[key]?.trim()?.takeIf { it.isNotEmpty() }))
+                    .map { if (isSecret) "••••••" else it }
+                val shown = fromDesktop?.takeIf { it.isNotEmpty() } ?: local.takeIf { it.isNotEmpty() }
+                // Option values map back to their labels.
+                val labels = shown?.map { v -> opts.firstOrNull { it.str("value") == v }?.str("label") ?: v }
+                if (labels != null) AnsweredValue(labels)
+            }
             if (!resolved) Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 opts.forEach { o ->
                     val label = o.str("label").orEmpty()
@@ -850,7 +921,7 @@ fun Subagent(item: RenderItem, ctx: RenderContext) {
         ) {
             if (status != StepStatus.Unknown) StepStatusIndicator(status, stepStatusLabel(status))
             if (item.hasChildren) {
-                TextButton(
+                io.github.tianli0.switchtether.ui.components.SubStepsToggle(
                     text = if (ctx.isCollapsed(item.key)) stringResource(R.string.render_expand_sub) else stringResource(R.string.render_collapse_sub),
                     onClick = { ctx.onToggleCollapse(item.key) },
                 )
@@ -881,6 +952,12 @@ fun Subagent(item: RenderItem, ctx: RenderContext) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 50.dp, end = 12.dp, bottom = 8.dp),
             )
+        }
+        // Claude Code keeps every sub-agent's own transcript: show its branch (latest steps while
+        // it runs) and open the whole process, like expanding a Task in Claude Code.
+        val agentId = d.str("agentId")?.takeIf { it.isNotBlank() }
+        if (agentId != null && ctx.agent in io.github.tianli0.switchtether.ui.sessions.SUBAGENT_AGENTS) {
+            SubagentBranchPreview(agentId, running, d.str("description"), ctx)
         }
     }
 }

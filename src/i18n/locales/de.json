@@ -5470,8 +5470,10 @@
       "verify": "Prüfcode (sollte mit dem Handy übereinstimmen):",
       "newCode": "Neuer Code",
       "step1": "Öffne SwitchTether auf deinem Handy.",
-      "step2": "Tippe auf „Computer hinzufügen“ und scanne diesen Code.",
+      "step2": "Tippe auf „Computer hinzufügen“ und scanne diesen Code – oder wähle diesen Computer unter „Computer in der Nähe“ und gib den Kopplungscode unten ein.",
       "step3": "Prüfe, ob der Bestätigungscode auf beiden Bildschirmen gleich ist.",
+      "codeLabel": "Kopplungscode",
+      "codeHint": "Wenn Scannen nicht geht: Wähle auf dem Telefon diesen Computer unter „Computer in der Nähe“ (oder gib seine Adresse ein) und tippe diesen Code.",
       "computer": "Computer",
       "addresses": "Adresse",
       "done": "Fertig"
@@ -5527,6 +5529,13 @@
         "label": "Terminal · st-claude / st-codex",
         "description": "Fügt die Befehle st-claude und st-codex hinzu ({{dir}}). Nutze sie statt claude / codex für Sitzungen, die du vom Handy erreichen willst; claude und codex selbst bleiben unverändert.",
         "enabledToast": "Aktiviert. Öffne ein neues Terminal und starte st-claude oder st-codex."
+      },
+      "dsh": {
+        "label": "DeepSeek Harness · Web",
+        "description": "Installiert das SwitchTether-Bridge-Plugin mit dshs eigener Plugin-Verwaltung (dsh plugin) in das web-Profil. Danach kann das Telefon Sitzungen in dsh web anschreiben, unterbrechen und Freigaben beantworten (die erste Antwort, Web oder Telefon, zählt). Manifest und Patch-Dateien des Profils werden vorher gesichert; Ausschalten führt dsh plugin remove aus. Wirkt nach einem Neustart von dsh web. Die DeepSeek-Harness-Desktop-App wird nicht unterstützt.",
+        "unavailable": "DeepSeek Harness (dsh) wurde nicht gefunden.",
+        "noProfile": "Das web-Profil von DeepSeek Harness ist noch nicht eingerichtet: zuerst einmal dsh web ausführen.",
+        "enabledToast": "Aktiviert. dsh web neu starten; dort geöffnete Sitzungen können dann vom Telefon übernommen werden."
       }
     },
     "basedOn": "Basiert auf CC Switch v{{version}}",

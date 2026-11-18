@@ -353,7 +353,10 @@ class ConnectionManager(
             null
         }
         val viaRelay = endpoint.host == io.github.tianli0.switchtether.remote.relay.RELAY_HOST
-        if (!viaRelay && desktop.lastGoodHost != endpoint.host) pairingStore.current()?.let { cur -> pairingStore.save(cur.copy(lastGoodHost = endpoint.host)) }
+        pairingStore.current()?.let { cur ->
+            val updated = refreshedAddresses(cur, status, if (viaRelay) null else endpoint.host)
+            if (updated != cur) pairingStore.save(updated)
+        }
         // Direct connection: pick up relay changes (new URL, reset token, rotated key) over the
         // authenticated channel (GET /v1/relay, RELAY.md §5). Older desktops without it: keep what we have.
         if (!viaRelay) scope.launch { refreshRelay(remote) }
@@ -428,6 +431,28 @@ class ConnectionManager(
     }
 
     companion object {
+        /**
+         * Stored addresses after a successful connection: the path that worked first, then the
+         * desktop's current candidates (`/v1/status` → `hosts`, so a changed LAN address heals on any
+         * connection, including via Tailscale or the relay), then the older ones, bounded. Wake-on-LAN
+         * targets are replaced when the desktop reports some (an empty list keeps the last known).
+         */
+        fun refreshedAddresses(cur: PairedDesktop, status: io.github.tianli0.switchtether.remote.protocol.StatusView?, workingHost: String?): PairedDesktop {
+            val reported = status?.hosts.orEmpty()
+                .map { it.trim().removePrefix("[").removeSuffix("]") }
+                .filter { it.isNotEmpty() && it != io.github.tianli0.switchtether.remote.relay.RELAY_HOST }
+            val hosts = (listOfNotNull(workingHost) + reported + cur.hosts).distinct()
+                .take(io.github.tianli0.switchtether.remote.pairing.PairingLink.MAX_HOSTS)
+            val wake = status?.wake?.filter { io.github.tianli0.switchtether.remote.wake.WakeOnLan.macBytes(it.mac) != null }
+                ?.takeIf { it.isNotEmpty() } ?: cur.wake
+            return cur.copy(
+                hosts = hosts,
+                lastGoodHost = workingHost ?: cur.lastGoodHost,
+                wake = wake,
+            )
+        }
+
+
         /** Longest wait between reconnect attempts: a task that finished while offline must not wait a minute more. */
         const val MAX_BACKOFF_MS = 15_000L
 

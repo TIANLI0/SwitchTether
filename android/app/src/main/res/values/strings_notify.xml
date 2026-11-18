@@ -16,8 +16,8 @@
     <string name="notif_ch_connection">Connection lost / restored</string>
     <string name="notif_quiet">Quiet hours</string>
     <string name="notif_quiet_summary">%1$s – %2$s: notifications arrive silently</string>
-    <string name="notif_quiet_start">Start hour</string>
-    <string name="notif_quiet_end">End hour</string>
+    <string name="notif_quiet_start">Start</string>
+    <string name="notif_quiet_end">End</string>
     <string name="notif_muted_agents">Muted agents</string>
     <string name="notif_muted_projects">Muted projects</string>
     <string name="notif_muted_hint">Comma-separated, e.g. codex, my-project</string>
@@ -124,4 +124,5 @@
     <string name="live_plan_now">Plan %1$d/%2$d · now: %3$s</string>
     <string name="live_files_changed">%1$d files changed</string>
     <string name="live_tokens_used">%1$s tokens</string>
+    <string name="notif_muted_projects_empty">No projects yet. Projects of your sessions appear here.</string>
 </resources>

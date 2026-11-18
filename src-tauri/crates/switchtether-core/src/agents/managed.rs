@@ -27,6 +27,10 @@ pub trait ManagedSession: Send + Sync {
     fn log(&self) -> Arc<Mutex<SessionLog>>;
     fn cwd(&self) -> PathBuf;
     fn native_session_id(&self) -> Option<String>;
+    /// Pid of a process SwitchTether spawned for this session (not of attached user processes).
+    fn pid(&self) -> Option<u32> {
+        None
+    }
     fn status(&self) -> &'static str;
     fn liveness(&self) -> Liveness;
     fn created_at_ms(&self) -> i64;
@@ -87,6 +91,9 @@ impl ManagedSession for super::claude::managed::ManagedClaude {
     }
     fn native_session_id(&self) -> Option<String> {
         self.native_session_id()
+    }
+    fn pid(&self) -> Option<u32> {
+        self.pid()
     }
     fn status(&self) -> &'static str {
         self.status()

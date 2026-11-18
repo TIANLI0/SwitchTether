@@ -5470,8 +5470,10 @@
       "verify": "驗證碼（應與手機上顯示的一致）：",
       "newCode": "新 QR 碼",
       "step1": "在手機上開啟 SwitchTether。",
-      "step2": "點選「新增電腦」，掃描這個 QR 碼。",
+      "step2": "點選「新增電腦」，掃描這個 QR 碼；或在「附近的電腦」中點選這台電腦，輸入下方的配對碼。",
       "step3": "核對兩邊顯示的驗證碼是否一致。",
+      "codeLabel": "配對碼",
+      "codeHint": "無法掃碼時使用：在手機的「附近的電腦」中點選這台電腦（或手動輸入位址），再輸入此碼。",
       "computer": "電腦",
       "addresses": "位址",
       "done": "完成"
@@ -5527,6 +5529,13 @@
         "label": "終端機 · st-claude / st-codex",
         "description": "新增 st-claude 與 st-codex 指令（{{dir}}）。想在手機上接管的工作階段改用它們代替 claude / codex 啟動；claude 與 codex 本身不變。",
         "enabledToast": "已開啟。開啟新的終端機執行 st-claude 或 st-codex。"
+      },
+      "dsh": {
+        "label": "DeepSeek Harness · Web",
+        "description": "使用 dsh 內建的外掛管理（dsh plugin）將 SwitchTether 橋接外掛安裝到 web profile，之後可在手機上對 dsh web 中的工作階段傳送訊息、中斷與審批（網頁與手機誰先回答算誰的）。開啟前備份該 profile 的清單與修補檔，關閉時以 dsh plugin remove 移除。重新啟動 dsh web 後生效。不支援 DeepSeek Harness 桌面版。",
+        "unavailable": "找不到 DeepSeek Harness（dsh）。",
+        "noProfile": "DeepSeek Harness 的 web profile 尚未初始化：請先執行一次 dsh web。",
+        "enabledToast": "已開啟。重新啟動 dsh web 後，在其中開啟的工作階段即可在手機上接管。"
       }
     },
     "basedOn": "基於 CC Switch v{{version}}",

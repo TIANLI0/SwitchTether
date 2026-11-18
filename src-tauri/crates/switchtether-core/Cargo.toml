@@ -51,14 +51,18 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 if-addrs = "0.15"
 socket2 = { version = "0.6", features = ["all"] }
 trash = "5"
+# Registry directory change events (Claude Code live sessions), with polling as the fallback.
+notify = "8"
 mdns-sd = "0.21.7"
+# DeepSeek Harness session logs are sequences of independent zstd frames.
+zstd = "0.13"
 iana-time-zone = "0.1.65"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 keyring = { version = "3.6", features = ["apple-native", "windows-native"] }

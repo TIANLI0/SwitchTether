@@ -1,0 +1,3 @@
+- insert:
+    - id: switchtether-bridge
+      name: 'switchtether-dsh-bridge'

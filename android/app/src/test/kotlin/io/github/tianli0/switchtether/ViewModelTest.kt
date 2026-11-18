@@ -24,6 +24,7 @@ import io.github.tianli0.switchtether.ui.common.CommandPrompt
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.UiError
 import io.github.tianli0.switchtether.ui.home.HomeViewModel
+import io.github.tianli0.switchtether.ui.onboarding.CodeError
 import io.github.tianli0.switchtether.ui.onboarding.PairingUiState
 import io.github.tianli0.switchtether.ui.onboarding.PairingViewModel
 import io.github.tianli0.switchtether.ui.sessions.ROLLING_STATUS_ID
@@ -179,6 +180,44 @@ class ViewModelTest {
         assertEquals("please fix it", repo2.sent.single().second)
         assertEquals(OutgoingStatus.DELIVERED, vm2.state.value.outgoing.single().status)
         assertTrue("typing row after a delivered message", vm2.state.value.typing)
+    }
+
+    @Test
+    fun attachmentsUploadFirstThenTravelWithTheMessage() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList()) }
+        val vm = SessionDetailViewModel("s1", FakeConnection(), repo, FakeDrafts(), ioDispatcher = dispatcher)
+        advanceUntilIdle()
+        // 5 MiB in 2 MiB chunks: three uploads, progress on the chip, ready at the end.
+        val big = ByteArray(5 * 1024 * 1024) { (it % 251).toByte() }
+        vm.addAttachment("build.log", big.size.toLong(), "text/plain") { big.inputStream() }
+        vm.addAttachment("photo.jpg", 3, "image/jpeg") { byteArrayOf(1, 2, 3).inputStream() }
+        advanceUntilIdle()
+        val drafts = vm.state.value.draftAttachments
+        assertTrue(drafts.all { it.ready })
+        assertTrue(repo.uploads.getValue("att-1").contentEquals(big))
+        // Too large is refused locally, never uploaded, and blocks sending until removed.
+        vm.addAttachment("huge.iso", 65L * 1024 * 1024, null) { null }
+        val huge = vm.state.value.draftAttachments.last()
+        assertEquals(io.github.tianli0.switchtether.ui.sessions.AttachmentFailure.TOO_LARGE, huge.failure)
+        vm.send()
+        assertTrue("not sent while a chip has failed", repo.sent.isEmpty())
+        vm.removeAttachment(huge.localId)
+        vm.send()
+        advanceUntilIdle()
+        val cmd = repo.sent.single().first
+        assertEquals(listOf("att-1", "att-2"), repo.sentAttachments[cmd])
+        assertTrue(vm.state.value.draftAttachments.isEmpty())
+        // Removing an uploaded one tells the desktop to delete it.
+        vm.addAttachment("x.txt", 1, null) { byteArrayOf(9).inputStream() }
+        advanceUntilIdle()
+        vm.removeAttachment(vm.state.value.draftAttachments.single().localId)
+        advanceUntilIdle()
+        assertEquals(listOf("att-3"), repo.cancelledAttachments)
+        // An older desktop answers 404: the chip says to update the desktop app.
+        repo.attachmentError = ApiException(404, ApiErrorBody("NOT_FOUND", "no route"), null)
+        vm.addAttachment("y.txt", 1, null) { byteArrayOf(9).inputStream() }
+        advanceUntilIdle()
+        assertEquals(io.github.tianli0.switchtether.ui.sessions.AttachmentFailure.OLD_DESKTOP, vm.state.value.draftAttachments.single().failure)
     }
 
     @Test
@@ -383,7 +422,7 @@ class ViewModelTest {
     fun pairingViewModelValidatesLinksAndReportsFailures() = runTest(dispatcher) {
         var result: Result<PairingResult> = Result.failure(PairingException(PairingException.Reason.EXPIRED))
         val repo = object : PairingRepository {
-            override suspend fun pair(link: PairingLink, deviceName: String, osVersion: String, appVersion: String) = result.getOrThrow()
+            override suspend fun pair(target: io.github.tianli0.switchtether.remote.pairing.PairingTarget, deviceName: String, osVersion: String, appVersion: String) = result.getOrThrow()
         }
         var succeeded: PairingResult? = null
         val vm = PairingViewModel(repo, { true }, "Pixel", "15", "0.1.0") { succeeded = it }
@@ -404,6 +443,71 @@ class ViewModelTest {
         assertTrue(vm.state.value is PairingUiState.Done)
         assertNotNull(succeeded)
         assertEquals("", vm.linkText.value) // single-use secret is dropped from memory
+    }
+
+    @Test
+    fun pairingWithCodeFromNearbyOrTypedAddress() = runTest(dispatcher) {
+        val seen = mutableListOf<io.github.tianli0.switchtether.remote.pairing.PairingTarget>()
+        var result: Result<PairingResult> = Result.failure(PairingException(PairingException.Reason.WRONG_SECRET))
+        val repo = object : PairingRepository {
+            override suspend fun pair(target: io.github.tianli0.switchtether.remote.pairing.PairingTarget, deviceName: String, osVersion: String, appVersion: String): PairingResult {
+                seen += target
+                return result.getOrThrow()
+            }
+        }
+        val vm = PairingViewModel(repo, { true }, "Pixel", "15", "0.1.0") {}
+        val fp = "cd".repeat(32)
+        vm.pickNearby(io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop("svc", "id", "PC", fp, "192.168.8.4", 47615))
+        val entry = vm.state.value as PairingUiState.EnterCode
+        assertEquals("192.168.8.4", entry.host)
+        assertEquals(listOf("192.168.8.4"), vm.pendingHosts())
+
+        vm.submitCode("", "12 34")
+        assertEquals(CodeError.INVALID_CODE, (vm.state.value as PairingUiState.EnterCode).error)
+        assertTrue(seen.isEmpty())
+
+        vm.submitCode("", "123 456")
+        advanceUntilIdle()
+        val code = seen.single() as io.github.tianli0.switchtether.remote.pairing.PairingTarget.Code
+        assertEquals("123456", code.code)
+        assertEquals(fp, code.fingerprint)
+        assertEquals(listOf("192.168.8.4"), code.hosts)
+        assertEquals(PairingException.Reason.WRONG_SECRET, (vm.state.value as PairingUiState.Failed).reason)
+        // Retrying a failed code goes back to the code screen (the code itself is not kept).
+        vm.pair()
+        assertEquals("192.168.8.4", (vm.state.value as PairingUiState.EnterCode).host)
+
+        // Typed address: no fingerprint (trust on first use), port parsed from the address.
+        vm.enterAddress()
+        vm.submitCode("not an address!", "123456")
+        assertEquals(CodeError.INVALID_ADDRESS, (vm.state.value as PairingUiState.EnterCode).error)
+        result = Result.success(PairingResult(TEST_DESKTOP, "111111", "111111", stepUpEnabled = true))
+        vm.submitCode("pc.tailnet.ts.net:48000", "654321")
+        advanceUntilIdle()
+        val typed = seen.last() as io.github.tianli0.switchtether.remote.pairing.PairingTarget.Code
+        assertEquals(listOf("pc.tailnet.ts.net"), typed.hosts)
+        assertEquals(48000, typed.port)
+        assertEquals(null, typed.fingerprint)
+        assertTrue(vm.state.value is PairingUiState.Done)
+    }
+
+    @Test
+    fun connectionRefreshesStoredAddressesAndWakeTargets() {
+        val status = io.github.tianli0.switchtether.remote.protocol.StatusView(
+            hosts = listOf("192.168.8.4", "[fd7a::1]", "100.64.0.7"),
+            wake = listOf(
+                io.github.tianli0.switchtether.remote.wake.WakeTarget("00:11:22:33:44:55", "192.168.8.255", "192.168.8.4"),
+                io.github.tianli0.switchtether.remote.wake.WakeTarget("bogus", "1.1.1.1", "x"),
+            ),
+        )
+        val cur = TEST_DESKTOP.copy(hosts = listOf("192.168.1.20", "100.64.0.7"), lastGoodHost = "192.168.1.20")
+        val viaTailscale = io.github.tianli0.switchtether.connection.ConnectionManager.refreshedAddresses(cur, status, "100.64.0.7")
+        assertEquals(listOf("100.64.0.7", "192.168.8.4", "fd7a::1", "192.168.1.20"), viaTailscale.hosts)
+        assertEquals("100.64.0.7", viaTailscale.lastGoodHost)
+        assertEquals(listOf("00:11:22:33:44:55"), viaTailscale.wake.map { it.mac })
+        // Via the relay: no working direct host; an older desktop without the fields changes nothing.
+        val viaRelay = io.github.tianli0.switchtether.connection.ConnectionManager.refreshedAddresses(viaTailscale, io.github.tianli0.switchtether.remote.protocol.StatusView(), null)
+        assertEquals(viaTailscale, viaRelay)
     }
 
     private fun unavailableManagement(): ManagementRepository = object : ManagementRepository {

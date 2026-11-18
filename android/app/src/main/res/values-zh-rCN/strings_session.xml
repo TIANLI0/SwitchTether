@@ -74,16 +74,16 @@
     <string name="composer_readonly">手机端只读</string>
     <string name="composer_send_unavailable">此会话暂不支持发送消息</string>
 
-    <string name="continue_action">在手机上接续</string>
-    <string name="continue_title">在手机上接续此会话？</string>
-    <string name="continue_point_context">SwitchTether 会在电脑上启动一个受管的 %1$s 会话，带着相同的上下文继续这段对话。</string>
-    <string name="continue_point_window">电脑上原来的窗口不会显示你在手机上发送的内容。</string>
+    <string name="continue_action">恢复会话</string>
+    <string name="continue_title">在手机上恢复此会话？</string>
+    <string name="continue_point_context">在电脑上用同一个 %1$s 会话继续这段对话：同一份记录、同样的上下文，不是副本。</string>
+    <string name="continue_point_window">这个会话还开在电脑的窗口里；那个窗口不会显示你在手机上发送的内容。</string>
     <string name="continue_point_busy">原会话在电脑上忙碌或等待处理时无法接续（Codex 的线程在别处打开时也不行）。</string>
-    <string name="continue_busy">原会话仍在运行，请等它空闲后再接续。</string>
-    <string name="continue_confirm">接续</string>
-    <string name="continue_command">接续会话</string>
+    <string name="continue_busy">会话正在电脑上运行，请等它空闲后再恢复。</string>
+    <string name="continue_confirm">恢复</string>
+    <string name="continue_command">恢复会话</string>
 
-    <string name="continue_fork">以副本继续</string>
+    <string name="continue_fork">改为以副本继续（不改动原记录）</string>
     <string name="continue_fork_hint">以副本继续（仅 Claude）不会改动原会话的记录。</string>
     <string name="continue_command_fork">以副本继续会话</string>
 
@@ -94,7 +94,7 @@
     <string name="session_managed_chip">SwitchTether</string>
     <string name="state_expanded">已展开</string>
     <string name="state_collapsed">已收起</string>
-    <string name="render_system_continued">已在 SwitchTether 中接续。之后的回合在 SwitchTether 进程中运行，电脑上原来的窗口不会显示。</string>
+    <string name="render_system_continued">已在手机上恢复。之后的回合由 SwitchTether 在电脑上运行。</string>
     <string name="render_system_init">智能体进程已启动</string>
     <string name="option_allow">允许</string>
     <string name="option_allow_session">本会话内始终允许</string>
@@ -134,4 +134,25 @@
     <string name="render_system_task">后台任务：%1$s</string>
     <string name="duration_seconds">%1$d 秒</string>
     <string name="duration_minutes">%1$d 分 %2$d 秒</string>
+    <string name="render_background_task">后台任务</string>
+    <string name="subagent_view_process">查看过程</string>
+    <string name="subagent_view_process_steps">查看过程 · %1$d 步</string>
+    <string name="subagent_process_unavailable">电脑上没有这个子 agent 的过程记录。</string>
+    <string name="subagent_main_session">全部子 agent</string>
+    <string name="subagent_older_omitted">更早的步骤未显示。</string>
+    <string name="subagent_starting">正在启动…</string>
+    <string name="subagent_no_steps">没有记录到步骤。</string>
+    <string name="subagent_children">它启动的子 agent</string>
+    <string name="subagent_following">运行中，实时跟随。</string>
+    <string name="subagent_unfinished">未完成</string>
+    <string name="subagent_tree_title">子 agent</string>
+    <string name="subagent_tree_empty">这个会话还没有启动子 agent。</string>
+    <string name="subagent_tree_note">只读：子 agent 不接受外部输入。分支表示由哪个 agent 启动。</string>
+    <plurals name="subagent_more_steps">
+        <item quantity="other">… 之前还有 %1$d 步</item>
+    </plurals>
+    <plurals name="subagent_chip">
+        <item quantity="other">%1$d 个子 agent</item>
+    </plurals>
+    <string name="decision_cancelled">已取消</string>
 </resources>

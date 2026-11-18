@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,8 +19,22 @@ pub fn routes() -> Router<Arc<ApiContext>> {
         .route("/v1/sessions", get(list).post(create))
         .route("/v1/sessions/:id", get(detail))
         .route("/v1/sessions/:id/events", get(events))
+        .route("/v1/sessions/:id/subagents", get(subagent_tree))
+        .route(
+            "/v1/sessions/:id/subagents/:agent_id/events",
+            get(subagent_events),
+        )
         .route("/v1/sessions/:id/events/:event_id/payload", get(payload))
         .route("/v1/sessions/:id/messages", post(send_message))
+        .route("/v1/sessions/:id/attachments", post(begin_attachment))
+        .route(
+            "/v1/sessions/:id/attachments/:attachment_id",
+            put(attachment_chunk)
+                .delete(cancel_attachment)
+                .layer(DefaultBodyLimit::max(
+                    crate::agents::attachments::MAX_CHUNK_BYTES + 1024,
+                )),
+        )
         .route("/v1/sessions/:id/interrupt", post(interrupt))
         .route("/v1/sessions/:id/stop", post(stop))
         .route("/v1/sessions/:id/approvals/:request_id", post(approve))
@@ -58,6 +73,26 @@ async fn events(
 ) -> ApiResult<Json<Value>> {
     ctx.agents
         .events(&id, q.before, q.after, q.limit.unwrap_or(100))
+        .await
+        .map(Json)
+}
+
+async fn subagent_tree(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    ctx.agents.subagent_tree(&id).await.map(Json)
+}
+
+async fn subagent_events(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Path((id, agent_id)): Path<(String, String)>,
+    Query(q): Query<EventsQuery>,
+) -> ApiResult<Json<Value>> {
+    ctx.agents
+        .subagent_events(&id, &agent_id, q.before, q.after, q.limit.unwrap_or(200))
         .await
         .map(Json)
 }
@@ -123,12 +158,15 @@ async fn create(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MessageBody {
+pub(crate) struct MessageBody {
     command_id: Option<String>,
     #[serde(default)]
     text: String,
     #[serde(default)]
     images: Vec<crate::agents::managed::ImageAttachment>,
+    /// Ids from `POST /v1/sessions/{id}/attachments`, fully uploaded.
+    #[serde(default)]
+    attachments: Vec<String>,
 }
 
 async fn send_message(
@@ -147,7 +185,14 @@ async fn send_message(
         || async move {
             let r = c
                 .agents
-                .send_message_with_images(&id, &body.text, &body.images, client_id.as_deref())
+                .send_message_full(
+                    &id,
+                    &body.text,
+                    &body.images,
+                    &body.attachments,
+                    dev.id(),
+                    client_id.as_deref(),
+                )
                 .await?;
             c.registry.audit(
                 Some(dev.id()),
@@ -155,15 +200,81 @@ async fn send_message(
                 Some(&id),
                 "ok",
                 Some(&format!(
-                    "{} chars, {} images",
+                    "{} chars, {} images, {} attachments",
                     body.text.chars().count(),
-                    body.images.len()
+                    body.images.len(),
+                    body.attachments.len()
                 )),
             );
             Ok(r)
         },
     )
     .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentBody {
+    name: String,
+    size: u64,
+    media_type: Option<String>,
+}
+
+/// Starts uploading a file the phone attaches to its next message in this session.
+async fn begin_attachment(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Path(id): Path<String>,
+    Json(body): Json<AttachmentBody>,
+) -> ApiResult<Json<Value>> {
+    ctx.agents.ensure_can_send(&id)?;
+    let store = ctx.agents.attachments()?;
+    let dev_id = dev.id().to_string();
+    let v = tokio::task::spawn_blocking(move || {
+        store.begin(
+            &dev_id,
+            &id,
+            &body.name,
+            body.size,
+            body.media_type.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| crate::error::ApiError::internal("attachment", e))??;
+    Ok(Json(json!(v)))
+}
+
+#[derive(Deserialize)]
+struct ChunkQuery {
+    offset: u64,
+}
+
+async fn attachment_chunk(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Path((id, attachment_id)): Path<(String, String)>,
+    Query(q): Query<ChunkQuery>,
+    body: Bytes,
+) -> ApiResult<Json<Value>> {
+    let store = ctx.agents.attachments()?;
+    let dev_id = dev.id().to_string();
+    let v = tokio::task::spawn_blocking(move || {
+        store.chunk(&dev_id, &id, &attachment_id, q.offset, &body)
+    })
+    .await
+    .map_err(|e| crate::error::ApiError::internal("attachment", e))??;
+    Ok(Json(json!(v)))
+}
+
+async fn cancel_attachment(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Path((id, attachment_id)): Path<(String, String)>,
+) -> ApiResult<Json<Value>> {
+    let store = ctx.agents.attachments()?;
+    let dev_id = dev.id().to_string();
+    let _ = tokio::task::spawn_blocking(move || store.cancel(&dev_id, &id, &attachment_id)).await;
+    Ok(Json(json!({ "cancelled": true })))
 }
 
 #[derive(Deserialize, Default)]
@@ -304,4 +415,20 @@ async fn answer(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn message_with_attachments_fixture() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../protocol/fixtures");
+        let body: super::MessageBody = serde_json::from_str(
+            &std::fs::read_to_string(root.join("send_message_attachments.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body.attachments.len(), 2);
+        assert!(body.images.is_empty());
+        assert_eq!(body.command_id.as_deref(), Some("c-7f3a"));
+    }
 }

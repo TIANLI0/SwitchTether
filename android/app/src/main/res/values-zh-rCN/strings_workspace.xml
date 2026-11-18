@@ -68,4 +68,14 @@
     <string name="ws_files_open">浏览文件</string>
     <string name="ws_git_open">Git</string>
     <string name="ws_git_hint">仓库状态、差异与历史</string>
+    <string name="files_discard_title">放弃修改？</string>
+    <string name="files_discard_body">你的修改还没有保存到电脑上。</string>
+    <string name="files_discard">放弃</string>
+    <string name="files_name_invalid">名称不能包含 / 或 \\。</string>
+    <string name="files_more">更多操作</string>
+    <string name="git_no_repo">尚未选择仓库</string>
+    <string name="git_no_repo_hint">填写电脑上某个 Git 仓库的路径。</string>
+    <string name="git_choose_repo">选择仓库</string>
+    <string name="git_show_file_at">点按查看此提交时的 %s</string>
+    <string name="term_scrollback_short">↑ 加载更早的输出</string>
 </resources>

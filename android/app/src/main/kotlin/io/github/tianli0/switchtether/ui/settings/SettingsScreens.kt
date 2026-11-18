@@ -381,26 +381,62 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                         title = stringResource(R.string.notif_quiet),
                         summary = stringResource(R.string.notif_quiet_summary, hm(prefs.quietStartMin), hm(prefs.quietEndMin)),
                     )
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        TextInput((prefs.quietStartMin / 60).toString(), { v -> v.toIntOrNull()?.takeIf { it in 0..23 }?.let { h -> update { it.copy(quietStartMin = h * 60) } } }, stringResource(R.string.notif_quiet_start), modifier = Modifier.weight(1f))
-                        Spacer(Modifier.size(12.dp))
-                        TextInput((prefs.quietEndMin / 60).toString(), { v -> v.toIntOrNull()?.takeIf { it in 0..23 }?.let { h -> update { it.copy(quietEndMin = h * 60) } } }, stringResource(R.string.notif_quiet_end), modifier = Modifier.weight(1f))
-                    }
+                    // System time pickers (hours and minutes, 12/24 h as the phone is set) instead of typed numbers.
+                    val is24h = android.text.format.DateFormat.is24HourFormat(context)
+                    ArrowPreference(
+                        title = stringResource(R.string.notif_quiet_start),
+                        summary = hm(prefs.quietStartMin),
+                        enabled = prefs.quietHoursEnabled,
+                        onClick = {
+                            android.app.TimePickerDialog(context, { _, h, m -> update { it.copy(quietStartMin = h * 60 + m) } }, prefs.quietStartMin / 60, prefs.quietStartMin % 60, is24h).show()
+                        },
+                    )
+                    ArrowPreference(
+                        title = stringResource(R.string.notif_quiet_end),
+                        summary = hm(prefs.quietEndMin),
+                        enabled = prefs.quietHoursEnabled,
+                        onClick = {
+                            android.app.TimePickerDialog(context, { _, h, m -> update { it.copy(quietEndMin = h * 60 + m) } }, prefs.quietEndMin / 60, prefs.quietEndMin % 60, is24h).show()
+                        },
+                        cardListPosition = CardListPosition.Tail,
+                    )
                 }
             }
+            // Mute by switching off, not by typing internal ids: known agents plus the projects of recent sessions.
             item { SectionHeader(stringResource(R.string.notif_muted_agents)) }
             item {
+                val agents = (listOf("claude_code", "codex", "dsh") + prefs.mutedAgents).distinct()
                 PageCard {
-                    Column(Modifier.padding(16.dp)) {
-                        TextInput(prefs.mutedAgents.joinToString(", "), { v -> update { it.copy(mutedAgents = splitList(v)) } }, stringResource(R.string.notif_muted_hint))
+                    agents.forEachIndexed { i, a ->
+                        SwitchPreference(
+                            checked = a in prefs.mutedAgents,
+                            onCheckedChange = { v -> update { p -> p.copy(mutedAgents = if (v) p.mutedAgents + a else p.mutedAgents - a) } },
+                            title = io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(a),
+                            cardListPosition = cardListPositionOf(i, agents.size),
+                        )
                     }
                 }
             }
             item { SectionHeader(stringResource(R.string.notif_muted_projects)) }
             item {
+                val container = io.github.tianli0.switchtether.ui.appContainer()
+                var known by remember { mutableStateOf<List<String>>(emptyList()) }
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    known = runCatching { container.sessions.list(io.github.tianli0.switchtether.domain.SessionQuery(), limit = 100).items }
+                        .getOrNull().orEmpty().mapNotNull { it.project?.takeIf { p -> p.isNotBlank() } }.distinct()
+                }
+                val projects = (prefs.mutedProjects.toList() + known).distinct()
                 PageCard {
-                    Column(Modifier.padding(16.dp)) {
-                        TextInput(prefs.mutedProjects.joinToString(", "), { v -> update { it.copy(mutedProjects = splitList(v)) } }, stringResource(R.string.notif_muted_hint))
+                    if (projects.isEmpty()) {
+                        io.github.suqi8.coui.kmp.basic.BasicComponent(title = stringResource(R.string.notif_muted_projects_empty), cardListPosition = CardListPosition.Full)
+                    }
+                    projects.forEachIndexed { i, proj ->
+                        SwitchPreference(
+                            checked = proj in prefs.mutedProjects,
+                            onCheckedChange = { v -> update { p -> p.copy(mutedProjects = if (v) p.mutedProjects + proj else p.mutedProjects - proj) } },
+                            title = proj,
+                            cardListPosition = cardListPositionOf(i, projects.size),
+                        )
                     }
                 }
             }
@@ -432,7 +468,6 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
 
 private fun hm(min: Int) = "%02d:%02d".format(min / 60, min % 60)
 
-private fun splitList(v: String): Set<String> = v.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
 data class LicenseEntry(val name: String, val license: String, val note: String)
 

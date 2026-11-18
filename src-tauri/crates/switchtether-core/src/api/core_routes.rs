@@ -68,10 +68,13 @@ async fn pair(
             "this client certificate was revoked; reset the app identity and pair again",
         ));
     }
-    match ctx
-        .pairing
-        .verify_and_consume(peer.ip(), &req.pairing_id, &req.secret)
-    {
+    let check = match req.code.as_deref().filter(|c| !c.trim().is_empty()) {
+        Some(code) => ctx.pairing.verify_code_and_consume(peer.ip(), code),
+        None => ctx
+            .pairing
+            .verify_and_consume(peer.ip(), &req.pairing_id, &req.secret),
+    };
+    match check {
         PairingCheck::Ok => {}
         PairingCheck::Expired => {
             ctx.registry
@@ -179,6 +182,14 @@ async fn status(State(ctx): State<Arc<ApiContext>>, dev: AuthDevice) -> Json<Val
         "platform": std::env::consts::OS,
         "deviceId": dev.id(),
         "stepUpGrants": ctx.stepup.grants(dev.id()),
+        // Wake-on-LAN targets (MAC + subnet broadcast of each LAN interface), kept by the phone.
+        "wake": tokio::task::spawn_blocking(crate::wake::wake_targets).await.unwrap_or_default(),
+        // Current addresses (same list as the pairing QR code): the phone merges them into
+        // its stored candidates, so a changed IP heals on any successful connection.
+        "hosts": crate::net::candidate_hosts(cfg.network_mode)
+            .into_iter()
+            .map(|h| h.address)
+            .collect::<Vec<_>>(),
     }))
 }
 
@@ -188,7 +199,7 @@ async fn capabilities(State(ctx): State<Arc<ApiContext>>, _dev: AuthDevice) -> J
         "agents": ctx.agents.capability_matrix(),
         "features": [
             "providers", "usage", "mcp", "skills", "prompts", "settings", "proxy",
-            "sessions", "managed_sessions", "terminal", "files", "git", "step_up"
+            "sessions", "managed_sessions", "terminal", "files", "git", "step_up", "attachments"
         ],
         "terminalShells": crate::terminal::available_shells(),
     }))
