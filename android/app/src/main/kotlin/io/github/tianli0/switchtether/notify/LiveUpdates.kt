@@ -261,8 +261,10 @@ class LiveUpdates(
             unpin(s.id, userInitiated = false, refill = false)
             return
         }
+        // Kept current for followed sessions too: [fillSlots] reads it when a slot frees, and the
+        // `busy` summary a session was pinned with would pin it again right after its turn settled.
+        if (s.isLive) liveSeen[s.id] = s else liveSeen.remove(s.id)
         if (s.id !in _pins.value) {
-            if (s.isLive) liveSeen[s.id] = s else liveSeen.remove(s.id)
             maybeAutoPin(s)
             return
         }
@@ -439,6 +441,9 @@ class LiveUpdates(
         val s = states[sessionId] ?: return
         states[sessionId] = LiveReducer.onSettled(s)
         post(sessionId)
+        // Its turn is over (possibly known only from the event stream, with the last summary still
+        // `busy`): it is not a running task waiting for a slot. The next turn's summary follows it again.
+        liveSeen.remove(sessionId)
         unpin(sessionId, keepCard = true, userInitiated = false)
     }
 

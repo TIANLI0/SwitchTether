@@ -203,6 +203,33 @@ class LiveUpdatesOrderingTest {
     }
 
     @Test
+    fun aSettledTurnIsNotFollowedAgainFromTheSummaryItWasPinnedWith() {
+        // The slot freed by settling was refilled from the session's own stale `busy` summary: the
+        // card went running → finished → result again and again, sounding every time.
+        val live = live(alertOnFinish = true)
+        val s = summary(id = "managed:loop", control = "full", status = "busy")
+        live.onStreamUpsert(s) // seen running before it is followed
+        live.pin(s, manual = false)
+        live.onStreamEvent(ev(s.id, "status", """{"state":"idle"}"""))
+        waitUntil { !live.isPinned(s.id) }
+        val settled = posts.size
+        Thread.sleep(500)
+        assertTrue("not followed again", !live.isPinned(s.id))
+        assertEquals("nothing posted after the result", settled, posts.size)
+        assertEquals("sounded once", 1, posts.count { it.alert })
+
+        // The same when the summary reported the end of the turn.
+        val t = summary(id = "managed:loop2", control = "full", status = "busy")
+        live.onStreamUpsert(t)
+        live.pin(t, manual = false)
+        live.onStreamUpsert(t.copy(status = "idle"))
+        waitUntil { !live.isPinned(t.id) }
+        Thread.sleep(500)
+        assertTrue(!live.isPinned(t.id))
+        assertTrue(!live.isPinned(s.id))
+    }
+
+    @Test
     fun backgroundWorkKeepsTheCardQuietlyUntilItEnds() {
         val live = live()
         val s = summary(id = "managed:bg", control = "full", status = "busy")
