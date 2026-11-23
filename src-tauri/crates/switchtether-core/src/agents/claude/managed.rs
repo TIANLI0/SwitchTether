@@ -836,6 +836,16 @@ impl ManagedClaude {
             }
             Some(_) => {
                 let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                // Claude Code reports its permission mode in `system` messages (`init`, and
+                // `status` when it changes, e.g. leaving plan mode by itself): what the phone
+                // shows follows the agent, not just the last value set from the phone.
+                if let Some(mode) = v
+                    .get("permissionMode")
+                    .and_then(|m| m.as_str())
+                    .filter(|m| ty == "system" && !m.is_empty())
+                {
+                    *self.permission_mode.lock() = Some(mode.to_string());
+                }
                 if let Some(sid) = v
                     .get("session_id")
                     .and_then(|s| s.as_str())
