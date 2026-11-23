@@ -81,7 +81,7 @@ class LiveUpdateTest {
     }
 
     @Test
-    fun finishedTurnsStayPromotedForAMinuteThenDemote() {
+    fun finishedTurnsShowTheirOutcomeBrieflyThenDemote() {
         var s = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
         s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 5_000)
         assertEquals(LivePhase.DONE, s.phase)
@@ -103,11 +103,9 @@ class LiveUpdateTest {
         assertEquals(LivePhase.OFFLINE, off.phase)
         assertEquals("Off", render(off, 3_000).chip)
         assertTrue(render(off, 3_000).promoted)
-        // An idle pin losing the connection says so, but quietly (not promoted).
+        // An idle or finished pin has nothing to lose: a drop does not touch it (no re-post).
         val idle = base.copy(phase = LivePhase.DONE, phaseSinceMs = 0)
-        val idleOff = LiveReducer.onConnection(idle, online = false, now = 3_000)
-        assertEquals("Off", render(idleOff, 3_000).chip)
-        assertFalse(render(idleOff, 3_000).promoted)
+        assertSame(idle, LiveReducer.onConnection(idle, online = false, now = 3_000))
         assertEquals(LivePhase.RUNNING, LiveReducer.onConnection(off, online = true, now = 4_000).phase)
         val ended = LiveReducer.onUpsert(running, summary.copy(liveness = "ended"), 5_000)
         val spec = render(ended, 5_000)
@@ -198,4 +196,66 @@ echo done"}"""))
         assertEquals(LivePhase.WAITING_INPUT, LiveReducer.onEvent(parent, childQuestion, 2_000).phase)
     }
 
+
+    @Test
+    fun aSettledCardIsAnOrdinarySwipeableResult() {
+        var s = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        s = LiveReducer.onEvent(s, ev("tool_call", """{"status":"running","name":"Read","callId":"c1"}"""), 2_000)
+        s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 5_000)
+        val settled = LiveReducer.onSettled(s)
+        val spec = render(settled, 5_100)
+        assertFalse(spec.promoted)
+        assertTrue(spec.dismissible)
+        assertEquals(listOf(LiveAction.OPEN), spec.actions)
+        assertEquals("Turn finished · 1 step", spec.text)
+    }
+
+    @Test
+    fun theSameToolRowAgainIsNotANewStepNorANewTurn() {
+        var s = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        s = LiveReducer.onEvent(s, ev("tool_call", """{"status":"running","name":"Bash","callId":"b1","background":true}"""), 2_000)
+        assertEquals(1, s.steps)
+        s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 3_000)
+        assertEquals(LivePhase.DONE, s.phase)
+        // Long after the outcome, the background shell's row is updated in place, still running.
+        val again = LiveReducer.onEvent(s, ev("tool_call", """{"status":"running","name":"Bash","callId":"b1","background":true}"""), 60_000)
+        assertEquals(LivePhase.DONE, again.phase)
+        assertEquals(1, again.steps)
+    }
+
+    @Test
+    fun backgroundWorkIsShownAfterTheTurnAndClearedByItsNotification() {
+        var s = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        s = LiveReducer.onEvent(s, ev("tool_call", """{"status":"running","name":"Bash","callId":"b1","background":true}"""), 2_000)
+        s = LiveReducer.onEvent(s, ev("subagent", """{"agentId":"a1","status":"running","background":true}""").copy(parentId = "spawn"), 2_500)
+        s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 3_000)
+        assertEquals(2, s.background)
+        assertEquals("Bg", render(s, 3_000).chip)
+        assertEquals("Turn finished · 2 background tasks running", render(s, 3_000).text)
+        s = LiveReducer.onEvent(s, ev("tool_call", """{"status":"completed","name":"Bash","callId":"b1","background":true}"""), 10_000)
+        s = LiveReducer.onEvent(s, ev("subagent", """{"agentId":"a1","status":"completed","background":true}""").copy(parentId = "spawn"), 11_000)
+        assertEquals(0, s.background)
+        assertEquals("Done", render(s, 11_000).chip)
+        // A managed session's own count wins over what the stream showed.
+        val managed = LiveReducer.onEvent(s, ev("status", """{"state":"idle","backgroundTasks":3}"""), 12_000)
+        assertEquals(3, managed.background)
+    }
+
+    @Test
+    fun aStaleRestBusyDoesNotRestartAFinishedTurn() {
+        var s = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 5_000)
+        assertEquals(LivePhase.DONE, LiveReducer.onUpsert(s, summary.copy(status = "busy"), 6_000, fromRest = true).phase)
+        // The stream's own busy is a new turn.
+        assertEquals(LivePhase.RUNNING, LiveReducer.onUpsert(s, summary.copy(status = "busy"), 6_000).phase)
+    }
+
+    @Test
+    fun anExitAfterTheTurnKeepsItsOutcome() {
+        var s = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 5_000)
+        assertEquals(LivePhase.DONE, LiveReducer.onEnded(s, 6_000).phase)
+        val running = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        assertEquals(LivePhase.ENDED, LiveReducer.onEnded(running, 6_000).phase)
+    }
 }

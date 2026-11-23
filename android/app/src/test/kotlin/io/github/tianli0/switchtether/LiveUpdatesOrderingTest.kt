@@ -48,6 +48,9 @@ class LiveUpdatesOrderingTest {
     private val inUpdate = AtomicInteger()
     private val overlaps = AtomicInteger()
 
+    private val ended: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val released: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
     private val channel = object : LiveActivityChannel {
         override fun update(spec: LiveUpdateSpec, agent: String, subtitle: String?) {
             if (inUpdate.incrementAndGet() > 1) overlaps.incrementAndGet()
@@ -55,11 +58,15 @@ class LiveUpdatesOrderingTest {
             posts += spec
             inUpdate.decrementAndGet()
         }
-        override fun end(sessionId: String) = Unit
+        override fun end(sessionId: String) { ended += sessionId }
+        override fun release(sessionId: String) { released += sessionId }
         override fun canPromote() = true
     }
 
-    private fun live(dispatcher: CoroutineDispatcher = Dispatchers.Unconfined): LiveUpdates {
+    /** Short timers so lifecycle tests run in real time. */
+    private val fast = LiveUpdates.Timing(headlineMs = 50, detailMs = 150, offlineGraceMs = 100, settleMs = 150, bgSettleGraceMs = 150, bgFollowMaxMs = 60_000)
+
+    private fun live(dispatcher: CoroutineDispatcher = Dispatchers.Unconfined, timing: LiveUpdates.Timing = fast, alertOnFinish: Boolean = false): LiveUpdates {
         scope.cancel()
         scope = CoroutineScope(SupervisorJob() + dispatcher)
         context.getSharedPreferences("live_pins", Context.MODE_PRIVATE).edit().clear().commit()
@@ -67,7 +74,15 @@ class LiveUpdatesOrderingTest {
             context, scope, FakeConnection(), store, channel,
             resolveApproval = { _, _, _, id -> CommandOutcome.NotSent(id, IllegalStateException("test")) },
             enabled = { true },
+            alertOnFinish = { alertOnFinish },
+            timing = timing,
         )
+    }
+
+    private fun waitUntil(ms: Long = 5_000, cond: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < deadline && !cond()) Thread.sleep(20)
+        assertTrue("condition not met in time", cond())
     }
 
     private fun ev(sid: String, kind: String, data: String, id: String = kind) =
@@ -148,5 +163,88 @@ class LiveUpdatesOrderingTest {
         assertEquals(1_000L, Notifier.notificationWhen(n.copy(atMs = null, alertOnce = true), now = 7_000, previous = 1_000))
         // A new moment in the same slot moves up.
         assertEquals(7_000L, Notifier.notificationWhen(n.copy(atMs = 7_000), now = 8_000, previous = 1_000))
+    }
+
+    @Test
+    fun nothingIsPostedWhenNothingVisibleChanged() {
+        val live = live(timing = fast.copy(headlineMs = 10_000, detailMs = 10_000))
+        val s = summary(id = "managed:quiet", control = "full", status = "busy")
+        live.pin(s, manual = true)
+        live.onStreamEvent(ev(s.id, "tool_call", """{"status":"running","name":"Bash","callId":"c1","input":{"command":"npm test"}}"""))
+        val before = posts.size
+        // The same row again, a status that changes nothing: no post (Fluid Cloud would animate).
+        repeat(5) { live.onStreamEvent(ev(s.id, "tool_call", """{"status":"running","name":"Bash","callId":"c1","input":{"command":"npm test"}}""")) }
+        live.onStreamEvent(ev(s.id, "status", """{"state":"running"}"""))
+        Thread.sleep(100)
+        assertEquals(before, posts.size)
+    }
+
+    @Test
+    fun aFinishedTurnSettlesIntoAResultAndFreesTheSlot() {
+        val live = live(alertOnFinish = true)
+        val s = summary(id = "managed:settle", control = "full", status = "busy")
+        live.pin(s, manual = false)
+        live.onStreamEvent(ev(s.id, "tool_call", """{"status":"running","name":"Read","callId":"c1"}"""))
+        live.onStreamEvent(ev(s.id, "status", """{"state":"idle"}"""))
+        val done = posts.last()
+        assertEquals(LivePhase.DONE, done.phase)
+        assertTrue(done.promoted)
+        assertTrue("the outcome sounds once", done.alert)
+        waitUntil { !live.isPinned(s.id) }
+        val result = posts.last()
+        assertTrue(result.dismissible)
+        assertTrue(!result.promoted)
+        assertTrue("sounded only once", !result.alert)
+        assertTrue("the card stays up", s.id !in ended)
+        assertTrue(s.id in released)
+        // Opening the session in the app clears it.
+        live.onSessionOpened(s.id)
+        assertTrue(s.id in ended)
+    }
+
+    @Test
+    fun backgroundWorkKeepsTheCardQuietlyUntilItEnds() {
+        val live = live()
+        val s = summary(id = "managed:bg", control = "full", status = "busy")
+        live.pin(s, manual = false)
+        live.onStreamEvent(ev(s.id, "tool_call", """{"status":"running","name":"Bash","callId":"b1","background":true}"""))
+        live.onStreamEvent(ev(s.id, "status", """{"state":"idle"}"""))
+        assertTrue(posts.last().promoted)
+        // Demoted after the outcome was shown, but still followed.
+        waitUntil { !posts.last().promoted }
+        Thread.sleep(300)
+        assertTrue(live.isPinned(s.id))
+        assertTrue(!posts.last().dismissible)
+        // The background shell reports back: settles after the grace.
+        live.onStreamEvent(ev(s.id, "tool_call", """{"status":"completed","name":"Bash","callId":"b1","background":true}"""))
+        waitUntil { !live.isPinned(s.id) }
+        assertTrue(posts.last().dismissible)
+    }
+
+    @Test
+    fun theAgentWakingUpForABackgroundResultContinuesOnTheSameCard() {
+        val live = live()
+        val s = summary(id = "managed:wake", control = "full", status = "busy")
+        live.pin(s, manual = false)
+        live.onStreamEvent(ev(s.id, "tool_call", """{"status":"running","name":"Bash","callId":"b1","background":true}"""))
+        live.onStreamEvent(ev(s.id, "status", """{"state":"idle"}"""))
+        Thread.sleep(300)
+        live.onStreamEvent(ev(s.id, "tool_call", """{"status":"completed","name":"Bash","callId":"b1","background":true}"""))
+        live.onStreamEvent(ev(s.id, "status", """{"state":"running"}"""))
+        assertEquals(LivePhase.RUNNING, posts.last().phase)
+        assertTrue(posts.last().promoted)
+        Thread.sleep(400)
+        assertTrue("still followed while running", live.isPinned(s.id))
+    }
+
+    @Test
+    fun anExitSettlesAtOnce() {
+        val live = live()
+        val s = summary(id = "managed:exit", control = "full", status = "busy")
+        live.pin(s, manual = false)
+        live.onStreamUpsert(s.copy(liveness = "ended"))
+        assertTrue(!live.isPinned(s.id))
+        assertEquals(LivePhase.ENDED, posts.last().phase)
+        assertTrue(posts.last().dismissible)
     }
 }

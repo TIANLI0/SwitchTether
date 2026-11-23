@@ -29,6 +29,8 @@ interface LiveActivityChannel {
     /** [subtitle]: "Claude Code · 项目" (OPPO auxiliary text [C3]). */
     fun update(spec: LiveUpdateSpec, agent: String, subtitle: String?)
     fun end(sessionId: String)
+    /** The card stays up as an ordinary result notification but is no longer followed (forget its state). */
+    fun release(sessionId: String) {}
     /** Whether the system will show it promoted (status chip / Fluid Cloud capsule). */
     fun canPromote(): Boolean
 }
@@ -52,6 +54,10 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
 
     override fun canPromote(): Boolean =
         Build.VERSION.SDK_INT >= 36 && runCatching { context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications() }.getOrDefault(false)
+
+    override fun release(sessionId: String) {
+        firstPostAt.remove(sessionId)
+    }
 
     override fun end(sessionId: String) {
         firstPostAt.remove(sessionId)
@@ -89,7 +95,8 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
             .setPublicVersion(public)
             .setContentIntent(openIntent(spec.sessionId))
             .setDeleteIntent(actionIntent(LiveUpdateActionReceiver.ACTION_DISMISSED, spec.sessionId, null))
-            .setAutoCancel(false)
+            // A settled result ("已完成 · 12 步") is an ordinary notification: tapping it clears it.
+            .setAutoCancel(spec.dismissible)
         if (spec.detail.isNotBlank()) b.setStyle(NotificationCompat.BigTextStyle().bigText(spec.detail))
         val base = spec.chronometerBaseMs
         // `when` is also the shade's order: always set it from the card's state (turn start / phase

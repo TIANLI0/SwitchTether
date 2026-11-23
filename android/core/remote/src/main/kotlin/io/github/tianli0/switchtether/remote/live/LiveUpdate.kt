@@ -62,23 +62,45 @@ data class PinnedSessionState(
      */
     val finishedAtMs: Long = 0,
     val finishedAtServerMs: Long = 0,
+    /**
+     * The turn is over and the card has become an ordinary result notification ("已完成 · 12 步"):
+     * not promoted, swipeable, tap opens the session. The pin slot is already free.
+     */
+    val settled: Boolean = false,
+    /**
+     * Background work of the session (Claude Code `run_in_background` shells, background agents),
+     * which keeps going after the turn ends: the count the computer reports in `status`
+     * (`backgroundTasks`, managed sessions; null = never reported) and the background rows seen
+     * running in the stream (observed sessions, whose status cannot report it). Not reset by a new turn.
+     */
+    val bgReported: Int? = null,
+    val bgIds: Set<String> = emptySet(),
+    /** Tool calls of this turn already counted: a row updated in place is not a new step (nor a new turn). */
+    val callIds: Set<String> = emptySet(),
     /** Bumped on every visible change; the throttle posts only when it moved. */
     val version: Int = 0,
-)
+) {
+    /** Background tasks still running. */
+    val background: Int get() = bgReported?.coerceAtLeast(0) ?: bgIds.size
+}
 
 /** Pure reducer: stream input → new pinned state. Returns the same instance when nothing visible changed. */
 object LiveReducer {
-    fun onUpsert(s: PinnedSessionState, summary: SessionSummary, now: Long): PinnedSessionState {
+    /**
+     * @param fromRest the summary was read over REST (reconnect / pin refresh): it may be older than
+     * the stream, so a `busy` that is not newer than the turn's outcome cannot restart a finished card.
+     */
+    fun onUpsert(s: PinnedSessionState, summary: SessionSummary, now: Long, fromRest: Boolean = false): PinnedSessionState {
         var n = s.copy(title = summary.title?.takeIf { it.isNotBlank() } ?: summary.project ?: s.title, agent = summary.agent, project = summary.project ?: s.project)
         n = when {
-            !summary.isLive -> n.enter(LivePhase.ENDED, now)
+            !summary.isLive -> n.endSession(now)
             summary.status == "waiting" || summary.waitingFor != null -> {
                 val approval = isApprovalWait(summary.waitingFor)
                 // Keep an already-known request (with its title) if the event arrived first.
                 if (n.pending != null) n.enter(if (n.pending!!.isQuestion) LivePhase.WAITING_INPUT else LivePhase.WAITING_APPROVAL, now)
                 else n.enter(if (approval || summary.waitingFor == null) LivePhase.WAITING_APPROVAL else LivePhase.WAITING_INPUT, now)
             }
-            summary.status == "busy" -> n.startTurnIfIdle(now)
+            summary.status == "busy" -> if (fromRest && n.isStaleBusy(summary, now)) n else n.startTurnIfIdle(now)
             summary.status == "error" -> n.finish(LivePhase.FAILED, now, summary.lastActiveAtMs)
             summary.status == "idle" || summary.status == "completed" ->
                 if (n.phase in ACTIVE) n.finish(LivePhase.DONE, now, summary.lastActiveAtMs) else n
@@ -89,7 +111,7 @@ object LiveReducer {
 
     fun onEvent(s: PinnedSessionState, e: AgentEvent, now: Long): PinnedSessionState {
         // Nested agent activity cannot close or restart the parent's turn.
-        if (e.parentId != null && e.kind !in setOf(EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION, EventKinds.APPROVAL_RESOLVED, EventKinds.FILE_CHANGE)) return s
+        if (e.parentId != null && e.kind !in setOf(EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION, EventKinds.APPROVAL_RESOLVED, EventKinds.FILE_CHANGE, EventKinds.SUBAGENT)) return s
         val d = e.data
         val at = eventTimeMs(e)
         // Older than the outcome that closed the turn (on the computer's clock): stale, whatever it is.
@@ -99,9 +121,21 @@ object LiveReducer {
         // registry and their steps from the transcript, so the two can arrive out of order).
         val straggler = older || (s.phase in FINISHED && s.finishedAtMs > 0 && now - s.finishedAtMs < STRAGGLER_GRACE_MS)
         val n = when (e.kind) {
-            EventKinds.TOOL_CALL -> if (straggler) s else if (d.str("status") == "running" || d.str("status") == "pending") {
-                s.startTurnIfIdle(now).copy(step = classifyStep(d.str("name"), d.str("title"), d.str("category"), d["input"] as? kotlinx.serialization.json.JsonObject), steps = s.steps + 1)
-            } else s
+            EventKinds.TOOL_CALL -> {
+                val callId = d.str("callId") ?: e.id
+                val running = d.str("status") == "running" || d.str("status") == "pending"
+                // A background shell stays `running` after its turn; its task notification ends it in place.
+                val b = if (d.bool("background") == true) s.trackBackground(callId, running) else s
+                when {
+                    // The same row again (in-place update, a background shell's "started" result): not a new step.
+                    callId in s.callIds -> b
+                    straggler || !running -> b
+                    else -> b.startTurnIfIdle(now).let {
+                        it.copy(step = classifyStep(d.str("name"), d.str("title"), d.str("category"), d["input"] as? kotlinx.serialization.json.JsonObject), steps = it.steps + 1, callIds = (it.callIds + callId).bounded())
+                    }
+                }
+            }
+            EventKinds.SUBAGENT -> if (d.bool("background") == true) s.trackBackground("sa:" + (d.str("agentId") ?: e.id), d.str("status") == "running") else s
             EventKinds.REASONING -> if (straggler) s else s.startTurnIfIdle(now).copy(step = null)
             // A new prompt opens the next turn (before any step of it arrives).
             EventKinds.USER_MESSAGE -> if (e.parentId == null && !older && s.phase in FINISHED) s.startTurnIfIdle(now) else s
@@ -133,13 +167,13 @@ object LiveReducer {
                 }
             }
             EventKinds.APPROVAL_RESOLVED -> if (s.pending?.requestId == d.str("requestId")) s.copy(pending = null).enter(LivePhase.RUNNING, now) else s
-            EventKinds.STATUS -> when (d.str("state")) {
+            EventKinds.STATUS -> s.copy(bgReported = (d["backgroundTasks"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: s.bgReported).let { s -> when (d.str("state")) {
                 "running" -> if (older) s else s.startTurnIfIdle(now)
                 "idle", "completed" -> if (s.phase in ACTIVE) s.finish(LivePhase.DONE, now, at) else s
                 "error" -> s.finish(LivePhase.FAILED, now, at)
                 "interrupted" -> s.finish(LivePhase.INTERRUPTED, now, at)
                 else -> s
-            }
+            } }
             EventKinds.ERROR -> if (s.phase in ACTIVE) s.finish(LivePhase.FAILED, now, at) else s
             EventKinds.SYSTEM -> if (d.str("subtype") == "turn_stopped" && s.phase in ACTIVE) s.finish(LivePhase.INTERRUPTED, now, at) else s
             else -> s
@@ -147,9 +181,13 @@ object LiveReducer {
         return n.bumpIfChanged(s)
     }
 
+    /**
+     * The connection dropped (the app debounces this, so a blip is never shown) or came back. Only a
+     * turn in flight shows OFFLINE: an idle or finished card has nothing to lose and stays as it is.
+     */
     fun onConnection(s: PinnedSessionState, online: Boolean, now: Long): PinnedSessionState {
         val n = if (!online) {
-            if (s.phase == LivePhase.OFFLINE) s else s.copy(phase = LivePhase.OFFLINE, beforeOffline = s.phase, beforeOfflineSinceMs = s.phaseSinceMs, phaseSinceMs = now, dismissed = false)
+            if (s.phase == LivePhase.OFFLINE || s.phase !in ACTIVE) s else s.copy(phase = LivePhase.OFFLINE, beforeOffline = s.phase, beforeOfflineSinceMs = s.phaseSinceMs, phaseSinceMs = now, dismissed = false)
         } else if (s.phase == LivePhase.OFFLINE) {
             // Back in the phase it was in, since when it was in it: a reconnect is not news, so the
             // card keeps its place (and a turn that finished long ago is not promoted again).
@@ -164,6 +202,14 @@ object LiveReducer {
         s.copy(pending = null, resolvedElsewhere = true).enter(LivePhase.RUNNING, now).bumpIfChanged(s)
 
     fun onDismissed(s: PinnedSessionState): PinnedSessionState = s.copy(dismissed = true)
+
+    /** The session's process exited (`session.removed`, or a summary that is no longer live). */
+    fun onEnded(s: PinnedSessionState, now: Long): PinnedSessionState = s.endSession(now).bumpIfChanged(s)
+
+    /** The final card has been shown: it becomes an ordinary, swipeable result notification. */
+    fun onSettled(s: PinnedSessionState): PinnedSessionState = if (s.settled) s else s.copy(settled = true).bumpIfChanged(s)
+
+    fun isFinished(p: LivePhase) = p in FINISHED
 
     /** Shows [message] in place of the step text until the next phase change. */
     fun onNotice(s: PinnedSessionState, message: String): PinnedSessionState = s.copy(notice = message, dismissed = false).bumpIfChanged(s)
@@ -190,10 +236,26 @@ object LiveReducer {
             waitedThisTurn = waitedThisTurn || p == LivePhase.WAITING_APPROVAL || p == LivePhase.WAITING_INPUT,
         )
 
+    /** A finished turn keeps its outcome ("已完成 · 12 步") when the process exits afterwards. */
+    private fun PinnedSessionState.endSession(now: Long): PinnedSessionState =
+        if (phase in FINISHED) copy(pending = null) else enter(LivePhase.ENDED, now).copy(pending = null)
+
+    private fun PinnedSessionState.trackBackground(id: String, running: Boolean): PinnedSessionState =
+        copy(bgIds = if (running) (bgIds + id).bounded() else bgIds - id)
+
+    private fun Set<String>.bounded(): Set<String> = if (size > 200) toList().takeLast(200).toSet() else this
+
+    private fun PinnedSessionState.isStaleBusy(summary: SessionSummary, now: Long): Boolean {
+        if (phase !in FINISHED) return false
+        val at = summary.lastActiveAtMs
+        if (finishedAtServerMs > 0 && at != null) return at <= finishedAtServerMs
+        return finishedAtMs > 0 && now - finishedAtMs < STRAGGLER_GRACE_MS
+    }
+
     private fun PinnedSessionState.startTurnIfIdle(now: Long): PinnedSessionState = when (phase) {
         LivePhase.RUNNING -> if (turnStartedMs == 0L) copy(turnStartedMs = now) else this
         LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> this
-        else -> copy(phase = LivePhase.RUNNING, phaseSinceMs = now, turnStartedMs = now, steps = 0, step = null, note = null, files = emptySet(), tokens = 0, dismissed = false, resolvedElsewhere = false, waitedThisTurn = false)
+        else -> copy(phase = LivePhase.RUNNING, phaseSinceMs = now, turnStartedMs = now, steps = 0, step = null, note = null, planDone = 0, planTotal = 0, planCurrent = null, files = emptySet(), tokens = 0, dismissed = false, resolvedElsewhere = false, waitedThisTurn = false, settled = false, notice = null, callIds = emptySet())
     }
 
     private fun PinnedSessionState.bumpIfChanged(old: PinnedSessionState): PinnedSessionState =
@@ -258,6 +320,10 @@ interface LiveText {
     fun interrupted(): String
     fun offline(): String
     fun ended(): String
+    /** Capsule text while only background work is left ("后台"). */
+    fun chipBackground(): String
+    /** "后台 2 个任务运行中" */
+    fun backgroundRunning(n: Int): String
     fun resolvedElsewhere(): String
     fun publicText(): String
 
@@ -305,6 +371,8 @@ interface LiveText {
         override fun interrupted() = "The turn was stopped"
         override fun offline() = "Connection to the computer lost, reconnecting…"
         override fun ended() = "Session ended"
+        override fun chipBackground() = "Bg"
+        override fun backgroundRunning(n: Int) = if (n == 1) "1 background task running" else "$n background tasks running"
         override fun resolvedElsewhere() = "Handled on the computer"
         override fun publicText() = "SwitchTether"
     }
@@ -350,7 +418,11 @@ data class LiveUpdateSpec(
      * finished) moves the card up. Null: unknown (the channel keeps the time of its first post).
      */
     val whenMs: Long? = null,
+    /** An ordinary result notification: swipeable and cleared when tapped (the turn is over, the pin released). */
+    val dismissible: Boolean = false,
 ) {
+    /** What the collapsed card / Fluid Cloud capsule shows; a change here is worth a prompt re-post. */
+    fun headline(): List<Any?> = listOf(title, text, chip, chronometerBaseMs, promoted, actions, requestId, tone, phase, stepKind, dismissible)
     /**
      * Never indeterminate: ColorOS Fluid Cloud renders no bar for an indeterminate ProgressStyle.
      * STAGE: tracker inside the current stage; FULL: done; ERROR: stopped where the turn was.
@@ -385,17 +457,23 @@ object LiveUpdateRenderer {
     /** OPPO Fluid Cloud capsule text [B] shows at most 5 characters (longer gets "…"). */
     const val MAX_CHIP = 5
 
-    /** Keep finished turns promoted this long, then demote (pin stays; next turn re-promotes). */
-    const val DONE_PROMOTED_MS = 60_000L
+    /**
+     * A finished turn shows its outcome in the capsule this long; then the card becomes an ordinary
+     * result notification and the pin slot is released (the next turn of the session is followed again).
+     */
+    const val DONE_PROMOTED_MS = 8_000L
 
-    fun render(s: PinnedSessionState, now: Long, t: LiveText, previousPhase: LivePhase?): LiveUpdateSpec {
+    /** @param promotedMs how long a finished turn's outcome stays promoted. */
+    fun render(s: PinnedSessionState, now: Long, t: LiveText, previousPhase: LivePhase?, promotedMs: Long = DONE_PROMOTED_MS): LiveUpdateSpec {
         val waiting = s.phase == LivePhase.WAITING_APPROVAL || s.phase == LivePhase.WAITING_INPUT
         val offlineWhileWaiting = s.phase == LivePhase.OFFLINE && (s.beforeOffline == LivePhase.WAITING_APPROVAL || s.beforeOffline == LivePhase.WAITING_INPUT)
         // 运行 | 待确认 | 完成 once the turn has asked the user something, else 运行 | 完成.
         val staged = s.waitedThisTurn || waiting || offlineWhileWaiting
         val segments = if (staged) listOf(33, 33, 34) else listOf(50, 50)
         val finished = s.phase == LivePhase.DONE || s.phase == LivePhase.FAILED || s.phase == LivePhase.INTERRUPTED
-        val chip = when (s.phase) {
+        // The turn is over but background work goes on (a dev server, a background agent).
+        val bg = if (finished && !s.settled) s.background else 0
+        val chip = if (bg > 0) t.chipBackground().take(MAX_CHIP) else when (s.phase) {
             LivePhase.RUNNING -> if (s.step != null || s.steps > 0) t.chipStep(s.step?.kind) else t.chipRunning()
             LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT -> t.chipWaiting()
             LivePhase.DONE -> t.chipDone()
@@ -410,7 +488,7 @@ object LiveUpdateRenderer {
             // becomes its file name).
             LivePhase.WAITING_APPROVAL -> s.pending?.title?.takeIf { it.isNotBlank() }?.let { t.waitingApproval() + " · " + shortSubject(it) } ?: t.waitingApproval()
             LivePhase.WAITING_INPUT -> s.pending?.title?.takeIf { it.isNotBlank() } ?: t.waitingInput()
-            LivePhase.DONE -> if (s.steps > 0) t.done() + " · " + t.stepsDone(s.steps) else t.done()
+            LivePhase.DONE -> if (bg > 0) t.done() + " · " + t.backgroundRunning(bg) else if (s.steps > 0) t.done() + " · " + t.stepsDone(s.steps) else t.done()
             LivePhase.FAILED -> t.failed()
             LivePhase.INTERRUPTED -> t.interrupted()
             LivePhase.OFFLINE -> t.offline()
@@ -431,16 +509,18 @@ object LiveUpdateRenderer {
                 totals.takeIf { it.isNotEmpty() },
             ).joinToString("\n").takeIf { it != text } ?: ""
         } else ""
+        val dismissible = s.settled || s.phase == LivePhase.ENDED
         val actions = buildList {
             if (s.phase == LivePhase.WAITING_APPROVAL && s.pending != null) { add(LiveAction.APPROVE); add(LiveAction.DENY) }
             if (s.phase == LivePhase.WAITING_INPUT) add(LiveAction.ANSWER) else add(LiveAction.OPEN)
-            if (s.phase != LivePhase.ENDED) add(LiveAction.UNPIN)
+            // A result notification is no longer pinned: nothing to unpin.
+            if (!dismissible) add(LiveAction.UNPIN)
         }.let { if (it.size > 3) it.filter { a -> a != LiveAction.OPEN } else it } // Android shows at most 3 actions
         val promoted = when {
-            s.phase == LivePhase.ENDED -> false
+            dismissible -> false
             // Losing the connection only matters while a turn was in flight; an idle pin stays quiet.
             s.phase == LivePhase.OFFLINE -> s.beforeOffline in ACTIVE_PHASES
-            finished -> now - s.phaseSinceMs < DONE_PROMOTED_MS
+            finished -> now - s.phaseSinceMs < promotedMs
             else -> true
         }
         return LiveUpdateSpec(
@@ -466,6 +546,7 @@ object LiveUpdateRenderer {
             stepKind = if (s.phase == LivePhase.RUNNING) s.step?.kind else null,
             detail = detail,
             whenMs = (if (s.phase == LivePhase.RUNNING && s.turnStartedMs > 0) s.turnStartedMs else s.phaseSinceMs).takeIf { it > 0 },
+            dismissible = dismissible,
             progressNote = if (s.planTotal > 0) "${s.planDone}/${s.planTotal}" + (if (s.steps > 0) " \u00b7 " + t.stepsDone(s.steps) else "") else if (s.steps > 0) t.stepsDone(s.steps) else "",
         )
     }

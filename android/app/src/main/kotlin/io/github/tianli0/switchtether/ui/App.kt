@@ -299,6 +299,8 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
             val container = appContainer()
             androidx.compose.runtime.DisposableEffect(top.sessionId) {
                 container.handoffSession.value = top.sessionId
+                // Seen: its "已完成" result notification has done its job.
+                container.liveUpdates.onSessionOpened(top.sessionId)
                 onDispose { if (container.handoffSession.value == top.sessionId) container.handoffSession.value = null }
             }
             // A resumed session takes this page's place, so back does not return to the old read-only view.

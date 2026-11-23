@@ -137,6 +137,20 @@ class AppContainer(private val context: Context) {
             channel = io.github.tianli0.switchtether.notify.AndroidLiveUpdateChannel(context),
             resolveApproval = { s, r, d, c -> sessions.resolveApproval(s, r, d, c) },
             enabled = { io.github.tianli0.switchtether.remote.notify.NotifyType.LIVE_UPDATE in notifyPrefsState.value.enabled },
+            // The card replaces the ordinary "finished / failed / stopped" notification, so it sounds
+            // exactly when that one would have (type on, agent / project not muted, not quiet hours,
+            // app not in front).
+            alertOnFinish = { s ->
+                val prefs = notifyPrefsState.value
+                val type = when (s.phase) {
+                    io.github.tianli0.switchtether.remote.live.LivePhase.FAILED -> io.github.tianli0.switchtether.remote.notify.NotifyType.TASK_FAILED
+                    io.github.tianli0.switchtether.remote.live.LivePhase.INTERRUPTED -> io.github.tianli0.switchtether.remote.notify.NotifyType.SESSION_INTERRUPTED
+                    else -> io.github.tianli0.switchtether.remote.notify.NotifyType.TASK_COMPLETED
+                }
+                val minute = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+                !isForeground && type in prefs.enabled && s.agent !in prefs.mutedAgents &&
+                    (s.project == null || s.project !in prefs.mutedProjects) && !prefs.inQuietHours(minute)
+            },
         )
     }
 
