@@ -185,7 +185,7 @@ impl CcSwitchBackend for CcSwitchBridge {
         let state = self.state()?;
         let providers = state
             .db
-            .get_all_providers(app_type.as_str())
+            .get_all_providers(&app_type)
             .map_err(|e| e.to_string())?;
         let provider = providers
             .get(id)

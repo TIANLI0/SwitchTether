@@ -329,7 +329,9 @@ mod tests {
 
         let db = crate::database::Database::init().expect("SwitchTether opens imported db");
         for app in ["claude", "claude-desktop", "codex", "gemini"] {
-            let p = db.get_all_providers(app).unwrap();
+            let app_type =
+                <crate::app_config::AppType as std::str::FromStr>::from_str(app).unwrap();
+            let p = db.get_all_providers(&app_type).unwrap();
             println!(
                 "providers[{app}] = {} {:?}",
                 p.len(),

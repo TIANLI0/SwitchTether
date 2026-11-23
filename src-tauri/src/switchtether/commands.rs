@@ -80,20 +80,6 @@ pub async fn remote_forget_device(
 }
 
 #[tauri::command]
-pub async fn remote_rename_device(
-    state: State<'_, RemoteState>,
-    device_id: String,
-    name: String,
-) -> Result<(), String> {
-    state
-        .get()?
-        .ctx
-        .registry
-        .rename_device(&device_id, &name)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub async fn remote_list_terminals(state: State<'_, RemoteState>) -> Result<Value, String> {
     Ok(json!(state.get()?.ctx.terminals.list()))
 }
@@ -149,11 +135,6 @@ pub async fn remote_audit_log(
         .audit_entries(limit.unwrap_or(100).min(500), before_id)
         .map_err(|e| e.to_string())?;
     Ok(json!(entries))
-}
-
-#[tauri::command]
-pub async fn remote_quit_impact(state: State<'_, RemoteState>) -> Result<Value, String> {
-    Ok(state.get()?.quit_impact().await)
 }
 
 /// Opt-in takeover hooks (VS Code wrapper, Codex Desktop, terminal launchers).

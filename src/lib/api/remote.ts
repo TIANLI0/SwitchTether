@@ -170,8 +170,6 @@ export const remoteApi = {
     invoke<boolean>("remote_revoke_device", { deviceId }),
   forgetDevice: (deviceId: string) =>
     invoke<boolean>("remote_forget_device", { deviceId }),
-  renameDevice: (deviceId: string, name: string) =>
-    invoke<void>("remote_rename_device", { deviceId, name }),
   listTerminals: () => invoke<RemoteTerminal[]>("remote_list_terminals"),
   killTerminal: (id: string) => invoke<boolean>("remote_kill_terminal", { id }),
   listForwards: () => invoke<RemoteForward[]>("remote_list_forwards"),
