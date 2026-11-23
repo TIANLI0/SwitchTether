@@ -99,6 +99,12 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Secrets that are not set arrive as empty strings; Tauri treats a set-but-empty
+          # APPLE_CERTIFICATE as a certificate to import and fails. Unset the empty ones so an
+          # unsigned macOS build is produced instead.
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
           extra=""
           if [ "$HAS_UPDATER_KEY" = "true" ]; then
             extra='--config {"bundle":{"createUpdaterArtifacts":true}}'
