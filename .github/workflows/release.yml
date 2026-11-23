@@ -21,6 +21,16 @@ on:
         description: "Build only, do not create a release"
         type: boolean
         default: true
+      targets:
+        description: "What to build"
+        type: choice
+        options: [all, android, desktop]
+        default: all
+
+# A tag builds the platforms whose own version equals the tag's (see the plan job): a release
+# that only changes the Android app bumps android/app/build.gradle.kts alone, and v<that version>
+# then builds and publishes the APK only. The desktop is built when package.json carries the
+# tag's version. The updaters cope with a release that lacks their asset (they skip it).
 
 permissions:
   contents: write
@@ -30,8 +40,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      desktop: ${{ steps.plan.outputs.desktop }}
+      android: ${{ steps.plan.outputs.android }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Decide what this release builds
+        id: plan
+        shell: bash
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          desktop=true
+          android=true
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            ver="${GITHUB_REF_NAME#v}"
+            desktop_ver="$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' package.json | head -n 1)"
+            android_ver="$(sed -nE 's/^ *versionName = "([^"]+)".*/\1/p' android/app/build.gradle.kts)"
+            echo "tag $ver, desktop $desktop_ver, android $android_ver"
+            [ "$desktop_ver" = "$ver" ] || desktop=false
+            [ "$android_ver" = "$ver" ] || android=false
+            if [ "$desktop" = false ] && [ "$android" = false ]; then
+              echo "::error::Tag $GITHUB_REF_NAME matches neither the desktop version ($desktop_ver) nor the Android version ($android_ver)."
+              exit 1
+            fi
+          fi
+          case "$TARGETS" in
+            android) desktop=false ;;
+            desktop) android=false ;;
+          esac
+          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+          echo "android=$android" >> "$GITHUB_OUTPUT"
+          echo "Building: desktop=$desktop android=$android" >> "$GITHUB_STEP_SUMMARY"
+
   desktop:
     name: Desktop (${{ matrix.name }})
+    needs: plan
+    if: needs.plan.outputs.desktop == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
@@ -139,6 +188,8 @@ jobs:
 
   android:
     name: Android APK
+    needs: plan
+    if: needs.plan.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -195,8 +246,15 @@ jobs:
 
   release:
     name: Draft GitHub release
-    needs: [desktop, android]
-    if: github.event_name == 'push' || inputs.dry_run == false
+    needs: [plan, desktop, android]
+    # A platform the plan left out is "skipped", which would skip this job too: run whenever
+    # nothing failed or was cancelled and at least one platform was built.
+    if: >-
+      always()
+      && (github.event_name == 'push' || inputs.dry_run == false)
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+      && (needs.desktop.result == 'success' || needs.android.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

@@ -76,5 +76,5 @@ such in the release notes.
 | Workflow | Purpose |
 |---|---|
 | `ci.yml` | Rust fmt/clippy/tests (workspace, 3 OSes), frontend typecheck + unit tests + build, Android unit tests + debug APK |
-| `release.yml` | tag `v*` → desktop bundles (Windows/macOS/Linux) + Android APK, draft GitHub release |
+| `release.yml` | tag `v*` → draft GitHub release with the platforms whose own version equals the tag's: desktop bundles (Windows/macOS/Linux) when `package.json` carries it, the Android APK when `android/app/build.gradle.kts` does. A release that bumps only the Android version builds only the APK. |
 | `upstream-sync.yml` | daily check of new CC Switch releases → sync branch + PR |
