@@ -243,9 +243,10 @@ fun PortForwardScreen(onBack: () -> Unit) {
         onBack = onBack,
         large = false,
         actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::refresh) },
+        immersive = true,
     ) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             if (active.isNotEmpty()) {
                 item { SmallTitle(stringResource(R.string.forward_active)) }
                 item {

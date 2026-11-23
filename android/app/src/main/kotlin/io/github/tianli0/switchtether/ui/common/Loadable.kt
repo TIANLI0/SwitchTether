@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.common
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import io.github.tianli0.switchtether.R
@@ -65,13 +67,18 @@ fun UiError.title(): String = when (kind) {
 @Composable
 fun <T> LoadableContent(state: Loadable<T>, onRetry: () -> Unit, content: @Composable (T) -> Unit) {
     when (state) {
-        Loadable.Loading -> LoadingState(stringResource(R.string.state_loading))
-        is Loadable.Failed -> ErrorState(
-            title = state.error.title(),
-            message = if (state.error.kind == UiError.Kind.BACKEND_UNAVAILABLE) stringResource(R.string.error_backend_unavailable_detail) else state.error.detail,
-            retryLabel = stringResource(R.string.action_retry),
-            onRetry = onRetry,
-        )
+        // On an immersive page the body starts under the title bar: keep the state below it.
+        Loadable.Loading -> androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().padding(top = LocalPageTopInset.current)) {
+            LoadingState(stringResource(R.string.state_loading))
+        }
+        is Loadable.Failed -> androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().padding(top = LocalPageTopInset.current)) {
+            ErrorState(
+                title = state.error.title(),
+                message = if (state.error.kind == UiError.Kind.BACKEND_UNAVAILABLE) stringResource(R.string.error_backend_unavailable_detail) else state.error.detail,
+                retryLabel = stringResource(R.string.action_retry),
+                onRetry = onRetry,
+            )
+        }
         is Loadable.Ready -> content(state.value)
     }
 }

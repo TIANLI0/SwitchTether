@@ -223,6 +223,7 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
         title = stringResource(R.string.agent_map_title),
         subtitle = if (n > 0) pluralStringResource(R.plurals.agent_map_subtitle, n, n) else "",
         onBack = onBack,
+        immersive = true,
     ) {
         LoadableContent(map, onRetry = vm::retry) { m ->
             val branches = SubagentTree.flatten(m.agents)

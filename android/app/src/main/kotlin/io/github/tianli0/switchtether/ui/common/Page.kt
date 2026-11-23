@@ -2,7 +2,10 @@ package io.github.tianli0.switchtether.ui.common
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
@@ -44,6 +47,13 @@ import io.github.tianli0.switchtether.R
 /** Space the floating bottom navigation bar occupies over page content (set by the shell). */
 val LocalBottomBarSpace = compositionLocalOf { 0.dp }
 
+/**
+ * Height of the page's title bar (incl. the status bar) when the page is [Page]`(immersive = true)`:
+ * the list then starts at the top of the screen and scrolls under the glass bar, so its first item
+ * must start this far down ([pageListPadding] adds it). 0 on other pages.
+ */
+val LocalPageTopInset = compositionLocalOf { 0.dp }
+
 /** The current page's collapsing-title scroll behavior (null on pages without one). */
 val LocalPageScrollBehavior = compositionLocalOf<ScrollBehavior?> { null }
 
@@ -77,15 +87,40 @@ fun rememberPageListState(): LazyListState {
     return state
 }
 
-/** Bottom content padding for lists so the last card clears the floating navigation bar. */
+/** [rememberPageListState] for a page body that is a plain `verticalScroll` column. */
 @Composable
-fun pageListPadding(top: Dp = 12.dp): PaddingValues = PaddingValues(top = top, bottom = 24.dp + LocalBottomBarSpace.current)
+fun rememberPageScrollState(): ScrollState {
+    val state = rememberScrollState()
+    BindScrollToTop(state)
+    return state
+}
+
+/**
+ * Content padding for a page's main list: on an immersive page the first item clears the title bar
+ * (the list itself runs under it), and the last card clears the floating navigation bar / the
+ * gesture bar.
+ */
+@Composable
+fun pageListPadding(top: Dp = 12.dp): PaddingValues = PaddingValues(
+    top = top + LocalPageTopInset.current,
+    bottom = 24.dp + LocalBottomBarSpace.current.takeIf { it > 0.dp }.let { it ?: navigationBarHeight() },
+)
+
+@Composable
+private fun navigationBarHeight(): Dp = with(androidx.compose.ui.platform.LocalDensity.current) {
+    androidx.compose.foundation.layout.WindowInsets.Companion.navigationBars.getBottom(this).toDp()
+}
 
 /**
  * Standard page, following the coui17 gallery structure: coui `Scaffold` on the ColorOS page color,
  * a large collapsing `TopAppBar` for top-level pages (or `SmallTopAppBar` for detail pages with a
  * back arrow), and the content below the bar. Lists inside should use [pageScroll] and
  * [pageListPadding].
+ *
+ * [immersive]: the body is one scrolling list (anything fixed above it, like the connection banner,
+ * belongs inside it as its first item). It then starts at the top of the screen and scrolls under the
+ * status bar and the frosted title bar, as ColorOS pages do; [pageListPadding] keeps its first item
+ * below the bar. Pages with fixed content above the list (tabs, chips, a composer) stay non-immersive.
  */
 @Composable
 fun Page(
@@ -96,6 +131,7 @@ fun Page(
     modifier: Modifier = Modifier,
     large: Boolean = onBack == null,
     floatingActionButton: @Composable () -> Unit = {},
+    immersive: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val behavior = COUIScrollBehavior()
@@ -133,8 +169,12 @@ fun Page(
         },
         floatingActionButton = floatingActionButton,
     ) { inner ->
-        CompositionLocalProvider(LocalPageScrollBehavior provides behavior) {
-            Column(Modifier.fillMaxSize().padding(top = inner.calculateTopPadding()), content = content)
+        val top = inner.calculateTopPadding()
+        CompositionLocalProvider(
+            LocalPageScrollBehavior provides behavior,
+            LocalPageTopInset provides if (immersive) top else 0.dp,
+        ) {
+            Column(Modifier.fillMaxSize().padding(top = if (immersive) 0.dp else top), content = content)
         }
     }
 }

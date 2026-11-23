@@ -157,12 +157,12 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
                     }
                 }
             }
-            Button(
+            // A settings row like the others on this page, not a full-width button.
+            ArrowPreference(
+                title = stringResource(R.string.companion_scan),
+                cardListPosition = CardListPosition.Full,
                 onClick = { link.associate(callback) },
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                minHeight = 48.dp,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            ) { Text(stringResource(R.string.companion_scan), color = COUITheme.colorScheme.onPrimary) }
+            )
             message?.let {
                 Text(it, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
             }

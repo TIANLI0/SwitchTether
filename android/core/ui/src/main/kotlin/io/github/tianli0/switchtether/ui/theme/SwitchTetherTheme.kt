@@ -145,6 +145,24 @@ fun SwitchTetherTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable (
             ),
         )
     }
+    // Edge-to-edge: the bars are transparent and the page runs under them, so their icons must follow
+    // the app's own theme (enableEdgeToEdge() only follows the system's: dark icons on a dark page
+    // when the app is set to dark on a light system), and no grey contrast scrim on the gesture bar.
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) {
+        androidx.compose.runtime.SideEffect {
+            val window = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+                .filterIsInstance<android.app.Activity>().firstOrNull()?.window ?: return@SideEffect
+            androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                window.isNavigationBarContrastEnforced = false
+                window.isStatusBarContrastEnforced = false
+            }
+        }
+    }
     COUITheme(controller = controller) {
         CompositionLocalProvider(
             LocalDevColors provides if (dark) DevColors.Dark else DevColors.Light,

@@ -4,6 +4,7 @@ import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
 import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 
@@ -24,7 +25,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -126,9 +126,10 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                 filesVm.loadRoots()
             })
         },
+        immersive = true,
     ) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             item { SmallTitle(stringResource(R.string.ws_terminals)) }
             item {
                 GroupCard {
@@ -298,7 +299,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
                 )
             }
             LoadableContent(detail.second, onRetry = vm::retryGitDetail) { text ->
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 24.dp + LocalBottomBarSpace.current)) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberPageScrollState()).padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 24.dp + LocalBottomBarSpace.current)) {
                     if (state.gitDiff != null) {
                         if (text.isBlank()) Text(stringResource(R.string.git_no_changes), color = COUITheme.colorScheme.onSurfaceVariantSummary) else DiffView(text)
                     } else {

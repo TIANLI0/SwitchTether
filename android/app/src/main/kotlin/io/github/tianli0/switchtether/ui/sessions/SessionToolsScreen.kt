@@ -259,6 +259,7 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
         title = stringResource(R.string.tools_title),
         subtitle = summary?.let { io.github.tianli0.switchtether.ui.common.sessionDisplayTitle(it) }.orEmpty(),
         onBack = onBack,
+        immersive = true,
     ) {
         // A session started on the computer is observe-only: what its files hold, nothing that needs the process.
         val readOnly = detail.claudeReadTools
@@ -335,16 +336,19 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
             }
             item {
                 SmallTitle(stringResource(R.string.tools_export))
-                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
+                // A row of the page's card, like every other action here (not a full-width button).
+                GroupCard {
+                    BasicComponent(
+                        title = stringResource(R.string.tools_export_action),
+                        titleColor = io.github.suqi8.coui.kmp.basic.BasicComponentDefaults.titleColor(color = COUITheme.colorScheme.primary),
                         onClick = vm::export,
                         enabled = (detail.canUseClaudeTools || (readOnly && detail.online)) && !st.exporting,
-                        colors = ButtonDefaults.buttonColorsPrimary(),
-                        modifier = Modifier.fillMaxWidth().testTag("tools-export"),
-                    ) {
-                        if (st.exporting) RotatingProgressIndicator(color = COUITheme.colorScheme.onPrimary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
-                        else Text(stringResource(R.string.tools_export_action), color = COUITheme.colorScheme.onPrimary)
-                    }
+                        endActions = {
+                            if (st.exporting) RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
+                        },
+                        cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Full,
+                        modifier = Modifier.testTag("tools-export"),
+                    )
                 }
                 st.exportError?.let { ToolsNote(it, LocalDevColors.current.danger) }
                 ToolsNote(stringResource(R.string.tools_export_hint))
@@ -578,14 +582,17 @@ private fun SideQuestion(st: SessionToolsState, enabled: Boolean, onAsk: (String
             enabled = enabled && !st.asking,
             modifier = Modifier.fillMaxWidth().testTag("btw-field"),
         )
-        Button(
-            onClick = { onAsk(question) },
-            enabled = enabled && !st.asking && question.isNotBlank(),
-            colors = ButtonDefaults.buttonColorsPrimary(),
-            modifier = Modifier.fillMaxWidth().testTag("btw-ask"),
-        ) {
-            if (st.asking) RotatingProgressIndicator(color = COUITheme.colorScheme.onPrimary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
-            else Text(stringResource(R.string.tools_side_question_ask), color = COUITheme.colorScheme.onPrimary)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Button(
+                onClick = { onAsk(question) },
+                enabled = enabled && !st.asking && question.isNotBlank(),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+                size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
+                modifier = Modifier.testTag("btw-ask"),
+            ) {
+                if (st.asking) RotatingProgressIndicator(color = COUITheme.colorScheme.onPrimary, size = 16.dp, ringDiameter = 12.8.dp, strokeWidth = 2.dp)
+                else Text(stringResource(R.string.tools_side_question_ask), color = COUITheme.colorScheme.onPrimary)
+            }
         }
         if (st.asking) {
             Text(stringResource(R.string.tools_side_question_waiting), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)

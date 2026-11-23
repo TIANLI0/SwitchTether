@@ -105,6 +105,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
         title = stringResource(R.string.downloads_title),
         onBack = onBack,
         large = false,
+        immersive = true,
         actions = {
             if (items.isNotEmpty()) {
                 TextButton(
