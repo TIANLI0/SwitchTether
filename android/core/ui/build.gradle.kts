@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "io.github.tianli0.switchtether.ui"
     compileSdk {
-        version = release(37) { minorApiLevel = 0 }
+        version = release(37) { minorApiLevel = 2 }
     }
     buildToolsVersion = "37.0.0"
     defaultConfig {

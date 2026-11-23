@@ -15,11 +15,14 @@ sealed interface Route {
     data class Subagent(val sessionId: String, val agentId: String, val title: String?, val agent: String = "claude_code") : Route
     /** All sub-agents of a session as a branch tree. */
     data class SubagentTree(val sessionId: String, val agent: String = "claude_code") : Route
+    /** Claude Code session tools (permission mode, context, plan, MCP, side question, rename, export). */
+    data class SessionTools(val sessionId: String) : Route
     data object NewSession : Route
     data class Terminal(val id: String?) : Route
     data object Files : Route
     data object Downloads : Route
     data object Git : Route
+    data object PortForward : Route
     data object PickFolder : Route
     data object Providers : Route
     data object Usage : Route

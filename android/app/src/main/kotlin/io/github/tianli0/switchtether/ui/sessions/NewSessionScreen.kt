@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -106,6 +108,10 @@ data class NewSessionState(
     val listing: Loadable<FsListing>? = null,
     val prompt: String = "",
     val model: String = "",
+    /** Effort / reasoning level; "" = the agent's default. */
+    val effort: String = "",
+    /** Models and effort levels the desktop offers for [agent] (null until loaded / older desktop). */
+    val modelOptions: io.github.tianli0.switchtether.remote.protocol.ModelOptions? = null,
     val permissionMode: String = "default",
     /** Models used before with this agent (one-tap chips under the model field). */
     val recentModels: List<String> = emptyList(),
@@ -125,6 +131,8 @@ interface NewSessionPrefs {
     fun setModel(agent: String, model: String)
     /** Models used before with [agent], newest first. */
     fun recentModels(agent: String): List<String>
+    fun effort(agent: String): String = ""
+    fun setEffort(agent: String, effort: String) {}
 
     /** In-memory fallback (tests). */
     class Memory : NewSessionPrefs {
@@ -139,6 +147,9 @@ interface NewSessionPrefs {
             if (model.isNotBlank()) recents[agent] = (listOf(model) + recentModels(agent).filter { it != model }).take(5)
         }
         override fun recentModels(agent: String) = recents[agent].orEmpty()
+        private val efforts = mutableMapOf<String, String>()
+        override fun effort(agent: String) = efforts[agent].orEmpty()
+        override fun setEffort(agent: String, effort: String) { efforts[agent] = effort }
     }
 }
 
@@ -161,6 +172,10 @@ class SharedNewSessionPrefs(context: android.content.Context) : NewSessionPrefs 
     }
     override fun recentModels(agent: String): List<String> =
         p.getString("recent_models.$agent", "").orEmpty().split('\n').filter { it.isNotBlank() }
+    override fun effort(agent: String): String = p.getString("effort.$agent", "").orEmpty()
+    override fun setEffort(agent: String, effort: String) {
+        p.edit().putString("effort.$agent", effort).apply()
+    }
 }
 
 class NewSessionViewModel(
@@ -176,6 +191,7 @@ class NewSessionViewModel(
                 // Where the last phone-started session ran; else the newest session's folder (loadRecent).
                 cwd = prefs.cwd,
                 model = prefs.model(agent),
+                effort = prefs.effort(agent),
                 recentModels = prefs.recentModels(agent),
                 permissionMode = prefs.permissionMode?.takeIf { it in CLAUDE_PERMISSION_MODES } ?: "default",
             )
@@ -191,6 +207,7 @@ class NewSessionViewModel(
                 if (s is ConnectionState.Online) {
                     if (_state.value.roots !is Loadable.Ready) loadRoots()
                     loadRecent()
+                    loadModelOptions()
                 }
             }
         }
@@ -206,6 +223,15 @@ class NewSessionViewModel(
                 .take(6)
                 .map { RecentProject(it.first, it.second) }
             _state.update { st -> st.copy(recent = recent, cwd = st.cwd ?: recent.firstOrNull()?.path) }
+        }
+    }
+
+    /** Models / effort levels for the selected agent (older desktops: built-in aliases only). */
+    private fun loadModelOptions() {
+        val agent = _state.value.agent
+        viewModelScope.launch {
+            val o = runCatching { repo.modelOptions(agent) }.getOrNull()
+            _state.update { if (it.agent == agent) it.copy(modelOptions = o) else it }
         }
     }
 
@@ -228,10 +254,12 @@ class NewSessionViewModel(
     fun select(path: String) = _state.update { it.copy(cwd = path) }
     fun setAgent(a: String) {
         prefs.agent = a
-        _state.update { it.copy(agent = a, model = prefs.model(a), recentModels = prefs.recentModels(a)) }
+        _state.update { it.copy(agent = a, model = prefs.model(a), effort = prefs.effort(a), recentModels = prefs.recentModels(a), modelOptions = null) }
+        if (_state.value.connection is ConnectionState.Online) loadModelOptions()
     }
     fun setPrompt(t: String) = _state.update { it.copy(prompt = t) }
     fun setModel(t: String) = _state.update { it.copy(model = t) }
+    fun setEffort(e: String) = _state.update { it.copy(effort = e) }
     fun setPermissionMode(m: String) {
         prefs.permissionMode = m
         _state.update { it.copy(permissionMode = m) }
@@ -248,9 +276,11 @@ class NewSessionViewModel(
             prompt = s.prompt,
             model = s.model,
             permissionMode = if (s.agent == "claude_code") s.permissionMode else null,
+            effort = s.effort.takeIf { it.isNotBlank() && supportsEffort(s.agent) },
         )
         // Remember the model (an empty one too: "agent default" is a choice).
         prefs.setModel(s.agent, s.model.trim())
+        prefs.setEffort(s.agent, s.effort)
         prefs.cwd = cwd
         _state.update { it.copy(recentModels = prefs.recentModels(s.agent)) }
         commands.run(label, onSuccess = { out -> _state.update { it.copy(created = out.createdSession()) } }) { id -> repo.createSession(req, id) }
@@ -285,17 +315,21 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
         modifier = Modifier.imePadding(),
     ) {
         ConnectionBanner(state.connection, { container.connection.retryNow() })
-        NewSessionContent(
-            state = state,
-            busy = busy != null,
-            onAgent = vm::setAgent,
-            onSelect = vm::select,
-            onPickFolder = onPickFolder,
-            onPrompt = vm::setPrompt,
-            onModel = vm::setModel,
-            onPermissionMode = vm::setPermissionMode,
-            onStart = { vm.start(startLabel) },
-        )
+        // The options fold out and the keyboard takes half the screen: the launcher must scroll.
+        Column(Modifier.weight(1f, fill = false).pageScroll().verticalScroll(rememberScrollState())) {
+            NewSessionContent(
+                state = state,
+                busy = busy != null,
+                onAgent = vm::setAgent,
+                onSelect = vm::select,
+                onPickFolder = onPickFolder,
+                onPrompt = vm::setPrompt,
+                onModel = vm::setModel,
+                onPermissionMode = vm::setPermissionMode,
+                onStart = { vm.start(startLabel) },
+                onEffort = vm::setEffort,
+            )
+        }
     }
     CommandPromptDialog(prompt, vm.commands::checkStatus, vm.commands::retry, vm.commands::dismiss)
 }
@@ -315,6 +349,7 @@ fun NewSessionContent(
     onModel: (String) -> Unit,
     onPermissionMode: (String) -> Unit,
     onStart: () -> Unit,
+    onEffort: (String) -> Unit = {},
 ) {
     val dev = LocalDevColors.current
     var options by rememberSaveable { mutableStateOf(false) }
@@ -363,7 +398,7 @@ fun NewSessionContent(
                 title = stringResource(R.string.new_session_options),
                 summary = listOfNotNull(
                     if (state.agent == "claude_code") permLabel else null,
-                    state.model.ifBlank { null } ?: stringResource(R.string.new_session_model_default),
+                    modelEffortSummary(state.model, state.effort.takeIf { supportsEffort(state.agent) }),
                 ).joinToString(" · "),
                 endActions = { Text(stringResource(if (options) R.string.state_expanded else R.string.state_collapsed), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary) },
                 onClick = { options = !options },
@@ -385,18 +420,16 @@ fun NewSessionContent(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            TextInput(
-                value = state.model,
-                onValueChange = onModel,
-                label = stringResource(R.string.new_session_model_hint),
+            ModelEffortChooser(
+                agent = state.agent,
+                options = state.modelOptions,
+                model = state.model,
+                effort = state.effort,
+                onModel = onModel,
+                onEffort = onEffort,
+                recent = state.recentModels,
                 modifier = Modifier.fillMaxWidth(),
             )
-            val models = state.recentModels.filter { it != state.model }
-            if (models.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(models, key = { it }) { m -> FilterChip(m, false, { onModel(m) }) }
-                }
-            }
         }
         Button(
             onClick = onStart,
@@ -598,7 +631,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
         onDismissRequest = onDismiss,
     ) {
         Box(Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
-            Column(Modifier.pageScroll()) {
+            Column(Modifier.pageScroll().verticalScroll(rememberScrollState())) {
                 NewSessionContent(
                     state = state,
                     busy = busy != null,
@@ -609,6 +642,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
                     onModel = vm::setModel,
                     onPermissionMode = vm::setPermissionMode,
                     onStart = { vm.start(startLabel) },
+            onEffort = vm::setEffort,
                 )
             }
         }

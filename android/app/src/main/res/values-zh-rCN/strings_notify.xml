@@ -125,4 +125,14 @@
     <string name="live_files_changed">改动 %1$d 个文件</string>
     <string name="live_tokens_used">%1$s tokens</string>
     <string name="notif_muted_projects_empty">还没有项目。会话所在的项目会显示在这里。</string>
+    <string name="ntf_action_answer">回答</string>
+    <string name="ntf_action_reply">回复</string>
+    <string name="ntf_answer_label">你的回答</string>
+    <string name="ntf_reply_label">发给智能体的消息</string>
+    <string name="ntf_sent">已发送</string>
+    <string name="ntf_not_sent">没有发送</string>
+    <string name="ntf_not_sure">不确定是否送达</string>
+    <string name="ntf_handled_elsewhere">已在别处处理</string>
+    <string name="ntf_offline_open">连不上电脑，请打开 SwitchTether 处理。</string>
+    <string name="ntf_open_to_check">请打开 SwitchTether 查看。</string>
 </resources>

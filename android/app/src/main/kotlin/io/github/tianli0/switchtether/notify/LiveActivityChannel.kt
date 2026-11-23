@@ -36,6 +36,9 @@ interface LiveActivityChannel {
 class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChannel {
     private val nm = NotificationManagerCompat.from(context)
 
+    /** First post per card, its `when` while the spec knows no better (the default "now" would re-rank it on every update). */
+    private val firstPostAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     init {
         val mgr = context.getSystemService(NotificationManager::class.java)
         // DEFAULT importance: Live Updates must not use a MIN channel; sound only on the alert post.
@@ -51,6 +54,7 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
         Build.VERSION.SDK_INT >= 36 && runCatching { context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications() }.getOrDefault(false)
 
     override fun end(sessionId: String) {
+        firstPostAt.remove(sessionId)
         runCatching { nm.cancel(TAG, notificationId(sessionId)) }
     }
 
@@ -88,10 +92,13 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
             .setAutoCancel(false)
         if (spec.detail.isNotBlank()) b.setStyle(NotificationCompat.BigTextStyle().bigText(spec.detail))
         val base = spec.chronometerBaseMs
+        // `when` is also the shade's order: always set it from the card's state (turn start / phase
+        // start), never leave the builder's "now", which moved the card on every step and re-post.
+        val firstAt = firstPostAt.getOrPut(spec.sessionId) { System.currentTimeMillis() }
         if (base != null) {
             b.setWhen(base).setShowWhen(true).setUsesChronometer(true)
         } else {
-            b.setShowWhen(false)
+            b.setWhen(spec.whenMs ?: firstAt).setShowWhen(false)
         }
         spec.actions.forEach { a -> actionFor(a, spec)?.let(b::addAction) }
         runCatching { nm.notify(TAG, id, b.build()) }

@@ -26,7 +26,8 @@ import kotlinx.coroutines.launch
 enum class SessionScope { LIVE, HISTORY, ALL }
 
 data class SessionsState(
-    val scope: SessionScope = SessionScope.LIVE,
+    // Everything by default (running sessions first): history must be visible on a fresh start.
+    val scope: SessionScope = SessionScope.ALL,
     val agent: String? = null,
     val project: String? = null,
     val query: String = "",
@@ -49,7 +50,12 @@ data class SessionsState(
             }
             .filter { agent == null || it.agent == agent }
             .filter { project == null || it.project == project }
-            .sortedWith(compareByDescending<SessionSummary> { it.isLive }.thenByDescending { it.lastActiveAtMs ?: 0L })
+            // Live first; among live sessions the ones waiting for the user lead (like Home).
+            .sortedWith(
+                compareByDescending<SessionSummary> { it.isLive }
+                    .thenByDescending { it.isLive && (it.status == "waiting" || it.waitingFor != null) }
+                    .thenByDescending { it.lastActiveAtMs ?: 0L },
+            )
 }
 
 @OptIn(FlowPreview::class)
@@ -60,6 +66,11 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     private var loadJob: Job? = null
 
     init {
+        // Last list seen from this desktop, at once (replaced by the first successful load).
+        viewModelScope.launch {
+            val cached = runCatching { repo.cachedList() }.getOrNull().orEmpty()
+            if (cached.isNotEmpty()) _state.update { if (it.items is Loadable.Ready) it else it.copy(items = Loadable.Ready(cached)).withKnown() }
+        }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
                 _state.update { it.copy(connection = s) }
@@ -113,7 +124,8 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(items = Loadable.Failed(UiError.from(e))) }
+                // Keep showing the last known list; only an empty screen turns into an error.
+                _state.update { if (it.items is Loadable.Ready) it else it.copy(items = Loadable.Failed(UiError.from(e))) }
             }
         }
     }

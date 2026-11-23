@@ -144,6 +144,20 @@ export interface RemoteUiEvent {
 
 export const REMOTE_UI_EVENT = "switchtether-remote-event";
 
+/** A phone forwarding one of this computer's loopback ports (PROTOCOL.md §7.11). */
+export interface RemoteForward {
+  id: string;
+  deviceId: string;
+  port: number;
+  createdAtMs: number;
+  expiresAtMs: number;
+  connected: boolean;
+  activeStreams: number;
+  totalStreams: number;
+  bytesDown: number;
+  bytesUp: number;
+}
+
 export const remoteApi = {
   status: () => invoke<RemoteStatus>("remote_status"),
   setConfig: (config: RemoteConfig) =>
@@ -160,6 +174,8 @@ export const remoteApi = {
     invoke<void>("remote_rename_device", { deviceId, name }),
   listTerminals: () => invoke<RemoteTerminal[]>("remote_list_terminals"),
   killTerminal: (id: string) => invoke<boolean>("remote_kill_terminal", { id }),
+  listForwards: () => invoke<RemoteForward[]>("remote_list_forwards"),
+  stopForward: (id: string) => invoke<boolean>("remote_stop_forward", { id }),
   auditLog: (limit = 50) => invoke<AuditEntry[]>("remote_audit_log", { limit }),
   setRelayKey: (key: string) =>
     invoke<RemoteStatus>("remote_set_relay_key", { key }),

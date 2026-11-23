@@ -38,6 +38,7 @@ import io.github.tianli0.switchtether.ui.common.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.pageContainerColor
 import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.nav.Route
@@ -122,10 +123,21 @@ fun SessionsContent(
                 onTabSelected = { onScope(SessionScope.entries[it]) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             )
+            // Project filter: only once sessions of more than one project are known.
+            if (state.knownProjects.size > 1) {
+                val projects = listOf<String?>(null) + state.knownProjects
+                io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+                    tabs = projects.map { ChipTabData(it ?: stringResource(R.string.sessions_all_projects)) },
+                    selectedIndex = projects.indexOf(state.project).coerceAtLeast(0),
+                    onSelectedChange = { onProject(projects[it]) },
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.padding(bottom = 4.dp).testTag("project-filter"),
+                )
+            }
             LoadableContent(state.items, onRetry = onReload) { _ ->
                 val visible = state.visible
                 PullToRefresh(isRefreshing = refreshing, onRefresh = onReload, topAppBarScrollBehavior = null) {
-                    LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("session-list"), contentPadding = pageListPadding(top = 8.dp)) {
+                    LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("session-list"), contentPadding = pageListPadding(top = 8.dp)) {
                         if (visible.isEmpty()) {
                             item {
                                 EmptyState(

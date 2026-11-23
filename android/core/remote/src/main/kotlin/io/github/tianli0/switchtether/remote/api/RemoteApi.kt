@@ -189,6 +189,24 @@ class RemoteApi(
         }.filter { it.agentId.isNotEmpty() }
     }
 
+    /** The Agent map: sub-agents with live state, background tasks, and whether they can be stopped. */
+    suspend fun agentMap(sessionId: String): io.github.tianli0.switchtether.remote.session.AgentMap {
+        val o = getJson(url("v1/sessions", sessionId, "subagents")) as? JsonObject
+            ?: return io.github.tianli0.switchtether.remote.session.AgentMap(emptyList())
+        val agents = (o["agents"] as? JsonArray).orEmpty().mapNotNull {
+            runCatching { ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.session.SubagentNode.serializer(), it) }.getOrNull()
+        }.filter { it.agentId.isNotEmpty() }
+        val tasks = (o["backgroundTasks"] as? JsonArray).orEmpty().mapNotNull {
+            runCatching { ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.session.BackgroundTaskNode.serializer(), it) }.getOrNull()
+        }
+        val stoppable = (o["stoppable"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+        return io.github.tianli0.switchtether.remote.session.AgentMap(agents, tasks, stoppable)
+    }
+
+    /** `POST /v1/sessions/{id}/subagents/{taskId}/stop`: stop a sub-agent or background task. */
+    suspend fun stopSubagent(sessionId: String, taskId: String, commandId: String): CommandResponse =
+        command(commandId, url("v1/sessions", sessionId, "subagents", taskId, "stop"), CommandBody(commandId))
+
     /** One sub-agent's own steps, newest page (read-only; the desktop tails its transcript). */
     suspend fun subagentEvents(sessionId: String, agentId: String, limit: Int = 300): io.github.tianli0.switchtether.remote.session.SubagentPage {
         val u = url("v1/sessions", sessionId, "subagents", agentId, "events").newBuilder()
@@ -254,6 +272,44 @@ class RemoteApi(
 
     suspend fun interrupt(sessionId: String, commandId: String): CommandResponse =
         command(commandId, url("v1/sessions", sessionId, "interrupt"), CommandBody(commandId))
+
+    /**
+     * `POST /v1/sessions/{id}/claude/{action}`: one Claude Code session tool ([io.github.tianli0.switchtether.remote.session.ClaudeTools]).
+     * [params] are the action's fields; the commandId is added. A side question can take minutes,
+     * so this uses a longer read timeout than other calls.
+     */
+    suspend fun claudeTool(sessionId: String, action: String, commandId: String, params: JsonObject = JsonObject(emptyMap())): CommandResponse {
+        val body = JsonObject(params + ("commandId" to kotlinx.serialization.json.JsonPrimitive(commandId)))
+        val tracker = SendTracker()
+        val req = Request.Builder().url(url("v1/sessions", sessionId, "claude", action))
+            .post(body.toString().toRequestBody(jsonMedia))
+            .header("Idempotency-Key", commandId)
+            .tagged()
+            .tag(SendTracker::class.java, tracker)
+            .build()
+        val r = try {
+            fetch(req, slowClient)
+        } catch (e: BodyReadException) {
+            throw CommandTransportException(commandId, true, e.cause as? IOException ?: e)
+        } catch (e: IOException) {
+            throw CommandTransportException(commandId, tracker.sent, e)
+        }
+        if (!r.ok) throw toApiException(r)
+        return CommandResponse(parseJson(r.text), r.headers["X-Command-Replayed"] == "true")
+    }
+
+    /** Side-effecting client for calls the desktop may take minutes to answer (never retried). */
+    private val slowClient: OkHttpClient by lazy {
+        client.newBuilder().readTimeout(200, java.util.concurrent.TimeUnit.SECONDS).build()
+    }
+
+    /** `POST /v1/sessions/{id}/options`: model / effort of a running session (`""` = default). */
+    suspend fun setSessionOptions(sessionId: String, commandId: String, model: String?, effort: String?): CommandResponse =
+        command(commandId, url("v1/sessions", sessionId, "options"), io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody(commandId, model, effort))
+
+    /** `GET /v1/agents/{agent}/models?session=` (404 on older desktops). */
+    suspend fun modelOptions(agent: String, sessionId: String? = null): io.github.tianli0.switchtether.remote.protocol.ModelOptions =
+        get(url("v1/agents", agent, "models").newBuilder().apply { sessionId?.let { addQueryParameter("session", it) } }.build())
 
     suspend fun resolveApproval(sessionId: String, requestId: String, commandId: String, decision: String, message: String? = null): CommandResponse =
         command(commandId, url("v1/sessions", sessionId, "approvals", requestId), ApprovalBody(commandId, decision, message))
@@ -379,6 +435,51 @@ class RemoteApi(
     /** `GET /v1/terminals/{id}/stream` WebSocket (snapshot/patch frames, §7.6). */
     fun openTerminal(id: String, listener: WebSocketListener): WebSocket =
         readClient.newWebSocket(Request.Builder().url(url("v1/terminals", id, "stream")).tagged().build(), listener)
+
+    // §7.11 Port forwarding ---------------------------------------------------------------------
+
+    suspend fun forwardPorts(): io.github.tianli0.switchtether.remote.protocol.ListeningPorts = get("v1/forwards/ports")
+
+    suspend fun forwards(): io.github.tianli0.switchtether.remote.protocol.ForwardList = get("v1/forwards")
+
+    /** Step-up `port_forward`; renews the device's lease when this port is already forwarded. */
+    suspend fun createForward(port: Int, ttlMinutes: Int? = null): io.github.tianli0.switchtether.remote.protocol.ForwardView =
+        post("v1/forwards", io.github.tianli0.switchtether.remote.protocol.CreateForwardBody(port, ttlMinutes))
+
+    suspend fun stopForward(id: String): JsonElement =
+        executeJson(Request.Builder().url(url("v1/forwards", id)).delete().tagged().build())
+
+    /** Pings keep the relay (10 min idle limit) and NAT mappings alive, and detect dead paths. */
+    private val tunnelClient: OkHttpClient by lazy { readClient.newBuilder().pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build() }
+
+    /** The lease's multiplexed tunnel (binary frames, see [io.github.tianli0.switchtether.remote.forward.ForwardFrames]). */
+    fun openForwardTunnel(
+        id: String,
+        events: io.github.tianli0.switchtether.remote.forward.TunnelEvents,
+    ): io.github.tianli0.switchtether.remote.forward.TunnelLink {
+        val ws = tunnelClient.newWebSocket(
+            Request.Builder().url(url("v1/forwards", id, "tunnel")).tagged().build(),
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) = events.onOpen()
+
+                override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) = events.onFrame(bytes.toByteArray())
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(1000, null)
+                    events.onClosed(code, reason)
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) =
+                    events.onClosed(response?.code ?: -1, t.message)
+            },
+        )
+        return object : io.github.tianli0.switchtether.remote.forward.TunnelLink {
+            override fun send(frame: ByteArray): Boolean = ws.send(okio.ByteString.of(*frame))
+            override fun close() {
+                ws.close(1000, null)
+            }
+        }
+    }
 
     // ---- §7.7 files & git (writes need step-up `files_write`) --------------------------------------------
 
@@ -586,8 +687,8 @@ class RemoteApi(
      * Executes asynchronously and reads the body on OkHttp's dispatcher thread, so callers on the
      * Android main thread never perform network I/O (NetworkOnMainThreadException).
      */
-    private suspend fun fetch(request: Request): Fetched = suspendCancellableCoroutine { cont ->
-        val call = (if (request.method == "GET") readClient else client).newCall(request)
+    private suspend fun fetch(request: Request, via: OkHttpClient? = null): Fetched = suspendCancellableCoroutine { cont ->
+        val call = (via ?: if (request.method == "GET") readClient else client).newCall(request)
         cont.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -626,7 +727,16 @@ class RemoteApi(
             } ?: SessionCapabilities()
             val pending = ((root["pendingRequests"] ?: summaryObj["pendingRequests"]) as? JsonArray).orEmpty()
                 .mapNotNull { runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), it) }.getOrNull() }
-            return SessionDetail(summary, caps, pending)
+            return SessionDetail(
+                summary,
+                caps,
+                pending,
+                claudeTools = (root.bool("claudeTools") ?: summaryObj.bool("claudeTools")) == true,
+                permissionMode = root.str("permissionMode") ?: summaryObj.str("permissionMode")
+                    ?: (root["nextStart"] as? JsonObject)?.str("permissionMode"),
+                claudeReadTools = root.bool("claudeReadTools") == true,
+                resumable = root.bool("resumable") == true,
+            )
         }
 
         fun parseEventPage(e: JsonElement, limit: Int, olderPossible: Boolean): EventPage {

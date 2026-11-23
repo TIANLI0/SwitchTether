@@ -1,0 +1,10 @@
+{
+  "agent": "claude_code",
+  "models": [
+    { "id": "default", "label": "Default (recommended)", "description": "Opus for complex work" },
+    { "id": "sonnet", "label": "Sonnet", "efforts": ["low", "medium", "high"] },
+    { "id": "haiku", "label": "Haiku" }
+  ],
+  "efforts": ["low", "medium", "high", "xhigh", "max"],
+  "source": "agent"
+}

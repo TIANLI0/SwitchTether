@@ -101,3 +101,144 @@ impl ClaudeObserver {
         live::transcript_path(&self.claude_dir, cwd, session_id)
     }
 }
+
+/// Rows for sub-agents that are still running in an observed session. A transcript records an
+/// Agent/Task call's sub-agent only with its result, which for a foreground agent comes when it
+/// finishes; meanwhile Claude Code writes the agent's own transcript and a sidecar
+/// `<session>/subagents/agent-<id>.meta.json` naming the call (`toolUseId`). For every running
+/// Agent/Task call without a `sa:<callId>` row this returns a `running` row (same shape and id as
+/// the parser's), so the phone can follow the agent's steps; the result replaces it later.
+/// Only the sidecar files are read, and only while such a call is open.
+pub fn running_subagent_rows(
+    lg: &crate::agents::store::SessionLog,
+    transcript: &std::path::Path,
+) -> Vec<crate::agents::model::EventDraft> {
+    use serde_json::{json, Value};
+    let open: Vec<_> = lg
+        .iter()
+        .filter(|e| {
+            e.kind == "tool_call"
+                && matches!(
+                    e.data.get("name").and_then(Value::as_str),
+                    Some("Agent" | "Task")
+                )
+                && e.data.get("status").and_then(Value::as_str) == Some("running")
+        })
+        .filter_map(|e| {
+            let call = e.data.get("callId").and_then(Value::as_str)?;
+            lg.get(&format!("sa:{call}")).is_none().then_some(e)
+        })
+        .collect();
+    if open.is_empty() {
+        return Vec::new();
+    }
+    let dir = transcript.with_extension("").join("subagents");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut metas: Vec<(String, Value)> = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(agent_id) = name
+            .strip_prefix("agent-")
+            .and_then(|n| n.strip_suffix(".meta.json"))
+        else {
+            continue;
+        };
+        if let Some(v) = std::fs::read(e.path())
+            .ok()
+            .filter(|b| b.len() < 64 * 1024)
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        {
+            metas.push((agent_id.to_string(), v));
+        }
+        if metas.len() > 500 {
+            break;
+        }
+    }
+    let mut out = Vec::new();
+    for call in open {
+        let call_id = call.data["callId"].as_str().unwrap_or_default();
+        let Some((agent_id, meta)) = metas
+            .iter()
+            .find(|(_, m)| m.get("toolUseId").and_then(Value::as_str) == Some(call_id))
+        else {
+            continue;
+        };
+        let input = call.data.get("input").cloned().unwrap_or(Value::Null);
+        let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(String::from);
+        let mut d = crate::agents::model::EventDraft::new(
+            format!("sa:{call_id}"),
+            "subagent",
+            call.ts.clone(),
+            json!({
+                "agentId": agent_id,
+                "description": text(&input, "description").or_else(|| text(meta, "description")),
+                "agentType": text(&input, "subagent_type").or_else(|| text(meta, "agentType")),
+                "model": text(meta, "pickedEffortModel"),
+                "background": meta.get("requestShape").and_then(Value::as_str) == Some("background")
+                    || input.get("run_in_background").and_then(Value::as_bool) == Some(true),
+                "status": "running",
+                "callId": call_id,
+            }),
+        );
+        d.turn_id = call.turn_id.clone();
+        d.parent_id = Some(call_id.to_string());
+        out.push(d);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::store::SessionLog;
+    use serde_json::json;
+
+    #[test]
+    fn a_running_foreground_agent_gets_its_row_from_the_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript = tmp.path().join("s-1.jsonl");
+        let sub = tmp.path().join("s-1").join("subagents");
+        std::fs::create_dir_all(&sub).unwrap();
+        let mut lg = SessionLog::new("claude:s-1", None);
+        let mut p = transcript::ClaudeParser::new();
+        for d in p.feed(&json!({"type":"assistant","message":{"id":"m1","content":[
+            {"type":"tool_use","id":"toolu_1","name":"Agent","input":{"description":"Scan","subagent_type":"Explore"}}]}}))
+        {
+            lg.upsert(d, false);
+        }
+        // No sidecar yet: nothing to add.
+        assert!(running_subagent_rows(&lg, &transcript).is_empty());
+        std::fs::write(
+            sub.join("agent-a42.meta.json"),
+            r#"{"agentType":"Explore","description":"Scan","toolUseId":"toolu_1","requestShape":"foreground"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sub.join("agent-zz.meta.json"),
+            r#"{"toolUseId":"toolu_other"}"#,
+        )
+        .unwrap();
+        let rows = running_subagent_rows(&lg, &transcript);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "sa:toolu_1");
+        assert_eq!(rows[0].data["agentId"], "a42");
+        assert_eq!(rows[0].data["status"], "running");
+        assert_eq!(rows[0].data["background"], false);
+        assert_eq!(rows[0].parent_id.as_deref(), Some("toolu_1"));
+        for d in rows {
+            lg.upsert(d, false);
+        }
+        // Added once; the result replaces it in place.
+        assert!(running_subagent_rows(&lg, &transcript).is_empty());
+        for d in p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done"}]},
+            "toolUseResult":{"status":"completed","agentId":"a42"}}))
+        {
+            lg.upsert(d, false);
+        }
+        let row = lg.get("sa:toolu_1").unwrap();
+        assert_eq!(row.data["status"], "completed");
+        assert_eq!(lg.iter().filter(|e| e.kind == "subagent").count(), 1);
+    }
+}

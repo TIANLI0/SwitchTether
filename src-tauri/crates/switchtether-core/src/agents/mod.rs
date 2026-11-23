@@ -16,6 +16,7 @@ pub mod codex;
 pub mod dsh;
 pub mod managed;
 pub mod model;
+pub mod model_probe;
 pub mod store;
 
 use std::collections::HashMap;
@@ -196,6 +197,45 @@ pub struct CreateSession {
     /// `continue` (default; same conversation id) or `fork` (Claude only: new id
     /// with the same history).
     pub mode: Option<String>,
+    /// Effort / reasoning level (Claude Code: low, medium, high, xhigh, max; Codex: none,
+    /// minimal, low, medium, high, xhigh).
+    #[serde(default)]
+    pub effort: Option<String>,
+}
+
+/// Public id of a conversation SwitchTether runs: the agent's own conversation id with the usual
+/// prefix (`claude:<id>`, `codex:<thread>`, `dsh:<id>`). The same id names the conversation in
+/// history after the process ends or the desktop restarts, so the phone never loses it.
+fn public_id(agent: &str, native: &str) -> String {
+    let prefix = match agent {
+        "claude_code" => "claude",
+        other => other,
+    };
+    format!("{prefix}:{native}")
+}
+
+/// Model names are passed to the agent as one argument; keep them plain.
+fn valid_model(m: &str) -> bool {
+    !m.is_empty()
+        && m.len() <= 100
+        && m.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.:/[]@".contains(c))
+}
+
+fn valid_effort(agent: &str, e: &str) -> bool {
+    match agent {
+        "claude_code" => matches!(e, "low" | "medium" | "high" | "xhigh" | "max"),
+        "codex" => matches!(e, "none" | "minimal" | "low" | "medium" | "high" | "xhigh"),
+        _ => false,
+    }
+}
+
+/// Options for the next start of a conversation that is not running (see `AgentHub::next_start`).
+#[derive(Debug, Clone, Default)]
+struct NextStart {
+    model: Option<String>,
+    effort: Option<String>,
+    permission_mode: Option<String>,
 }
 
 pub struct AgentHub {
@@ -215,6 +255,12 @@ pub struct AgentHub {
     /// Claude Code sub-agent transcripts opened from the phone ("查看过程"), keyed
     /// `<session id>|<agent id>`; tailed on each request, dropped when idle.
     subagent_logs: Mutex<HashMap<String, Loaded>>,
+    /// Model / effort / permission mode chosen on the phone for a conversation that is not
+    /// running: applied when sending a message resumes it (session id -> options).
+    next_start: Mutex<HashMap<String, NextStart>>,
+    /// The agents' own model lists (Claude Code initialize, Codex `model/list`), read by a short
+    /// SwitchTether-owned probe process and cached (agent -> (when, list)).
+    model_lists: Mutex<HashMap<String, (Instant, Value)>>,
     index_cache: Mutex<Option<(Instant, Arc<Vec<IndexedSession>>)>>,
     /// Claude transcript path -> (mtime, len, title); avoids re-reading unchanged transcripts.
     title_cache: Mutex<HashMap<PathBuf, TitleCacheEntry>>,
@@ -255,6 +301,8 @@ impl AgentHub {
             dsh_bin: dsh::managed::find_dsh_bin(),
             loaded: Mutex::new(HashMap::new()),
             subagent_logs: Mutex::new(HashMap::new()),
+            next_start: Mutex::new(HashMap::new()),
+            model_lists: Mutex::new(HashMap::new()),
             dsh_children: Mutex::new(HashMap::new()),
             dsh_turns: Mutex::new(HashMap::new()),
             probe_log: Arc::new(Mutex::new(SessionLog::new("probe", None))),
@@ -441,7 +489,7 @@ impl AgentHub {
             _ => return None,
         };
         m.iter()
-            .filter(|(_, s)| s.origin() != "managed" && s.agent() == agent)
+            .filter(|(_, s)| s.agent() == agent)
             .filter(|(_, s)| s.liveness() == Liveness::Live)
             .find(|(_, s)| {
                 s.native_session_id().as_deref().map(dsh::norm_id) == Some(dsh::norm_id(native))
@@ -467,6 +515,7 @@ impl AgentHub {
                 created_at_ms: None,
                 last_active_at_ms: None,
                 model: None,
+                effort: None,
                 git_branch: None,
                 pid: None,
                 managed: false,
@@ -595,6 +644,7 @@ impl AgentHub {
             created_at_ms: Some(m.created_at_ms()),
             last_active_at_ms: Some(m.last_active_at_ms()),
             model: m.model(),
+            effort: m.effort(),
             git_branch: None,
             pid: None,
             managed: m.origin() == "managed",
@@ -656,6 +706,7 @@ impl AgentHub {
             created_at_ms: l.started_at_ms,
             last_active_at_ms: Some(last_active),
             model: None,
+            effort: None,
             git_branch: None,
             pid: l.pid,
             managed: false,
@@ -756,6 +807,7 @@ impl AgentHub {
                 created_at_ms: s.created_at_ms,
                 last_active_at_ms: s.last_active_at_ms,
                 model: None,
+                effort: None,
                 git_branch: None,
                 pid: None,
                 managed: false,
@@ -847,6 +899,7 @@ impl AgentHub {
             created_at_ms: None,
             last_active_at_ms: modified,
             model: parser.model.clone(),
+            effort: None,
             git_branch: parser.git_branch.clone(),
             pid: None,
             managed: false,
@@ -887,22 +940,41 @@ impl AgentHub {
 
     fn capabilities_for(&self, s: &SessionSummary) -> Capabilities {
         if !s.managed && s.control == Control::Full {
-            return attached_caps(s);
-        }
-        if s.managed {
-            let mut c = managed_caps();
-            if s.liveness != Liveness::Live {
-                c.send_message = Some(CapStatus::Blocked);
-                c.approve = Some(CapStatus::Blocked);
-                c.interrupt = Some(CapStatus::Blocked);
-                c.answer_question = Some(CapStatus::Blocked);
-                c.reason =
-                    Some("The managed process has exited; start a new session to continue.".into());
+            let mut c = attached_caps(s);
+            // A stream-json session attached through the opt-in hook can switch model / effort.
+            if s.terminal_id.is_none() && s.liveness == Liveness::Live {
+                let switchable = self
+                    .find_managed(&s.id)
+                    .is_some_and(|(_, m)| m.can_change_model());
+                c.change_model = switchable.then_some(CapStatus::Partial);
             }
             return c;
         }
+        let live = s.liveness == Liveness::Live;
+        if s.managed && live {
+            let mut c = managed_caps();
+            let switchable = self
+                .find_managed(&s.id)
+                .is_some_and(|(_, m)| m.can_change_model());
+            c.change_model = switchable.then_some(CapStatus::Partial);
+            return c;
+        }
+        if !live && self.can_resume(s) {
+            // History (or a run that ended, e.g. with a desktop restart): the next message resumes
+            // the same conversation the official way and keeps its id.
+            return resumable_caps(&s.agent);
+        }
+        if s.managed {
+            let mut c = managed_caps();
+            c.send_message = Some(CapStatus::Blocked);
+            c.approve = Some(CapStatus::Blocked);
+            c.interrupt = Some(CapStatus::Blocked);
+            c.answer_question = Some(CapStatus::Blocked);
+            c.reason = Some("The process has exited.".into());
+            return c;
+        }
         let mut c = observed_caps(&s.agent);
-        if s.liveness != Liveness::Live {
+        if !live {
             c.live_events = None;
         }
         c
@@ -940,7 +1012,11 @@ impl AgentHub {
                     .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
                     .or_else(|| self.claude.transcript_path(s.cwd.as_deref(), &s.native_id));
                 match path {
-                    Some(p) => Some(load_file(&p, Box::new(ClaudeParser::new()), &log)?),
+                    Some(p) => {
+                        let tail = load_file(&p, Box::new(ClaudeParser::new()), &log)?;
+                        add_running_subagents(&p, &log, false);
+                        Some(tail)
+                    }
                     None => None,
                 }
             }
@@ -1046,6 +1122,31 @@ impl AgentHub {
         v["capabilities"] = json!(self.capabilities_for(&s));
         v["pendingRequests"] = json!(pending);
         v["eventCount"] = json!(log.lock().len());
+        if let Some((_, m)) = self.find_managed(id) {
+            // Claude Code session tools (permission mode, context, plan, …) for a process
+            // SwitchTether started; see `claude_tool`.
+            if m.supports_claude_tools() {
+                v["claudeTools"] = json!(true);
+                v["permissionMode"] = json!(m.permission_mode());
+            }
+        }
+        if v.get("claudeTools").is_none() && s.agent == "claude_code" {
+            // Observed session: the read-only tools (task output, plan, export) only.
+            v["claudeReadTools"] = json!(true);
+        }
+        if v.get("claudeTools").is_none() {
+            // Not running anywhere: a message resumes it under SwitchTether, with the model,
+            // effort and permission mode chosen here beforehand (`next_start`).
+            let resumable = self.resumable(id).await.is_some();
+            v["resumable"] = json!(resumable);
+            if resumable {
+                if let Some(n) = self.next_start.lock().get(id) {
+                    v["nextStart"] = json!({
+                        "model": n.model, "effort": n.effort, "permissionMode": n.permission_mode,
+                    });
+                }
+            }
+        }
         Ok(v)
     }
 
@@ -1145,10 +1246,375 @@ impl AgentHub {
         }))
     }
 
-    /// All Claude Code sub-agents of a session as a tree (`parentAgentId` = null for those the
-    /// session started itself), from the sidecar metadata Claude Code writes next to each
-    /// sub-agent transcript. Empty when the session has none.
+    /// The Agent map of a session: every sub-agent as a tree node (see [`Self::subagent_nodes`])
+    /// with its live state from the session log (status, waiting for a permission, counters,
+    /// current activity, model, prompt, result), the session's background shell tasks, and
+    /// whether the phone may stop them (a process SwitchTether started).
     pub async fn subagent_tree(&self, id: &str) -> ApiResult<Value> {
+        let mut tree = self.subagent_nodes(id).await?;
+        let Some(s) = self.summary(id).await else {
+            return Ok(tree);
+        };
+        let Ok(log) = self.ensure_loaded(&s).await else {
+            return Ok(tree);
+        };
+        let (live, tasks) = agent_map_state(&log.lock());
+        if let Some(nodes) = tree.get_mut("agents").and_then(Value::as_array_mut) {
+            for n in nodes {
+                let call = n
+                    .get("toolUseId")
+                    .and_then(Value::as_str)
+                    .map(String::from)
+                    .or_else(|| {
+                        let a = n.get("agentId").and_then(Value::as_str)?;
+                        live.iter()
+                            .find(|(_, v)| v.get("agentId").and_then(Value::as_str) == Some(a))
+                            .map(|(k, _)| k.clone())
+                    });
+                if let (Some(o), Some(extra)) = (n.as_object_mut(), call.and_then(|c| live.get(&c)))
+                {
+                    for (k, v) in extra.as_object().into_iter().flatten() {
+                        if !v.is_null() && (k != "agentId" || !o.contains_key(k)) {
+                            o.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            }
+        }
+        let stoppable = self
+            .find_managed(id)
+            .is_some_and(|(_, m)| m.agent() == "claude_code" && m.supports_claude_tools());
+        tree["backgroundTasks"] = json!(tasks);
+        tree["stoppable"] = json!(stoppable);
+        Ok(tree)
+    }
+
+    /// The Claude Code IDE's session tools for a process SwitchTether started. Each action is one
+    /// whitelisted control request; responses are reduced to the fields the phone shows (never
+    /// MCP configuration, which can hold secrets) and texts are redacted.
+    pub async fn claude_tool(&self, id: &str, action: &str, p: &Value) -> ApiResult<Value> {
+        let live = self
+            .find_managed(id)
+            .map(|(_, m)| m)
+            .filter(|m| m.supports_claude_tools());
+        let Some(m) = live else {
+            return self.observed_claude_tool(id, action, p).await;
+        };
+        if !m.supports_claude_tools() {
+            return Err(ApiError::unavailable_capability(
+                "BLOCKED",
+                "This session does not offer Claude Code session tools.",
+            ));
+        }
+        let arg = |k: &str| -> ApiResult<String> {
+            p.get(k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty() && v.len() <= 4000)
+                .map(String::from)
+                .ok_or_else(|| ApiError::validation(format!("'{k}' is required")))
+        };
+        let short = Duration::from_secs(20);
+        let redact = |v: Option<&Value>| {
+            v.and_then(Value::as_str)
+                .map(|t| json!(crate::redact::redact_text(t)))
+                .unwrap_or(Value::Null)
+        };
+        match action {
+            "permission_mode" => {
+                let mode = arg("mode")?;
+                if !matches!(
+                    mode.as_str(),
+                    "default" | "acceptEdits" | "plan" | "bypassPermissions" | "auto" | "dontAsk"
+                ) {
+                    return Err(ApiError::validation("unknown permission mode"));
+                }
+                let r = m
+                    .claude_control(
+                        json!({ "subtype": "set_permission_mode", "mode": mode }),
+                        short,
+                    )
+                    .await?;
+                Ok(json!({ "mode": r.get("mode").cloned().unwrap_or(json!(mode)) }))
+            }
+            "context_usage" => {
+                let r = m
+                    .claude_control(json!({ "subtype": "get_context_usage" }), short)
+                    .await?;
+                let cats: Vec<Value> = r
+                    .get("categories")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|c| {
+                        json!({ "id": c.get("id"), "name": c.get("name"), "tokens": c.get("tokens"), "kind": c.get("kind") })
+                    })
+                    .collect();
+                Ok(json!({
+                    "totalTokens": r.get("totalTokens"), "maxTokens": r.get("maxTokens"),
+                    "percentage": r.get("percentage"), "categories": cats,
+                }))
+            }
+            "task_output" => {
+                let task = arg("taskId")?;
+                if !valid_agent_id(&task) {
+                    return Err(ApiError::validation("invalid task id"));
+                }
+                let r = m
+                    .claude_control(
+                        json!({ "subtype": "get_task_output", "task_id": task }),
+                        short,
+                    )
+                    .await?;
+                // The newest 64 KiB are what a phone shows.
+                let out = r.get("output").and_then(Value::as_str).unwrap_or("");
+                let cut = out.len().saturating_sub(64 * 1024);
+                let cut = (cut..=out.len())
+                    .find(|i| out.is_char_boundary(*i))
+                    .unwrap_or(out.len());
+                Ok(json!({
+                    "output": crate::redact::redact_text(&out[cut..]),
+                    "totalBytes": r.get("total_bytes"),
+                    "truncated": cut > 0 || r.get("truncated") == Some(&json!(true)),
+                }))
+            }
+            "plan" => {
+                let r = m
+                    .claude_control(json!({ "subtype": "get_plan" }), short)
+                    .await?;
+                let text = ["content", "plan", "text", "markdown"]
+                    .iter()
+                    .find_map(|k| r.get(*k).filter(|v| v.is_string()));
+                Ok(json!({
+                    "exists": r.get("exists").and_then(Value::as_bool).unwrap_or(text.is_some()),
+                    "content": redact(text),
+                    "path": r.get("path").filter(|v| v.is_string()),
+                }))
+            }
+            "mcp_status" => {
+                let r = m
+                    .claude_control(json!({ "subtype": "mcp_status" }), short)
+                    .await?;
+                let servers: Vec<Value> = r
+                    .get("mcpServers")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|s| {
+                        json!({
+                            "name": s.get("name"), "status": s.get("status"),
+                            "title": s.pointer("/serverInfo/title"),
+                            "version": s.pointer("/serverInfo/version"),
+                            "transport": s.get("transport"), "scope": s.get("scope"),
+                            "tools": s.get("tools").and_then(Value::as_array).map(Vec::len),
+                            "error": redact(s.get("error")),
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "servers": servers }))
+            }
+            "mcp_reconnect" => {
+                let server = arg("server")?;
+                m.claude_control(
+                    json!({ "subtype": "mcp_reconnect", "serverName": server }),
+                    Duration::from_secs(60),
+                )
+                .await?;
+                Ok(json!({ "reconnected": true }))
+            }
+            "run_in_background" => {
+                let call = arg("toolUseId")?;
+                if !valid_agent_id(&call) {
+                    return Err(ApiError::validation("invalid tool use id"));
+                }
+                let r = m
+                    .claude_control(
+                        json!({ "subtype": "background_tasks", "tool_use_id": call }),
+                        short,
+                    )
+                    .await?;
+                Ok(
+                    json!({ "backgrounded": r.get("backgrounded").and_then(Value::as_bool).unwrap_or(false) }),
+                )
+            }
+            "cancel_message" => {
+                let uuid = arg("messageUuid")?;
+                if uuid::Uuid::parse_str(&uuid).is_err() {
+                    return Err(ApiError::validation("invalid message uuid"));
+                }
+                let r = m
+                    .claude_control(
+                        json!({ "subtype": "cancel_async_message", "message_uuid": uuid }),
+                        short,
+                    )
+                    .await?;
+                Ok(
+                    json!({ "cancelled": r.get("cancelled").and_then(Value::as_bool).unwrap_or(false) }),
+                )
+            }
+            "side_question" => {
+                let q = arg("question")?;
+                let r = m
+                    .claude_control(
+                        json!({ "subtype": "side_question", "question": q }),
+                        Duration::from_secs(180),
+                    )
+                    .await?;
+                Ok(json!({ "answer": redact(r.get("response")) }))
+            }
+            "rename" => {
+                let title = arg("title")?;
+                if title.chars().count() > 200 {
+                    return Err(ApiError::validation("title too long"));
+                }
+                m.claude_control(
+                    json!({ "subtype": "rename_session", "title": title, "source": "host" }),
+                    short,
+                )
+                .await?;
+                Ok(json!({ "title": title }))
+            }
+            // Built and verified, but switched off for now: managed processes run without file
+            // checkpoints (see `REWIND_FILES_ENABLED` in claude::managed).
+            "rewind" if !claude::managed::REWIND_FILES_ENABLED => Err(
+                ApiError::unavailable_capability("BLOCKED", "Rewinding files is not enabled."),
+            ),
+            "rewind" => {
+                let msg = arg("userMessageId")?;
+                if uuid::Uuid::parse_str(&msg).is_err() {
+                    return Err(ApiError::validation("invalid message id"));
+                }
+                let dry = p.get("dryRun").and_then(Value::as_bool).unwrap_or(true);
+                let r = m
+                    .claude_control(
+                        json!({ "subtype": "rewind_files", "user_message_id": msg, "dry_run": dry }),
+                        Duration::from_secs(60),
+                    )
+                    .await?;
+                let cwd = m.cwd();
+                let files: Vec<Value> = r
+                    .get("filesChanged")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|f| {
+                        let path = Path::new(f);
+                        json!(path.strip_prefix(&cwd).unwrap_or(path).to_string_lossy())
+                    })
+                    .collect();
+                Ok(json!({
+                    "dryRun": dry,
+                    "canRewind": r.get("canRewind").and_then(Value::as_bool).unwrap_or(false),
+                    "error": redact(r.get("error")),
+                    "filesChanged": files,
+                    "insertions": r.get("insertions"), "deletions": r.get("deletions"),
+                }))
+            }
+            "export" => {
+                let r = m
+                    .claude_control(
+                        json!({ "subtype": "export_conversation" }),
+                        Duration::from_secs(60),
+                    )
+                    .await?;
+                Ok(json!({ "text": redact(r.get("text")), "filename": r.get("default_filename") }))
+            }
+            _ => Err(ApiError::not_found("unknown session tool")),
+        }
+    }
+
+    /// Session tools for a Claude Code session started outside SwitchTether (observe-only: hard
+    /// rule 1). Only what its files already hold is offered, read-only: a background task's output
+    /// file, the latest plan, and the conversation as text. Everything that would need the
+    /// process answers `capability_unavailable` naming the opt-in ways to get it.
+    async fn observed_claude_tool(&self, id: &str, action: &str, p: &Value) -> ApiResult<Value> {
+        let s = self
+            .summary(id)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown session"))?;
+        let blocked = || {
+            ApiError::unavailable_capability(
+                "BLOCKED",
+                "This Claude Code session was started on the computer and can only be watched. Turn on the takeover hook in Settings → Remote for new VS Code panels, or use \"Continue on phone\".",
+            )
+        };
+        // Not running: the permission mode is kept for the resume a message starts.
+        if action == "permission_mode" && self.resumable(id).await.is_some() {
+            let mode = p
+                .get("mode")
+                .and_then(Value::as_str)
+                .filter(|m| {
+                    matches!(
+                        *m,
+                        "default"
+                            | "acceptEdits"
+                            | "plan"
+                            | "bypassPermissions"
+                            | "auto"
+                            | "dontAsk"
+                    )
+                })
+                .ok_or_else(|| ApiError::validation("unknown permission mode"))?;
+            self.next_start
+                .lock()
+                .entry(id.to_string())
+                .or_default()
+                .permission_mode = Some(mode.to_string()).filter(|m| m != "default");
+            return Ok(json!({ "mode": mode, "pending": true }));
+        }
+        if s.agent != "claude_code" || !matches!(action, "task_output" | "plan" | "export") {
+            return Err(blocked());
+        }
+        let log = self.ensure_loaded(&s).await?;
+        let lg = log.lock();
+        match action {
+            "task_output" => {
+                let task = p
+                    .get("taskId")
+                    .and_then(Value::as_str)
+                    .filter(|t| valid_agent_id(t))
+                    .ok_or_else(|| ApiError::validation("invalid task id"))?;
+                let path = observed_task_output_path(&lg, task)
+                    .ok_or_else(|| ApiError::not_found("no output file for this task"))?;
+                drop(lg);
+                read_task_output(&path)
+            }
+            "plan" => {
+                let plan = lg
+                    .iter()
+                    .filter(|e| {
+                        e.kind == "tool_call"
+                            && e.data.get("name").and_then(Value::as_str) == Some("ExitPlanMode")
+                    })
+                    .filter_map(|e| e.data.pointer("/input/plan").and_then(Value::as_str))
+                    .last()
+                    .map(crate::redact::redact_text);
+                Ok(json!({ "exists": plan.is_some(), "content": plan }))
+            }
+            _ => {
+                let text = crate::redact::redact_text(&export_text(&lg));
+                let date = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
+                Ok(json!({ "text": text, "filename": format!("{date}-{}.txt", s.native_id) }))
+            }
+        }
+    }
+
+    /// Agent map "Stop": stops one sub-agent or background task (its task id: a sub-agent's
+    /// `agentId`, a shell's `taskId`) of a session SwitchTether started.
+    pub async fn stop_subagent(&self, id: &str, task_id: &str) -> ApiResult<Value> {
+        if !valid_agent_id(task_id) {
+            return Err(ApiError::validation("invalid task id"));
+        }
+        let m = self.managed_or_blocked(id)?;
+        m.stop_task(task_id).await?;
+        Ok(json!({ "stopped": true, "taskId": task_id }))
+    }
+
+    /// All sub-agents of a session as a tree (`parentAgentId` = null for those the session
+    /// started itself). Claude Code: from the sidecar metadata written next to each sub-agent
+    /// transcript; others: from the log's `subagent` rows. Empty when the session has none.
+    async fn subagent_nodes(&self, id: &str) -> ApiResult<Value> {
         let s = self
             .summary(id)
             .await
@@ -1425,44 +1891,51 @@ impl AgentHub {
 
     pub async fn create_managed(&self, req: CreateSession) -> ApiResult<SessionSummary> {
         let mut req = req;
-        // Continuing a session started elsewhere ("接续会话"): never in place —
-        // a new SwitchTether-owned process continues the same conversation.
+        req.model = req
+            .model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty() && m != "default");
+        if req.model.as_deref().is_some_and(|m| !valid_model(m)) {
+            return Err(ApiError::validation("invalid model name"));
+        }
+        req.effort = req.effort.filter(|e| !e.is_empty() && e != "default");
+        if req
+            .effort
+            .as_deref()
+            .is_some_and(|e| !valid_effort(&req.agent, e))
+        {
+            return Err(ApiError::validation("invalid effort level for this agent"));
+        }
+        // Continuing a conversation: the agent's own resume (`claude --resume`, `thread/resume`,
+        // `session/resume`) in a process SwitchTether starts. The conversation keeps its id, so it
+        // stays one entry everywhere (phone, `claude --resume`, the IDE's history).
         let mut continue_from: Option<(SessionSummary, bool)> = None;
         if let Some(target) = req.resume_from.clone() {
-            let s = self
-                .summary(&target)
-                .await
-                .ok_or_else(|| ApiError::not_found("unknown session to continue"))?;
-            if s.managed || s.control == Control::Full {
-                return Err(ApiError::validation(
-                    "this session is already controlled by SwitchTether",
-                ));
-            }
-            if s.agent != req.agent {
-                return Err(ApiError::validation("agent does not match the session"));
-            }
             let fork = match req.mode.as_deref() {
                 None | Some("continue") => false,
                 Some("fork") => true,
                 Some(_) => return Err(ApiError::validation("mode must be continue or fork")),
             };
-            if !fork {
-                // Already continued here (a second tap, or a retry after a lost reply): follow
-                // that session instead of starting a second writer on the same conversation.
-                let running = self
-                    .managed
-                    .read()
-                    .iter()
-                    .find(|(_, m)| {
-                        m.origin() == "managed"
-                            && m.agent() == s.agent
-                            && m.liveness() == Liveness::Live
-                            && m.native_session_id().as_deref() == Some(s.native_id.as_str())
-                    })
-                    .map(|(k, m)| (k.clone(), m.clone()));
-                if let Some((id, m)) = running {
-                    return Ok(self.managed_summary(&id, m.as_ref()));
+            if let Some((id, m)) = self.find_managed(&target) {
+                if m.liveness() == Liveness::Live {
+                    if m.origin() != "managed" {
+                        return Err(ApiError::validation(
+                            "this session is already controlled by SwitchTether",
+                        ));
+                    }
+                    if !fork {
+                        // Already running here (a second tap, or a retry after a lost reply):
+                        // follow that session instead of starting a second writer.
+                        return Ok(self.managed_summary(&id, m.as_ref()));
+                    }
                 }
+            }
+            let s = self
+                .summary(&target)
+                .await
+                .ok_or_else(|| ApiError::not_found("unknown session to continue"))?;
+            if s.agent != req.agent {
+                return Err(ApiError::validation("agent does not match the session"));
             }
             if !fork
                 && s.liveness == Liveness::Live
@@ -1487,7 +1960,21 @@ impl AgentHub {
         if crate::files::policy::classify(&cwd) == crate::files::Classification::Denied {
             return Err(ApiError::forbidden("this directory is blocked by policy"));
         }
-        let id = format!("managed:{}", crate::util::new_id());
+        // The conversation id, when it is known before the process starts: always for Claude Code
+        // (`--session-id` for new conversations and forks), and when continuing in place.
+        let claude_session = (req.agent == "claude_code").then(|| match &continue_from {
+            Some((s, false)) => s.native_id.clone(),
+            _ => crate::util::new_id(),
+        });
+        let known_native = claude_session.clone().or_else(|| match &continue_from {
+            Some((s, false)) => Some(s.native_id.clone()),
+            _ => None,
+        });
+        let id = match &known_native {
+            Some(n) => public_id(&req.agent, n),
+            // Codex / dsh name a new conversation when it starts; the session is re-keyed then.
+            None => format!("starting:{}", crate::util::new_id()),
+        };
         let log = Arc::new(Mutex::new(SessionLog::new(
             id.clone(),
             Some(self.bus.clone()),
@@ -1507,6 +1994,7 @@ impl AgentHub {
                     .clone()
                     .map(PathBuf::from)
                     .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+                    .or_else(|| find_codex_rollout(&s.native_id))
                     .map(|p| (p, Box::new(CodexParser::new()) as Box<dyn LineParser>)),
                 _ => None,
             };
@@ -1515,19 +2003,22 @@ impl AgentHub {
                     log::warn!("[agents] could not preload history: {e}");
                 }
             }
-            log.lock().upsert(
-                EventDraft::new(
-                    "continued",
-                    "system",
-                    crate::util::now_rfc3339(),
-                    json!({
-                        "subtype": "continued",
-                        "text": "Continued in SwitchTether. New turns run in a SwitchTether process; the original window on the computer does not show them.",
-                        "from": s.id,
-                    }),
-                ),
-                false,
-            );
+            if s.liveness == Liveness::Live {
+                // The original window is still open on the computer: it will not show these turns.
+                log.lock().upsert(
+                    EventDraft::new(
+                        "continued",
+                        "system",
+                        crate::util::now_rfc3339(),
+                        json!({
+                            "subtype": "continued",
+                            "text": "Continued from the phone. New turns run in a new process on the computer; the window that is still open there does not show them.",
+                            "from": s.id,
+                        }),
+                    ),
+                    false,
+                );
+            }
         }
         let session: Arc<dyn ManagedSession> = match req.agent.as_str() {
             "claude_code" => {
@@ -1564,8 +2055,10 @@ impl AgentHub {
                         resume_from,
                         fork,
                         add_dirs,
+                        session_id: claude_session.clone(),
+                        effort: req.effort.clone(),
                     },
-                    log,
+                    log.clone(),
                 )
                 .await
                 .map_err(|e| ApiError::internal("start claude", e))?
@@ -1598,8 +2091,9 @@ impl AgentHub {
                         model: req.model.clone(),
                         approval_policy: approval_policy.into(),
                         resume_thread,
+                        effort: req.effort.clone(),
                     },
-                    log,
+                    log.clone(),
                 )
                 .await
                 .map_err(|e| {
@@ -1628,7 +2122,7 @@ impl AgentHub {
                         cwd,
                         resume_session: continue_from.as_ref().map(|(s, _)| s.native_id.clone()),
                     },
-                    log,
+                    log.clone(),
                 )
                 .await
                 .map_err(|e| ApiError::internal("start dsh", format!("{e:#}")))?
@@ -1640,7 +2134,22 @@ impl AgentHub {
                 ))
             }
         };
-        self.managed.write().insert(id.clone(), session.clone());
+        let id = match (&known_native, session.native_session_id()) {
+            (None, Some(n)) => {
+                let key = public_id(&req.agent, &n);
+                log.lock().rekey(&key);
+                key
+            }
+            _ => id,
+        };
+        {
+            let mut m = self.managed.write();
+            // An ended run of the same conversation is replaced by the new process.
+            m.remove(&id);
+            m.insert(id.clone(), session.clone());
+        }
+        // A history view of this conversation must not tail the transcript a second time.
+        self.loaded.lock().remove(&id);
         if let Some(p) = req.prompt.as_deref().filter(|p| !p.trim().is_empty()) {
             session.send_message(p).await?;
         }
@@ -1649,8 +2158,196 @@ impl AgentHub {
         Ok(summary)
     }
 
-    /// The phone may send messages (and attachments) to this session.
-    pub fn ensure_can_send(&self, id: &str) -> ApiResult<()> {
+    /// The session the phone's message goes to. A conversation that is not running (history, or a
+    /// run that ended, e.g. after the desktop restarted) is resumed the official way first
+    /// (`claude --resume <id>`, `thread/resume`, `session/resume`) and keeps its id.
+    async fn session_for_send(&self, id: &str) -> ApiResult<Arc<dyn ManagedSession>> {
+        if let Some((_, m)) = self.find_managed(id) {
+            if m.liveness() == Liveness::Live || m.origin() != "managed" {
+                return Ok(m);
+            }
+        }
+        if let Some(s) = self.resumable(id).await {
+            // What the phone chose while it was not running.
+            let next = self.next_start.lock().remove(id).unwrap_or_default();
+            let summary = self
+                .create_managed(CreateSession {
+                    agent: s.agent.clone(),
+                    cwd: s.cwd.clone().unwrap_or_default(),
+                    prompt: None,
+                    model: next.model,
+                    permission_mode: next.permission_mode,
+                    resume_from: Some(s.id.clone()),
+                    mode: Some("continue".into()),
+                    effort: next.effort,
+                })
+                .await?;
+            if let Some((_, m)) = self.find_managed(&summary.id) {
+                return Ok(m);
+            }
+        }
+        self.managed_or_blocked(id)
+    }
+
+    /// History of an agent SwitchTether can resume: not running anywhere, agent installed.
+    async fn resumable(&self, id: &str) -> Option<SessionSummary> {
+        let s = self.summary(id).await?;
+        (s.liveness != Liveness::Live && self.can_resume(&s)).then_some(s)
+    }
+
+    fn can_resume(&self, s: &SessionSummary) -> bool {
+        let installed = match s.agent.as_str() {
+            "claude_code" => self.claude.claude_bin.is_some(),
+            "codex" => self.codex_bin.is_some(),
+            "dsh" => self.dsh_bin.is_some(),
+            _ => false,
+        };
+        installed && !s.native_id.is_empty()
+    }
+
+    /// Change model and / or effort of a running session (`""` or `default`: back to the default).
+    pub async fn set_options(
+        &self,
+        id: &str,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> ApiResult<SessionSummary> {
+        let live = self
+            .find_managed(id)
+            .filter(|(_, m)| m.liveness() == Liveness::Live);
+        let Some((key, m)) = live else {
+            // Not running: the choice is kept and applied when a message resumes it.
+            let Some(mut s) = self.resumable(id).await else {
+                return Err(match self.summary(id).await {
+                    None => ApiError::not_found("unknown session"),
+                    Some(x) if x.liveness == Liveness::Live => ApiError::unavailable_capability(
+                        "BLOCKED",
+                        "This conversation is running in a window on the computer that SwitchTether does not control; change its model there, or turn on the takeover hook in Settings → Remote.",
+                    ),
+                    Some(_) => ApiError::conflict(
+                        "This conversation cannot be resumed here (its agent is not installed on the computer).",
+                    ),
+                });
+            };
+            // Absent: unchanged; "" or "default": back to the agent's default.
+            let clean =
+                |v: &str| Some(v.trim().to_string()).filter(|x| !x.is_empty() && x != "default");
+            let model = model.as_deref().map(clean);
+            let effort = effort.as_deref().map(clean);
+            if model
+                .as_ref()
+                .and_then(|m| m.as_deref())
+                .is_some_and(|x| !valid_model(x))
+            {
+                return Err(ApiError::validation("invalid model name"));
+            }
+            if effort
+                .as_ref()
+                .and_then(|e| e.as_deref())
+                .is_some_and(|e| !valid_effort(&s.agent, e))
+            {
+                return Err(ApiError::validation("invalid effort level for this agent"));
+            }
+            let mut pending = self.next_start.lock();
+            let entry = pending.entry(id.to_string()).or_default();
+            if let Some(m) = model {
+                entry.model = m;
+            }
+            if let Some(e) = effort {
+                entry.effort = e;
+            }
+            s.model = entry.model.clone().or(s.model);
+            s.effort = entry.effort.clone();
+            return Ok(s);
+        };
+        if !m.can_change_model() {
+            return Err(ApiError::unavailable_capability(
+                "BLOCKED",
+                "This session runs in a window on the computer; change its model there.",
+            ));
+        }
+        if let Some(model) = model.as_deref().map(str::trim) {
+            let model = Some(model).filter(|x| !x.is_empty() && *x != "default");
+            if model.is_some_and(|x| !valid_model(x)) {
+                return Err(ApiError::validation("invalid model name"));
+            }
+            m.set_model(model).await?;
+        }
+        if let Some(effort) = effort.as_deref() {
+            let effort = Some(effort).filter(|x| !x.is_empty() && *x != "default");
+            if effort.is_some_and(|e| !valid_effort(m.agent(), e)) {
+                return Err(ApiError::validation("invalid effort level for this agent"));
+            }
+            m.set_effort(effort).await?;
+        }
+        let summary = self.managed_summary(&key, m.as_ref());
+        self.bus.publish("session.upserted", json!(summary));
+        Ok(summary)
+    }
+
+    /// Models and effort levels the phone can offer for an agent (and a running session).
+    pub async fn model_options(&self, agent: &str, session: Option<&str>) -> Value {
+        let live = session.and_then(|id| {
+            self.find_managed(id)
+                .filter(|(_, m)| m.liveness() == Liveness::Live)
+                .map(|(_, m)| m)
+        });
+        let mut reported = match &live {
+            Some(m) => m.models().await,
+            None => Value::Null,
+        };
+        if model_list(&reported).is_empty() {
+            // No running session to ask (new session, a conversation not running): the agent's
+            // own list, read by a short probe and cached.
+            reported = self.agent_model_list(agent).await;
+        }
+        model_catalog(agent, &reported)
+    }
+
+    /// The agent's official model list (see `model_probe`), cached for 30 minutes; a failed probe
+    /// keeps the last list it had.
+    async fn agent_model_list(&self, agent: &str) -> Value {
+        const TTL: Duration = Duration::from_secs(30 * 60);
+        if let Some((at, v)) = self.model_lists.lock().get(agent) {
+            if at.elapsed() < TTL {
+                return v.clone();
+            }
+        }
+        let fresh = match agent {
+            "claude_code" => match &self.claude.claude_bin {
+                Some(b) => model_probe::claude_models(b).await,
+                None => None,
+            },
+            "codex" => match &self.codex_bin {
+                Some(b) => model_probe::codex_models(b).await,
+                None => None,
+            },
+            _ => None,
+        };
+        let mut lists = self.model_lists.lock();
+        match fresh {
+            Some(v) => {
+                lists.insert(agent.to_string(), (Instant::now(), v.clone()));
+                v
+            }
+            None => lists
+                .get(agent)
+                .map(|(_, v)| v.clone())
+                .unwrap_or(Value::Null),
+        }
+    }
+
+    /// The phone may send messages (and attachments) to this session: it runs under
+    /// SwitchTether's control, or it is a conversation SwitchTether resumes on the first message.
+    pub async fn ensure_can_send(&self, id: &str) -> ApiResult<()> {
+        if let Some((_, m)) = self.find_managed(id) {
+            if m.liveness() == Liveness::Live || m.origin() != "managed" {
+                return Ok(());
+            }
+        }
+        if self.resumable(id).await.is_some() {
+            return Ok(());
+        }
         self.managed_or_blocked(id).map(|_| ())
     }
 
@@ -1699,12 +2396,19 @@ impl AgentHub {
         device_id: &str,
         client_id: Option<&str>,
     ) -> ApiResult<Value> {
-        let m = self.managed_or_blocked(id)?;
+        if (text.trim().is_empty() && images.is_empty() && attachment_ids.is_empty())
+            || text.len() > 200_000
+        {
+            return Err(ApiError::validation(
+                "message must be 1..200000 bytes (or include images or attachments)",
+            ));
+        }
         let atts = if attachment_ids.is_empty() {
             Vec::new()
         } else {
             self.attachments()?.resolve(device_id, id, attachment_ids)?
         };
+        let m = self.session_for_send(id).await?;
         if (text.trim().is_empty() && images.is_empty() && atts.is_empty()) || text.len() > 200_000
         {
             return Err(ApiError::validation(
@@ -1765,7 +2469,8 @@ impl AgentHub {
             m.log().lock().expect_user_message(text, c);
         }
         m.send_message_with_images(text, images).await?;
-        Ok(json!({ "accepted": true }))
+        // A Claude Code message SwitchTether sent carries this id: cancel it while it is queued.
+        Ok(json!({ "accepted": true, "messageUuid": m.last_message_uuid() }))
     }
 
     pub async fn interrupt(&self, id: &str) -> ApiResult<Value> {
@@ -2069,6 +2774,7 @@ impl AgentHub {
                 if let Err(e) = tail_file(t, &l.log, true) {
                     log::debug!("[agents] tail error: {e}");
                 }
+                add_running_subagents(&t.path, &l.log, true);
             }
         }
         drop(loaded);
@@ -2090,6 +2796,7 @@ fn observed_caps(agent: &str) -> Capabilities {
         answer_question: Some(CapStatus::Blocked),
         interrupt: Some(CapStatus::Blocked),
         continue_session: (known || dsh).then_some(CapStatus::Partial),
+        change_model: None,
         reason: Some(match agent {
             "claude_code" => "The original Claude Code process (CLI / VS Code) cannot be controlled from another program. Use \"Continue on phone\": the same conversation continues in a SwitchTether process (only while the original is idle; the original window will not show the new turns).".into(),
             "codex" => "The original Codex process (CLI / Desktop) cannot be controlled from another program. Use \"Continue on phone\": the thread continues on SwitchTether's own app-server, which Codex allows only when the thread is not open elsewhere.".into(),
@@ -2112,6 +2819,7 @@ fn attached_caps(s: &SessionSummary) -> Capabilities {
             answer_question: Some(CapStatus::Partial),
             interrupt: on(CapStatus::Partial),
             continue_session: None,
+            change_model: None,
             reason: Some(
                 "Runs in a terminal window on the computer: prompts are answered in the mirrored terminal view.".into(),
             ),
@@ -2125,6 +2833,7 @@ fn attached_caps(s: &SessionSummary) -> Capabilities {
         answer_question: on(CapStatus::Partial),
         interrupt: on(CapStatus::Partial),
         continue_session: None,
+        change_model: None,
         reason: (!live).then(|| "The process on the computer has exited.".into()),
     }
 }
@@ -2138,6 +2847,131 @@ fn norm_path(p: &str) -> String {
     }
 }
 
+/// A conversation that is not running anywhere and can be resumed by sending a message.
+fn resumable_caps(agent: &str) -> Capabilities {
+    let how = match agent {
+        "claude_code" => "claude --resume",
+        "codex" => "codex resume",
+        _ => "dsh resume",
+    };
+    Capabilities {
+        read_history: Some(CapStatus::Verified),
+        live_events: None,
+        send_message: Some(CapStatus::Partial),
+        approve: Some(CapStatus::Blocked),
+        answer_question: Some(CapStatus::Blocked),
+        interrupt: Some(CapStatus::Blocked),
+        continue_session: Some(CapStatus::Partial),
+        // Kept and applied when a message resumes it (see AgentHub::next_start).
+        change_model: Some(CapStatus::Partial),
+        reason: Some(format!(
+            "Not running. Sending a message resumes this conversation on the computer ({how}); it keeps its id and stays in the usual history."
+        )),
+    }
+}
+
+/// Models and effort levels offered on the phone. The agent's own list (Claude Code's initialize
+/// response, Codex `model/list`) is used when a running session reported one; otherwise the
+/// aliases every installation accepts.
+/// The model entries of a reported list: Claude Code's `models` array, Codex's `data`, or the
+/// array itself.
+fn model_list(reported: &Value) -> Vec<Value> {
+    reported
+        .get("data")
+        .or_else(|| reported.get("models"))
+        .unwrap_or(reported)
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+pub fn model_catalog(agent: &str, reported: &Value) -> Value {
+    let mut models: Vec<Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push = |id: &str, label: &str, description: Option<&str>, efforts: Option<Value>| {
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            return;
+        }
+        let mut m = json!({ "id": id, "label": label });
+        if let Some(d) = description.filter(|d| !d.is_empty()) {
+            m["description"] = json!(d);
+        }
+        if let Some(e) = efforts {
+            m["efforts"] = e;
+        }
+        models.push(m);
+    };
+    let list = model_list(reported);
+    let official = !list.is_empty();
+    for r in list
+        .iter()
+        .filter(|r| r.get("hidden").and_then(Value::as_bool) != Some(true))
+    {
+        let id = r
+            .get("value")
+            .or_else(|| r.get("model"))
+            .or_else(|| r.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let label = r
+            .get("displayName")
+            .or_else(|| r.get("display_name"))
+            .and_then(Value::as_str)
+            .unwrap_or(id);
+        let efforts = r
+            .get("supportedReasoningEfforts")
+            .or_else(|| r.get("supportedEffortLevels"))
+            .and_then(Value::as_array)
+            .map(|a| {
+                json!(a
+                    .iter()
+                    .filter_map(|e| e
+                        .as_str()
+                        .or_else(|| e.get("reasoningEffort").and_then(Value::as_str))
+                        .or_else(|| e.get("effort").and_then(Value::as_str)))
+                    .collect::<Vec<_>>())
+            })
+            // A model the agent says takes no effort level gets an empty list (the phone then
+            // hides the effort control instead of offering the generic levels).
+            .or_else(|| {
+                (r.get("supportsEffort").and_then(Value::as_bool) == Some(false)).then(|| json!([]))
+            });
+        push(
+            id,
+            label,
+            r.get("description").and_then(Value::as_str),
+            efforts,
+        );
+    }
+    let efforts: &[&str] = match agent {
+        "claude_code" => {
+            // The aliases every installation accepts, only when the agent's own list is unknown.
+            for (id, label) in if official {
+                &[][..]
+            } else {
+                &[
+                    ("default", "Default"),
+                    ("opus", "Opus"),
+                    ("sonnet", "Sonnet"),
+                    ("haiku", "Haiku"),
+                    ("opusplan", "Opus Plan"),
+                ][..]
+            } {
+                push(id, label, None, None);
+            }
+            &["low", "medium", "high", "xhigh", "max"]
+        }
+        "codex" => &["minimal", "low", "medium", "high", "xhigh"],
+        _ => &[],
+    };
+    json!({
+        "agent": agent,
+        "models": models,
+        "efforts": efforts,
+        "source": if official { "agent" } else { "builtin" },
+    })
+}
+
 fn managed_caps() -> Capabilities {
     Capabilities {
         read_history: Some(CapStatus::Verified),
@@ -2147,8 +2981,178 @@ fn managed_caps() -> Capabilities {
         answer_question: Some(CapStatus::Partial),
         interrupt: Some(CapStatus::Verified),
         continue_session: None,
+        change_model: None,
         reason: None,
     }
+}
+
+/// Output file of a background task in an observed Claude Code session. Claude Code names it in
+/// the task's start result ("Output is being written to: …/tasks/<id>.output", or the agent
+/// result's `outputFile`). Only a file named exactly `<task id>.output` is accepted, so a
+/// transcript cannot point the desktop at any other file.
+fn observed_task_output_path(lg: &SessionLog, task: &str) -> Option<PathBuf> {
+    let want = format!("{task}.output");
+    // The parser keeps the path on the task's row: a background shell's `tool_call`
+    // (`taskId`) or a sub-agent's row (`agentId`).
+    lg.iter()
+        .filter(|e| {
+            let d = &e.data;
+            (e.kind == "tool_call" && d.get("taskId").and_then(Value::as_str) == Some(task))
+                || (e.kind == "subagent" && d.get("agentId").and_then(Value::as_str) == Some(task))
+        })
+        .filter_map(|e| e.data.get("outputFile").and_then(Value::as_str))
+        .map(PathBuf::from)
+        .find(|p| p.file_name().and_then(|n| n.to_str()) == Some(want.as_str()) && p.is_file())
+}
+
+/// The newest 64 KiB of a task output file, redacted.
+fn read_task_output(path: &Path) -> ApiResult<Value> {
+    use std::io::{Read, Seek, SeekFrom};
+    const KEEP: u64 = 64 * 1024;
+    let mut f = std::fs::File::open(path).map_err(|e| ApiError::internal("task output", e))?;
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(KEEP);
+    f.seek(SeekFrom::Start(start))
+        .map_err(|e| ApiError::internal("task output", e))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)
+        .map_err(|e| ApiError::internal("task output", e))?;
+    let text = String::from_utf8_lossy(&buf);
+    Ok(json!({
+        "output": crate::redact::redact_text(&text),
+        "totalBytes": len,
+        "truncated": start > 0,
+    }))
+}
+
+/// A session log as plain text, like Claude Code's own export: prompts (`❯`), answers (`●`) and
+/// one line per tool call.
+fn export_text(lg: &SessionLog) -> String {
+    let mut out = String::new();
+    for e in lg.iter().filter(|e| e.parent_id.is_none()) {
+        let text = e
+            .data
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        match e.kind.as_str() {
+            "user_message" if !text.is_empty() => {
+                out.push_str("\n❯ ");
+                out.push_str(&text.replace('\n', "\n  "));
+                out.push('\n');
+            }
+            "assistant_message" if !text.is_empty() => {
+                out.push_str("\n● ");
+                out.push_str(&text.replace('\n', "\n  "));
+                out.push('\n');
+            }
+            "tool_call" => {
+                let name = e.data.get("name").and_then(Value::as_str).unwrap_or("");
+                let title = e.data.get("title").and_then(Value::as_str).unwrap_or("");
+                out.push_str(&format!("  ⎿ {name}({title})\n"));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Live Agent map state from a session log: per spawning call id (`callId` of each `subagent`
+/// row) the fields the map shows, and the background shell tasks. A sub-agent is `waiting`
+/// while a permission request or question raised inside it (parent chain reaches its call or
+/// its row) is unanswered.
+fn agent_map_state(lg: &SessionLog) -> (HashMap<String, Value>, Vec<Value>) {
+    let by_id: HashMap<&str, &model::AgentEvent> = lg.iter().map(|e| (e.id.as_str(), e)).collect();
+    let mut waiting: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for e in lg.iter().filter(|e| {
+        matches!(e.kind.as_str(), "approval_request" | "question")
+            && e.data.get("resolved").and_then(Value::as_bool) != Some(true)
+    }) {
+        let mut cur = e.parent_id.as_deref();
+        let mut hops = 0;
+        while let Some(p) = cur {
+            waiting.insert(p.to_string());
+            cur = by_id.get(p).and_then(|x| x.parent_id.as_deref());
+            hops += 1;
+            if hops > 64 {
+                break;
+            }
+        }
+        // Claude Code names the call the request belongs to.
+        if let Some(t) = e.data.get("toolUseId").and_then(Value::as_str) {
+            waiting.insert(t.to_string());
+        }
+    }
+    let mut live = HashMap::new();
+    for e in lg.iter().filter(|e| e.kind == "subagent") {
+        let d = &e.data;
+        let Some(call) = d
+            .get("callId")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .or_else(|| e.parent_id.clone())
+        else {
+            continue;
+        };
+        let pick = |k: &str| d.get(k).cloned().unwrap_or(Value::Null);
+        let preview_of = |k: &str| {
+            d.get(k)
+                .and_then(Value::as_str)
+                .map(|t| json!(model::preview(t, 600).0))
+                .unwrap_or(Value::Null)
+        };
+        let prompt = by_id
+            .values()
+            .find(|c| {
+                c.kind == "tool_call"
+                    && c.data.get("callId").and_then(Value::as_str) == Some(call.as_str())
+            })
+            .and_then(|c| c.data.pointer("/input/prompt").and_then(Value::as_str))
+            .map(|p| json!(model::preview(p, 2000).0))
+            .unwrap_or(Value::Null);
+        let running = d.get("status").and_then(Value::as_str) == Some("running");
+        live.insert(
+            call.clone(),
+            json!({
+                "agentId": pick("agentId"),
+                "status": pick("status"),
+                "waiting": running && (waiting.contains(&call) || waiting.contains(&e.id)),
+                "background": pick("background"),
+                "model": pick("model"),
+                "tokens": pick("tokens"),
+                "toolUses": pick("toolUses"),
+                "durationMs": pick("durationMs"),
+                "activity": pick("activity"),
+                "summary": preview_of("summary"),
+                "result": preview_of("result"),
+                "prompt": prompt,
+                "startedAt": e.ts,
+                "finishedAt": pick("finishedAt"),
+                "toolUseId": call,
+            }),
+        );
+    }
+    let tasks = lg
+        .iter()
+        .filter(|e| {
+            e.kind == "tool_call" && e.data.get("background").and_then(Value::as_bool) == Some(true)
+        })
+        .map(|e| {
+            let d = &e.data;
+            json!({
+                "taskId": d.get("taskId"),
+                "callId": d.get("callId"),
+                "title": d.get("title"),
+                "status": d.get("status"),
+                "summary": d.get("backgroundSummary"),
+                "exitCode": d.get("exitCode"),
+                "startedAt": e.ts,
+                "finishedAt": d.get("finishedAt"),
+            })
+        })
+        .collect();
+    (live, tasks)
 }
 
 /// `subagent` rows of a session log as tree nodes; the parent is the nearest enclosing
@@ -2301,6 +3305,7 @@ fn dsh_summary_from_log(id: &str) -> Option<SessionSummary> {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64),
         model: None,
+        effort: None,
         git_branch: None,
         pid: None,
         managed: false,
@@ -2412,6 +3417,21 @@ impl Tail {
             parser,
             zstd,
             raw: Vec::new(),
+        }
+    }
+}
+
+/// Claude Code transcripts: rows for sub-agents still running (see
+/// [`claude::running_subagent_rows`]). Other logs have no Agent/Task calls and cost one scan.
+fn add_running_subagents(path: &Path, log: &Arc<Mutex<SessionLog>>, publish: bool) {
+    if path.extension().is_none_or(|e| e != "jsonl") {
+        return;
+    }
+    let rows = claude::running_subagent_rows(&log.lock(), path);
+    if !rows.is_empty() {
+        let mut lg = log.lock();
+        for d in rows {
+            lg.upsert(d, publish);
         }
     }
 }
@@ -2595,6 +3615,137 @@ mod tests {
             .subagent_events("claude:s-1", "nope", None, None, 50)
             .await
             .is_err());
+    }
+
+    /// Observed sessions: a background task's output is read only from the file Claude Code named
+    /// for exactly that task; export renders the log as text.
+    #[test]
+    fn observed_task_output_and_export() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("tasks").join("b1.output");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        std::fs::write(&out, "line 1\nbuild ok\n").unwrap();
+        let mut lg = SessionLog::new("claude:o", None);
+        let mut p = ClaudeParser::new();
+        for r in [
+            json!({"type":"user","message":{"content":"Build it"}}),
+            json!({"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo build","description":"Build","run_in_background":true}}]}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":
+                format!("Command running in background with ID: b1. Output is being written to: {}. You will be notified when it completes.", out.display())}]},
+                "toolUseResult":{"stdout":"","backgroundTaskId":"b1"}}),
+            json!({"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"Started."}]}}),
+        ] {
+            for d in p.feed(&r) {
+                lg.upsert(d, false);
+            }
+        }
+        let path = observed_task_output_path(&lg, "b1").expect("output path");
+        assert_eq!(path, out);
+        let v = read_task_output(&path).unwrap();
+        assert_eq!(v["output"], "line 1\nbuild ok\n");
+        // Another task id never resolves to this file.
+        assert!(observed_task_output_path(&lg, "b2").is_none());
+        let text = export_text(&lg);
+        assert!(text.contains("❯ Build it"));
+        assert!(text.contains("⎿ Bash(Build)"));
+        assert!(text.contains("● Started."));
+    }
+
+    /// Session tools and Stop only act on a process SwitchTether started: an observed session is
+    /// refused before anything is sent.
+    #[tokio::test]
+    async fn session_tools_are_blocked_for_observed_sessions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects").join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(
+            proj.join("observed-1.jsonl"),
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(8),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        // Anything that needs the process is refused; nothing is sent anywhere.
+        for action in [
+            "permission_mode",
+            "rewind",
+            "cancel_message",
+            "rename",
+            "context_usage",
+        ] {
+            let e = hub
+                .claude_tool("claude:observed-1", action, &json!({ "mode": "plan" }))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                e.code,
+                crate::error::ErrorCode::CapabilityUnavailable,
+                "{action}"
+            );
+        }
+        // What the files hold is offered read-only.
+        let export = hub
+            .claude_tool("claude:observed-1", "export", &json!({}))
+            .await
+            .unwrap();
+        assert!(export["text"].as_str().unwrap().contains("❯ hi"));
+        let plan = hub
+            .claude_tool("claude:observed-1", "plan", &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(plan["exists"], false);
+        let e = hub
+            .stop_subagent("claude:observed-1", "a1")
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::CapabilityUnavailable);
+        let e = hub
+            .stop_subagent("claude:observed-1", "../x")
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::ValidationFailed);
+    }
+
+    #[test]
+    fn agent_map_state_reads_live_rows_waiting_and_tasks() {
+        let mut lg = SessionLog::new("claude:m", None);
+        let mut p = ClaudeParser::new();
+        let recs = [
+            json!({"type":"assistant","message":{"id":"m1","content":[
+                {"type":"tool_use","id":"toolu_a","name":"Agent","input":{"description":"Scan","prompt":"Look at src","subagent_type":"Explore"}},
+                {"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"cargo build","run_in_background":true}}]}}),
+            json!({"type":"system","subtype":"task_started","task_id":"a1","tool_use_id":"toolu_a","task_type":"local_agent","is_backgrounded":false}),
+            json!({"type":"system","subtype":"task_progress","task_id":"a1","tool_use_id":"toolu_a","description":"Reading main.rs","usage":{"total_tokens":50,"tool_uses":2,"duration_ms":3000}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"started"}]},"tool_use_result":{"stdout":"","backgroundTaskId":"b9"}}),
+        ];
+        for r in &recs {
+            for d in p.feed(r) {
+                lg.upsert(d, false);
+            }
+        }
+        // A permission prompt raised inside the sub-agent.
+        let mut req = EventDraft::new(
+            "req:1",
+            "approval_request",
+            "2026-11-21T00:00:00Z",
+            json!({"resolved":false,"toolUseId":"toolu_in"}),
+        );
+        req.parent_id = Some("toolu_a".into());
+        lg.upsert(req, false);
+        let (live, tasks) = agent_map_state(&lg);
+        let a = &live["toolu_a"];
+        assert_eq!(a["agentId"], "a1");
+        assert_eq!(a["status"], "running");
+        assert_eq!(a["waiting"], true);
+        assert_eq!(a["activity"], "Reading main.rs");
+        assert_eq!(a["toolUses"], 2);
+        assert_eq!(a["prompt"], "Look at src");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0]["taskId"], "b9");
+        assert_eq!(tasks[0]["status"], "running");
     }
 
     #[test]
@@ -2987,6 +4138,7 @@ mod tests {
                 permission_mode: None,
                 resume_from: Some("claude:busy-1".into()),
                 mode: None,
+                effort: None,
             })
             .await
             .unwrap_err();
@@ -3001,6 +4153,7 @@ mod tests {
                 permission_mode: None,
                 resume_from: Some("claude:busy-1".into()),
                 mode: None,
+                effort: None,
             })
             .await
             .unwrap_err();
@@ -3021,5 +4174,179 @@ mod tests {
         assert_eq!(e.code, crate::error::ErrorCode::CapabilityUnavailable);
         assert_eq!(e.details.unwrap()["status"], "BLOCKED");
         assert!(hub.interrupt("codex:x").await.is_err());
+    }
+
+    /// A conversation that is not running (history, or a run that ended with a desktop restart)
+    /// takes messages: sending resumes it the official way under the same id. Here the agent binary
+    /// does not exist, so the resume itself fails, which proves the send went that way instead of
+    /// being refused as "started outside SwitchTether".
+    #[tokio::test]
+    async fn history_is_resumed_on_send_under_the_same_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("work");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let proj = tmp.path().join("projects").join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let cwd_s = cwd.to_string_lossy().replace('\\', "/");
+        std::fs::write(
+            proj.join("hist-1.jsonl"),
+            format!(
+                r#"{{"type":"user","uuid":"u1","sessionId":"hist-1","cwd":"{cwd_s}","timestamp":"2026-11-20T10:00:00Z","message":{{"role":"user","content":"hello"}}}}"#
+            ) + "\n",
+        )
+        .unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(16),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(
+                tmp.path().to_path_buf(),
+                Some(tmp.path().join("no-such-claude")),
+            ),
+        );
+        let s = hub.summary("claude:hist-1").await.unwrap();
+        assert_eq!(s.liveness, Liveness::Ended);
+        let caps = hub.capabilities_for(&s);
+        assert_eq!(caps.send_message, Some(CapStatus::Partial));
+        assert_eq!(caps.approve, Some(CapStatus::Blocked));
+        assert!(hub.ensure_can_send("claude:hist-1").await.is_ok());
+        let e = hub
+            .send_message("claude:hist-1", "hi again", None)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::Internal, "{e:?}");
+        // Without the agent installed the history stays read-only.
+        let hub = AgentHub::new(
+            EventBus::new(16),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        let s = hub.summary("claude:hist-1").await.unwrap();
+        assert_eq!(
+            hub.capabilities_for(&s).send_message,
+            Some(CapStatus::Blocked)
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_model_and_effort_are_refused_before_starting() {
+        let hub = AgentHub::new(
+            EventBus::new(16),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(PathBuf::from("/nonexistent"), None),
+        );
+        let req = |model: Option<&str>, effort: Option<&str>| CreateSession {
+            agent: "claude_code".into(),
+            cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+            prompt: None,
+            model: model.map(String::from),
+            permission_mode: None,
+            resume_from: None,
+            mode: None,
+            effort: effort.map(String::from),
+        };
+        let e = hub
+            .create_managed(req(Some("opus --dangerously"), None))
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::ValidationFailed);
+        let e = hub
+            .create_managed(req(None, Some("minimal")))
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::ValidationFailed);
+        // Not a known conversation at all (a resumable one keeps the choice for its resume).
+        let e = hub
+            .set_options("claude:nothing-running", Some("opus".into()), None)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::NotFound);
+    }
+
+    /// A conversation that is not running keeps model, effort and permission mode for the resume
+    /// that the next message starts; the detail shows them.
+    #[tokio::test]
+    async fn options_of_a_stopped_conversation_wait_for_its_resume() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects").join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(
+            proj.join("old-2.jsonl"),
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(8),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), Some(PathBuf::from("claude"))),
+        );
+        let s = hub
+            .set_options("claude:old-2", Some("fable".into()), Some("high".into()))
+            .await
+            .unwrap();
+        assert_eq!(s.model.as_deref(), Some("fable"));
+        assert_eq!(s.effort.as_deref(), Some("high"));
+        let r = hub
+            .claude_tool(
+                "claude:old-2",
+                "permission_mode",
+                &json!({ "mode": "plan" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["pending"], true);
+        let d = hub.detail("claude:old-2").await.unwrap();
+        assert_eq!(d["resumable"], true);
+        assert_eq!(d["nextStart"]["model"], "fable");
+        assert_eq!(d["nextStart"]["permissionMode"], "plan");
+        // Effort back to the default; the model stays.
+        hub.set_options("claude:old-2", None, Some("default".into()))
+            .await
+            .unwrap();
+        let d = hub.detail("claude:old-2").await.unwrap();
+        assert_eq!(d["nextStart"]["effort"], Value::Null);
+        assert_eq!(d["nextStart"]["model"], "fable");
+    }
+
+    #[test]
+    fn model_catalog_merges_agent_lists_with_aliases() {
+        let c = model_catalog("claude_code", &Value::Null);
+        assert_eq!(c["source"], "builtin");
+        assert!(c["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"] == "opus"));
+        assert_eq!(c["efforts"].as_array().unwrap().len(), 5);
+        // Claude Code initialize response shape.
+        let reported = json!([
+            {"value": "default", "displayName": "Default (recommended)", "description": "Opus"},
+            {"value": "claude-sonnet-5-5", "displayName": "Sonnet 5.5", "supportedEffortLevels": ["low", "high"]}
+        ]);
+        let c = model_catalog("claude_code", &reported);
+        let models = c["models"].as_array().unwrap();
+        assert_eq!(models[0]["label"], "Default (recommended)");
+        assert_eq!(models[1]["efforts"], json!(["low", "high"]));
+        assert_eq!(models.iter().filter(|m| m["id"] == "default").count(), 1);
+        // Codex `model/list` shape.
+        let reported = json!({"data": [
+            {"id": "gpt-5", "model": "gpt-5", "displayName": "GPT-5",
+             "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "high"}]}
+        ]});
+        let c = model_catalog("codex", &reported);
+        assert_eq!(c["models"][0]["id"], "gpt-5");
+        assert_eq!(c["models"][0]["efforts"], json!(["low", "high"]));
+    }
+
+    #[test]
+    fn rekeyed_logs_relabel_their_events() {
+        let mut lg = SessionLog::new("starting:1", None);
+        lg.upsert(
+            EventDraft::new("a", "system", "t".to_string(), json!({})),
+            false,
+        );
+        lg.rekey("codex:th-1");
+        assert!(lg.iter().all(|e| e.session_id == "codex:th-1"));
+        assert_eq!(public_id("claude_code", "x"), "claude:x");
+        assert_eq!(public_id("codex", "th"), "codex:th");
     }
 }

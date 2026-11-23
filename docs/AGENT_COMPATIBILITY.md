@@ -85,7 +85,30 @@ or rewriting transcript files.
 | Files attached from the phone | PARTIAL — `attachments_reach_the_agent_as_paths_and_images_inline` (fake agent); not yet run with a real agent | Same for every agent (Claude Code, Codex, DeepSeek Harness; managed or taken over): absolute paths in a marked block of the message (PROTOCOL §sessions). Claude Code managed: `--add-dir` for the attachments folder; images ≤ 3 MiB also inline for Claude Code / Codex. Taken-over sessions and dsh may ask for permission to read the path (the request reaches the phone). |
 | Continue an old history | PARTIAL — `--resume <id>` continues the same conversation (refused while the original is busy / waiting; a second request while it already runs in SwitchTether returns that session); `--fork-session` on request (§6a) | PARTIAL — `thread/resume` (§6a) |
 
-Live evidence command: `cargo run -p switchtether-core --example managed_smoke -- claude haiku`
+| Official conversation id (`claude:<uuid>` via `--session-id`; Claude Code's own transcript; listed by `claude --resume`) | VERIFIED (live, 2026-11-21, `resume_smoke`) | PARTIAL — id is the thread id from `thread/start`; not run live |
+| Change model / effort while running | VERIFIED (live: `set_model` to `sonnet` → next reply from `claude-sonnet-5-5`; `apply_flag_settings {effortLevel}` accepted) | UNTESTED live (`turn/start` `model` / `effort`) |
+| Resume on send after the process ended (desktop restart) | VERIFIED (live: new hub, same id, `claude --resume <uuid>`, remembered the first turn's code word) | PARTIAL — `thread/resume` path, not run live |
+
+Live evidence command: `cargo run -p switchtether-core --example resume_smoke -- haiku sonnet` (new session with effort
+`low` → switch to `sonnet` / `medium` → drop the hub → send to the same id from a fresh hub). Output excerpt (2026-11-21,
+Claude Code 2.1.325):
+
+```
+1. created id=claude:cde1ab97-… native=cde1ab97-… effort=Some("low")
+  assistant (claude-haiku-5-5): ALPHA
+   official transcript: Some("C:\\Users\\…\\.claude\\projects\\C--Users-…-Temp--tmpvvKmSh\\cde1ab97-….jsonl")
+   model options (source "agent"): default, opus, fable, sonnet, haiku, …, opusplan
+2. switched: model=Some("sonnet") effort=Some("medium")
+  assistant (claude-sonnet-5-5): BETA
+3. after restart: liveness="ended" sendMessage="PARTIAL" eventCount=8
+  assistant (claude-sonnet-5-5): ZEBRA-42
+   resumed: id="claude:cde1ab97-…" liveness="live" remembers=true
+```
+
+SwitchTether no longer sets its own `CLAUDE_CODE_ENTRYPOINT`; Claude Code names stream-json sessions `sdk-cli` itself,
+as for the official Agent SDK.
+
+Earlier live evidence command: `cargo run -p switchtether-core --example managed_smoke -- claude haiku`
 (with `SMOKE_PROMPT` / `SMOKE_INTERRUPT` variants). Output excerpt:
 
 ```

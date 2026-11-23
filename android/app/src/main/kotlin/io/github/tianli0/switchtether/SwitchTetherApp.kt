@@ -17,5 +17,12 @@ class SwitchTetherApp : Application() {
             override fun onStart(owner: LifecycleOwner) = container.onForeground()
             override fun onStop(owner: LifecycleOwner) = container.onBackground()
         })
+        // Presence observation survives reboots on most builds; re-arming is idempotent and cheap.
+        if (container.companion.associations.value.isNotEmpty()) container.companion.observeAll()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_UI_HIDDEN) container.onTrimMemory()
     }
 }

@@ -1639,6 +1639,8 @@ pub fn run() {
             switchtether::commands::remote_rename_device,
             switchtether::commands::remote_list_terminals,
             switchtether::commands::remote_kill_terminal,
+            switchtether::commands::remote_list_forwards,
+            switchtether::commands::remote_stop_forward,
             switchtether::commands::remote_audit_log,
             switchtether::commands::remote_quit_impact,
             switchtether::commands::remote_takeover_status,

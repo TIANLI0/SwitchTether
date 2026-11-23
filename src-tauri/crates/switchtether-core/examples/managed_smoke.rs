@@ -57,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
             permission_mode: None,
             resume_from: std::env::var("SMOKE_RESUME").ok(),
             mode: std::env::var("SMOKE_MODE").ok(),
+            effort: std::env::var("SMOKE_EFFORT").ok(),
         })
         .await;
     let s = match s {

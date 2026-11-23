@@ -1,5 +1,4 @@
 diff --git a/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/layout/DialogButtonBar.kt b/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/layout/DialogButtonBar.kt
-index dfb996df..9cc22b6a 100644
 --- a/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/layout/DialogButtonBar.kt
 +++ b/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/layout/DialogButtonBar.kt
 @@ -31,6 +31,8 @@ import io.github.suqi8.coui.kmp.basic.MaterialStrokeParams

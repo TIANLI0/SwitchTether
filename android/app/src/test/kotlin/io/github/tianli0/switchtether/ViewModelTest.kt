@@ -393,9 +393,10 @@ class ViewModelTest {
         }
         val vm = SessionsViewModel(FakeConnection(), repo)
         advanceUntilIdle()
-        assertEquals(listOf("a"), vm.state.value.visible.map { it.id })
-        vm.setScope(SessionScope.ALL)
+        // Everything by default (history visible on a fresh start), running sessions first.
         assertEquals(listOf("a", "b", "n"), vm.state.value.visible.map { it.id }) // null lastActive must not crash sorting
+        vm.setScope(SessionScope.LIVE)
+        assertEquals(listOf("a"), vm.state.value.visible.map { it.id })
         vm.setScope(SessionScope.HISTORY)
         assertEquals(listOf("b", "n"), vm.state.value.visible.map { it.id })
         repo.changeFlow.emit(SessionChange.Upserted(summary("b", live = true)))

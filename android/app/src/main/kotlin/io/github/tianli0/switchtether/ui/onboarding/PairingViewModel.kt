@@ -97,8 +97,12 @@ class PairingViewModel(
     }
 
     /** Code screen submitted; [address] is used only when the address was typed by the user. */
+    /** Whether the last code attempt used a typed address (a retry must let the user correct it). */
+    private var lastCodeManual = false
+
     fun submitCode(address: String, code: String) {
         val s = _state.value as? PairingUiState.EnterCode ?: return
+        lastCodeManual = s.manual
         val (host, port) = if (s.manual) {
             val a = ManualAddress.parse(address) ?: run {
                 _state.value = s.copy(error = CodeError.INVALID_ADDRESS)
@@ -134,7 +138,8 @@ class PairingViewModel(
                     host = t.hosts.firstOrNull(),
                     port = t.port,
                     fingerprint = t.fingerprint,
-                    manual = false,
+                    // A typed address stays editable (and pre-filled) instead of being locked in.
+                    manual = lastCodeManual,
                 )
             }
             else -> Unit

@@ -50,6 +50,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalUriHandler
@@ -76,6 +77,7 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
 import io.github.tianli0.switchtether.remote.protocol.Capability
 import io.github.tianli0.switchtether.remote.protocol.SessionDetail
+import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.str
 import io.github.tianli0.switchtether.remote.session.RenderItem
 import io.github.tianli0.switchtether.ui.appContainer
@@ -116,6 +118,10 @@ import io.github.tianli0.switchtether.ui.sessions.render.statusStateLabel
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.launch
 
+
+/** "Rewind files" is built but switched off for now (desktop refuses it too). */
+const val REWIND_FILES_ENABLED = false
+
 @Composable
 fun SessionDetailScreen(
     sessionId: String,
@@ -151,7 +157,9 @@ fun SessionDetailScreen(
     val agent = summary?.agent ?: "unknown"
     val agentLabel = Formatters.agentLabel(agent)
     val cancelLabel = stringResource(R.string.action_cancel)
-    val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent, summary?.cwd, busy) {
+    val claudeTools = state.claudeTools
+    val backgrounding = state.backgrounding
+    val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent, summary?.cwd, busy, claudeTools, backgrounding) {
         val caps = state.detail.valueOrNull?.capabilities
         RenderContext(
             agent = agent,
@@ -192,6 +200,10 @@ fun SessionDetailScreen(
             },
             onLoadImageBytes = vm::loadImageBytes,
             onViewImage = { viewingImage = it },
+            // Claude Code session tools (a Claude process SwitchTether started).
+            onRunInBackground = if (claudeTools) vm::runInBackground else null,
+            isBackgrounding = { it in backgrounding },
+            onRewindFiles = if (claudeTools && REWIND_FILES_ENABLED) vm::previewRewind else null,
         )
     }
 
@@ -201,7 +213,7 @@ fun SessionDetailScreen(
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             uris.forEach { uri ->
                 val (name, size, mime) = pickedFileInfo(context, uri)
-                vm.addAttachment(name, size, mime) { context.contentResolver.openInputStream(uri) }
+                vm.addAttachment(name, size, mime, localUri = uri.toString()) { context.contentResolver.openInputStream(uri) }
             }
         }
     }
@@ -212,6 +224,73 @@ fun SessionDetailScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
     ) { addPicked(it) }
     var showAttach by remember { mutableStateOf(false) }
+    var showModels by rememberSaveable { mutableStateOf(false) }
+    val switchLabel = stringResource(R.string.model_switch_label)
+    ModelEffortSheet(
+        show = showModels,
+        agent = state.detail.valueOrNull?.summary?.agent.orEmpty(),
+        options = state.modelOptions,
+        model = state.detail.valueOrNull?.summary?.model,
+        effort = state.detail.valueOrNull?.summary?.effort,
+        busy = busy != null,
+        onModel = { vm.setModel(it, switchLabel) },
+        onEffort = { vm.setEffort(it, switchLabel) },
+        onDismiss = {
+            showModels = false
+            vm.clearPermissionError()
+        },
+        extra = {
+            // Claude Code's permission mode belongs with the run settings (one sheet, one chip).
+            val claude = state.detail.valueOrNull?.summary?.agent == "claude_code"
+            if (claude && (state.claudeTools || state.resumable)) {
+                Text(
+                    stringResource(R.string.tools_permission),
+                    style = COUITheme.textStyles.footnote1,
+                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                PermissionModeOptions(
+                    current = state.detail.valueOrNull?.permissionMode,
+                    pending = state.permissionPending,
+                    enabled = state.canUseClaudeTools || (state.resumable && state.online),
+                    onSelect = vm::setPermissionMode,
+                )
+                state.permissionError?.let {
+                    Text(stringResource(R.string.tools_permission_failed, it), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger)
+                }
+            }
+        },
+    )
+
+    var showPermission by rememberSaveable { mutableStateOf(false) }
+    PermissionModeSheet(
+        show = showPermission && state.claudeTools,
+        current = state.detail.valueOrNull?.permissionMode,
+        pending = state.permissionPending,
+        error = state.permissionError,
+        enabled = state.canUseClaudeTools,
+        onSelect = vm::setPermissionMode,
+        onDismiss = {
+            showPermission = false
+            vm.clearPermissionError()
+        },
+    )
+    RewindDialog(state.rewind, onConfirm = vm::confirmRewind, onDismiss = vm::dismissRewind)
+    val noticeText = when (val n = state.notice) {
+        null -> null
+        ToolNotice.Withdrawn -> stringResource(R.string.tools_withdrawn)
+        ToolNotice.WithdrawTooLate -> stringResource(R.string.tools_withdraw_too_late)
+        ToolNotice.Backgrounded -> stringResource(R.string.tools_backgrounded)
+        ToolNotice.NotBackgrounded -> stringResource(R.string.tools_not_backgrounded)
+        is ToolNotice.Rewound -> pluralStringResource(R.plurals.rewind_done, n.files, n.files)
+        is ToolNotice.Failed -> n.message
+    }
+    LaunchedEffect(state.notice) {
+        if (noticeText != null) {
+            android.widget.Toast.makeText(context, noticeText, android.widget.Toast.LENGTH_SHORT).show()
+            vm.consumeNotice()
+        }
+    }
 
     LaunchedEffect(state.continuedAs?.id) {
         val created = state.continuedAs ?: return@LaunchedEffect
@@ -233,7 +312,12 @@ fun SessionDetailScreen(
         onSend = vm::send,
         onRetryOutgoing = vm::retrySend,
         onDeleteOutgoing = vm::deleteOutgoing,
+        onEditOutgoing = vm::editOutgoing,
         onInterrupt = { confirmInterrupt = true },
+        onModelClick = {
+            vm.loadModelOptions()
+            showModels = true
+        },
         // An ended session has no window on the computer that could disagree: resume at once.
         // A session still open there gets the short explanation first.
         onContinue = {
@@ -248,6 +332,11 @@ fun SessionDetailScreen(
         onPickImage = { showAttach = true },
         onRemoveImage = vm::removeImage,
         onRemoveAttachment = vm::removeAttachment,
+        onWithdrawOutgoing = vm::withdrawOutgoing,
+        onOpenTools = if (state.claudeTools || state.claudeReadTools) {
+            { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId)) }
+        } else null,
+        onPermissionClick = { showPermission = true },
     )
 
     AttachSheet(
@@ -345,12 +434,22 @@ fun SessionDetailContent(
     onTogglePin: () -> Unit = {},
     onRetryOutgoing: (String) -> Unit = {},
     onDeleteOutgoing: (String) -> Unit = {},
+    onEditOutgoing: (String) -> Unit = {},
     onPickImage: () -> Unit = {},
     onRemoveImage: (Int) -> Unit = {},
     onRemoveAttachment: (String) -> Unit = {},
+    onModelClick: () -> Unit = {},
+    onWithdrawOutgoing: ((String) -> Unit)? = null,
+    /** Claude Code session tools page (null = not offered for this session). */
+    onOpenTools: (() -> Unit)? = null,
+    onPermissionClick: (() -> Unit)? = null,
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
+    val hasAgents = summary?.agent in SUBAGENT_AGENTS && state.log.events.any {
+        it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT ||
+            (it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true)
+    }
     // The read-only tip explains once; the read-only composer bar keeps saying it afterwards.
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val hints = remember(appCtx) { (appCtx as? io.github.tianli0.switchtether.SwitchTetherApp)?.container?.hintPrefs }
@@ -369,6 +468,8 @@ fun SessionDetailContent(
         } ?: "",
         onBack = onBack,
         actions = {
+            // Live Update tracking (Fluid Cloud) stays in the title bar; the other functions are
+            // capsules in the row over the conversation.
             if (summary != null && (summary.isLive || pinned)) {
                 ToolbarIcon(
                     if (pinned) AppIcons.Unpin else AppIcons.Pin,
@@ -417,46 +518,50 @@ fun SessionDetailContent(
             when (val ev = state.events) {
                 Loadable.Loading -> LoadingState(stringResource(R.string.state_loading))
                 is Loadable.Failed -> ErrorState(ev.error.title(), ev.error.detail, stringResource(R.string.action_retry), onReload)
-                is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing)
+                is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing)
             }
             // Floats over the top of the conversation instead of taking a row of its own.
             StatusChipRow(
                 state,
-                onClick = { showInfo = true },
-                onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
-                onOpenSubagents = onOpenSubagentTree?.takeIf {
-                    summary?.agent in SUBAGENT_AGENTS && state.log.events.any { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT }
-                },
+                onInfo = { showInfo = true },
+                onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
                 subagentCount = state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT },
+                agentsDot = agentsPillState(state),
+                onOpenTools = onOpenTools,
+                onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
                 modifier = Modifier.align(Alignment.TopStart),
             )
         }
-        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment)
+        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) })
     }
     SessionInfoSheet(show = showInfo, detail = state.detail.valueOrNull, activity = state.rollingStatus?.data?.takeIf { it.str("state") !in setOf("idle", "completed", null) }?.let { listOfNotNull(statusStateLabel(it.str("state")).ifEmpty { null }, it.str("detail")).joinToString(" · ") }, onDismiss = { showInfo = false })
 }
 
 /**
  * Capsules floating over the top of the conversation (what it is doing, who waits, how it is
- * attached, limits, branch, terminal): no background and no row of their own; messages scroll
- * underneath. Only the capsules take touches; tapping them opens the full info sheet.
+ * attached, limits, branch, terminal, sub-agents, session tools): no background and no row of
+ * their own; messages scroll underneath. Only the capsules take touches; tapping the row opens
+ * the full info sheet.
  */
 @Composable
 private fun StatusChipRow(
     state: SessionDetailState,
-    onClick: () -> Unit,
-    onOpenTerminal: (() -> Unit)?,
+    onInfo: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenSubagents: (() -> Unit)? = null,
     subagentCount: Int = 0,
+    agentsDot: AgentMapState? = null,
+    onOpenTools: (() -> Unit)? = null,
+    onOpenTerminal: (() -> Unit)? = null,
 ) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
     val terminalLabel = stringResource(R.string.open_terminal)
+    val toolsLabel = stringResource(R.string.tools_open)
     val bg = io.github.tianli0.switchtether.ui.common.pageContainerColor().compositeOver(COUITheme.colorScheme.background)
     Column(
         modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(SquircleShape(16.dp))
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onClick).padding(vertical = 2.dp),
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 2.dp),
     ) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status), backdrop = bg)
@@ -471,9 +576,42 @@ private fun StatusChipRow(
             }
             if (onOpenSubagents != null) {
                 val label = pluralStringResource(R.plurals.subagent_chip, subagentCount, subagentCount)
-                InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("subagent-tree"), backdrop = bg)
+                // Like Claude Code's agents pill: a dot while an agent waits, works or failed.
+                val dot = when (agentsDot) {
+                    AgentMapState.Waiting -> dev.warn
+                    AgentMapState.Working -> dev.info
+                    AgentMapState.Failed -> dev.danger
+                    else -> null
+                }
+                val described = agentsDot?.takeIf { dot != null }?.let { "$label · ${agentStateLabel(it)}" } ?: label
+                if (dot != null) {
+                    InfoChip(label, dot = dot, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = described }.testTag("subagent-tree"), backdrop = bg)
+                } else {
+                    InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("subagent-tree"), backdrop = bg)
+                }
+            }
+            // Extra functions sit in the same row as the sub-agents.
+            if (onOpenTools != null) {
+                InfoChip(toolsLabel, icon = AppIcons.SessionTools, onClick = onOpenTools, modifier = Modifier.semantics { contentDescription = toolsLabel }.testTag("chip-tools"), backdrop = bg)
             }
         }
+    }
+}
+
+/**
+ * The agents pill's state from the session log: waiting (an agent works and the session waits
+ * for an answer), working, failed (the latest finished agent failed), else none.
+ */
+private fun agentsPillState(state: SessionDetailState): AgentMapState? {
+    val kinds = io.github.tianli0.switchtether.remote.protocol.EventKinds
+    val rows = state.log.events.filter { it.kind == kinds.SUBAGENT }
+    val shells = state.log.events.filter { it.kind == kinds.TOOL_CALL && it.data.bool("background") == true }
+    val working = rows.any { it.data.str("status") == "running" } || shells.any { it.data.str("status") == "running" }
+    return when {
+        working && state.detail.valueOrNull?.summary?.waitingFor != null -> AgentMapState.Waiting
+        working -> AgentMapState.Working
+        rows.lastOrNull()?.data?.str("status") == "failed" -> AgentMapState.Failed
+        else -> null
     }
 }
 
@@ -489,11 +627,14 @@ private fun EventList(
     onToggleSteps: (String) -> Unit,
     onRetryOutgoing: (String) -> Unit,
     onDeleteOutgoing: (String) -> Unit,
+    onEditOutgoing: (String) -> Unit,
+    onWithdrawOutgoing: ((String) -> Unit)? = null,
 ) {
     val rows = chatRows(state)
     val follow = rememberFollowState()
     // Opening a session lands at the bottom; only then may scrolling to the top load older pages.
-    var initialScrollDone by remember(state.sessionId) { mutableStateOf(false) }
+    // Saveable: coming back from a sub-agent page keeps the reading position instead of jumping down.
+    var initialScrollDone by androidx.compose.runtime.saveable.rememberSaveable(state.sessionId) { mutableStateOf(false) }
     LaunchedEffect(rows.isNotEmpty()) {
         if (rows.isNotEmpty() && !initialScrollDone) {
             listState.scrollToEnd()
@@ -530,7 +671,7 @@ private fun EventList(
                 when (row) {
                     is TimelineRow.Event -> TimelineEventRow(row.item, row.segment, ctx)
                     is TimelineRow.Steps -> StepsHeader(row, onToggleSteps)
-                    is TimelineRow.Outgoing -> OutgoingBubble(row.message, onRetryOutgoing, onDeleteOutgoing)
+                    is TimelineRow.Outgoing -> OutgoingBubble(row.message, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdraw = onWithdrawOutgoing?.takeIf { state.online })
                     TimelineRow.Typing -> TypingRow(ctx)
                 }
             }
@@ -594,6 +735,9 @@ private fun Composer(
     onPickImage: () -> Unit = {},
     onRemoveImage: (Int) -> Unit = {},
     onRemoveAttachment: (String) -> Unit = {},
+    onModelClick: () -> Unit = {},
+    onPermissionClick: (() -> Unit)? = null,
+    onViewImage: (io.github.tianli0.switchtether.ui.sessions.render.ImagePreview) -> Unit = {},
 ) {
     val s = state.detail.valueOrNull?.summary
     Column(
@@ -681,12 +825,56 @@ private fun Composer(
             }
         }
         if (state.draftAttachments.isNotEmpty()) {
+            // Photos as thumbnails (tap to look at the whole picture), other files as chips.
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 4.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                state.draftAttachments.forEach { a -> DraftAttachmentChip(a, onRemove = { onRemoveAttachment(a.localId) }) }
+                state.draftAttachments.forEach { a ->
+                    if (a.isImage && a.localUri != null) {
+                        DraftImageTile(a, onRemove = { onRemoveAttachment(a.localId) }, onPreview = onViewImage)
+                    } else {
+                        DraftAttachmentChip(a, onRemove = { onRemoveAttachment(a.localId) })
+                    }
+                }
             }
+        }
+        val showPermission = state.claudeTools && onPermissionClick != null
+        if ((state.canChangeModel && s != null) || showPermission) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if ((state.canChangeModel || showPermission) && s != null) {
+                    // Model and effort of the running session, one tap away (like the IDE's model picker).
+                    Row(
+                        Modifier
+                            .padding(start = 4.dp, bottom = 6.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClick = onModelClick)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("model-chip"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(AppIcons.Settings, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.size(4.dp))
+                        val mode = state.detail.valueOrNull?.permissionMode?.takeIf { it != "default" }
+                        Text(
+                            listOfNotNull(modelEffortSummary(s.model, s.effort).ifBlank { null }, mode?.let { permissionModeLabel(it) })
+                                .joinToString(" · "),
+                            style = COUITheme.textStyles.footnote1,
+                            color = COUITheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        } else if (state.resumesOnSend) {
+            Text(
+                stringResource(R.string.composer_resume_hint),
+                style = COUITheme.textStyles.footnote2,
+                color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
+            )
         }
         Row(verticalAlignment = Alignment.Bottom) {
             val showInterrupt = state.canInterrupt && s != null && s.isLive && s.status != "idle"
@@ -762,6 +950,72 @@ private fun AttachSheet(show: Boolean, onImages: () -> Unit, onFiles: () -> Unit
         }
     }
 }
+
+/**
+ * A picked photo in the composer: its thumbnail (decoded small from the phone's copy), the upload
+ * progress or failure on top, a remove button, and a tap that shows the whole picture.
+ */
+@Composable
+private fun DraftImageTile(a: DraftAttachment, onRemove: () -> Unit, onPreview: (io.github.tianli0.switchtether.ui.sessions.render.ImagePreview) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val dev = LocalDevColors.current
+    val uri = a.localUri ?: return
+    val thumb by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, uri) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { decodeThumbnail(context, android.net.Uri.parse(uri), 256) }
+    }
+    val scope = rememberCoroutineScope()
+    Box(
+        Modifier.size(64.dp).clip(SquircleShape(12.dp)).background(COUITheme.colorScheme.surfaceContainer)
+            .clickable(role = androidx.compose.ui.semantics.Role.Image, onClickLabel = stringResource(R.string.render_image_preview)) {
+                scope.launch {
+                    val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching {
+                            context.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { it.readBytes() }
+                        }.getOrNull()
+                    }
+                    if (bytes != null) onPreview(io.github.tianli0.switchtether.ui.sessions.render.ImagePreview(alt = a.name, bytes = bytes))
+                }
+            }
+            .testTag("draft-image"),
+        contentAlignment = Alignment.Center,
+    ) {
+        thumb?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it,
+                contentDescription = a.name,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } ?: Icon(AppIcons.Image, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(22.dp))
+        when {
+            a.failure != null -> Box(Modifier.fillMaxSize().background(dev.danger.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                Icon(AppIcons.Info, contentDescription = stringResource(R.string.attach_failed), tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(20.dp))
+            }
+            a.uploading -> Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
+                RotatingProgressIndicator(color = androidx.compose.ui.graphics.Color.White, size = 20.dp, ringDiameter = 16.dp, strokeWidth = 2.dp)
+            }
+        }
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(3.dp).size(20.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
+                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AppIcons.Close, contentDescription = stringResource(R.string.attach_remove), tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(11.dp))
+        }
+    }
+}
+
+/** A small bitmap of a picked photo (at most [maxPx] on its long side), or null. */
+private fun decodeThumbnail(context: android.content.Context, uri: android.net.Uri, maxPx: Int): androidx.compose.ui.graphics.ImageBitmap? = runCatching {
+    val r = context.contentResolver
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    r.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
+    val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    r.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }?.asImageBitmap()
+}.getOrNull()
 
 /** A picked file in the composer: name, upload progress or what went wrong, and remove. */
 @Composable

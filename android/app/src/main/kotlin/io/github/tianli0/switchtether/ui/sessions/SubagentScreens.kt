@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,6 +48,7 @@ import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.common.loadable
 import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.ui.components.PageCard
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.icons.AppIcons
@@ -71,9 +73,13 @@ val SUBAGENT_AGENTS = setOf("claude_code", "codex", "dsh")
 /** How long a sub-agent without `finished` still counts as working after its last write. */
 private const val ACTIVE_WINDOW_MS = 120_000L
 
-/** Running = not marked finished and written to recently (Claude Code sets `finished` at the end). */
+/**
+ * Running: the live status when the desktop knows it (the session log's row); otherwise not
+ * marked finished and written to recently (Claude Code sets `finished` at the end).
+ */
 fun SubagentNode.isRunning(now: Long = System.currentTimeMillis()): Boolean =
-    finished != true && (updatedAtMs ?: 0L) > now - ACTIVE_WINDOW_MS
+    status?.let { it == "running" }
+        ?: (finished != true && (updatedAtMs ?: 0L) > now - ACTIVE_WINDOW_MS)
 
 data class SubagentState(
     val page: Loadable<SubagentPage> = Loadable.Loading,
@@ -191,7 +197,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
                 .filter { it.event.kind != EventKinds.STATUS }
             val trail = SubagentTree.trail(state.tree, agentId)
             val children = SubagentTree.flatten(state.tree).filter { it.node.parentAgentId == agentId }
-            LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 item(key = "trail") { Breadcrumb(sessionId, agent, trail, heading, onOpen) }
                 if (page.hasMoreBefore) {
                     item(key = "older") { Note(stringResource(R.string.subagent_older_omitted)) }
@@ -212,7 +218,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
                             color = COUITheme.colorScheme.onSurfaceVariantSummary,
                             modifier = Modifier.padding(start = 24.dp, top = 16.dp, bottom = 6.dp),
                         )
-                        PageCard { children.forEachIndexed { i, b -> BranchRow(b.node, if (i == children.lastIndex) "└─ " else "├─ ") { onOpen(Route.Subagent(sessionId, b.node.agentId, b.node.description, agent)) } } }
+                        PageCard { children.forEachIndexed { i, b -> BranchRow(b.node, last = i == children.lastIndex) { onOpen(Route.Subagent(sessionId, b.node.agentId, b.node.description, agent)) } } }
                     }
                 }
                 if (running) item(key = "live") { Note(stringResource(R.string.subagent_following)) }
@@ -254,18 +260,18 @@ private fun Note(text: String) {
 
 /** A row of the branch tree: connector glyphs, status dot, description, type and time. */
 @Composable
-private fun BranchRow(node: SubagentNode, prefix: String, onClick: () -> Unit) {
+private fun BranchRow(node: SubagentNode, last: Boolean, onClick: () -> Unit) {
     val dev = LocalDevColors.current
     val running = node.isRunning()
     Row(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp).testTag("branch-${node.agentId}"),
+        Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp).testTag("branch-${node.agentId}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(prefix, style = DevType.code, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+        TreeGutter(depth = 0, rails = emptyList(), last = last)
         val dot = if (running) dev.info else if (node.finished == true) dev.ok else dev.neutral
         androidx.compose.foundation.Canvas(Modifier.size(8.dp)) { drawCircle(dot) }
         Spacer(Modifier.size(8.dp))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
             Text(
                 node.description?.takeIf { it.isNotBlank() } ?: node.agentType ?: node.agentId,
                 style = COUITheme.textStyles.body2,
@@ -284,53 +290,3 @@ private fun BranchRow(node: SubagentNode, prefix: String, onClick: () -> Unit) {
     }
 }
 
-class SubagentTreeViewModel(private val sessionId: String, private val repo: SessionRepository) : ViewModel() {
-    private val _tree = MutableStateFlow<Loadable<List<SubagentNode>>>(Loadable.Loading)
-    val tree: StateFlow<Loadable<List<SubagentNode>>> = _tree.asStateFlow()
-
-    init {
-        viewModelScope.launch {
-            while (isActive) {
-                val next = loadable { repo.subagentTree(sessionId) }
-                if (next is Loadable.Ready || _tree.value !is Loadable.Ready) _tree.value = next
-                // Refresh while anything in the tree is still working.
-                if (_tree.value.valueOrNull?.none { it.isRunning() } != false) break
-                delay(3_000)
-            }
-        }
-    }
-
-    fun retry() {
-        _tree.value = Loadable.Loading
-        viewModelScope.launch { _tree.value = loadable { repo.subagentTree(sessionId) } }
-    }
-}
-
-/** Every sub-agent of the session as a branch tree, like Claude Code's agent list. */
-@Composable
-fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) -> Unit, agent: String = "claude_code") {
-    val vm = containerViewModel(key = "subagent-tree:$sessionId") { SubagentTreeViewModel(sessionId, it.sessions) }
-    val tree by vm.tree.collectAsStateWithLifecycle()
-    val n = tree.valueOrNull?.size ?: 0
-    Page(title = stringResource(R.string.subagent_tree_title), subtitle = if (n > 0) pluralStringResource(R.plurals.subagent_chip, n, n) else "", onBack = onBack) {
-        LoadableContent(tree, onRetry = vm::retry) { nodes ->
-            val branches = SubagentTree.flatten(nodes)
-            LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-                if (branches.isEmpty()) {
-                    item { Note(stringResource(R.string.subagent_tree_empty)) }
-                } else {
-                    item {
-                        PageCard {
-                            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                                branches.forEach { b ->
-                                    BranchRow(b.node, SubagentTree.prefix(b)) { onOpen(Route.Subagent(sessionId, b.node.agentId, b.node.description, agent)) }
-                                }
-                            }
-                        }
-                    }
-                    item { Note(stringResource(R.string.subagent_tree_note)) }
-                }
-            }
-        }
-    }
-}

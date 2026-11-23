@@ -1,5 +1,4 @@
 diff --git a/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/basic/BottomBarBackdropRenderer.android.kt b/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/basic/BottomBarBackdropRenderer.android.kt
-index 5369a16..e41f4ab 100644
 --- a/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/basic/BottomBarBackdropRenderer.android.kt
 +++ b/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/basic/BottomBarBackdropRenderer.android.kt
 @@ -39,7 +39,6 @@ import androidx.compose.ui.viewinterop.AndroidView

@@ -111,6 +111,31 @@ pub async fn remote_kill_terminal(
     Ok(ok)
 }
 
+/// Port forwards of every paired phone (docs/PROTOCOL.md §7.11).
+#[tauri::command]
+pub async fn remote_list_forwards(state: State<'_, RemoteState>) -> Result<Value, String> {
+    Ok(json!(state.get()?.ctx.forwards.list_all()))
+}
+
+#[tauri::command]
+pub async fn remote_stop_forward(
+    state: State<'_, RemoteState>,
+    id: String,
+) -> Result<bool, String> {
+    let rt = state.get()?;
+    let Some(lease) = rt.ctx.forwards.remove(None, &id) else {
+        return Ok(false);
+    };
+    rt.ctx.registry.audit(
+        Some(&lease.device_id),
+        "forward.stop",
+        Some(&lease.port.to_string()),
+        "ok",
+        Some("by desktop"),
+    );
+    Ok(true)
+}
+
 #[tauri::command]
 pub async fn remote_audit_log(
     state: State<'_, RemoteState>,

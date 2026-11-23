@@ -15,6 +15,7 @@
 //!   duplicated here).
 //! - [`terminal`], [`files`], [`git`]: desktop-side terminal (PTY + emulator),
 //!   file and git services.
+//! - [`forward`]: port forwarding leases and the multiplexed tunnel.
 //! - [`agents`]: agent adapters (Claude Code, Codex) and the agent event schema.
 //!
 //! The crate has no Tauri dependency so it can be tested in isolation.
@@ -27,6 +28,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod files;
+pub mod forward;
 pub mod git;
 pub mod identity;
 pub mod net;

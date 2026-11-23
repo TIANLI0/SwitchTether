@@ -121,6 +121,7 @@ object StepUpScopes {
     const val TERMINAL = "terminal"
     const val FILES_WRITE = "files_write"
     const val CONFIG_WRITE = "config_write"
+    const val PORT_FORWARD = "port_forward"
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -218,6 +219,8 @@ data class SessionSummary(
     val createdAtMs: Long? = null,
     val lastActiveAtMs: Long? = null,
     val model: String? = null,
+    /** Effort / reasoning level chosen for a session SwitchTether runs (`low` … `max`). */
+    val effort: String? = null,
     val gitBranch: String? = null,
     val pid: Long? = null,
     val managed: Boolean = false,
@@ -262,6 +265,8 @@ data class SessionCapabilities(
     val interrupt: String? = null,
     /** Present (e.g. `PARTIAL`) when the session can be continued as a managed one on the phone. */
     val continueSession: String? = null,
+    /** Present when model / effort of the running session can be changed (`POST …/options`). */
+    val changeModel: String? = null,
     val reason: String? = null,
 ) {
     fun status(name: Capability): CapStatus = CapStatus.parse(
@@ -273,17 +278,28 @@ data class SessionCapabilities(
             Capability.ANSWER_QUESTION -> answerQuestion
             Capability.INTERRUPT -> interrupt
             Capability.CONTINUE_SESSION -> continueSession
+            Capability.CHANGE_MODEL -> changeModel
         },
     )
 }
 
-enum class Capability { READ_HISTORY, LIVE_EVENTS, SEND_MESSAGE, APPROVE, ANSWER_QUESTION, INTERRUPT, CONTINUE_SESSION }
+enum class Capability { READ_HISTORY, LIVE_EVENTS, SEND_MESSAGE, APPROVE, ANSWER_QUESTION, INTERRUPT, CONTINUE_SESSION, CHANGE_MODEL }
 
 /** `GET /v1/sessions/{id}`: the summary fields plus capabilities and open requests. */
 data class SessionDetail(
     val summary: SessionSummary,
     val capabilities: SessionCapabilities,
     val pendingRequests: List<AgentEvent>,
+    /** Claude Code session tools are offered (`POST …/claude/{action}`): a Claude process SwitchTether started. */
+    val claudeTools: Boolean = false,
+    /** Current Claude Code permission mode when [claudeTools] (`default`, `acceptEdits`, `plan`, …). */
+    val permissionMode: String? = null,
+    /** A Claude Code session started on the computer (observe-only): only the read-only tools are
+     *  offered (plan, export, background task output). */
+    val claudeReadTools: Boolean = false,
+    /** Not running anywhere: a message resumes it under SwitchTether, with the model, effort and
+     *  permission mode chosen beforehand ([permissionMode] then is that pending choice). */
+    val resumable: Boolean = false,
 )
 
 @Serializable
@@ -404,6 +420,36 @@ data class CreateSessionBody(
     val resumeFrom: String? = null,
     /** `"continue"` with [resumeFrom]. */
     val mode: String? = null,
+    /** Effort / reasoning level (Claude Code: low … max; Codex: minimal … xhigh). */
+    val effort: String? = null,
+)
+
+/** `POST /v1/sessions/{id}/options`: absent = unchanged, `""` = the agent's default. */
+@kotlinx.serialization.Serializable
+data class SessionOptionsBody(
+    val commandId: String,
+    val model: String? = null,
+    val effort: String? = null,
+)
+
+/** One model offered by `GET /v1/agents/{agent}/models`. */
+@kotlinx.serialization.Serializable
+data class ModelOption(
+    val id: String,
+    val label: String = id,
+    val description: String? = null,
+    /** Effort levels this model supports, when the agent says so. */
+    val efforts: List<String>? = null,
+)
+
+/** `GET /v1/agents/{agent}/models?session=`: models and effort levels to offer. */
+@kotlinx.serialization.Serializable
+data class ModelOptions(
+    val agent: String = "",
+    val models: List<ModelOption> = emptyList(),
+    val efforts: List<String> = emptyList(),
+    /** `agent` (reported by the running agent) or `builtin` (aliases every install accepts). */
+    val source: String = "builtin",
 )
 
 // ---------------------------------------------------------------------------------------------

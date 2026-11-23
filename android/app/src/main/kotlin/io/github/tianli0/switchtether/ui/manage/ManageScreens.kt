@@ -54,6 +54,7 @@ import io.github.tianli0.switchtether.ui.home.RowIcon
 import io.github.tianli0.switchtether.ui.common.GroupCard
 import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.remote.protocol.DailyUsage
 import io.github.tianli0.switchtether.remote.protocol.ProviderView
 import io.github.tianli0.switchtether.remote.protocol.QuotaView
@@ -133,7 +134,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         AppTabs(state.apps, state.app, vm::selectApp)
         LoadableContent(state.providers, onRetry = vm::load) { view ->
-            LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 if (view.providers.isEmpty()) item { EmptyMessage(stringResource(R.string.provider_empty)) }
                 items(view.providers, key = { it.id }) { p ->
                     ProviderCard(
@@ -296,7 +297,7 @@ fun UsageContent(
         LoadableContent(failed, onRetry = onRetry) {}
         return
     }
-    LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
+    LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
         item { PageCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
         item { SyncNote(state.lastSyncMs, state.zone) }
         item { SectionHeader(stringResource(if (state.hourly) R.string.usage_trend_hourly else R.string.usage_trend_daily)) }
@@ -623,7 +624,7 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
         AppTabs(DEFAULT_APPS, state.app, vm::selectApp)
         if (kind == ToggleListKind.PROMPTS) {
             LoadableContent(state.prompts, onRetry = vm::load) { prompts ->
-                LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+                LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                     if (prompts.isEmpty()) item { EmptyMessage(stringResource(R.string.toggle_empty)) }
                     if (prompts.isNotEmpty()) item(key = "prompts") {
                         GroupCard {
@@ -642,7 +643,7 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
             }
         } else {
             LoadableContent(state.items, onRetry = vm::load) { items ->
-                LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+                LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                     if (items.isEmpty()) item { EmptyMessage(stringResource(R.string.toggle_empty)) }
                     if (items.isNotEmpty()) item(key = "items") {
                         GroupCard {

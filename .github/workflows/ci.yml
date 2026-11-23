@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   # 每周一次全量：push 到 main 也按路径过滤后，靠它在缓存被淘汰后重新建起来
   schedule:
     - cron: "41 19 * * 0" # 周一 03:41（北京时间）
@@ -371,7 +371,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: "platforms;android-37.0 build-tools;37.0.0 platform-tools"
+          packages: "platforms;android-37.2 build-tools;37.0.0 platform-tools"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4

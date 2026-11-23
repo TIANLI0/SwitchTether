@@ -5499,6 +5499,14 @@
       "end": "End",
       "external": "Your terminal window"
     },
+    "forwards": {
+      "title": "Port forwarding",
+      "help": "A phone reaches a port that listens only on this computer (for example a dev server) through its encrypted connection, as if it opened localhost here. Each forward is confirmed with biometrics on the phone, ends when it expires, and can be stopped here at any time.",
+      "empty": "No phone is forwarding a port.",
+      "port": "Local port {{port}}",
+      "detail": "{{device}} · {{connections}} connection(s) · expires {{time}}",
+      "stop": "Stop"
+    },
     "audit": {
       "title": "Security log",
       "help": "Pairing, revocation, terminal, file and configuration actions from phones. Terminal input and secret values are never recorded.",

@@ -24,6 +24,11 @@ pub fn routes() -> Router<Arc<ApiContext>> {
             "/v1/sessions/:id/subagents/:agent_id/events",
             get(subagent_events),
         )
+        .route(
+            "/v1/sessions/:id/subagents/:agent_id/stop",
+            post(stop_subagent),
+        )
+        .route("/v1/sessions/:id/claude/:action", post(claude_tool))
         .route("/v1/sessions/:id/events/:event_id/payload", get(payload))
         .route("/v1/sessions/:id/messages", post(send_message))
         .route("/v1/sessions/:id/attachments", post(begin_attachment))
@@ -36,6 +41,8 @@ pub fn routes() -> Router<Arc<ApiContext>> {
                 )),
         )
         .route("/v1/sessions/:id/interrupt", post(interrupt))
+        .route("/v1/sessions/:id/options", post(set_options))
+        .route("/v1/agents/:agent/models", get(models))
         .route("/v1/sessions/:id/stop", post(stop))
         .route("/v1/sessions/:id/approvals/:request_id", post(approve))
         .route("/v1/sessions/:id/answers/:request_id", post(answer))
@@ -83,6 +90,65 @@ async fn subagent_tree(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     ctx.agents.subagent_tree(&id).await.map(Json)
+}
+
+/// The Claude Code IDE's session tools (`permission_mode`, `context_usage`, `task_output`,
+/// `plan`, `mcp_status`, `mcp_reconnect`, `run_in_background`, `cancel_message`,
+/// `side_question`, `rename`, `rewind`, `export`) for sessions SwitchTether started. The body is
+/// the action's parameters plus an optional `commandId`; every call is audited.
+async fn claude_tool(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Path((id, action)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> Response {
+    let c = ctx.clone();
+    let command_id = body
+        .get("commandId")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let what = format!("session.claude.{action}");
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        command_id,
+        "session.claude",
+        || async move {
+            let r = c.agents.claude_tool(&id, &action, &body).await?;
+            c.registry
+                .audit(Some(dev.id()), &what, Some(&id), "ok", None);
+            Ok(r)
+        },
+    )
+    .await
+}
+
+/// Agent map "Stop agent" / "Stop" for a background task (managed Claude Code sessions).
+async fn stop_subagent(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Path((id, agent_id)): Path<(String, String)>,
+    Json(body): Json<CmdBody>,
+) -> Response {
+    let c = ctx.clone();
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "session.stop_subagent",
+        || async move {
+            let r = c.agents.stop_subagent(&id, &agent_id).await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "session.stop_subagent",
+                Some(&id),
+                "ok",
+                None,
+            );
+            Ok(r)
+        },
+    )
+    .await
 }
 
 async fn subagent_events(
@@ -227,7 +293,7 @@ async fn begin_attachment(
     Path(id): Path<String>,
     Json(body): Json<AttachmentBody>,
 ) -> ApiResult<Json<Value>> {
-    ctx.agents.ensure_can_send(&id)?;
+    ctx.agents.ensure_can_send(&id).await?;
     let store = ctx.agents.attachments()?;
     let dev_id = dev.id().to_string();
     let v = tokio::task::spawn_blocking(move || {
@@ -303,6 +369,61 @@ async fn interrupt(
         },
     )
     .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OptionsBody {
+    command_id: Option<String>,
+    /// New model; `""` / `"default"` = the agent's default; absent = unchanged.
+    model: Option<String>,
+    /// New effort level; `""` / `"default"` = the default; absent = unchanged.
+    effort: Option<String>,
+}
+
+/// `POST /v1/sessions/{id}/options`: change model and / or effort of a running session.
+async fn set_options(
+    State(ctx): State<Arc<ApiContext>>,
+    dev: AuthDevice,
+    Path(id): Path<String>,
+    Json(body): Json<OptionsBody>,
+) -> Response {
+    let c = ctx.clone();
+    let (model, effort) = (body.model, body.effort);
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        body.command_id,
+        "session.options",
+        || async move {
+            let detail = json!({ "model": model, "effort": effort }).to_string();
+            let r = c.agents.set_options(&id, model, effort).await?;
+            c.registry.audit(
+                Some(dev.id()),
+                "session.options",
+                Some(&id),
+                "ok",
+                Some(&detail),
+            );
+            Ok(json!(r))
+        },
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+struct ModelsQuery {
+    session: Option<String>,
+}
+
+/// `GET /v1/agents/{agent}/models?session=`: models and effort levels to offer.
+async fn models(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Path(agent): Path<String>,
+    Query(q): Query<ModelsQuery>,
+) -> Json<Value> {
+    Json(ctx.agents.model_options(&agent, q.session.as_deref()).await)
 }
 
 async fn stop(
@@ -430,5 +551,35 @@ mod tests {
         assert_eq!(body.attachments.len(), 2);
         assert!(body.images.is_empty());
         assert_eq!(body.command_id.as_deref(), Some("c-7f3a"));
+    }
+
+    #[test]
+    fn session_options_and_model_options_fixtures() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../protocol/fixtures");
+        let body: super::OptionsBody = serde_json::from_str(
+            &std::fs::read_to_string(root.join("session_options.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body.command_id.as_deref(), Some("c-41d2"));
+        assert_eq!(body.model.as_deref(), Some("sonnet"));
+        assert_eq!(body.effort.as_deref(), Some("high"));
+        // What the desktop answers for a Claude Code session that reported its models.
+        let fixture: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("model_options.json")).unwrap(),
+        )
+        .unwrap();
+        let reported = serde_json::json!([
+            {"value": "default", "displayName": "Default (recommended)", "description": "Opus for complex work"},
+            {"value": "sonnet", "displayName": "Sonnet", "supportedEffortLevels": ["low", "medium", "high"]},
+            {"value": "haiku", "displayName": "Haiku"}
+        ]);
+        let built = crate::agents::model_catalog("claude_code", &reported);
+        assert_eq!(
+            built["models"].as_array().unwrap()[..3],
+            fixture["models"].as_array().unwrap()[..]
+        );
+        assert_eq!(built["efforts"], fixture["efforts"]);
+        assert_eq!(built["source"], fixture["source"]);
     }
 }

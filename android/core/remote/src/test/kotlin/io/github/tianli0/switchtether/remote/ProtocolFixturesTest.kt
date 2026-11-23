@@ -142,4 +142,16 @@ class ProtocolFixturesTest {
         assertEquals(listOf("a", "b"), events.events.map { it.id })
         assertTrue(events.hasMoreBefore)
     }
+
+    @Test
+    fun sessionOptionsAndModelOptionsFixtures() {
+        val body = io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody("c-41d2", model = "sonnet", effort = "high")
+        assertEquals(ProtocolJson.parseToJsonElement(fixture("session_options.json")).jsonObject, ProtocolJson.encodeToJsonElement(io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody.serializer(), body))
+        val o = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.ModelOptions.serializer(), fixture("model_options.json"))
+        assertEquals("agent", o.source)
+        assertEquals(listOf("default", "sonnet", "haiku"), o.models.map { it.id })
+        assertEquals(listOf("low", "medium", "high"), o.models[1].efforts)
+        assertEquals(null, o.models[2].efforts)
+        assertEquals(5, o.efforts.size)
+    }
 }

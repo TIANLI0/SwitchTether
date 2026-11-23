@@ -107,7 +107,7 @@ jobs:
 
       - name: Install FluentSetup
         if: runner.os == 'Windows'
-        uses: TIANLI0/FluentSetup@v1.3.0
+        uses: TIANLI0/FluentSetup@v1.5.0
 
       - name: Package Windows installer (FluentSetup)
         if: runner.os == 'Windows'
@@ -144,7 +144,7 @@ jobs:
           java-version: "21"
       - uses: android-actions/setup-android@v3
         with:
-          packages: "platforms;android-37.0 build-tools;37.0.0 platform-tools"
+          packages: "platforms;android-37.2 build-tools;37.0.0 platform-tools"
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Decode signing keystore

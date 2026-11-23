@@ -5,6 +5,7 @@ mod cc;
 mod core_routes;
 mod events_ws;
 mod files;
+mod forward;
 mod sessions;
 mod terminals;
 
@@ -55,6 +56,8 @@ pub struct ApiContext {
     pub terminals: Arc<TerminalManager>,
     pub agents: Arc<AgentHub>,
     pub files: FileService,
+    /// Port forwarding leases (docs/PROTOCOL.md §7.11).
+    pub forwards: crate::forward::ForwardManager,
     limiter: RateLimiter,
 }
 
@@ -89,6 +92,7 @@ impl ApiContext {
             terminals,
             agents,
             files: FileService::new(),
+            forwards: Default::default(),
             limiter: RateLimiter::default(),
         })
     }
@@ -101,6 +105,7 @@ impl ApiContext {
         };
         self.stepup.clear_device(device_id);
         self.terminals.release_device(device_id);
+        self.forwards.release_device(device_id);
         let closed = self
             .connections
             .disconnect_fingerprint(&rec.cert_fingerprint);
@@ -354,6 +359,7 @@ pub fn router(ctx: Arc<ApiContext>) -> Router {
         .merge(sessions::routes())
         .merge(terminals::routes())
         .merge(files::routes())
+        .merge(forward::routes())
         .layer(axum::extract::DefaultBodyLimit::max(MAX_JSON_BODY))
         .layer(axum::middleware::from_fn(request_id_layer))
         .fallback(|| async { ApiError::not_found("no such endpoint") })

@@ -306,6 +306,7 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         }
         is Route.Subagent -> io.github.tianli0.switchtether.ui.sessions.SubagentScreen(top.sessionId, top.agentId, top.title, onBack, onOpen = nav::push, agent = top.agent)
         is Route.SubagentTree -> io.github.tianli0.switchtether.ui.sessions.SubagentTreeScreen(top.sessionId, onBack, onOpen = nav::push, agent = top.agent)
+        is Route.SessionTools -> io.github.tianli0.switchtether.ui.sessions.SessionToolsScreen(top.sessionId, onBack)
         // Every entry point opens the one launcher sheet (the folder picker returns to it).
         Route.NewSession -> {
             val container = appContainer()
@@ -318,6 +319,7 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         Route.Files -> io.github.tianli0.switchtether.ui.workspace.FilesPage(onBack, onOpenDownloads = { nav.push(Route.Downloads) })
         Route.Downloads -> io.github.tianli0.switchtether.ui.files.DownloadsScreen(onBack)
         Route.Git -> io.github.tianli0.switchtether.ui.workspace.GitPage(onBack)
+        Route.PortForward -> io.github.tianli0.switchtether.ui.workspace.PortForwardScreen(onBack)
         Route.PickFolder -> io.github.tianli0.switchtether.ui.sessions.PickFolderScreen(onBack)
         Route.Providers -> ProvidersScreen(onBack)
         Route.Usage -> UsageScreen(onBack)

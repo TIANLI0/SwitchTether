@@ -63,7 +63,7 @@
     <string name="cap_status_blocked">不可用</string>
     <string name="cap_status_untested">未验证</string>
     <string name="cap_status_unknown">未知</string>
-    <string name="origin_managed">由 SwitchTether 启动</string>
+    <string name="origin_managed">从手机启动</string>
     <string name="origin_external">在电脑上启动</string>
     <string name="waiting_for_approval">等待审批</string>
     <string name="waiting_for_input">等待输入</string>
@@ -91,7 +91,7 @@
     <string name="time_minutes">%1$d 分钟前</string>
     <string name="time_hours">%1$d 小时前</string>
     <string name="time_days">%1$d 天前</string>
-    <string name="session_managed_chip">SwitchTether</string>
+    <string name="session_managed_chip">手机启动</string>
     <string name="state_expanded">已展开</string>
     <string name="state_collapsed">已收起</string>
     <string name="render_system_continued">已在手机上恢复。之后的回合由 SwitchTether 在电脑上运行。</string>
@@ -113,6 +113,8 @@
     <string name="outgoing_failed">发送失败</string>
     <string name="outgoing_retry">重试</string>
     <string name="outgoing_delete">删除</string>
+    <string name="outgoing_edit">编辑</string>
+    <string name="message_copy_mine">复制消息</string>
     <string name="outgoing_session_ended">会话已结束，未发送</string>
     <string name="session_typing">正在回复…</string>
     <string name="jump_latest">回到最新</string>
@@ -155,4 +157,56 @@
         <item quantity="other">%1$d 个子 agent</item>
     </plurals>
     <string name="decision_cancelled">已取消</string>
+    <string name="model_title">模型</string>
+    <string name="effort_title">思考强度</string>
+    <string name="model_default">默认</string>
+    <string name="effort_short">强度 %1$s</string>
+    <string name="effort_none">无</string>
+    <string name="effort_minimal">最低</string>
+    <string name="effort_low">低</string>
+    <string name="effort_medium">中</string>
+    <string name="effort_high">高</string>
+    <string name="effort_xhigh">超高</string>
+    <string name="effort_max">最高</string>
+    <string name="model_sheet_title">模型与思考强度</string>
+    <string name="model_sheet_note">从下一次回复开始生效，和电脑上的 /model、/effort 一样。</string>
+    <string name="model_switch_label">切换模型</string>
+    <string name="composer_resume_hint">会话未在运行：发送后会在电脑上恢复这个会话</string>
+    <!-- Agent map -->
+    <string name="agent_map_this_session">本会话</string>
+    <string name="agent_map_title">Agent 地图</string>
+    <plurals name="agent_map_subtitle">
+        <item quantity="other">%1$d 个 agent · 点按查看详情</item>
+    </plurals>
+    <plurals name="agent_map_tasks">
+        <item quantity="other">%1$d 个后台任务</item>
+    </plurals>
+    <plurals name="agent_map_tool_uses">
+        <item quantity="other">%1$d 次工具调用</item>
+    </plurals>
+    <string name="agent_map_state_waiting">等待中</string>
+    <string name="agent_map_state_working">运行中</string>
+    <string name="agent_map_state_finished">已完成</string>
+    <string name="agent_map_state_failed">失败</string>
+    <string name="agent_map_state_stopped">已停止</string>
+    <string name="agent_map_waiting_permission">等待你的授权</string>
+    <string name="agent_map_waiting_detail">等待你的授权：请在对话中处理。</string>
+    <string name="agent_map_tokens">%1$s tokens</string>
+    <string name="agent_map_background">后台</string>
+    <string name="agent_map_foreground">前台</string>
+    <string name="agent_map_spawned_by">由 %1$s 启动</string>
+    <string name="agent_map_show_prompt">显示提示词</string>
+    <string name="agent_map_hide_prompt">隐藏提示词</string>
+    <string name="agent_map_open_transcript">查看过程</string>
+    <string name="agent_map_stop_agent">停止 agent</string>
+    <string name="agent_map_stop_task">停止</string>
+    <string name="agent_map_stopping">正在停止…</string>
+    <string name="agent_map_stop_failed">无法停止，可能已经结束。</string>
+    <string name="agent_map_exit_code">退出码 %1$d</string>
+    <string name="agent_map_observe_only">此会话在电脑上运行：这里可以跟进它的 agent，但不能停止。</string>
+    <string name="model_more_versions">更多版本（%1$d）</string>
+    <string name="model_fewer_versions">收起版本</string>
+    <string name="session_menu">会话</string>
+    <string name="menu_tools_hint">权限模式、上下文、计划、MCP、导出</string>
+    <string name="menu_info_hint">状态、项目、分支、连接方式</string>
 </resources>

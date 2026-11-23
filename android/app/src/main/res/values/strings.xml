@@ -107,12 +107,13 @@
     <string name="sessions_history">History</string>
     <string name="sessions_all">All</string>
     <string name="sessions_all_agents">All agents</string>
+    <string name="sessions_all_projects">All projects</string>
     <string name="sessions_empty">No sessions.</string>
     <string name="sessions_empty_live">No live sessions. Start Claude Code or Codex on the computer.</string>
     <string name="sessions_empty_history">No past sessions found.</string>
     <string name="badge_live">LIVE</string>
     <string name="badge_ended">ENDED</string>
-    <string name="badge_managed">MANAGED</string>
+    <string name="badge_managed">PHONE</string>
     <string name="control_full">FULL CONTROL</string>
     <string name="control_observe">OBSERVE</string>
     <string name="control_history">HISTORY</string>
@@ -260,6 +261,18 @@
     <string name="settings_connection">Connection</string>
     <string name="settings_background">Stay connected in background</string>
     <string name="settings_background_summary">Stays connected to the computer while in the background so approvals and task changes are notified (ongoing notification).</string>
+    <string name="companion_title">Bind computer (Bluetooth)</string>
+    <string name="companion_summary_none">Lets Android keep SwitchTether running in the background and wake it when the computer is nearby.</string>
+    <string name="companion_summary_bound">Bound: %1$s</string>
+    <string name="companion_intro">Associate the computer this phone is paired with over Bluetooth. Android then exempts SwitchTether from battery optimisation and wakes it when the computer connects. Nothing is changed on the computer.</string>
+    <string name="companion_bind">Bind</string>
+    <string name="companion_unbind">Unbind</string>
+    <string name="companion_scan">Search for a computer</string>
+    <string name="companion_bt_permission">Allow “Nearby devices” to list paired computers</string>
+    <string name="companion_nearby_only">Only while the computer is nearby</string>
+    <string name="companion_nearby_only_summary">When the computer disconnects from Bluetooth, the background connection stops so Android can reclaim the memory SwitchTether uses; it resumes when the computer is back. Pinned tasks and port forwards keep it running.</string>
+    <string name="companion_no_presence">Detecting the computer nearby needs Android 12 or later.</string>
+    <string name="companion_failed">Binding failed: %1$s</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_summary">Choose which events notify you</string>
     <string name="notifications_phase_b">Notification delivery arrives with background connection in the next version. Your choices are saved now.</string>
@@ -286,8 +299,8 @@
 
     <!-- New managed session -->
     <string name="new_session_title">New session</string>
-    <string name="new_session_subtitle">New SwitchTether-managed session</string>
-    <string name="new_session_explainer">Starts a NEW agent process on the computer that SwitchTether manages: you can send messages, answer approvals and interrupt it from the phone. It does not take over sessions you started in a terminal or VS Code.</string>
+    <string name="new_session_subtitle">New Claude Code / Codex session on the computer</string>
+    <string name="new_session_explainer">Starts a new session on the computer the official way: it is an ordinary Claude Code / Codex conversation, listed by claude --resume and in VS Code\'s history. Send messages, answer approvals, interrupt and switch the model from the phone; after the computer or SwitchTether restarts, just send a message to continue. Sessions open in a terminal or VS Code are not taken over.</string>
     <string name="new_session_agent">Agent</string>
     <string name="new_session_cwd">Working directory</string>
     <string name="new_session_cwd_none">Pick a folder below</string>
@@ -304,7 +317,7 @@
     <string name="perm_accept_edits">Auto-accept file edits, ask for the rest</string>
     <string name="perm_plan">Plan only, no changes</string>
     <string name="new_session_start">Start session</string>
-    <string name="new_session_confirm_title">Start a managed session?</string>
+    <string name="new_session_confirm_title">Start a new session?</string>
     <string name="new_session_confirm_body">Start %1$s in %2$s on the computer.</string>
     <string name="provider_credential">Update credential</string>
     <string name="provider_credential_note">The new value is sent once to the computer (after biometric confirmation) and is never shown again. Provider: %1$s</string>
@@ -390,7 +403,7 @@
     <string name="notif_battery_fix_summary">Battery saving may delay “task finished” alerts. Tap to exempt SwitchTether.</string>
     <string name="new_session_options">Options</string>
     <string name="new_session_model_default">Default model</string>
-    <string name="new_session_note">Starts a new session on the computer that you can control from here. Sessions you started in a terminal or VS Code stay as they are.</string>
+    <string name="new_session_note">Starts an ordinary session on the computer (it shows up in claude --resume / VS Code history too). Sessions you have open in a terminal or VS Code stay as they are.</string>
     <string name="perm_default_short">Ask first</string>
     <string name="perm_accept_edits_short">Auto-edit</string>
     <string name="perm_plan_short">Plan only</string>

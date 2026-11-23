@@ -121,18 +121,9 @@ pub fn secret_fields(config: &Value) -> Vec<Value> {
     out
 }
 
-/// Same rule as `commands::stream_check::is_copilot_provider` (kept private upstream).
 fn is_copilot(provider: &crate::provider::Provider) -> bool {
-    provider
-        .meta
-        .as_ref()
-        .and_then(|m| m.provider_type.as_deref())
-        == Some("github_copilot")
-        || provider
-            .settings_config
-            .pointer("/env/ANTHROPIC_BASE_URL")
-            .and_then(|v| v.as_str())
-            .is_some_and(|u| u.contains("githubcopilot.com"))
+    crate::provider_kind::ProviderKind::of(provider)
+        == Some(crate::provider_kind::ProviderKind::GitHubCopilot)
 }
 
 fn provider_view(p: &crate::provider::Provider, current: &str) -> Value {

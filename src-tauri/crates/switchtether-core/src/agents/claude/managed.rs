@@ -31,6 +31,10 @@ use crate::agents::model::{EventDraft, Liveness};
 use crate::agents::store::SessionLog;
 use crate::error::{ApiError, ApiResult};
 
+/// "Rewind files" from the phone (`rewind_files`, needs file checkpoints): built and verified,
+/// switched off for now.
+pub const REWIND_FILES_ENABLED: bool = false;
+
 #[derive(Debug, Clone)]
 pub struct ManagedClaudeOptions {
     pub claude_bin: PathBuf,
@@ -44,6 +48,12 @@ pub struct ManagedClaudeOptions {
     /// Extra directories Claude Code may read without asking (`--add-dir`): the folder of files
     /// attached from the phone.
     pub add_dirs: Vec<PathBuf>,
+    /// Conversation id for a new conversation (`--session-id`, also for forks): the session is a
+    /// normal Claude Code conversation known by its own id from the start, listed by
+    /// `claude --resume` and the IDE's history like any other.
+    pub session_id: Option<String>,
+    /// Effort level (`--effort`: low, medium, high, xhigh, max).
+    pub effort: Option<String>,
 }
 
 struct Pending {
@@ -79,6 +89,10 @@ pub struct ManagedClaude {
     /// Attached mode: user texts already shown (from the IDE or the phone);
     /// a replayed copy on stdout is skipped.
     echoed: Mutex<HashSet<String>>,
+    /// Permission mode as last set (`--permission-mode`, then `set_permission_mode`).
+    permission_mode: Mutex<Option<String>>,
+    /// `uuid` of the last message sent from the phone (`cancel_async_message` while queued).
+    last_uuid: Mutex<Option<String>>,
     pub origin: &'static str,
 }
 
@@ -89,6 +103,12 @@ struct State {
     native_session_id: Option<String>,
     created_at_ms: i64,
     last_active_at_ms: i64,
+    /// Model chosen from the phone during the session (`set_model`); wins over the parsed one
+    /// until the agent reports a model again.
+    model_override: Option<String>,
+    effort: Option<String>,
+    /// `models` from the initialize response (what this Claude Code offers), if any.
+    models: Value,
 }
 
 impl ManagedClaude {
@@ -111,11 +131,42 @@ impl ManagedClaude {
         self.state.lock().last_active_at_ms
     }
     pub fn model(&self) -> Option<String> {
-        self.parser
+        self.state
             .lock()
-            .model
+            .model_override
             .clone()
+            .or_else(|| self.parser.lock().model.clone())
             .or(self.options.model.clone())
+    }
+    pub fn effort(&self) -> Option<String> {
+        self.state.lock().effort.clone()
+    }
+    pub fn models(&self) -> Value {
+        self.state.lock().models.clone()
+    }
+
+    /// Switch the model of the running session the way the official SDK does
+    /// (`set_model` control request); `None` returns to the default model.
+    pub async fn set_model(&self, model: Option<&str>) -> ApiResult<()> {
+        self.control_request(
+            json!({ "subtype": "set_model", "model": model }),
+            Duration::from_secs(20),
+        )
+        .await?;
+        self.state.lock().model_override = model.map(String::from);
+        Ok(())
+    }
+
+    /// Change the effort level of the running session (`apply_flag_settings` with
+    /// `effortLevel`, as the SDK's `applyFlagSettings`); `None` returns to the default.
+    pub async fn set_effort(&self, effort: Option<&str>) -> ApiResult<()> {
+        self.control_request(
+            json!({ "subtype": "apply_flag_settings", "settings": { "effortLevel": effort } }),
+            Duration::from_secs(20),
+        )
+        .await?;
+        self.state.lock().effort = effort.map(String::from);
+        Ok(())
     }
     pub fn title(&self) -> Option<String> {
         self.parser.lock().title.clone()
@@ -155,6 +206,9 @@ impl ManagedClaude {
         if let Some(m) = &options.model {
             cmd.args(["--model", m]);
         }
+        if let Some(e) = &options.effort {
+            cmd.args(["--effort", e]);
+        }
         if let Some(pm) = &options.permission_mode {
             cmd.args(["--permission-mode", pm]);
         }
@@ -167,15 +221,30 @@ impl ManagedClaude {
                 cmd.arg("--fork-session");
             }
         }
+        if let Some(sid) = options.session_id.as_deref().filter(|_| {
+            // `--session-id` names a new conversation: never together with an in-place resume.
+            options.resume_from.is_none() || options.fork
+        }) {
+            cmd.args(["--session-id", sid]);
+        }
         for d in options.add_dirs.iter().filter(|d| d.is_dir()) {
             cmd.arg("--add-dir").arg(d);
         }
+        // No CLAUDE_CODE_ENTRYPOINT of our own: Claude Code names a stream-json session `sdk-cli`
+        // itself (like the official Agent SDK); unknown names are not an official entrypoint.
         cmd.current_dir(&options.cwd)
-            .env("CLAUDE_CODE_ENTRYPOINT", "sdk-switchtether")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if REWIND_FILES_ENABLED {
+            // File checkpoints, as the Agent SDK's `enableFileCheckpointing`: lets the phone
+            // rewind file changes (`rewind_files`). Claude Code's own data; nothing of the
+            // user's configuration changes.
+            cmd.env("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "1");
+        }
+        let initial_mode = options.permission_mode.clone();
         #[cfg(windows)]
         {
             cmd.creation_flags(0x0800_0000);
@@ -191,7 +260,12 @@ impl ManagedClaude {
         let now = crate::util::now_ms();
         // Continuing in place keeps the conversation id, so it is known before the first turn:
         // lists and the live registry match the session at once instead of after the next prompt.
-        let native_session_id = options.resume_from.clone().filter(|_| !options.fork);
+        let native_session_id = options
+            .resume_from
+            .clone()
+            .filter(|_| !options.fork)
+            .or_else(|| options.session_id.clone());
+        let effort = options.effort.clone();
         let me = Arc::new(Self {
             id,
             options,
@@ -210,12 +284,17 @@ impl ManagedClaude {
                 native_session_id,
                 created_at_ms: now,
                 last_active_at_ms: now,
+                model_override: None,
+                effort,
+                models: Value::Null,
             }),
             next_req: std::sync::atomic::AtomicU64::new(1),
             stderr_tail: Mutex::new(Vec::new()),
             remote: None,
             verdicts: Mutex::new(HashMap::new()),
             echoed: Mutex::new(HashSet::new()),
+            permission_mode: Mutex::new(initial_mode),
+            last_uuid: Mutex::new(None),
             origin: "managed",
         });
 
@@ -250,9 +329,19 @@ impl ManagedClaude {
                 Duration::from_secs(60),
             )
             .await;
-        if let Err(e) = init {
-            me.kill();
-            anyhow::bail!("claude did not initialize: {e}");
+        match init {
+            Err(e) => {
+                me.kill();
+                anyhow::bail!("claude did not initialize: {e}");
+            }
+            Ok(v) => {
+                let models = v
+                    .pointer("/response/models")
+                    .or_else(|| v.get("models"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                me.state.lock().models = models;
+            }
         }
         Ok(me)
     }
@@ -278,6 +367,8 @@ impl ManagedClaude {
                 resume_from: None,
                 fork: false,
                 add_dirs: Vec::new(),
+                session_id: None,
+                effort: None,
             },
             log,
             parser: Mutex::new(ClaudeParser::new()),
@@ -294,12 +385,17 @@ impl ManagedClaude {
                 native_session_id: None,
                 created_at_ms: now,
                 last_active_at_ms: now,
+                model_override: None,
+                effort: None,
+                models: Value::Null,
             }),
             next_req: std::sync::atomic::AtomicU64::new(1),
             stderr_tail: Mutex::new(Vec::new()),
             remote: Some(tx),
             verdicts: Mutex::new(HashMap::new()),
             echoed: Mutex::new(HashSet::new()),
+            permission_mode: Mutex::new(None),
+            last_uuid: Mutex::new(None),
             origin,
         })
     }
@@ -496,7 +592,7 @@ impl ManagedClaude {
                 }
             }));
         }
-        let msg = json!({
+        let mut msg = json!({
             "type": "user",
             "session_id": "",
             "parent_tool_use_id": null,
@@ -505,6 +601,10 @@ impl ManagedClaude {
         if self.remote.is_none() {
             self.sent_texts.lock().insert(text.trim().to_string());
         }
+        // Our own id: a message queued while the agent works can be cancelled by it.
+        let uuid = crate::util::new_id();
+        msg["uuid"] = json!(uuid);
+        *self.last_uuid.lock() = Some(uuid);
         self.write_line(&msg).await?;
         if self.remote.is_some() {
             self.echo_user(&msg, Some("phone"));
@@ -512,6 +612,59 @@ impl ManagedClaude {
         self.set_status("busy");
         self.publish_status("running", None);
         Ok(())
+    }
+
+    pub fn permission_mode(&self) -> Option<String> {
+        self.permission_mode.lock().clone()
+    }
+
+    pub fn last_message_uuid(&self) -> Option<String> {
+        self.last_uuid.lock().clone()
+    }
+
+    /// One control request of the IDE's session tools (the caller builds and whitelists it);
+    /// returns its `response` object. In an attached session (the opt-in takeover hook) it goes
+    /// through switchtether-shim like the phone's messages and approvals; the IDE ignores the
+    /// reply to a request it did not send (an unmatched `control_response`).
+    pub async fn control(&self, request: Value, timeout: Duration) -> ApiResult<Value> {
+        if self.liveness() != Liveness::Live {
+            return Err(ApiError::conflict("session process has exited"));
+        }
+        let subtype = request
+            .get("subtype")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let v = self.control_request(request.clone(), timeout).await?;
+        let response = v.get("response").cloned().unwrap_or(Value::Null);
+        match subtype.as_str() {
+            "set_permission_mode" => {
+                let mode = response
+                    .get("mode")
+                    .or_else(|| request.get("mode"))
+                    .and_then(Value::as_str)
+                    .map(String::from);
+                *self.permission_mode.lock() = mode;
+            }
+            "rename_session" => {
+                if let Some(t) = request.get("title").and_then(Value::as_str) {
+                    self.parser.lock().title = Some(t.to_string());
+                }
+            }
+            _ => {}
+        }
+        Ok(response)
+    }
+
+    /// Stop one background task or sub-agent (`stop_task`, as the SDK's `stopTask` and the IDE's
+    /// "Stop agent"), in a process SwitchTether started or an attached one (opt-in hook).
+    pub async fn stop_task(&self, task_id: &str) -> ApiResult<()> {
+        self.control_request(
+            json!({ "subtype": "stop_task", "task_id": task_id }),
+            Duration::from_secs(15),
+        )
+        .await
+        .map(|_| ())
     }
 
     pub async fn interrupt(&self) -> ApiResult<()> {
@@ -637,11 +790,14 @@ impl ManagedClaude {
     }
 
     fn publish_status(&self, state: &str, detail: Option<&str>) {
+        // Background agents / shells keep working after the turn's `result`; their count
+        // tells the phone the session is idle but not finished.
+        let background = self.parser.lock().background_tasks;
         let d = EventDraft::new(
             format!("status:{}", crate::util::now_ms()),
             "status",
             crate::util::now_rfc3339(),
-            json!({ "state": state, "detail": detail }),
+            json!({ "state": state, "detail": detail, "backgroundTasks": background }),
         );
         // Status changes replace one rolling status event to keep the log small.
         let mut d = d;
@@ -706,6 +862,13 @@ impl ManagedClaude {
                     }
                     "assistant" | "stream_event" if self.status() != "waiting" => {
                         self.set_status("busy");
+                    }
+                    "system"
+                        if v.get("subtype").and_then(|s| s.as_str())
+                            == Some("background_tasks_changed")
+                            && self.status() == "idle" =>
+                    {
+                        self.publish_status("idle", None);
                     }
                     _ => {}
                 }

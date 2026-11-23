@@ -53,12 +53,41 @@ interface SessionRepository {
     val refetch: Flow<String>
 
     suspend fun list(query: SessionQuery, cursor: String? = null, limit: Int = 50): SessionPage
+
+    /** Last session list seen from this desktop (shown while connecting), null if none. */
+    suspend fun cachedList(): List<SessionSummary>? = null
+
+    /** Last newest-events page of a conversation (shown while connecting), null if none. */
+    suspend fun cachedEvents(id: String): EventPage? = null
+
+    /** Change model and / or effort of a running session (`""` = the agent's default, null = unchanged). */
+    suspend fun setOptions(id: String, model: String?, effort: String?, commandId: String = newCommandId()): CommandOutcome =
+        throw UnsupportedOperationException("session options")
+
+    /** Models and effort levels to offer for [agent] (and a running [sessionId]). */
+    suspend fun modelOptions(agent: String, sessionId: String? = null): io.github.tianli0.switchtether.remote.protocol.ModelOptions =
+        throw UnsupportedOperationException("model options")
     suspend fun detail(id: String): SessionDetail
     suspend fun events(id: String, before: Long? = null, after: Long? = null, limit: Int = 300): EventPage
     suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int = 64 * 1024): PayloadChunk
 
     /** Claude Code sub-agents of a session, with parent links (branch tree). */
     suspend fun subagentTree(id: String): List<io.github.tianli0.switchtether.remote.session.SubagentNode> = emptyList()
+
+    /** The Agent map: sub-agents with live state, background tasks, whether they can be stopped. */
+    suspend fun agentMap(id: String): io.github.tianli0.switchtether.remote.session.AgentMap =
+        io.github.tianli0.switchtether.remote.session.AgentMap(subagentTree(id))
+
+    /** Stop one sub-agent or background task (sessions SwitchTether started). */
+    suspend fun stopSubagent(id: String, taskId: String, commandId: String = newCommandId()): CommandOutcome =
+        throw UnsupportedOperationException("stop sub-agent")
+
+    /**
+     * One Claude Code session tool (`POST …/claude/{action}`, see
+     * [io.github.tianli0.switchtether.remote.session.ClaudeTools]); only sessions whose detail has `claudeTools`.
+     */
+    suspend fun claudeTool(id: String, action: String, params: JsonObject = JsonObject(emptyMap()), commandId: String = newCommandId()): CommandOutcome =
+        throw UnsupportedOperationException("Claude Code session tools")
 
     /** One sub-agent's own steps (read-only). */
     suspend fun subagentEvents(id: String, agentId: String, limit: Int = 300): io.github.tianli0.switchtether.remote.session.SubagentPage =
@@ -101,9 +130,11 @@ data class NewSessionRequest(
     val prompt: String?,
     val model: String?,
     val permissionMode: String?,
-    /** Session id to continue from (`mode = "continue"`): forks an external session into a managed one. */
+    /** Session id to continue from (`mode = "continue"`), or to fork (`mode = "fork"`). */
     val resumeFrom: String? = null,
     val mode: String? = null,
+    /** Effort / reasoning level; null = the agent's default. */
+    val effort: String? = null,
 )
 
 interface ManagementRepository {
@@ -149,7 +180,12 @@ private suspend fun ConnectionController.command(commandId: String, block: suspe
     return Commands.run(commandId) { id -> block(api, id) }
 }
 
-class RemoteSessionRepository(private val conn: ConnectionController) : SessionRepository {
+class RemoteSessionRepository(
+    private val conn: ConnectionController,
+    private val cache: io.github.tianli0.switchtether.data.SessionCache? = null,
+    /** Server id of the paired desktop (cache key). */
+    private val serverId: suspend () -> String? = { null },
+) : SessionRepository {
     override val changes: Flow<SessionChange> = conn.events.mapNotNull { ev ->
         val data = ev.data as? JsonObject
         when (ev.topic) {
@@ -169,18 +205,55 @@ class RemoteSessionRepository(private val conn: ConnectionController) : SessionR
 
     override val refetch: Flow<String> = conn.resyncs
 
-    override suspend fun list(query: SessionQuery, cursor: String?, limit: Int) =
-        conn.withApi { it.sessions(query.agent, query.project, query.text, cursor, limit) }
+    override suspend fun list(query: SessionQuery, cursor: String?, limit: Int): SessionPage {
+        val page = conn.withApi { it.sessions(query.agent, query.project, query.text, cursor, limit) }
+        if (cache != null && cursor == null && query == SessionQuery()) {
+            serverId()?.let { sid -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.saveList(sid, page.items) } }
+        }
+        return page
+    }
+
+    override suspend fun cachedList(): List<SessionSummary>? {
+        val c = cache ?: return null
+        val sid = serverId() ?: return null
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { c.loadList(sid) }
+    }
+
+    override suspend fun cachedEvents(id: String): EventPage? {
+        val c = cache ?: return null
+        val sid = serverId() ?: return null
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { c.loadEvents(sid, id) }
+            ?.let { (events, more) -> EventPage(events, more) }
+    }
 
     override suspend fun detail(id: String) = conn.withApi { it.session(id) }
 
-    override suspend fun events(id: String, before: Long?, after: Long?, limit: Int) =
-        conn.withApi { it.sessionEvents(id, before, after, limit) }
+    override suspend fun events(id: String, before: Long?, after: Long?, limit: Int): EventPage {
+        val page = conn.withApi { it.sessionEvents(id, before, after, limit) }
+        if (cache != null && before == null && after == null) {
+            serverId()?.let { sid -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.saveEvents(sid, id, page.events, page.hasMoreBefore) } }
+        }
+        return page
+    }
+
+    override suspend fun setOptions(id: String, model: String?, effort: String?, commandId: String) =
+        conn.command(commandId) { api, c -> api.setSessionOptions(id, c, model, effort) }
+
+    override suspend fun modelOptions(agent: String, sessionId: String?) =
+        conn.withApi { it.modelOptions(agent, sessionId) }
 
     override suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int) =
         conn.withApi { it.eventPayload(sessionId, eventId, offset, limit) }
 
     override suspend fun subagentTree(id: String) = conn.withApi { it.subagentTree(id) }
+
+    override suspend fun agentMap(id: String) = conn.withApi { it.agentMap(id) }
+
+    override suspend fun stopSubagent(id: String, taskId: String, commandId: String) =
+        conn.command(commandId) { api, c -> api.stopSubagent(id, taskId, c) }
+
+    override suspend fun claudeTool(id: String, action: String, params: JsonObject, commandId: String) =
+        conn.command(commandId) { api, c -> api.claudeTool(id, action, c, params) }
 
     override suspend fun subagentEvents(id: String, agentId: String, limit: Int) =
         conn.withApi { it.subagentEvents(id, agentId, limit) }
@@ -232,6 +305,7 @@ class RemoteSessionRepository(private val conn: ConnectionController) : SessionR
                     permissionMode = request.permissionMode?.takeIf { it.isNotBlank() },
                     resumeFrom = request.resumeFrom,
                     mode = request.mode,
+                    effort = request.effort?.takeIf { it.isNotBlank() },
                 ),
             )
         }

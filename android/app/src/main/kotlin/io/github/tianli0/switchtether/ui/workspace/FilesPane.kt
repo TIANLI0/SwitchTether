@@ -16,13 +16,28 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import com.adamglin.PhosphorIcons
+import com.adamglin.phosphoricons.Regular
+import com.adamglin.phosphoricons.regular.ArrowUp
+import com.adamglin.phosphoricons.regular.SortAscending
+import com.adamglin.phosphoricons.regular.SortDescending
+import io.github.suqi8.coui.kmp.basic.CardListPosition
+import io.github.tianli0.switchtether.files.Crumb
+import io.github.tianli0.switchtether.files.FileIcon
+import io.github.tianli0.switchtether.files.FileListing
+import io.github.tianli0.switchtether.files.FileTypes
+import io.github.tianli0.switchtether.files.SortKey
+import io.github.tianli0.switchtether.ui.files.TextFileBody
+import io.github.tianli0.switchtether.ui.files.fileIconVector
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,15 +76,12 @@ import io.github.suqi8.coui.kmp.window.WindowDialog
 import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.FsEntry
-import io.github.tianli0.switchtether.ui.code.CodeBlockView
-import io.github.tianli0.switchtether.ui.code.SyntaxHighlighter
 import io.github.tianli0.switchtether.ui.common.AppBottomSheet
 import io.github.tianli0.switchtether.ui.common.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.switchtether.ui.common.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
 import io.github.tianli0.switchtether.ui.common.TextInput
 import io.github.tianli0.switchtether.ui.common.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.pageListPadding
@@ -145,26 +157,30 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     var confirmDelete by remember { mutableStateOf<FsEntry?>(null) }
     var actionsFor by remember { mutableStateOf<FsEntry?>(null) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
     var searchExpanded by rememberSaveable { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::upload) }
     val listing = (state.listing as? Loadable.Ready)?.value
-    // Back closes search results first, then goes up a folder.
-    BackHandler(enabled = state.results != null || listing?.parent != null) {
-        if (state.results != null) {
-            vm.clearSearch()
-            searchExpanded = false
-        } else {
-            listing?.parent?.let(vm::browse)
+    val roots = (state.roots as? Loadable.Ready)?.value.orEmpty()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboard.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // Back: leave search results, then clear the quick filter, then go up a folder.
+    BackHandler(enabled = state.results != null || state.query.isNotEmpty() || listing?.parent != null) {
+        when {
+            state.results != null -> vm.clearSearch().also { searchExpanded = false }
+            state.query.isNotEmpty() -> vm.setQuery("")
+            else -> listing?.parent?.let(vm::browse)
         }
     }
     Column(Modifier.fillMaxSize()) {
-        (state.roots as? Loadable.Ready)?.value?.takeIf { it.size > 1 }?.let { roots ->
+        roots.takeIf { it.size > 1 }?.let { rs ->
             val currentPath = listing?.path.orEmpty()
-            val selectedRoot = roots.indexOfFirst { currentPath == it.path || currentPath.startsWith(it.path.trimEnd('/', '\\') + "/") || currentPath.startsWith(it.path.trimEnd('/', '\\') + "\\") }.coerceAtLeast(0)
+            val selectedRoot = rs.indexOfFirst { FileListing.isInside(it.path, currentPath) }.coerceAtLeast(0)
             ChipTabGroup(
-                tabs = roots.map { ChipTabData(it.name.ifBlank { it.path }) },
+                tabs = rs.map { ChipTabData(it.name.ifBlank { it.path }) },
                 selectedIndex = selectedRoot,
-                onSelectedChange = { vm.browse(roots[it].path) },
+                onSelectedChange = { vm.browse(rs[it].path) },
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 modifier = Modifier.padding(vertical = 2.dp),
             )
@@ -179,14 +195,14 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 onSearch = { vm.search() },
                 expanded = searchExpanded || state.query.isNotEmpty() || state.results != null,
                 onExpandedChange = { searchExpanded = it },
-                label = stringResource(R.string.files_search),
+                label = stringResource(R.string.files_filter_hint),
                 cancelText = stringResource(R.string.action_cancel),
                 onCancel = {
                     vm.clearSearch()
                     searchExpanded = false
                 },
                 insideMargin = DpSize(0.dp, 4.dp),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("files-filter"),
             )
             if (searchExpanded || state.query.isNotEmpty()) {
                 Spacer(Modifier.size(6.dp))
@@ -196,6 +212,35 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                     onClick = { vm.setSearchContent(!state.searchContent) },
                 )
             } else {
+                Box {
+                    ToolbarIcon(
+                        if (state.sort.descending) PhosphorIcons.Regular.SortDescending else PhosphorIcons.Regular.SortAscending,
+                        stringResource(R.string.files_sort), { showSortMenu = true },
+                    )
+                    WindowListPopup(show = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                        val keys = listOf(
+                            SortKey.NAME to stringResource(R.string.files_sort_name),
+                            SortKey.MODIFIED to stringResource(R.string.files_sort_modified),
+                            SortKey.SIZE to stringResource(R.string.files_sort_size),
+                            SortKey.TYPE to stringResource(R.string.files_sort_type),
+                        )
+                        ListPopupColumn {
+                            keys.forEachIndexed { idx, (key, label) ->
+                                val active = state.sort.key == key
+                                DropdownImpl(
+                                    text = if (active) label + if (state.sort.descending) "  ↓" else "  ↑" else label,
+                                    optionSize = keys.size,
+                                    isSelected = active,
+                                    index = idx,
+                                    onSelectedIndexChange = {
+                                        showSortMenu = false
+                                        vm.sortBy(key)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
                 Box {
                     ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { showMoreMenu = true })
                     WindowListPopup(show = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
@@ -224,20 +269,43 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 }
             }
         }
+        // Path bar: always visible (not scrolled away with the list); every segment opens that folder.
+        if (listing != null && state.results == null) {
+            val crumbs = remember(listing.path, roots) { FileListing.breadcrumbs(listing.path, roots.map { Crumb(it.name, it.path) }) }
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                ToolbarIcon(PhosphorIcons.Regular.ArrowUp, stringResource(R.string.files_up), { listing.parent?.let(vm::browse) }, enabled = listing.parent != null)
+                androidx.compose.runtime.key(listing.path) {
+                    BreadcrumbBar(
+                        items = crumbs.map { BreadcrumbItem(path = it.path, text = it.label) },
+                        onItemClick = { idx -> crumbs.getOrNull(idx)?.let { if (it.path != listing.path) vm.browse(it.path) } },
+                        modifier = Modifier.weight(1f).testTag("files-path"),
+                    )
+                }
+            }
+        }
+        if (state.navigatingTo != null && listing != null) {
+            LinearProgressIndicator(progress = null, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+        }
         state.transfer?.let { TransferRow(it, vm, onOpenDownloads) }
         val results = state.results
         if (results != null) {
             LoadableContent(results, onRetry = vm::search) { hits ->
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = pageListPadding(top = 4.dp)) {
-                    item { SmallTitle(stringResource(R.string.files_results, hits.size)) }
-                    item {
-                        GroupCard {
-                            hits.forEachIndexed { i, h ->
-                                BasicComponent(
-                                    title = h.name, summary = listOfNotNull(h.path, h.line?.let { "L$it" }, h.snippet).joinToString(" · "),
-                                    onClick = { vm.openPath(h.path) }, cardListPosition = cardListPositionOf(i, hits.size),
-                                )
-                            }
+                LazyColumn(Modifier.fillMaxSize().testTag("search-results"), contentPadding = pageListPadding(top = 4.dp)) {
+                    item(key = "h") { SmallTitle(stringResource(R.string.files_results, hits.size)) }
+                    if (hits.isEmpty()) item(key = "none") { EmptyNote(stringResource(R.string.files_search_none)) }
+                    itemsIndexed(hits, key = { i, h -> "$i:${h.path}:${h.line}" }) { i, h ->
+                        CardRow(cardListPositionOf(i, hits.size)) {
+                            BasicComponent(
+                                title = h.name,
+                                summary = listOfNotNull(
+                                    FileListing.relativeTo(listing?.path, h.path),
+                                    h.line?.let { stringResource(R.string.files_line_n, it) },
+                                    h.snippet?.trim()?.take(160),
+                                ).joinToString(" · "),
+                                startAction = { EntryIcon(FileTypes.iconOf(h.name, isDir = false)) },
+                                onClick = { vm.openPath(h.path) },
+                                cardListPosition = cardListPositionOf(i, hits.size),
+                            )
                         }
                     }
                 }
@@ -247,54 +315,75 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         when (val l = state.listing) {
             null -> Unit
             else -> LoadableContent(l, onRetry = { vm.currentDir()?.let(vm::browse) ?: vm.loadRoots() }) { list ->
-                val crumbs = remember(list.path) { buildBreadcrumbs(list.path) }
+                val visible = remember(list, state.query, state.sort) { FileListing.sort(FileListing.filter(list.entries, state.query), state.sort) }
+                // Each folder remembers where it was scrolled to (also across opening a file), so going back lands where you left.
+                val positions = vm.scrollPositions
+                val listState = remember(list.path) { positions[list.path]?.let { LazyListState(it.first, it.second) } ?: LazyListState() }
+                androidx.compose.runtime.DisposableEffect(list.path) {
+                    onDispose { positions[list.path] = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+                }
+                io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
+                val query = state.query.trim()
                 io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = vm::refreshListing, topAppBarScrollBehavior = null) {
-                LazyColumn(Modifier.fillMaxSize().testTag("file-list"), contentPadding = pageListPadding(top = 4.dp)) {
-                    if (crumbs.isNotEmpty()) {
-                        item(key = "crumbs") {
-                            BreadcrumbBar(
-                                items = crumbs.map { BreadcrumbItem(path = it.second, text = it.first) },
-                                onItemClick = { idx -> vm.browse(crumbs[idx].second) },
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            )
+                    LazyColumn(Modifier.fillMaxSize().testTag("file-list"), state = listState, contentPadding = pageListPadding(top = 4.dp)) {
+                        if (visible.isEmpty()) {
+                            item(key = "empty") {
+                                if (query.isEmpty()) {
+                                    EmptyNote(stringResource(R.string.files_empty_folder))
+                                } else {
+                                    Column {
+                                        EmptyNote(stringResource(R.string.files_filter_none))
+                                        TextButton(text = stringResource(R.string.files_search_subfolders, query), onClick = vm::search, modifier = Modifier.padding(horizontal = 16.dp))
+                                    }
+                                }
+                            }
                         }
-                    }
-                    item {
-                        GroupCard {
-                            val rows = listOfNotNull(list.parent?.let { FsEntry("..", it, "dir") }) + list.entries
-                            rows.forEachIndexed { i, e ->
+                        itemsIndexed(visible, key = { _, e -> e.path }) { i, e ->
+                            val pos = cardListPositionOf(i, visible.size)
+                            CardRow(pos) {
                                 BasicComponent(
                                     title = e.name,
-                                    summary = if (e.isDir) null else listOfNotNull(Formatters.bytes(e.size), e.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) }).joinToString(" · "),
-                                    startAction = {
-                                        Icon(
-                                            imageVector = if (e.isDir) AppIcons.Workspace else AppIcons.File,
-                                            contentDescription = null,
-                                            tint = if (e.isDir) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurfaceVariantSummary,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    },
+                                    summary = entrySummary(e),
+                                    startAction = { EntryIcon(FileTypes.iconOf(e.name, e.isDir, e.sensitive)) },
                                     endActions = {
                                         if (e.sensitive) StatusPill(stringResource(R.string.new_session_sensitive), LocalDevColors.current.warn)
-                                        if (e.name != "..") ToolbarIcon(AppIcons.More, stringResource(R.string.files_actions, e.name), { actionsFor = e })
+                                        ToolbarIcon(AppIcons.More, stringResource(R.string.files_actions, e.name), { actionsFor = e })
                                     },
-                                    onClick = { if (e.name == "..") vm.browse(e.path) else vm.open(e) },
+                                    onClick = { vm.open(e) },
                                     onClickLabel = e.name,
-                                    cardListPosition = cardListPositionOf(i, rows.size),
+                                    cardListPosition = pos,
                                 )
                             }
                         }
+                        if (query.isNotEmpty() && visible.isNotEmpty()) {
+                            item(key = "deep") {
+                                TextButton(text = stringResource(R.string.files_search_subfolders, query), onClick = vm::search, modifier = Modifier.padding(horizontal = 16.dp))
+                            }
+                        }
+                        item(key = "count") {
+                            val dirs = list.entries.count { it.isDir }
+                            Text(
+                                stringResource(R.string.files_count, dirs, list.entries.size - dirs) +
+                                    if (list.truncated || list.blocked > 0) " · " + stringResource(R.string.new_session_listing_note, list.blocked) else "",
+                                style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                            )
+                        }
                     }
-                    if (list.truncated || list.blocked > 0) item { Text(stringResource(R.string.new_session_listing_note, list.blocked), style = DevType.label, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
-                }
                 }
             }
         }
     }
     actionsFor?.let { e ->
+        val copied = stringResource(R.string.files_copied)
         AppBottomSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }) {
             val opts = buildList {
                 if (!e.isDir) add(stringResource(R.string.files_download) to { actionsFor = null; vm.download(e) })
+                add(stringResource(R.string.files_copy_path) to {
+                    actionsFor = null
+                    scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(e.name, e.path))) }
+                    android.widget.Toast.makeText(context, copied, android.widget.Toast.LENGTH_SHORT).show()
+                })
                 add(stringResource(R.string.files_rename) to { actionsFor = null; target = e; nameDialog = "rename" })
                 add(stringResource(R.string.files_delete) to { actionsFor = null; confirmDelete = e })
             }
@@ -355,6 +444,44 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     }
 }
 
+/** "12 KiB · 3 min ago" for files, the modification time for folders. */
+@Composable
+private fun entrySummary(e: FsEntry): String? {
+    val time = e.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) }
+    return if (e.isDir) time else listOfNotNull(Formatters.bytes(e.size), time).joinToString(" · ")
+}
+
+@Composable
+private fun EntryIcon(icon: FileIcon) {
+    val tint = when (icon) {
+        FileIcon.FOLDER -> COUITheme.colorScheme.primary
+        FileIcon.LOCKED -> LocalDevColors.current.warn
+        else -> COUITheme.colorScheme.onSurfaceVariantSummary
+    }
+    Icon(imageVector = fileIconVector(icon), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+}
+
+/** One row of a card group laid out lazily (each row its own item, so folders with thousands of entries scroll smoothly). */
+@Composable
+private fun CardRow(position: CardListPosition, content: @Composable () -> Unit) {
+    val r = io.github.suqi8.coui.kmp.basic.CardDefaults.GroupCornerRadius
+    val shape = when (position) {
+        CardListPosition.Full -> RoundedCornerShape(r)
+        CardListPosition.Head -> RoundedCornerShape(topStart = r, topEnd = r)
+        CardListPosition.Tail -> RoundedCornerShape(bottomStart = r, bottomEnd = r)
+        else -> androidx.compose.ui.graphics.RectangleShape
+    }
+    val last = position == CardListPosition.Tail || position == CardListPosition.Full
+    Box(
+        Modifier.padding(horizontal = 16.dp).padding(bottom = if (last) 8.dp else 0.dp)
+            .clip(shape).background(io.github.suqi8.coui.kmp.basic.CardDefaults.defaultColors().color),
+    ) { content() }
+}
+
+@Composable
+private fun EmptyNote(text: String) {
+    Text(text, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
+}
 @Composable
 private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -381,19 +508,21 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
 private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
     BackHandler(onBack = vm::requestCloseFile)
     Column(Modifier.fillMaxSize()) {
+        val f = (state.file as? Loadable.Ready)?.value
+        val name = f?.path?.let(FileTypes::fileName).orEmpty()
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), vm::requestCloseFile)
-            val f = (state.file as? Loadable.Ready)?.value
-            Text(
-                f?.path?.substringAfterLast('\\')?.substringAfterLast('/') ?: "",
-                style = COUITheme.textStyles.body1,
-                color = COUITheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(Modifier.weight(1f)) {
+                Text(name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                if (f != null) {
+                    Text(
+                        f.path, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1, overflow = TextOverflow.StartEllipsis,
+                    )
+                }
+            }
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
-            if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(f.path.substringAfterLast('\\').substringAfterLast('/'), f.path, "file", f.size)) })
+            if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(name, f.path, "file", f.size)) })
             if (state.editing) {
                 Button(onClick = vm::save, enabled = !state.saving, colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.padding(end = 8.dp).testTag("save")) {
                     Text(if (state.saving) "…" else stringResource(R.string.files_save), color = COUITheme.colorScheme.onPrimary)
@@ -401,11 +530,17 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
             }
         }
         state.transfer?.let { TransferRow(it, vm, {}) }
-        LoadableContent(state.file!!, onRetry = { (state.file as? Loadable.Ready)?.value?.path?.let(vm::openPath) }) { f ->
+        LoadableContent(state.file!!, onRetry = { (state.file as? Loadable.Ready)?.value?.path?.let(vm::openPath) }) { file ->
             val dev = LocalDevColors.current
             Text(
-                listOf(f.encoding, f.lineEnding.uppercase(), Formatters.bytes(f.size), f.sha256.take(12)).joinToString(" · ") + if (f.truncated) " · truncated" else "",
-                style = DevType.label, color = dev.gutter, modifier = Modifier.padding(horizontal = 16.dp),
+                listOfNotNull(
+                    file.encoding,
+                    file.lineEnding.uppercase(),
+                    Formatters.bytes(file.size),
+                    file.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) },
+                    file.sha256.take(12).takeIf { it.isNotEmpty() },
+                ).joinToString(" · "),
+                style = DevType.label, color = dev.gutter, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
             )
             if (state.editing) {
                 BasicTextField(
@@ -415,20 +550,18 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
                     cursorBrush = SolidColor(COUITheme.colorScheme.primary),
                     modifier = Modifier.fillMaxSize().padding(8.dp).background(dev.codeBackground).padding(8.dp).testTag("editor"),
                 )
-            } else if (f.text == null) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(stringResource(R.string.files_binary), color = COUITheme.colorScheme.onSurfaceVariantSummary)
-                    TextButton(text = stringResource(R.string.files_view_binary), onClick = { vm.openViewer(f.path, f.path.substringAfterLast('\\').substringAfterLast('/'), f.size.takeIf { it > 0 }, f.modifiedMs) })
-                }
             } else {
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 24.dp + LocalBottomBarSpace.current)) {
-                    CodeBlockView(f.text.orEmpty(), f.language ?: SyntaxHighlighter.languageForPath(f.path))
-                }
+                TextFileBody(
+                    file,
+                    Modifier.fillMaxSize(),
+                    onOpenPath = { vm.openPath(it) },
+                    onDownload = { vm.download(FsEntry(FileTypes.fileName(file.path), file.path, "file", file.size)) },
+                    onOpenBinary = { vm.openViewer(file.path, FileTypes.fileName(file.path), file.size.takeIf { it > 0 }, file.modifiedMs) },
+                )
             }
         }
     }
 }
-
 @Composable
 private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
     val c = state.conflict ?: return
@@ -464,26 +597,6 @@ private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
         }
     }
     ConfirmDialog(confirmOverwrite, stringResource(R.string.files_overwrite), stringResource(R.string.files_overwrite_confirm), stringResource(R.string.files_overwrite), { confirmOverwrite = false; vm.overwrite() }, { confirmOverwrite = false })
-}
-
-/** Splits a Windows or POSIX path into `(label, fullPath)` pairs for COUI17 [BreadcrumbBar]. */
-private fun buildBreadcrumbs(path: String): List<Pair<String, String>> {
-    if (path.isBlank()) return emptyList()
-    val isWin = path.contains('\\') || (path.length >= 2 && path[1] == ':')
-    val sep = if (isWin) "\\" else "/"
-    val parts = path.split('/', '\\').filter { it.isNotEmpty() }
-    if (parts.isEmpty()) return listOf("/" to "/")
-    val out = mutableListOf<Pair<String, String>>()
-    var acc = if (path.startsWith("/")) "/" else ""
-    parts.forEachIndexed { idx, part ->
-        acc = when {
-            idx == 0 && isWin && part.endsWith(":") -> "$part\\"
-            acc.isEmpty() || acc == "/" || acc.endsWith("\\") -> acc + part
-            else -> acc + sep + part
-        }
-        out += part to acc
-    }
-    return out
 }
 
 /** Outcome messages that only report success: shown as a toast instead of a dialog. */

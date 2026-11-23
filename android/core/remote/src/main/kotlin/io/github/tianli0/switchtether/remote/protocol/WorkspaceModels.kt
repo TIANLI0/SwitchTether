@@ -141,3 +141,35 @@ data class GitLog(val commits: List<GitCommit> = emptyList())
 
 @Serializable
 data class GitShow(val text: String? = null, val binary: Boolean = false)
+
+// ---------------------------------------------------------------------------------------------
+// §7.11 Port forwarding
+// ---------------------------------------------------------------------------------------------
+
+/** A TCP port listening on the desktop's loopback; [process] where the desktop OS tells (Windows). */
+@Serializable
+data class ListeningPort(val port: Int, val process: String? = null, val pid: Long? = null)
+
+@Serializable
+data class ListeningPorts(val ports: List<ListeningPort> = emptyList())
+
+/** A forward lease. [listening] is only set in the response of `POST /v1/forwards`. */
+@Serializable
+data class ForwardView(
+    val id: String,
+    val port: Int,
+    val createdAtMs: Long = 0,
+    val expiresAtMs: Long = 0,
+    val connected: Boolean = false,
+    val activeStreams: Int = 0,
+    val totalStreams: Long = 0,
+    val bytesDown: Long = 0,
+    val bytesUp: Long = 0,
+    val listening: Boolean? = null,
+)
+
+@Serializable
+data class ForwardList(val forwards: List<ForwardView> = emptyList())
+
+@Serializable
+data class CreateForwardBody(val port: Int, val ttlMinutes: Int? = null)

@@ -49,6 +49,7 @@ import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.common.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -113,7 +114,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
             }
         },
     ) {
-        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 4.dp)) {
+        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 4.dp)) {
             item { SmallTitle(stringResource(R.string.downloads_section_saved)) }
             item {
                 Text(

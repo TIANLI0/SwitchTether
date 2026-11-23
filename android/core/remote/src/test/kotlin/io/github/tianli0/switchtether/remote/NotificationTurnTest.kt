@@ -144,4 +144,74 @@ class NotificationTurnTest {
         assertEquals(NotifyType.TASK_COMPLETED, e.onSessionUpsert(S.copy(status = "idle"))?.type)
     }
 
+
+    @Test
+    fun oneWaitAlertsOnceWhicheverSourceComesFirst() {
+        // Request event first: the status change for the same wait stays quiet.
+        val e = engine()
+        val req = e.onSessionEvent(ev("a1", 1, "approval_request", """{"requestId":"r1","title":"Run npm test"}"""), S)
+        assertEquals(NotifyType.WAITING_APPROVAL, req?.type)
+        assertEquals("r1", req!!.requestId)
+        assertEquals("Run npm test", req.body)
+        assertEquals(false, req.alertOnce)
+        assertNull(e.onSessionUpsert(S.copy(status = "waiting", waitingFor = "permission prompt")))
+
+        // Status change first: the request event updates it with the details, without a second alert.
+        val f = engine()
+        val generic = f.onSessionUpsert(S.copy(status = "waiting", waitingFor = "permission prompt"))
+        assertEquals(NotifyType.WAITING_APPROVAL, generic?.type)
+        assertNull(generic!!.requestId)
+        val detailed = f.onSessionEvent(ev("a2", 1, "approval_request", """{"requestId":"r2","title":"Edit main.rs"}"""), S)
+        assertEquals("r2", detailed?.requestId)
+        assertEquals(true, detailed!!.alertOnce)
+
+        // The wait ends; the next wait is announced again.
+        f.onSessionUpsert(S.copy(status = "busy"))
+        val next = f.onSessionUpsert(S.copy(status = "waiting", waitingFor = "permission prompt"))
+        assertEquals(NotifyType.WAITING_APPROVAL, next?.type)
+        assertEquals(false, next!!.alertOnce)
+    }
+
+    @Test
+    fun aSingleChoiceQuestionIsAnswerableFromTheNotification() {
+        val e = engine()
+        val q = e.onSessionEvent(
+            ev(
+                "q1", 1, "question",
+                """{"requestId":"q-1","questions":[{"id":"target","question":"Which environment?","multiSelect":false,"allowOther":true,
+                   "options":[{"label":"Staging","value":"stg"},{"label":"Production"}]}]}""",
+            ),
+            S,
+        )
+        assertEquals("Which environment?", q?.body)
+        val p = q!!.prompt!!
+        assertEquals("q-1", p.requestId)
+        assertEquals("target", p.key)
+        assertEquals(listOf("Staging", "Production"), p.labels)
+        assertEquals("stg", p.valueFor("Staging"))
+        assertEquals("Production", p.valueFor("Production"))
+        assertEquals("eu-west", p.valueFor("eu-west"))
+        assertEquals(true, p.freeText)
+
+        // Several questions, multi-select or secret: shown, but answered in the app.
+        val several = e.onSessionEvent(ev("q2", 2, "question", """{"requestId":"q-2","questions":[{"question":"A?"},{"question":"B?"}]}"""), S)
+        assertEquals("A?  ·  B?", several?.body)
+        assertNull(several!!.prompt)
+        val multi = e.onSessionEvent(ev("q3", 3, "question", """{"requestId":"q-3","questions":[{"question":"Pick","multiSelect":true,"options":[{"label":"x"}]}]}"""), S)
+        assertNull(multi!!.prompt)
+        val secret = e.onSessionEvent(ev("q4", 4, "question", """{"requestId":"q-4","questions":[{"question":"Token?","isSecret":true}]}"""), S)
+        assertNull(secret!!.prompt)
+    }
+
+    @Test
+    fun replyIsOfferedOnlyForSessionsThePhoneControls() {
+        val e = engine()
+        e.onSessionUpsert(S.copy(status = "busy"))
+        assertEquals(true, e.onSessionUpsert(S.copy(status = "idle"))?.replyable)
+        val observed = S.copy(id = "claude:obs", control = "observe", managed = false)
+        e.onSessionUpsert(observed.copy(status = "busy"))
+        val done = e.onSessionUpsert(observed.copy(status = "idle"))
+        assertEquals(NotifyType.TASK_COMPLETED, done?.type)
+        assertEquals(false, done!!.replyable)
+    }
 }

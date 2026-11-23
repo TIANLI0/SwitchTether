@@ -98,12 +98,13 @@
     <string name="sessions_history">历史</string>
     <string name="sessions_all">全部</string>
     <string name="sessions_all_agents">全部智能体</string>
+    <string name="sessions_all_projects">全部项目</string>
     <string name="sessions_empty">没有会话。</string>
     <string name="sessions_empty_live">没有运行中的会话。请在电脑上启动 Claude Code 或 Codex。</string>
     <string name="sessions_empty_history">没有找到历史会话。</string>
     <string name="badge_live">运行中</string>
     <string name="badge_ended">已结束</string>
-    <string name="badge_managed">托管</string>
+    <string name="badge_managed">手机</string>
     <string name="control_full">完全控制</string>
     <string name="control_observe">仅观察</string>
     <string name="control_history">历史</string>
@@ -247,6 +248,18 @@
     <string name="settings_connection">连接</string>
     <string name="settings_background">后台保持连接</string>
     <string name="settings_background_summary">应用在后台时保持与电脑的连接，以便及时通知审批和任务状态（常驻通知）。</string>
+    <string name="companion_title">通过蓝牙绑定电脑</string>
+    <string name="companion_summary_none">绑定后系统会为 SwitchTether 解除后台限制，并在电脑靠近时唤醒它。</string>
+    <string name="companion_summary_bound">已绑定：%1$s</string>
+    <string name="companion_intro">将这台手机已通过蓝牙配对的电脑关联为配套设备。之后系统会为 SwitchTether 解除电池优化，并在电脑连上蓝牙时唤醒它。不会改动电脑上的任何内容。</string>
+    <string name="companion_bind">绑定</string>
+    <string name="companion_unbind">解除</string>
+    <string name="companion_scan">搜索电脑</string>
+    <string name="companion_bt_permission">允许“附近的设备”权限以列出已配对的电脑</string>
+    <string name="companion_nearby_only">仅在电脑附近时保持连接</string>
+    <string name="companion_nearby_only_summary">电脑断开蓝牙后停止后台连接，让系统回收 SwitchTether 的内存；电脑回来时自动恢复。固定的任务和端口转发不受影响。</string>
+    <string name="companion_no_presence">检测电脑是否在附近需要 Android 12 及以上。</string>
+    <string name="companion_failed">绑定失败：%1$s</string>
     <string name="settings_notifications">通知</string>
     <string name="settings_notifications_summary">选择哪些事件需要通知</string>
     <string name="notifications_phase_b">通知将随后台连接在下一版本推送。你现在的选择会被保存。</string>
@@ -271,8 +284,8 @@
     <string name="workspace_security">访问终端和写入文件时始终需要生物识别确认。</string>
 
     <string name="new_session_title">新建会话</string>
-    <string name="new_session_subtitle">新建由 SwitchTether 托管的会话</string>
-    <string name="new_session_explainer">在电脑上启动一个由 SwitchTether 托管的新智能体进程：可以从手机发送消息、处理审批和中断。它不会接管你在终端或 VS Code 中启动的会话。</string>
+    <string name="new_session_subtitle">在电脑上新建 Claude Code / Codex 会话</string>
+    <string name="new_session_explainer">用官方方式在电脑上新建会话：它就是一个普通的 Claude Code / Codex 会话，claude --resume 和 VS Code 的历史里都能找到。可以从手机发消息、审批、中断、切换模型；电脑或 SwitchTether 重启后，直接发消息即可继续。不会接管你在终端或 VS Code 里开着的会话。</string>
     <string name="new_session_agent">智能体</string>
     <string name="new_session_cwd">工作目录</string>
     <string name="new_session_cwd_none">请在下方选择文件夹</string>
@@ -289,7 +302,7 @@
     <string name="perm_accept_edits">自动接受文件修改，其余仍询问</string>
     <string name="perm_plan">只做计划，不做修改</string>
     <string name="new_session_start">启动会话</string>
-    <string name="new_session_confirm_title">启动托管会话？</string>
+    <string name="new_session_confirm_title">启动新会话？</string>
     <string name="new_session_confirm_body">在电脑上于 %2$s 启动 %1$s。</string>
     <string name="provider_credential">更新凭据</string>
     <string name="provider_credential_note">新值在生物识别确认后发送到电脑一次，之后不会再显示。供应商：%1$s</string>
@@ -375,7 +388,7 @@
     <string name="notif_battery_fix_summary">省电策略可能让“任务完成”通知延迟，点按为 SwitchTether 解除限制。</string>
     <string name="new_session_options">选项</string>
     <string name="new_session_model_default">默认模型</string>
-    <string name="new_session_note">在电脑上新建一个可由手机控制的会话；你在终端或 VS Code 里自己开的会话不受影响。</string>
+    <string name="new_session_note">在电脑上新建一个普通会话（claude --resume、VS Code 历史里也能找到）；你在终端或 VS Code 里开着的会话不受影响。</string>
     <string name="perm_default_short">逐项确认</string>
     <string name="perm_accept_edits_short">自动编辑</string>
     <string name="perm_plan_short">仅规划</string>

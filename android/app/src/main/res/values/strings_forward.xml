@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Port forwarding (docs/PROTOCOL.md §7.11) -->
+    <string name="forward_title">Port forwarding</string>
+    <string name="forward_ws_summary">Open the computer\'s dev servers in this phone\'s browser</string>
+    <plurals name="forward_ws_active">
+        <item quantity="one">Forwarding %d port</item>
+        <item quantity="other">Forwarding %d ports</item>
+    </plurals>
+    <string name="forward_active">Forwarding</string>
+    <string name="forward_listening">Listening on the computer</string>
+    <string name="forward_listening_empty">Nothing listens on the computer\'s localhost right now. Start a dev server there, or enter a port.</string>
+    <string name="forward_manual">Enter a port…</string>
+    <string name="forward_resumable">Still valid on the computer</string>
+    <string name="forward_resume_summary">No new confirmation needed until it expires</string>
+    <string name="forward_remote_port">Port on the computer</string>
+    <string name="forward_local_port">Port on this phone</string>
+    <string name="forward_local_hint">Same as the computer by default, so addresses and origins match.</string>
+    <string name="forward_start">Forward</string>
+    <string name="forward_open">Open</string>
+    <string name="forward_copy">Copy</string>
+    <string name="forward_copied">Address copied</string>
+    <string name="forward_extend">+2 h</string>
+    <string name="forward_extended">Extended until %1$s</string>
+    <string name="forward_stop">Stop</string>
+    <string name="forward_stop_all">Stop forwarding</string>
+    <string name="forward_status_open">Connected</string>
+    <string name="forward_status_connecting">Connecting…</string>
+    <string name="forward_status_waiting">Reconnecting…</string>
+    <string name="forward_via_relay">via relay</string>
+    <string name="forward_to_computer">→ computer :%1$d</string>
+    <plurals name="forward_connections">
+        <item quantity="one">%d connection</item>
+        <item quantity="other">%d connections</item>
+    </plurals>
+    <string name="forward_until">until %1$s</string>
+    <string name="forward_already">Forwarded</string>
+    <string name="forward_hint">Each forward is confirmed with biometrics and ends after 2 hours, or when you stop it. While it runs, other apps on this phone can reach these localhost ports too.</string>
+    <string name="forward_local_busy">Port %1$d on this phone is in use. Choose another one.</string>
+    <string name="forward_not_listening">Nothing is running on port %1$d of the computer yet. The page reloads by itself once it starts.</string>
+    <string name="forward_failed">Could not forward: %1$s</string>
+    <string name="forward_no_stepup">Forwarding needs biometric confirmation, which this pairing does not have. Pair again on a phone with a screen lock.</string>
+    <string name="forward_ended">The computer ended the forward of port %1$d</string>
+    <string name="forward_invalid_port">Enter a port between 1 and 65535</string>
+    <string name="forward_no_browser">No browser installed</string>
+    <string name="forward_page_refused_title">Nothing is running on port %1$d of the computer</string>
+    <string name="forward_page_refused_body">Start it on the computer; this page reloads by itself.</string>
+    <string name="forward_page_unreachable_title">Can\'t reach the computer right now</string>
+    <string name="forward_page_unreachable_body">SwitchTether is reconnecting; this page reloads by itself.</string>
+    <string name="forward_page_footer">SwitchTether port forwarding → computer port %1$d</string>
+    <plurals name="service_title_forwarding">
+        <item quantity="one">Forwarding %d port from your computer</item>
+        <item quantity="other">Forwarding %d ports from your computer</item>
+    </plurals>
+</resources>

@@ -57,12 +57,29 @@ pub struct ClaudeParser {
     agent_calls: HashMap<String, String>,
     /// Background shell task id (`backgroundTaskId`, the notification's `<task-id>`) -> Bash call id.
     bg_shells: HashMap<String, String>,
+    /// Background tasks (agents, shells) still running, from stream-json
+    /// `background_tasks_changed`; always 0 for transcripts, which do not record it.
+    pub background_tasks: usize,
 }
 
 struct SubagentRow {
     data: Value,
     turn_id: Option<String>,
     ts: String,
+}
+
+/// What a background task reported, from a `<task-notification>` (transcript) or a stream-json
+/// `system` `task_notification` record.
+#[derive(Default)]
+struct TaskNote {
+    task_id: Option<String>,
+    tool_use_id: Option<String>,
+    status: Option<String>,
+    summary: Option<String>,
+    result: Option<String>,
+    tokens: Option<i64>,
+    tool_uses: Option<i64>,
+    duration_ms: Option<i64>,
 }
 
 /// Longest sub-agent result kept on the row; the full text stays in the transcript.
@@ -388,6 +405,11 @@ impl ClaudeParser {
             self.session_id = Some(sid);
         }
         let parent = s(rec, "parent_tool_use_id");
+        // Stream-json: a sub-agent's own records carry `agent_id`; the first one shows it runs.
+        let early = match (&parent, s(rec, "agent_id")) {
+            (Some(p), Some(a)) if !p.is_empty() => self.ensure_running_subagent(p, &a, None, &ts),
+            _ => None,
+        };
         let mut out = match rec.get("type").and_then(|t| t.as_str()) {
             Some("user") => self.user(rec, &ts),
             Some("assistant") => self.assistant(rec, &ts),
@@ -434,6 +456,9 @@ impl ClaudeParser {
                     d.parent_id = Some(p.clone());
                 }
             }
+        }
+        if let Some(e) = early {
+            out.insert(0, e);
         }
         out
     }
@@ -507,15 +532,19 @@ impl ClaudeParser {
                 if b.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
                     let call_id = s(b, "tool_use_id").unwrap_or_default();
                     let is_error = b.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
-                    out.extend(self.tool_result(
-                        &call_id,
-                        is_error,
-                        &clean_tool_output(&tool_result_text(
-                            b.get("content").unwrap_or(&Value::Null),
-                        )),
-                        rec.get("toolUseResult"),
-                        ts,
-                    ));
+                    out.extend(
+                        self.tool_result(
+                            &call_id,
+                            is_error,
+                            &clean_tool_output(&tool_result_text(
+                                b.get("content").unwrap_or(&Value::Null),
+                            )),
+                            // Transcripts write `toolUseResult`; stream-json writes `tool_use_result`.
+                            rec.get("toolUseResult")
+                                .or_else(|| rec.get("tool_use_result")),
+                            ts,
+                        ),
+                    );
                 }
             }
         }
@@ -630,6 +659,15 @@ impl ClaudeParser {
                 });
                 if let Some(task) = bg_task.filter(|_| !is_error) {
                     tc.data["background"] = json!(true);
+                    // "… Output is being written to: <dir>/<task>.output. You will be notified …"
+                    let want = format!("{task}.output");
+                    if let Some(path) = text
+                        .find("Output is being written to: ")
+                        .map(|i| &text[i + "Output is being written to: ".len()..])
+                        .and_then(|rest| rest.find(want.as_str()).map(|e| &rest[..e + want.len()]))
+                    {
+                        tc.data["outputFile"] = json!(path.trim());
+                    }
                     tc.data["taskId"] = json!(task);
                     self.bg_shells.insert(task, call_id.to_string());
                 }
@@ -780,6 +818,9 @@ impl ClaudeParser {
             "status": status,
             "callId": call_id,
         });
+        if let Some(f) = s(st, "outputFile") {
+            data["outputFile"] = json!(f);
+        }
         if status != "running" {
             let (p, truncated) = preview(text.trim(), SUBAGENT_RESULT_LIMIT);
             if !p.is_empty() {
@@ -796,6 +837,33 @@ impl ClaudeParser {
                 data[to] = json!(v);
             }
         }
+        // The row may exist since the agent started (see `ensure_running_subagent`): keep its
+        // start time and what only the live records knew.
+        let mut ts = ts.to_string();
+        let mut turn = turn;
+        if let Some(prev) = self.subagents.get(call_id) {
+            for k in [
+                "tokens",
+                "toolUses",
+                "durationMs",
+                "summary",
+                "model",
+                "agentType",
+            ] {
+                if data.get(k).is_none_or(Value::is_null) {
+                    if let Some(v) = prev.data.get(k).filter(|v| !v.is_null()) {
+                        data[k] = v.clone();
+                    }
+                }
+            }
+            if status == "running" {
+                if let Some(a) = prev.data.get("activity") {
+                    data["activity"] = a.clone();
+                }
+            }
+            ts = prev.ts.clone();
+            turn = prev.turn_id.clone().or(turn);
+        }
         if !agent_id.is_empty() {
             self.agent_calls.insert(agent_id, call_id.to_string());
         }
@@ -804,7 +872,7 @@ impl ClaudeParser {
             SubagentRow {
                 data: data.clone(),
                 turn_id: turn.clone(),
-                ts: ts.to_string(),
+                ts: ts.clone(),
             },
         );
         let mut sa = EventDraft::new(format!("sa:{call_id}"), "subagent", ts, data);
@@ -813,18 +881,170 @@ impl ClaudeParser {
         sa
     }
 
-    /// `<task-notification>`: a background agent (or background shell task) finished. Known
-    /// sub-agents are updated in place; anything else becomes a short system note.
+    /// A sub-agent that is running but has no result yet (foreground agents report only when
+    /// they finish) gets its row now, so its steps can be followed while it works. Called from
+    /// the stream's `task_started` and from the first record the agent writes (`agent_id` +
+    /// `parent_tool_use_id`). Returns None when the row exists or the call is not Agent/Task.
+    fn ensure_running_subagent(
+        &mut self,
+        call_id: &str,
+        agent_id: &str,
+        background: Option<bool>,
+        ts: &str,
+    ) -> Option<EventDraft> {
+        if self.subagents.contains_key(call_id) {
+            return None;
+        }
+        let tc = self.tools.get(call_id)?;
+        if !matches!(tc.name.as_str(), "Agent" | "Task") {
+            return None;
+        }
+        let input = tc.data.get("input").cloned().unwrap_or(Value::Null);
+        let background = background.unwrap_or_else(|| {
+            input.get("run_in_background").and_then(Value::as_bool) == Some(true)
+        });
+        let row = SubagentRow {
+            data: json!({
+                "agentId": agent_id,
+                "description": s(&input, "description").or_else(|| s(&tc.data, "title")),
+                "agentType": s(&input, "subagent_type"),
+                "background": background,
+                "status": "running",
+                "callId": call_id,
+            }),
+            turn_id: tc.turn_id.clone(),
+            ts: ts.to_string(),
+        };
+        if !agent_id.is_empty() {
+            self.agent_calls
+                .insert(agent_id.to_string(), call_id.to_string());
+        }
+        let d = Self::subagent_draft(call_id, &row);
+        self.subagents.insert(call_id.to_string(), row);
+        Some(d)
+    }
+
+    /// `<task-notification>` (transcript, or a user turn of the stream): a background agent (or
+    /// background shell task) finished. See [`Self::apply_task_note`].
     fn task_notification(&mut self, uuid: &str, text: &str, ts: &str) -> Vec<EventDraft> {
-        if let Some(d) = self.background_shell_finished(text, ts) {
+        let num = |tag: &str| xml_tag(text, tag).and_then(|v| v.parse::<i64>().ok());
+        let note = TaskNote {
+            task_id: xml_tag(text, "task-id").map(String::from),
+            tool_use_id: xml_tag(text, "tool-use-id").map(String::from),
+            status: xml_tag(text, "status").map(String::from),
+            summary: xml_tag(text, "summary").map(String::from),
+            result: xml_tag(text, "result").map(String::from),
+            tokens: num("subagent_tokens"),
+            tool_uses: num("tool_uses"),
+            duration_ms: num("duration_ms"),
+        };
+        self.apply_task_note(uuid, note, ts)
+    }
+
+    /// Stream-json `system` records about background tasks (`task_started`, `task_progress`,
+    /// `task_notification`). The stream reports background work this way instead of the
+    /// transcript's `<task-notification>` user turns, so a managed session updates the same rows.
+    fn task_system(&mut self, subtype: &str, rec: &Value, uuid: &str, ts: &str) -> Vec<EventDraft> {
+        let task_id = s(rec, "task_id");
+        let tool_use_id = s(rec, "tool_use_id");
+        let usage = rec.get("usage");
+        let num = |k: &str| usage.and_then(|u| u.get(k)).and_then(Value::as_i64);
+        match subtype {
+            // Learn task id -> call id early: a shell's notification may name only the task.
+            "task_started" => {
+                let (Some(t), Some(c)) = (task_id, tool_use_id) else {
+                    return vec![];
+                };
+                if s(rec, "task_type").as_deref() == Some("local_bash") {
+                    self.bg_shells.insert(t, c);
+                    return vec![];
+                }
+                let background = rec.get("is_backgrounded").and_then(Value::as_bool);
+                self.agent_calls.insert(t.clone(), c.clone());
+                self.ensure_running_subagent(&c, &t, background, ts)
+                    .into_iter()
+                    .collect()
+            }
+            // A running agent's live counters and what it is doing now.
+            "task_progress" => {
+                let call_id = tool_use_id
+                    .filter(|c| self.subagents.contains_key(c))
+                    .or_else(|| task_id.and_then(|t| self.agent_calls.get(&t).cloned()));
+                let Some(call_id) = call_id else {
+                    return vec![];
+                };
+                let Some(row) = self.subagents.get_mut(&call_id) else {
+                    return vec![];
+                };
+                if row.data["status"] != "running" {
+                    return vec![];
+                }
+                for (k, key) in [
+                    ("total_tokens", "tokens"),
+                    ("tool_uses", "toolUses"),
+                    ("duration_ms", "durationMs"),
+                ] {
+                    if let Some(n) = num(k) {
+                        row.data[key] = json!(n);
+                    }
+                }
+                if let Some(a) = s(rec, "description").filter(|a| !a.trim().is_empty()) {
+                    row.data["activity"] = json!(preview(&a, 200).0);
+                }
+                vec![Self::subagent_draft(&call_id, row)]
+            }
+            _ => {
+                // An agent's notification carries its final answer as the summary; a shell's
+                // is the one-line "Background command … completed (exit code N)".
+                let summary = s(rec, "summary");
+                let is_agent = tool_use_id
+                    .as_ref()
+                    .is_some_and(|c| self.subagents.contains_key(c))
+                    || task_id
+                        .as_ref()
+                        .is_some_and(|t| self.agent_calls.contains_key(t));
+                let note = TaskNote {
+                    task_id,
+                    tool_use_id,
+                    status: s(rec, "status"),
+                    result: summary.clone().filter(|_| is_agent),
+                    summary: summary.map(|t| {
+                        if is_agent {
+                            t.lines()
+                                .map(str::trim)
+                                .find(|l| !l.is_empty())
+                                .unwrap_or("")
+                                .to_string()
+                        } else {
+                            t
+                        }
+                    }),
+                    tokens: num("total_tokens"),
+                    tool_uses: num("tool_uses"),
+                    duration_ms: num("duration_ms"),
+                };
+                self.apply_task_note(uuid, note, ts)
+            }
+        }
+    }
+
+    /// A background task finished. Known sub-agents and background shells are updated in place;
+    /// anything else becomes a short system note.
+    fn apply_task_note(&mut self, uuid: &str, note: TaskNote, ts: &str) -> Vec<EventDraft> {
+        if let Some(d) = self.background_shell_finished(&note, ts) {
             return vec![d];
         }
-        let call_id = xml_tag(text, "tool-use-id")
-            .map(String::from)
+        let call_id = note
+            .tool_use_id
+            .clone()
             .filter(|c| self.subagents.contains_key(c))
-            .or_else(|| xml_tag(text, "task-id").and_then(|t| self.agent_calls.get(t).cloned()));
-        let status = xml_tag(text, "status").map(subagent_status);
-        let summary = xml_tag(text, "summary").map(|t| preview(t, 300).0);
+            .or_else(|| {
+                note.task_id
+                    .as_ref()
+                    .and_then(|t| self.agent_calls.get(t).cloned())
+            });
+        let status = note.status.as_deref().map(subagent_status);
+        let summary = note.summary.as_deref().map(|t| preview(t, 300).0);
         let Some(row) = call_id.as_deref().and_then(|c| self.subagents.get_mut(c)) else {
             return vec![EventDraft::new(
                 format!("{uuid}:task"),
@@ -841,24 +1061,31 @@ impl ClaudeParser {
         if let Some(st) = status {
             row.data["status"] = json!(st);
         }
-        if let Some(sm) = summary {
+        if let Some(sm) = summary.filter(|t| !t.is_empty()) {
             row.data["summary"] = json!(sm);
         }
-        if let Some(r) = xml_tag(text, "result") {
-            let (p, truncated) = preview(r, SUBAGENT_RESULT_LIMIT);
+        if let Some(r) = note.result.as_deref().filter(|r| !r.trim().is_empty()) {
+            let (p, truncated) = preview(r.trim(), SUBAGENT_RESULT_LIMIT);
             row.data["result"] = json!(p);
             row.data["resultTruncated"] = json!(truncated);
         }
-        for (tag, key) in [
-            ("subagent_tokens", "tokens"),
-            ("tool_uses", "toolUses"),
-            ("duration_ms", "durationMs"),
+        for (v, key) in [
+            (note.tokens, "tokens"),
+            (note.tool_uses, "toolUses"),
+            (note.duration_ms, "durationMs"),
         ] {
-            if let Some(n) = xml_tag(text, tag).and_then(|v| v.parse::<i64>().ok()) {
+            if let Some(n) = v {
                 row.data[key] = json!(n);
             }
         }
+        if let Some(o) = row.data.as_object_mut() {
+            o.remove("activity");
+        }
         row.data["finishedAt"] = json!(ts);
+        vec![Self::subagent_draft(&call_id, row)]
+    }
+
+    fn subagent_draft(call_id: &str, row: &SubagentRow) -> EventDraft {
         let mut sa = EventDraft::new(
             format!("sa:{call_id}"),
             "subagent",
@@ -866,30 +1093,35 @@ impl ClaudeParser {
             row.data.clone(),
         );
         sa.turn_id = row.turn_id.clone();
-        sa.parent_id = Some(call_id);
-        vec![sa]
+        sa.parent_id = Some(call_id.to_string());
+        sa
     }
 
     /// A background shell command (`Bash` with `run_in_background`) finished: its `tool_call`
     /// row is updated in place (status, the notification's summary, exit code). Monitors and
     /// other tasks without a known Bash call return None.
-    fn background_shell_finished(&mut self, text: &str, ts: &str) -> Option<EventDraft> {
-        let call_id = xml_tag(text, "tool-use-id")
+    fn background_shell_finished(&mut self, note: &TaskNote, ts: &str) -> Option<EventDraft> {
+        let call_id = note
+            .tool_use_id
+            .clone()
             .filter(|c| {
                 self.tools
-                    .get(*c)
+                    .get(c)
                     .is_some_and(|tc| tc.data.get("background") == Some(&json!(true)))
             })
-            .map(String::from)
-            .or_else(|| xml_tag(text, "task-id").and_then(|t| self.bg_shells.get(t).cloned()))?;
+            .or_else(|| {
+                note.task_id
+                    .as_ref()
+                    .and_then(|t| self.bg_shells.get(t).cloned())
+            })?;
         let tc = self.tools.get_mut(&call_id)?;
-        let summary = xml_tag(text, "summary").map(|t| preview(t, 300).0);
+        let summary = note.summary.as_deref().map(|t| preview(t, 300).0);
         // "Background command "…" completed (exit code 0)"
         let exit_code = summary.as_deref().and_then(|t| {
             let rest = &t[t.rfind("exit code ")? + "exit code ".len()..];
             rest.trim_end_matches(')').trim().parse::<i64>().ok()
         });
-        let status = match xml_tag(text, "status").map(subagent_status) {
+        let status = match note.status.as_deref().map(subagent_status) {
             Some("completed") if exit_code.is_some_and(|c| c != 0) => "failed",
             Some(st) => st,
             None => "completed",
@@ -1059,6 +1291,20 @@ impl ClaudeParser {
     fn system(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
         let uuid = s(rec, "uuid").unwrap_or_else(crate::util::new_id);
         let subtype = s(rec, "subtype").unwrap_or_else(|| "info".into());
+        match subtype.as_str() {
+            "task_started" | "task_progress" | "task_notification" => {
+                return self.task_system(&subtype, rec, &uuid, ts);
+            }
+            // The live list of background tasks (stream-json only).
+            "background_tasks_changed" => {
+                self.background_tasks = rec
+                    .get("tasks")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len);
+                return vec![];
+            }
+            _ => {}
+        }
         let text = match subtype.as_str() {
             "init" => {
                 if let Some(m) = s(rec, "model") {
@@ -1501,6 +1747,120 @@ mod tests {
             .feed(&json!({"type":"attachment","uuid":"a4","isSidechain":true,
             "attachment":{"type":"queued_command","commandMode":"prompt","prompt":"sub"}}))
             .is_empty());
+    }
+
+    /// Shapes recorded from `claude -p --output-format stream-json` 2.1.325 with a background
+    /// Agent and a background Bash: the stream writes `tool_use_result` (snake case) and reports
+    /// the tasks with `system` records instead of `<task-notification>` user turns.
+    #[test]
+    fn stream_json_background_agent_and_shell() {
+        let mut p = ClaudeParser::new();
+        p.feed(&json!({"type":"assistant","parent_tool_use_id":null,"message":{"id":"m1","content":[
+            {"type":"tool_use","id":"toolu_sh","name":"Bash","input":{"command":"sleep 5","description":"Sleep","run_in_background":true}},
+            {"type":"tool_use","id":"toolu_ag","name":"Agent","input":{"subagent_type":"general-purpose","description":"count files","prompt":"ls","run_in_background":true}}]}}));
+        p.feed(&json!({"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a9","task_type":"local_agent"}]}));
+        p.feed(&json!({"type":"system","subtype":"task_started","task_id":"a9","tool_use_id":"toolu_ag","task_type":"local_agent","is_backgrounded":true}));
+        let out = p.feed(&json!({"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[
+            {"tool_use_id":"toolu_ag","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully."}]}]},
+            "tool_use_result":{"isAsync":true,"status":"async_launched","agentId":"a9","description":"count files","resolvedModel":"claude-haiku-5-5"}}));
+        let sa = out
+            .iter()
+            .find(|e| e.kind == "subagent")
+            .expect("subagent row");
+        assert_eq!(sa.data["status"], "running");
+        assert_eq!(sa.data["background"], true);
+        assert_eq!(sa.data["agentType"], "general-purpose");
+        assert!(sa.data.get("result").is_none());
+
+        p.feed(&json!({"type":"system","subtype":"task_started","task_id":"bsh","tool_use_id":"toolu_sh","task_type":"local_bash","is_backgrounded":true}));
+        let out = p.feed(&json!({"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[
+            {"tool_use_id":"toolu_sh","type":"tool_result","content":"Command running in background with ID: bsh.","is_error":false}]},
+            "tool_use_result":{"stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"bsh"}}));
+        let sh = out.iter().find(|e| e.kind == "tool_call").unwrap();
+        assert_eq!(
+            sh.data["status"], "running",
+            "a background shell is not done when launched"
+        );
+        assert_eq!(sh.data["background"], true);
+
+        // The agent's own steps arrive inline, nested under its Agent call.
+        let inner = p.feed(&json!({"type":"assistant","parent_tool_use_id":"toolu_ag","message":{"id":"m2","content":[
+            {"type":"tool_use","id":"toolu_in","name":"Bash","input":{"command":"ls"}}]}}));
+        assert_eq!(inner[0].parent_id.as_deref(), Some("toolu_ag"));
+
+        let prog = p.feed(&json!({"type":"system","subtype":"task_progress","task_id":"a9","tool_use_id":"toolu_ag",
+            "description":"Running List directory","usage":{"total_tokens":100,"tool_uses":1,"duration_ms":1700}}));
+        assert_eq!(prog[0].id, "sa:toolu_ag");
+        assert_eq!(prog[0].data["toolUses"], 1);
+        assert_eq!(prog[0].data["activity"], "Running List directory");
+
+        // The first turn ends while both tasks run.
+        p.feed(&json!({"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a9"},{"task_id":"bsh"}]}));
+        assert_eq!(p.background_tasks, 2);
+
+        let done = p.feed(&json!({"type":"system","subtype":"task_notification","task_id":"a9","tool_use_id":"toolu_ag",
+            "status":"completed","summary":"The directory has 2 entries.\nDetails follow.","usage":{"total_tokens":380,"tool_uses":1,"duration_ms":5095}}));
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].id, "sa:toolu_ag");
+        assert_eq!(done[0].data["status"], "completed");
+        assert_eq!(done[0].data["summary"], "The directory has 2 entries.");
+        assert_eq!(
+            done[0].data["result"],
+            "The directory has 2 entries.\nDetails follow."
+        );
+        assert_eq!(done[0].data["durationMs"], 5095);
+        assert!(done[0].data.get("activity").is_none());
+
+        let done = p.feed(&json!({"type":"system","subtype":"task_notification","task_id":"bsh","tool_use_id":"toolu_sh",
+            "status":"completed","summary":"Background command \"Sleep\" completed (exit code 0)"}));
+        assert_eq!(done[0].kind, "tool_call");
+        assert_eq!(done[0].data["status"], "completed");
+        assert_eq!(done[0].data["exitCode"], 0);
+
+        p.feed(&json!({"type":"system","subtype":"background_tasks_changed","tasks":[]}));
+        assert_eq!(p.background_tasks, 0);
+    }
+
+    /// A foreground agent (recorded from stream-json 2.1.325) reports only when it finishes;
+    /// its row exists from `task_started` on so the phone can follow it while it works.
+    #[test]
+    fn stream_json_foreground_agent_has_a_row_while_running() {
+        let mut p = ClaudeParser::new();
+        p.feed(&json!({"type":"assistant","message":{"id":"m1","content":[
+            {"type":"tool_use","id":"toolu_fg","name":"Agent","input":{"subagent_type":"general-purpose","description":"list dir","prompt":"ls"}}]}}));
+        let out = p.feed(&json!({"type":"system","subtype":"task_started","task_id":"ae5","tool_use_id":"toolu_fg",
+            "description":"list dir","is_backgrounded":false,"task_type":"local_agent"}));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "sa:toolu_fg");
+        assert_eq!(out[0].data["status"], "running");
+        assert_eq!(out[0].data["agentId"], "ae5");
+        assert_eq!(out[0].data["background"], false);
+        assert_eq!(out[0].parent_id.as_deref(), Some("toolu_fg"));
+        let start_ts = out[0].ts.clone();
+        // Its own records do not create a second row.
+        let inner = p.feed(&json!({"type":"assistant","parent_tool_use_id":"toolu_fg","agent_id":"ae5","message":{"id":"m2","content":[
+            {"type":"tool_use","id":"toolu_in","name":"Bash","input":{"command":"ls"}}]}}));
+        assert!(inner.iter().all(|e| e.kind != "subagent"));
+        p.feed(&json!({"type":"system","subtype":"task_progress","task_id":"ae5","tool_use_id":"toolu_fg",
+            "description":"Running ls","usage":{"total_tokens":10,"tool_uses":1,"duration_ms":900}}));
+        p.feed(&json!({"type":"system","subtype":"task_notification","task_id":"ae5","tool_use_id":"toolu_fg","status":"completed"}));
+        let res = p.feed(&json!({"type":"user","timestamp":"2026-11-21T00:00:09Z","message":{"role":"user","content":[
+            {"tool_use_id":"toolu_fg","type":"tool_result","content":[{"type":"text","text":"3 files"}]}]},
+            "tool_use_result":{"status":"completed","agentId":"ae5","agentType":"general-purpose"}}));
+        let sa = res.iter().find(|e| e.kind == "subagent").unwrap();
+        assert_eq!(sa.data["status"], "completed");
+        assert_eq!(sa.data["result"], "3 files");
+        assert_eq!(sa.data["toolUses"], 1, "live counters are kept");
+        assert_eq!(sa.ts, start_ts, "the row keeps its start time");
+        assert!(sa.data.get("activity").is_none());
+
+        // Without `task_started`, the agent's first own record creates the row.
+        let mut q = ClaudeParser::new();
+        q.feed(&json!({"type":"assistant","message":{"id":"m1","content":[
+            {"type":"tool_use","id":"toolu_x","name":"Task","input":{"description":"scan"}}]}}));
+        let first = q.feed(&json!({"type":"user","parent_tool_use_id":"toolu_x","agent_id":"ax","message":{"role":"user","content":"go"}}));
+        assert_eq!(first[0].id, "sa:toolu_x");
+        assert_eq!(first[0].data["description"], "scan");
     }
 
     #[test]

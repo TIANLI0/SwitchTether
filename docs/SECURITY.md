@@ -67,7 +67,7 @@ certificate, visible in the desktop's device list and revocable.
 - Every endpoint except `GET /v1/hello` and `POST /v1/pair` requires an active paired device.
 - The API is an explicit whitelist (`src-tauri/crates/switchtether-core/src/api/*`); Tauri IPC
   commands are not exposed.
-- **Step-up (biometric) scopes** — `terminal`, `files_write`, `config_write` — require a grant
+- **Step-up (biometric) scopes** — `terminal`, `files_write`, `config_write`, `port_forward` — require a grant
   obtained by signing a server challenge with a second Keystore key that is usable only after
   BiometricPrompt / device-credential authentication. The server verifies the ECDSA signature
   over `switchtether-stepup-v1\n{deviceId}\n{challengeId}\n{nonce}\n{scope}`; challenges are
@@ -114,6 +114,27 @@ SwitchTether does **not** pretend to filter dangerous commands (string filtering
 restrict a shell). Protections are: biometric step-up, per-device ownership, audit of
 open/close and input volume (never input content), kill on revocation and on quit.
 
+### 7a. Port forwarding
+
+A forward (PROTOCOL.md §7.11) lets the phone reach one TCP port on the desktop's loopback.
+
+- Starting one needs step-up `port_forward`; the lease is bound to the device, the port and an
+  expiry (2 h default, 12 h max), kept in memory only, and ends on revocation, on unpair, when
+  stopped on either side (Settings → Remote → Port forwarding lists every lease with a stop
+  button) or when the desktop app exits.
+- The desktop connects only to `127.0.0.1` / `::1` at the leased port; there is no host
+  parameter, so a lease cannot be turned into access to other machines on the desktop's
+  network. The Remote server's own port is refused.
+- Opening, renewing, stopping and each tunnel (connection and byte counts, never content)
+  are written to the audit log.
+- Per tunnel: at most 128 streams, 256 KiB unacknowledged data per stream and direction,
+  32 KiB frames; protocol violations close the tunnel.
+- **On the phone the forward listens on `127.0.0.1` only, but every app on the phone can
+  connect to it while it runs** (Android has no per-app loopback isolation). The forwarding
+  screen says so; the ongoing notification names the forwarded ports and has a stop action.
+  Compared with the remote shell this exposes less (one port, not a shell), which is why it is
+  a separate, narrower scope.
+
 ## 8. Replay and duplicate operations
 
 TLS prevents network replay. Application-level duplicates (client retries) are handled by
@@ -157,7 +178,8 @@ the redactor.
 | Wrong certificate / wrong pin | `e2e: wrong_server_pin_is_rejected_by_client`, `client_without_certificate_is_rejected` |
 | Revoked certificate | `e2e: pairing_then_revocation`, `registry::tests::register_lookup_revoke` |
 | Replay / duplicates | `e2e: idempotent_commands_and_unknown_outcome`, `stepup::tests::full_flow` (challenge replay) |
-| Privilege escalation (no step-up) | `e2e: terminal_requires_step_up_and_streams_output`, `file_write_conflict_over_api` |
+| Privilege escalation (no step-up) | `e2e: terminal_requires_step_up_and_streams_output`, `file_write_conflict_over_api`, `port_forward_tunnel_carries_http_over_mtls` |
+| Port forward isolation (other device, stop, window abuse, refused port) | `e2e: port_forward_tunnel_carries_http_over_mtls`, `forward::tests::*`; Android `PortForwardTest` |
 | Concurrent operations | `e2e: concurrent_pairing_race_only_one_wins`; live managed-session second answer → 409 |
 | Path traversal / symlinks / denied paths | `files::policy::tests::*`, `files::tests::list_hides_denied_and_hidden`, e2e traversal |
 | Oversized messages | `e2e: oversized_body_is_rejected` |

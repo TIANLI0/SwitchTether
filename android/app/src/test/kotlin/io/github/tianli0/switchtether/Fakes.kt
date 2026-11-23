@@ -72,6 +72,15 @@ class FakeSessionRepository : SessionRepository {
     val sent = mutableListOf<Pair<String, String>>() // commandId to text
     val statusQueries = mutableListOf<String>()
     var listCalls = 0
+    var cached: List<SessionSummary>? = null
+    var cachedPage: EventPage? = null
+    val optionCalls = mutableListOf<Pair<String?, String?>>()
+    override suspend fun cachedList() = cached
+    override suspend fun cachedEvents(id: String) = cachedPage
+    override suspend fun setOptions(id: String, model: String?, effort: String?, commandId: String): CommandOutcome {
+        optionCalls += model to effort
+        return nextOutcome(commandId)
+    }
 
     override suspend fun list(query: SessionQuery, cursor: String?, limit: Int): SessionPage {
         listCalls++

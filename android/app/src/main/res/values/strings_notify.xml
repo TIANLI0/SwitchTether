@@ -125,4 +125,14 @@
     <string name="live_files_changed">%1$d files changed</string>
     <string name="live_tokens_used">%1$s tokens</string>
     <string name="notif_muted_projects_empty">No projects yet. Projects of your sessions appear here.</string>
+    <string name="ntf_action_answer">Answer</string>
+    <string name="ntf_action_reply">Reply</string>
+    <string name="ntf_answer_label">Your answer</string>
+    <string name="ntf_reply_label">Message to the agent</string>
+    <string name="ntf_sent">Sent</string>
+    <string name="ntf_not_sent">Not sent</string>
+    <string name="ntf_not_sure">Not sure it arrived</string>
+    <string name="ntf_handled_elsewhere">Already handled elsewhere</string>
+    <string name="ntf_offline_open">Could not reach the computer. Open SwitchTether to handle it.</string>
+    <string name="ntf_open_to_check">Open SwitchTether to check.</string>
 </resources>

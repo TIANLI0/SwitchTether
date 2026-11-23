@@ -55,13 +55,33 @@ class MonitorService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun build(online: Boolean) = NotificationCompat.Builder(this, Notifier.SERVICE_CHANNEL)
+    /** [forwards]: local ports currently forwarded to the computer (named in the notification, with a stop action). */
+    private fun build(online: Boolean, forwards: List<Int> = emptyList()) = NotificationCompat.Builder(this, Notifier.SERVICE_CHANNEL)
         .setSmallIcon(R.drawable.ic_stat_notify)
-        .setContentTitle(getString(if (online) R.string.service_title else R.string.service_title_reconnecting))
-        .setContentText(getString(R.string.service_text))
+        .setContentTitle(
+            when {
+                !online -> getString(R.string.service_title_reconnecting)
+                forwards.isNotEmpty() -> resources.getQuantityString(R.plurals.service_title_forwarding, forwards.size, forwards.size)
+                else -> getString(R.string.service_title)
+            },
+        )
+        .setContentText(
+            if (forwards.isEmpty()) getString(R.string.service_text)
+            else forwards.joinToString(" · ") { "localhost:$it" },
+        )
         .setOngoing(true)
         .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
         .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        .apply {
+            if (forwards.isNotEmpty()) {
+                val stop = PendingIntent.getService(
+                    this@MonitorService, 1,
+                    Intent(this@MonitorService, MonitorService::class.java).setAction(ACTION_STOP_FORWARDS),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                addAction(NotificationCompat.Action.Builder(null, getString(R.string.forward_stop_all), stop).build())
+            }
+        }
         .build()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -70,6 +90,10 @@ class MonitorService : Service() {
             return START_NOT_STICKY
         }
         val container = (application as SwitchTetherApp).container
+        if (intent?.action == ACTION_STOP_FORWARDS) {
+            container.portForwards.stopAll()
+            if (watching) return START_STICKY
+        }
         val notification = build(container.connection.state.value is ConnectionState.Online)
         val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
         runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type) }
@@ -82,9 +106,14 @@ class MonitorService : Service() {
             watching = true
             // The ongoing notification says whether the computer is actually reachable right now.
             scope.launch {
-                container.connection.state.map { it is ConnectionState.Online }.distinctUntilChanged().collect { online ->
-                    runCatching { androidx.core.app.NotificationManagerCompat.from(this@MonitorService).notify(NOTIFICATION_ID, build(online)) }
-                }
+                kotlinx.coroutines.flow.combine(
+                    container.connection.state.map { it is ConnectionState.Online },
+                    container.portForwards.active.map { list -> list.map { it.localPort } },
+                ) { online, forwards -> online to forwards }
+                    .distinctUntilChanged()
+                    .collect { (online, forwards) ->
+                        runCatching { androidx.core.app.NotificationManagerCompat.from(this@MonitorService).notify(NOTIFICATION_ID, build(online, forwards)) }
+                    }
             }
             scope.launch { container.activeSessions.collect { n -> setAwake(n > 0) } }
         }
@@ -102,6 +131,7 @@ class MonitorService : Service() {
         const val NOTIFICATION_ID = 7
         private const val WAKE_MAX_MS = 15 * 60_000L
         const val ACTION_STOP = "io.github.tianli0.switchtether.STOP_MONITOR"
+        const val ACTION_STOP_FORWARDS = "io.github.tianli0.switchtether.STOP_FORWARDS"
 
         fun start(context: Context) {
             runCatching { ContextCompat.startForegroundService(context, Intent(context, MonitorService::class.java)) }

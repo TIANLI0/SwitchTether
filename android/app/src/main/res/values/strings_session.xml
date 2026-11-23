@@ -66,7 +66,7 @@
     <string name="cap_status_blocked">Not available</string>
     <string name="cap_status_untested">Not verified</string>
     <string name="cap_status_unknown">Unknown</string>
-    <string name="origin_managed">By SwitchTether</string>
+    <string name="origin_managed">Started from the phone</string>
     <string name="origin_external">On the computer</string>
     <string name="waiting_for_approval">Waiting for approval</string>
     <string name="waiting_for_input">Waiting for input</string>
@@ -94,7 +94,7 @@
     <string name="time_minutes">%1$d min ago</string>
     <string name="time_hours">%1$d h ago</string>
     <string name="time_days">%1$d d ago</string>
-    <string name="session_managed_chip">SwitchTether</string>
+    <string name="session_managed_chip">From phone</string>
     <string name="state_expanded">Expanded</string>
     <string name="state_collapsed">Collapsed</string>
     <string name="render_system_continued">Resumed from the phone. New turns run in SwitchTether on the computer.</string>
@@ -116,6 +116,8 @@
     <string name="outgoing_failed">Not sent</string>
     <string name="outgoing_retry">Retry</string>
     <string name="outgoing_delete">Delete</string>
+    <string name="outgoing_edit">Edit</string>
+    <string name="message_copy_mine">Copy message</string>
     <string name="outgoing_session_ended">The session ended; not sent</string>
     <string name="session_typing">Replying…</string>
     <string name="jump_latest">Back to latest</string>
@@ -161,4 +163,59 @@
         <item quantity="other">%1$d sub-agents</item>
     </plurals>
     <string name="decision_cancelled">Cancelled</string>
+    <string name="model_title">Model</string>
+    <string name="effort_title">Effort</string>
+    <string name="model_default">Default</string>
+    <string name="effort_short">effort %1$s</string>
+    <string name="effort_none">None</string>
+    <string name="effort_minimal">Minimal</string>
+    <string name="effort_low">Low</string>
+    <string name="effort_medium">Medium</string>
+    <string name="effort_high">High</string>
+    <string name="effort_xhigh">Extra high</string>
+    <string name="effort_max">Max</string>
+    <string name="model_sheet_title">Model and effort</string>
+    <string name="model_sheet_note">Applies from the next reply on, like /model and /effort on the computer.</string>
+    <string name="model_switch_label">Change model</string>
+    <string name="composer_resume_hint">Not running: sending resumes this session on the computer</string>
+    <!-- Agent map -->
+    <string name="agent_map_this_session">This session</string>
+    <string name="agent_map_title">Agent map</string>
+    <plurals name="agent_map_subtitle">
+        <item quantity="one">%1$d agent · tap an agent for details</item>
+        <item quantity="other">%1$d agents · tap an agent for details</item>
+    </plurals>
+    <plurals name="agent_map_tasks">
+        <item quantity="one">%1$d background task</item>
+        <item quantity="other">%1$d background tasks</item>
+    </plurals>
+    <plurals name="agent_map_tool_uses">
+        <item quantity="one">%1$d tool use</item>
+        <item quantity="other">%1$d tool uses</item>
+    </plurals>
+    <string name="agent_map_state_waiting">Waiting</string>
+    <string name="agent_map_state_working">Working</string>
+    <string name="agent_map_state_finished">Finished</string>
+    <string name="agent_map_state_failed">Failed</string>
+    <string name="agent_map_state_stopped">Stopped</string>
+    <string name="agent_map_waiting_permission">Waiting for your permission</string>
+    <string name="agent_map_waiting_detail">Waiting for your permission: answer it in the conversation.</string>
+    <string name="agent_map_tokens">%1$s tokens</string>
+    <string name="agent_map_background">background</string>
+    <string name="agent_map_foreground">foreground</string>
+    <string name="agent_map_spawned_by">Spawned by %1$s</string>
+    <string name="agent_map_show_prompt">Show prompt</string>
+    <string name="agent_map_hide_prompt">Hide prompt</string>
+    <string name="agent_map_open_transcript">Open transcript</string>
+    <string name="agent_map_stop_agent">Stop agent</string>
+    <string name="agent_map_stop_task">Stop</string>
+    <string name="agent_map_stopping">Stopping…</string>
+    <string name="agent_map_stop_failed">Could not stop it. It may have finished already.</string>
+    <string name="agent_map_exit_code">exit %1$d</string>
+    <string name="agent_map_observe_only">This session runs on the computer: its agents can be followed here, not stopped.</string>
+    <string name="model_more_versions">More versions (%1$d)</string>
+    <string name="model_fewer_versions">Fewer versions</string>
+    <string name="session_menu">Session</string>
+    <string name="menu_tools_hint">Permission mode, context, plan, MCP, export</string>
+    <string name="menu_info_hint">Status, project, branch, how it is connected</string>
 </resources>

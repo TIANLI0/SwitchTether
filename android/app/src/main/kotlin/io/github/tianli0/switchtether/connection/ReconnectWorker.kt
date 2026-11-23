@@ -41,7 +41,9 @@ class ReconnectWorker(context: Context, params: WorkerParameters) : CoroutineWor
         val canStartFgsFromBg = Build.VERSION.SDK_INT < 31 ||
             applicationContext.getSystemService(PowerManager::class.java)
                 ?.isIgnoringBatteryOptimizations(applicationContext.packageName) == true
-        if (canStartFgsFromBg) {
+        // With a bound computer that is away ("nearby only"), a bounded probe is enough: the
+        // presence service starts the monitor again when the computer comes back.
+        if (canStartFgsFromBg && container.wantsMonitor()) {
             MonitorService.start(applicationContext)
         }
 

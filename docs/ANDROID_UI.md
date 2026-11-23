@@ -253,6 +253,21 @@ NOTICE + MPL headers kept, MPL source link in the licenses screen. Re-sync with
   - **Battery:** Settings → Notifications → Battery optimization opens the system
     ignore-optimization list with an explanation. The app does not request
     `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (Play policy).
+  - **Optional Bluetooth binding (CompanionDeviceManager).** Settings → Connection → "Bind
+    computer (Bluetooth)" associates a computer that is paired with the phone over Bluetooth, in
+    the system's own dialog (`connection/CompanionLink.kt`). The user sees and confirms every step,
+    and nothing changes on the computer or in any agent. While the association exists:
+    - Android exempts the app from battery optimization (`REQUEST_COMPANION_RUN_IN_BACKGROUND`).
+    - `CompanionPresenceService` is bound when the computer connects or disconnects. It may start
+      the `connectedDevice` service from the background
+      (`REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND`).
+    - **"Only while the computer is nearby"** (default off) stops a background-only
+      connection when the computer leaves, so the whole process can be reclaimed. The connection
+      comes back when the computer returns. Pinned tasks and port forwards always keep the
+      connection. `ReconnectWorker` still runs its bounded probe while the computer is away.
+  - **Memory:** 60 s after the app goes to the background, and on `onTrimMemory(UI_HIDDEN+)`, the
+    app evicts the idle OkHttp connections that all API clients share. The live WebSocket is not
+    affected.
 - **Rules** (`NotificationEngine`, pure and unit-tested):
   - Sources: `session.event` (`approval_request` and `question` while unresolved, `status`
     transitions, `tool_call`, final `assistant_message`) and `session.upserted` (`waiting` /
@@ -369,7 +384,8 @@ the read-only composer bar. It opens a confirm sheet (`WindowBottomSheet`) that 
 The buttons are **接续** (`mode: "continue"`) and, for Claude only, **以副本继续** (`mode: "fork"`).
 The request is `POST /v1/sessions {commandId, agent, resumeFrom: <session id>, mode, cwd?}` and goes
 through `CommandTracker`, so there is no silent retry and a 409/422 shows the desktop's message in
-the command dialog. On success the app opens the returned `managed:` session. The desktop's
+the command dialog. On success the app opens the returned session (same `claude:<id>` / `codex:<id>` when continuing; older
+desktops returned a `managed:` id). The desktop's
 "continued" and "init" system rows are shown in the app language.
 
 Verified on the emulator against the sandbox desktop:
@@ -684,7 +700,7 @@ the cache (never into memory; refuses above the cache cap). Sensitive files are 
 copy (the desktop's `fs/download` refuses them); they keep the confirmed in-memory text read.
 
 Viewers (`ui/files/FileViewers.kt`, shared by the Files page, chat links and the downloads list): images
-(zoom/pan, decoded down-sampled), PDF (`PdfRenderer`, lazily rendered pages), video/audio (Media3 ExoPlayer
+(Telephoto zoom, tiled decoding; see §18), PDF (`PdfRenderer`, lazily rendered pages, tap to zoom), video/audio (Media3 ExoPlayer
 only, no Media3 UI), everything else and text-less binaries via "Open with…" / "Share" through a read-only
 `FileProvider` or MediaStore URI (never `file://`). A link in chat that points at a desktop path opens the
 viewer; an image's viewer offers Download and Open with.
@@ -802,3 +818,167 @@ agent's transcript):
 - Codex: the same entry points (`Route.Subagent`/`SubagentTree` carry the agent id); the desktop serves the
   events nested under the sub-agent row, so the nested rows in the main timeline and the page agree.
 
+
+## 16. Port forwarding (Workspace → 端口转发)
+
+The phone opens a web/dev server that runs on the computer at the **same** address,
+`http://localhost:<port>/`, in any browser on the phone (protocol: docs/PROTOCOL.md §7.11;
+security: docs/SECURITY.md §7a).
+
+- **Entry**: Workspace has a "端口转发" card (summary: what it does, or the running
+  `localhost:<port>` list).
+- **Page** (`Route.PortForward`, `PortForwardScreen`):
+  - "正在转发": one row per forward: `localhost:<local>`, `→ 电脑 :<port> · <process>`, connections,
+    bytes received, "经中继" when the connection uses the relay, expiry; a status pill (已连接 /
+    正在连接… / 正在重连…); buttons 打开 · 复制 · 延长 2 小时 · 停止. Tapping the row opens it.
+  - "电脑上仍有效的转发": leases the computer still has but this phone does not serve (e.g. after
+    the app process ended); tapping resumes without a new biometric prompt.
+  - "电脑上正在监听": `GET /v1/forwards/ports` (process name on Windows). Tap → biometric step-up
+    `port_forward` → lease → local listener on the same port → the browser opens. Already
+    forwarded ports show "已转发" and open instead.
+  - "输入端口…": computer port and optional phone port (defaults to the same port so Host / Origin /
+    HMR WebSocket URLs / OAuth callbacks match the computer).
+  - Footer: the forward lasts 2 h, and other apps on the phone can reach it while it runs.
+- **Errors**: phone port in use → dialog, then the manual dialog prefilled with the computer port;
+  nothing listening on the computer → notice instead of opening the browser. A browser request
+  that reaches a port with nothing behind it gets a small HTML page (502, "电脑的 5173 端口上没有
+  正在运行的服务"; 503 while the computer is unreachable) that reloads itself every 3 s, so the page
+  appears by itself once the dev server starts.
+- **Background**: while any forward runs, the monitor service keeps the connection (like a pinned
+  task). Its ongoing notification reads "正在转发电脑上的 N 个端口" with the `localhost:<port>` list
+  and a "停止转发" action.
+- **Reconnects**: one tunnel WebSocket per forward (pings every 20 s). After a network change or
+  a switch between direct and relay paths it reconnects at once when the connection is back
+  online, else with backoff (0.5 s … 15 s). Connections inside a dropped tunnel are closed; new
+  ones wait up to 10 s for the tunnel. Close 4410 / 404 (stopped, expired, revoked) ends the
+  forward on the phone with a toast.
+- Implementation: `:core:remote` `forward/PortForward.kt` (frames, `LocalForwarder`: loopback
+  listener, streams with 256 KiB windows, half-close, error page), `RemoteApi.openForwardTunnel`;
+  app `forward/PortForwards.kt` (step-up, leases, expiry, stats), `ui/workspace/PortForwardScreen.kt`.
+
+## 17. Notification actions and fixes (2026-11-19)
+
+- **Act from the notification** (each button requires the phone to be unlocked;
+  `NotifyActionReceiver`, same API and commandId idempotency as the in-app buttons):
+  - approval → 允许 / 拒绝 (when the request event, with its id, has arrived);
+  - question → the notification text is the question itself; a single single-choice, non-secret
+    question gets 回答 with the options as inline choices and free text when the question allows
+    it (a chosen label is sent as its option value); several / multi-select / secret questions
+    open the app;
+  - finished turn or "waiting for you" of a session the phone controls (managed / attached, live)
+    → 回复 sends a message.
+  The notification is then replaced by the outcome: 已发送 (disappears after 4 s), 已在别处处理
+  (409), 没有发送 + reason, or 不确定是否送达 (unknown outcome; never retried silently). While the
+  app is in the background the connection is started for the action and released afterwards.
+- **One alert per wait**: the request event and the status change describe the same wait; the
+  second source no longer alerts (a later request event updates the generic text silently).
+- **Live Updates off / card swiped away**: ordinary notifications are suppressed only while a Live
+  Update card really shows the session (`LiveUpdates.covers`); with Live Updates off no session
+  is auto-pinned. Before, approvals of auto-pinned sessions were dropped without any notice.
+- **Connection notification**: one notification replaced in place; "lost" only after 30 s
+  unreachable; "reconnected" replaces it quietly and goes away after 8 s.
+- **Session page**: allow / deny disabled while a decision is in flight; question cards keep
+  choices and typed text when scrolled away, across sub-agent pages and rotation
+  (`rememberSaveable`); coming back from a sub-agent page keeps the reading position; a failed
+  message has 编辑 (text back into the composer; files must be picked again); sent messages have
+  a copy button; small retry / edit / delete targets are 40 dp high.
+- **Sessions**: in 实时, sessions waiting for the user come first; project chips appear once more
+  than one project is known.
+- **Workspace**: the Git diff error's retry reloads it (it used to close the page); keys typed
+  while a terminal connects are sent once it opens (≤ 4 KiB), and a disconnected terminal says
+  "未连接，按键不会发送" next to 重新连接.
+- **Pairing**: retrying a failed typed-address attempt keeps the address editable and pre-filled.
+
+## 18. Files: browsing and viewing (2026-11-21)
+
+Usability pass of Workspace → Files (`ui/workspace/FilesPane.kt`, `ui/files/`, pure logic in `files/FileListing.kt`
+and `files/TextDocument.kt`). Viewers reuse maintained open-source libraries instead of hand-rolled ones.
+
+**List**
+- Path bar outside the list (never scrolls away): an "up one folder" button and a COUI `BreadcrumbBar` whose
+  segments each open that folder; inside a shared root it starts at the root's name (`FileListing.breadcrumbs`).
+- The search field filters the current folder as you type (all terms, `*.rs` / `.md` match the extension);
+  pressing search, or "Search subfolders for …", runs the desktop's recursive name/content search. Results show
+  paths relative to the folder and the line number.
+- Sort menu: name (natural order, `file2` before `file10`), date modified, size, type; picking the active key
+  flips the direction; folders always first.
+- Phosphor file-type icons (folder, code, Markdown, image, PDF, video, audio, archive, document, sheet,
+  slides, lock for sensitive/`.env`), size · relative time, folder/file count, empty and no-match states.
+- Each row is its own lazy item (folders with thousands of entries scroll smoothly); opening a folder keeps
+  the old list with a progress bar instead of a blank spinner; each folder remembers its scroll position.
+- Row actions add "Copy path". Back: search results → clear filter → up a folder.
+
+**Text viewer** (`CodeViewer`, shared by the Files page and chat file links)
+- Lazy list of lines with a line-number gutter (fast for the 2 MiB `fs/read` limit), tabs expanded,
+  lines over 20 000 characters shortened for display only.
+- Syntax colours in the app's code palette: SnipMeDev **Highlights** for C/C++/C#/Dart/Go/Java/JS/Kotlin/Perl/
+  PHP/Python/Ruby/Rust/Shell/Swift/TS (and Vue/Svelte/Gradle approximations); the built-in tokenizer for
+  JSON/YAML/TOML/XML/SQL/CSS…; none above 384 K characters (a note says so).
+- Wrap ↔ sideways scroll toggle (one shared horizontal offset, gutter stays put), find-in-file with
+  count and previous/next (case-insensitive), go to line, pinch or menu text size, long-press a line to
+  copy it, "Copy all".
+- Markdown files open **rendered** (Mike Penz's multiplatform-markdown-renderer, GFM tables/task
+  lists/alerts, fenced code via Highlights, lazy layout) with a Rendered / Source switch. Web links open the
+  browser; relative/absolute file links resolve against the file and open in the viewer; images are not
+  fetched.
+- Truncated files say how much is shown and offer Download; binaries show name, size and "Preview or open
+  with another app" / Download. Edit / save / 409 conflict / discard flows are unchanged.
+
+**Images and PDF**
+- Images: **Telephoto** `SubSamplingImage` + `Modifier.zoomable` (pinch, double-tap, fling, bounded pan;
+  tiles decoded per zoom level, so huge photos stay sharp without OOM). GIF/AVIF/BMP/ICO fall back to a
+  down-sampled `ImageDecoder` bitmap with `Modifier.zoomable`.
+- PDF: Android's `PdfRenderer` (no library); tap a page to open a full-screen pager rendered at ~2× width
+  with Telephoto zoom, swipe between pages; × or back returns to the same page in the list.
+
+| Library | Version | License | Use |
+|---|---|---|---|
+| `me.saket.telephoto:zoomable`, `:sub-sampling-image` | 0.19.0 | Apache-2.0 | zoomable images and PDF pages |
+| `com.mikepenz:multiplatform-markdown-renderer`, `-code` | 0.46.0 | Apache-2.0 | rendered Markdown (pulls `org.jetbrains:markdown` 0.7.17, Apache-2.0) |
+| `dev.snipme:highlights` | 1.2.0 | Apache-2.0 | syntax highlighting |
+
+APK impact (release, R8, arm64, measured on HEAD vs HEAD + this change): 8 565 482 → 9 059 769 bytes,
+**+483 KiB (+5.8 %)**.
+
+Rejected: sora-editor (LGPL-2.1, View-based, large with TextMate grammars), WebView-based highlighters
+(the app has no WebView), `androidx.pdf` viewer (needs API 31+/SDK extensions; minSdk is 29).
+
+## 19. One session, one id; model and effort; last known state (2026-11-21)
+
+- Sessions started from the phone are ordinary Claude Code / Codex conversations with the agent's own id
+  (`claude:<uuid>`…), shown like any other session (origin label "从手机启动", no separate "托管" kind). They are
+  listed by `claude --resume` and the IDE history on the computer, and stay the same entry after the desktop restarts.
+- History that is not running anywhere keeps the normal composer (`sendMessage: PARTIAL`) with the hint
+  "会话未在运行：发送后会在电脑上恢复这个会话"; sending resumes it on the computer under the same id. Claude
+  histories can still be forked from the session menu.
+- Model and effort: in the new-session launcher (options row → chips from `GET /v1/agents/{agent}/models`, plus a
+  custom model field and the models used before) and, for a running session, a "模型 · 强度" chip above the
+  composer that opens a sheet (`POST /v1/sessions/{id}/options`; applies from the next reply, like `/model`, `/effort`).
+- Last known state: the unfiltered session list and the newest 300 events of the last 40 opened conversations are
+  cached per desktop in app-private storage (`filesDir/session-cache`, `SessionCache`) and shown at once on a fresh
+  start while connecting; the first successful load replaces them, a failed refresh keeps them. Cleared with
+  "clear caches" and on unpair. The sessions page now opens on "全部" (running sessions first).
+
+
+## 20. Claude Code session tools (2026-11-21)
+
+The Claude Code IDE extension's session features, for Claude Code sessions SwitchTether started (session detail
+`claudeTools: true`; hidden otherwise). Calls go through `POST /v1/sessions/{id}/claude/{action}` with a commandId
+(`RemoteApi.claudeTool`, longer read timeout for the side question); responses are parsed in `ClaudeTools`
+(`:core:remote`, JVM-tested); refusals show the desktop's message.
+
+- **Session tools page** (`Route.SessionTools`, toolbox icon in the session's top bar): permission mode (four
+  `RadioButtonPreference`s; bypassPermissions shows the CLI's refusal when the session was not started with it),
+  context usage (bar split by category + per-category tokens / %), plan (markdown), MCP servers (status dot, tool
+  count, error, Reconnect), side question (/btw, spinner up to ~2 min), rename (prefilled), export (text handed to
+  the share sheet with `ACTION_SEND`; nothing is written to storage).
+- **Permission capsule** above the composer (next to the model chip): current mode; tap → mode sheet.
+- **Run in background**: expanded running foreground `Bash` / `Agent` / `Task` calls (and running foreground
+  sub-agent rows) offer "转到后台" (`run_in_background`, `RenderContext.onRunInBackground`).
+- **Background task output**: Agent map → background task → "查看输出" (`task_output`, monospace, refreshed every 2 s
+  while the task runs).
+- **Withdraw a queued message**: a message sent while the session is busy keeps the send response's `messageUuid`;
+  the delivered bubble reads "已送达 · 排队中" with "撤回" until the echo arrives (`cancel_message`; withdrawn → bubble
+  removed, too late → it stays a normal message).
+- **Rewind files**: a small icon next to copy under user messages whose id is a Claude Code UUID: dry run → dialog
+  listing the files (+/− lines) that says only files are restored, not the conversation → confirm → toast.

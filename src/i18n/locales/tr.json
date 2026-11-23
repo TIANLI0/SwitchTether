@@ -5499,6 +5499,14 @@
       "end": "Sonlandır",
       "external": "Senin terminal pencerin"
     },
+    "forwards": {
+      "title": "Port yönlendirme",
+      "help": "Telefon, şifreli bağlantısı üzerinden bu bilgisayarda yalnızca yerel olarak dinleyen bir porta (örneğin bir geliştirme sunucusuna) burada localhost açıyormuş gibi erişir. Her yönlendirme telefonda biyometrik olarak onaylanır, süresi dolunca sona erer ve buradan istediğiniz zaman durdurulabilir.",
+      "empty": "Port yönlendiren telefon yok.",
+      "port": "Yerel port {{port}}",
+      "detail": "{{device}} · {{connections}} bağlantı · bitiş {{time}}",
+      "stop": "Durdur"
+    },
     "audit": {
       "title": "Güvenlik günlüğü",
       "help": "Telefonlardan yapılan eşleştirme, iptal, terminal, dosya ve yapılandırma işlemleri. Terminal girdisi ve gizli değerler asla kaydedilmez.",

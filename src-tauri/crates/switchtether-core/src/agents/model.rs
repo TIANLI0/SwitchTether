@@ -48,6 +48,9 @@ pub struct SessionSummary {
     pub created_at_ms: Option<i64>,
     pub last_active_at_ms: Option<i64>,
     pub model: Option<String>,
+    /// Effort / reasoning level chosen for a session SwitchTether runs (`low` … `max`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     pub git_branch: Option<String>,
     pub pid: Option<u32>,
     pub managed: bool,
@@ -91,6 +94,9 @@ pub struct Capabilities {
     /// Continue this (externally started) conversation in a SwitchTether process.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub continue_session: Option<CapStatus>,
+    /// Change model / effort of the running session (`POST /v1/sessions/{id}/options`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_model: Option<CapStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -222,6 +228,13 @@ pub fn record_answers(data: &mut Value, answers: &Value) {
     data["answers"] = Value::Object(out);
 }
 
+/// Text Codex stores encrypted (a Fernet token, `gAAAA…`, no spaces) instead of the plain text,
+/// e.g. a `spawn_agent` message or an inter-agent payload. Never shown.
+pub fn is_encrypted_blob(text: &str) -> bool {
+    let t = text.trim();
+    t.len() > 40 && t.starts_with("gAAAA") && !t.contains(char::is_whitespace)
+}
+
 /// Short human title for a tool call.
 pub fn tool_title(name: &str, input: &Value) -> String {
     let s = |k: &str| input.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -235,8 +248,13 @@ pub fn tool_title(name: &str, input: &Value) -> String {
         "WebFetch" => s("url"),
         "WebSearch" => s("query"),
         "Task" | "Agent" => s("description"),
-        "spawn_agent" => s("message").or_else(|| s("agent_type")),
-        "send_input" => s("message").or_else(|| s("id")),
+        "spawn_agent" => s("message")
+            .filter(|m| !is_encrypted_blob(m))
+            .or_else(|| s("task_name"))
+            .or_else(|| s("agent_type")),
+        "send_input" => s("message")
+            .filter(|m| !is_encrypted_blob(m))
+            .or_else(|| s("id")),
         "resume_agent" | "close_agent" => s("id"),
         "shell" | "exec_command" | "local_shell" => input
             .get("command")

@@ -51,8 +51,17 @@ data class PinnedSessionState(
     val notice: String? = null,
     /** The current turn has stopped at least once for the user (shows the 待确认 milestone). */
     val waitedThisTurn: Boolean = false,
-    /** Phase before OFFLINE, restored on reconnect. */
+    /** Phase before OFFLINE, restored on reconnect (with the time it was entered, so a reconnect does not reorder cards). */
     val beforeOffline: LivePhase? = null,
+    val beforeOfflineSinceMs: Long = 0,
+    /**
+     * When the current turn finished (DONE / FAILED / INTERRUPTED) on this phone's clock, and the
+     * computer's own time of that outcome (event `ts`, or the summary's `lastActiveAtMs`); 0 = unknown.
+     * Stragglers of the finished turn (a transcript line tailed after the outcome, a request read
+     * over REST before it) must not restart it.
+     */
+    val finishedAtMs: Long = 0,
+    val finishedAtServerMs: Long = 0,
     /** Bumped on every visible change; the throttle posts only when it moved. */
     val version: Int = 0,
 )
@@ -70,9 +79,9 @@ object LiveReducer {
                 else n.enter(if (approval || summary.waitingFor == null) LivePhase.WAITING_APPROVAL else LivePhase.WAITING_INPUT, now)
             }
             summary.status == "busy" -> n.startTurnIfIdle(now)
-            summary.status == "error" -> n.enter(LivePhase.FAILED, now)
+            summary.status == "error" -> n.finish(LivePhase.FAILED, now, summary.lastActiveAtMs)
             summary.status == "idle" || summary.status == "completed" ->
-                if (n.phase == LivePhase.RUNNING || n.phase == LivePhase.WAITING_APPROVAL || n.phase == LivePhase.WAITING_INPUT) n.enter(LivePhase.DONE, now).copy(pending = null) else n
+                if (n.phase in ACTIVE) n.finish(LivePhase.DONE, now, summary.lastActiveAtMs) else n
             else -> n
         }
         return n.bumpIfChanged(s)
@@ -82,11 +91,20 @@ object LiveReducer {
         // Nested agent activity cannot close or restart the parent's turn.
         if (e.parentId != null && e.kind !in setOf(EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION, EventKinds.APPROVAL_RESOLVED, EventKinds.FILE_CHANGE)) return s
         val d = e.data
+        val at = eventTimeMs(e)
+        // Older than the outcome that closed the turn (on the computer's clock): stale, whatever it is.
+        val older = s.phase in FINISHED && s.finishedAtServerMs > 0 && at != null && at <= s.finishedAtServerMs
+        // Work steps / requests right after the outcome without a new user message or `running`
+        // status: the tail of the finished turn (observed sessions take their status from the
+        // registry and their steps from the transcript, so the two can arrive out of order).
+        val straggler = older || (s.phase in FINISHED && s.finishedAtMs > 0 && now - s.finishedAtMs < STRAGGLER_GRACE_MS)
         val n = when (e.kind) {
-            EventKinds.TOOL_CALL -> if (d.str("status") == "running" || d.str("status") == "pending") {
+            EventKinds.TOOL_CALL -> if (straggler) s else if (d.str("status") == "running" || d.str("status") == "pending") {
                 s.startTurnIfIdle(now).copy(step = classifyStep(d.str("name"), d.str("title"), d.str("category"), d["input"] as? kotlinx.serialization.json.JsonObject), steps = s.steps + 1)
             } else s
-            EventKinds.REASONING -> s.startTurnIfIdle(now).copy(step = null)
+            EventKinds.REASONING -> if (straggler) s else s.startTurnIfIdle(now).copy(step = null)
+            // A new prompt opens the next turn (before any step of it arrives).
+            EventKinds.USER_MESSAGE -> if (e.parentId == null && !older && s.phase in FINISHED) s.startTurnIfIdle(now) else s
             EventKinds.ASSISTANT_MESSAGE -> d.str("text")?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() }
                 ?.let { line -> s.copy(note = if (line.length > 90) line.take(89) + "…" else line) } ?: s
             EventKinds.PLAN -> {
@@ -104,6 +122,8 @@ object LiveReducer {
                 val q = e.kind == EventKinds.QUESTION
                 if (resolved) {
                     if (s.pending?.requestId == rid) s.copy(pending = null).enter(LivePhase.RUNNING, now) else s
+                } else if (straggler) {
+                    s
                 } else {
                     val title = d.str("title")?.takeIf { it.isNotBlank() }
                         ?: d["questions"]?.let { runCatching { (it as kotlinx.serialization.json.JsonArray).firstOrNull()?.let { x -> (x as kotlinx.serialization.json.JsonObject).str("question") } }.getOrNull() }
@@ -114,14 +134,14 @@ object LiveReducer {
             }
             EventKinds.APPROVAL_RESOLVED -> if (s.pending?.requestId == d.str("requestId")) s.copy(pending = null).enter(LivePhase.RUNNING, now) else s
             EventKinds.STATUS -> when (d.str("state")) {
-                "running" -> s.startTurnIfIdle(now)
-                "idle", "completed" -> if (s.phase in ACTIVE) s.enter(LivePhase.DONE, now).copy(pending = null) else s
-                "error" -> s.enter(LivePhase.FAILED, now).copy(pending = null)
-                "interrupted" -> s.enter(LivePhase.INTERRUPTED, now).copy(pending = null)
+                "running" -> if (older) s else s.startTurnIfIdle(now)
+                "idle", "completed" -> if (s.phase in ACTIVE) s.finish(LivePhase.DONE, now, at) else s
+                "error" -> s.finish(LivePhase.FAILED, now, at)
+                "interrupted" -> s.finish(LivePhase.INTERRUPTED, now, at)
                 else -> s
             }
-            EventKinds.ERROR -> if (s.phase in ACTIVE) s.enter(LivePhase.FAILED, now).copy(pending = null) else s
-            EventKinds.SYSTEM -> if (d.str("subtype") == "turn_stopped" && s.phase in ACTIVE) s.enter(LivePhase.INTERRUPTED, now).copy(pending = null) else s
+            EventKinds.ERROR -> if (s.phase in ACTIVE) s.finish(LivePhase.FAILED, now, at) else s
+            EventKinds.SYSTEM -> if (d.str("subtype") == "turn_stopped" && s.phase in ACTIVE) s.finish(LivePhase.INTERRUPTED, now, at) else s
             else -> s
         }
         return n.bumpIfChanged(s)
@@ -129,9 +149,12 @@ object LiveReducer {
 
     fun onConnection(s: PinnedSessionState, online: Boolean, now: Long): PinnedSessionState {
         val n = if (!online) {
-            if (s.phase == LivePhase.OFFLINE) s else s.copy(phase = LivePhase.OFFLINE, beforeOffline = s.phase, phaseSinceMs = now, dismissed = false)
+            if (s.phase == LivePhase.OFFLINE) s else s.copy(phase = LivePhase.OFFLINE, beforeOffline = s.phase, beforeOfflineSinceMs = s.phaseSinceMs, phaseSinceMs = now, dismissed = false)
         } else if (s.phase == LivePhase.OFFLINE) {
-            s.copy(phase = s.beforeOffline ?: LivePhase.RUNNING, beforeOffline = null, phaseSinceMs = now, dismissed = false)
+            // Back in the phase it was in, since when it was in it: a reconnect is not news, so the
+            // card keeps its place (and a turn that finished long ago is not promoted again).
+            val back = s.beforeOffline ?: LivePhase.RUNNING
+            s.copy(phase = back, beforeOffline = null, phaseSinceMs = if (s.beforeOffline != null && s.beforeOfflineSinceMs > 0) s.beforeOfflineSinceMs else now, beforeOfflineSinceMs = 0, dismissed = false)
         } else s
         return n.bumpIfChanged(s)
     }
@@ -146,6 +169,17 @@ object LiveReducer {
     fun onNotice(s: PinnedSessionState, message: String): PinnedSessionState = s.copy(notice = message, dismissed = false).bumpIfChanged(s)
 
     private val ACTIVE = setOf(LivePhase.RUNNING, LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT)
+    private val FINISHED = setOf(LivePhase.DONE, LivePhase.FAILED, LivePhase.INTERRUPTED)
+
+    /** How long after an outcome work steps without a new prompt / `running` status count as the finished turn's tail. */
+    const val STRAGGLER_GRACE_MS = 10_000L
+
+    private fun eventTimeMs(e: AgentEvent): Long? = runCatching { java.time.Instant.parse(e.ts).toEpochMilli() }.getOrNull()
+
+    /** Ends the turn in [p]; remembers when (phone clock and, if known, the computer's clock). */
+    private fun PinnedSessionState.finish(p: LivePhase, now: Long, serverMs: Long?): PinnedSessionState =
+        if (phase == p) copy(pending = null)
+        else enter(p, now).copy(pending = null, finishedAtMs = now, finishedAtServerMs = serverMs ?: 0L)
 
     private fun PinnedSessionState.enter(p: LivePhase, now: Long): PinnedSessionState =
         if (phase == p) this else copy(
@@ -309,6 +343,13 @@ data class LiveUpdateSpec(
     val detail: String = "",
     /** The short status shown next to the elapsed time ("12 steps"). */
     val progressNote: String = "",
+    /**
+     * The notification's `when` (phone clock), which is also what the shade orders by: the turn start
+     * while running (the chronometer base), else when the current phase began. Stable across updates
+     * of one phase, so a step or a re-post never reshuffles the cards; a new phase (waiting for you,
+     * finished) moves the card up. Null: unknown (the channel keeps the time of its first post).
+     */
+    val whenMs: Long? = null,
 ) {
     /**
      * Never indeterminate: ColorOS Fluid Cloud renders no bar for an indeterminate ProgressStyle.
@@ -424,6 +465,7 @@ object LiveUpdateRenderer {
             phase = s.phase,
             stepKind = if (s.phase == LivePhase.RUNNING) s.step?.kind else null,
             detail = detail,
+            whenMs = (if (s.phase == LivePhase.RUNNING && s.turnStartedMs > 0) s.turnStartedMs else s.phaseSinceMs).takeIf { it > 0 },
             progressNote = if (s.planTotal > 0) "${s.planDone}/${s.planTotal}" + (if (s.steps > 0) " \u00b7 " + t.stepsDone(s.steps) else "") else if (s.steps > 0) t.stepsDone(s.steps) else "",
         )
     }

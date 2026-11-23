@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -21,16 +23,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.AppBarBlurOverlayDefaults
+import io.github.suqi8.coui.kmp.basic.BindScrollToTop
 import io.github.suqi8.coui.kmp.basic.COUIScrollBehavior
 import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.CardDefaults
-import io.github.suqi8.coui.kmp.basic.HighlightedIconButton
 import io.github.suqi8.coui.kmp.basic.Icon
+import io.github.suqi8.coui.kmp.basic.couiTopAppBarActionItem
+import io.github.suqi8.coui.kmp.basic.HighlightedIconButton
 import io.github.suqi8.coui.kmp.basic.Scaffold
 import io.github.suqi8.coui.kmp.basic.ScrollBehavior
 import io.github.suqi8.coui.kmp.basic.SmallTopAppBar
 import io.github.suqi8.coui.kmp.basic.TopAppBar
-import io.github.suqi8.coui.kmp.basic.couiTopAppBarActionItem
 import io.github.suqi8.coui.kmp.icon.COUIIcons
 import io.github.suqi8.coui.kmp.icon.extended.Back
 import io.github.suqi8.coui.kmp.theme.COUITheme
@@ -62,6 +65,18 @@ fun Modifier.pageScroll(): Modifier {
         .fillMaxHeight()
 }
 
+/**
+ * State for a page's main list, bound to the COUI17 scroll-to-top controller of the page's
+ * `Scaffold`: tapping the top app bar (and, on ColorOS, the status bar) scrolls it back to the top
+ * and re-expands the collapsing title. Not for bottom-following lists (chat, terminal).
+ */
+@Composable
+fun rememberPageListState(): LazyListState {
+    val state = rememberLazyListState()
+    BindScrollToTop(state)
+    return state
+}
+
 /** Bottom content padding for lists so the last card clears the floating navigation bar. */
 @Composable
 fun pageListPadding(top: Dp = 12.dp): PaddingValues = PaddingValues(top = top, bottom = 24.dp + LocalBottomBarSpace.current)
@@ -90,14 +105,7 @@ fun Page(
         containerColor = color,
         topBar = {
             val nav: @Composable () -> Unit = {
-                if (onBack != null) {
-                    HighlightedIconButton(
-                        onClick = onBack,
-                        modifier = Modifier.couiTopAppBarActionItem(),
-                    ) {
-                        Icon(imageVector = COUIIcons.Back, contentDescription = stringResource(R.string.action_back))
-                    }
-                }
+                if (onBack != null) BackArrow(onBack)
             }
             if (large) {
                 TopAppBar(
@@ -128,6 +136,14 @@ fun Page(
         CompositionLocalProvider(LocalPageScrollBehavior provides behavior) {
             Column(Modifier.fillMaxSize().padding(top = inner.calculateTopPadding()), content = content)
         }
+    }
+}
+
+/** The back button of a detail page: the COUI17 glass round button of the top bar. */
+@Composable
+fun BackArrow(onBack: () -> Unit) {
+    HighlightedIconButton(onClick = onBack, modifier = Modifier.couiTopAppBarActionItem()) {
+        Icon(imageVector = COUIIcons.Back, contentDescription = stringResource(R.string.action_back))
     }
 }
 

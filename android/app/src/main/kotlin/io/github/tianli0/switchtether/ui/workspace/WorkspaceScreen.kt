@@ -4,6 +4,7 @@ import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 
 
@@ -127,7 +128,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
         },
     ) {
         ConnectionBanner(conn, { container.connection.retryNow() })
-        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { SmallTitle(stringResource(R.string.ws_terminals)) }
             item {
                 GroupCard {
@@ -197,6 +198,21 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                             cardListPosition = cardListPositionOf(i, roots.size),
                         )
                     }
+                }
+            }
+            item { SmallTitle(stringResource(R.string.forward_title)) }
+            item {
+                val forwards by container.portForwards.active.collectAsStateWithLifecycle()
+                GroupCard {
+                    BasicComponent(
+                        title = if (forwards.isEmpty()) stringResource(R.string.forward_title)
+                        else forwards.joinToString(" · ") { "localhost:${it.localPort}" },
+                        summary = if (forwards.isEmpty()) stringResource(R.string.forward_ws_summary)
+                        else androidx.compose.ui.res.pluralStringResource(R.plurals.forward_ws_active, forwards.size, forwards.size),
+                        startAction = { RowIcon(AppIcons.PortForward) },
+                        onClick = { onOpen(Route.PortForward) },
+                        cardListPosition = CardListPosition.Full,
+                    )
                 }
             }
             item { SmallTitle(stringResource(R.string.ws_git)) }
@@ -281,7 +297,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            LoadableContent(detail.second, onRetry = vm::closeGitDetail) { text ->
+            LoadableContent(detail.second, onRetry = vm::retryGitDetail) { text ->
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 24.dp + LocalBottomBarSpace.current)) {
                     if (state.gitDiff != null) {
                         if (text.isBlank()) Text(stringResource(R.string.git_no_changes), color = COUITheme.colorScheme.onSurfaceVariantSummary) else DiffView(text)

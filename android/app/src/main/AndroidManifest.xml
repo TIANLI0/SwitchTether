@@ -24,7 +24,20 @@
     <!-- Android 16+: an active session's ongoing notification may be promoted (Live Update). -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
+    <!-- Optional Bluetooth association with the user's computer (CompanionDeviceManager, user picks
+         it in the system dialog): battery exemption while associated, presence wake-ups, and
+         listing already-bonded computers (BLUETOOTH_CONNECT, asked only from that sheet). -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
 
     <!-- Package visibility for the settings pages offered from the pin / live-notification sheet. -->
     <queries>
@@ -79,6 +92,15 @@
             android:name=".notify.MonitorService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+        <!-- Bound by the system when the associated computer connects / disconnects over Bluetooth. -->
+        <service
+            android:name=".connection.CompanionPresenceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
         <!-- PackageInstaller session results for self-update (not exported: PendingIntent only). -->
         <receiver
             android:name=".update.InstallResultReceiver"
@@ -95,6 +117,10 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_status_info" />
         </receiver>
+        <!-- Allow / deny / answer / reply buttons of ordinary notifications (PendingIntents only). -->
+        <receiver
+            android:name=".notify.NotifyActionReceiver"
+            android:exported="false" />
         <!-- Buttons / swipe-away of pinned tasks' Live Updates (PendingIntents only). -->
         <receiver
             android:name=".notify.LiveUpdateActionReceiver"

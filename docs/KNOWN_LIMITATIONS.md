@@ -59,6 +59,18 @@ TODO list. Each item says what the user experiences.
     optional foreground connection service and vendor battery policies; Doze can delay them.
     Missed events are fetched after reconnecting (event replay) or by refreshing (resync).
 
+## Port forwarding
+
+10a. A forward reaches only ports that listen on the computer's **loopback** (or on all
+     interfaces). A server bound to one LAN address only is not reachable through it.
+10b. While a forward runs, other apps on the phone can connect to `localhost:<port>` too.
+10c. Forwards on the phone end when the app process ends. The lease stays valid on the computer
+     until it expires, and the forwarding screen offers to resume it without a new confirmation.
+10d. Plain TCP only (HTTP, WebSocket, most dev tools). UDP (e.g. HTTP/3-only servers) is not
+     forwarded. Through the relay, throughput and latency are those of the relay.
+10e. The list of listening ports shows process names on Windows only; on macOS only common
+     development ports are probed (any port can still be entered by hand).
+
 ## Desktop
 
 11. **Quitting SwitchTether ends the remote terminals and managed agent processes it owns.**

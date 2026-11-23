@@ -20,6 +20,8 @@ pub enum Scope {
     Terminal,
     FilesWrite,
     ConfigWrite,
+    /// Starting a port forward (docs/PROTOCOL.md §7.11).
+    PortForward,
 }
 
 impl Scope {
@@ -28,6 +30,7 @@ impl Scope {
             Scope::Terminal => "terminal",
             Scope::FilesWrite => "files_write",
             Scope::ConfigWrite => "config_write",
+            Scope::PortForward => "port_forward",
         }
     }
 }

@@ -1,0 +1,10 @@
+{
+  "frames": [
+    { "type": 1, "name": "open", "stream": 1, "payloadHex": "", "hex": "0100000001" },
+    { "type": 2, "name": "opened", "stream": 1, "payloadHex": "", "hex": "0200000001" },
+    { "type": 3, "name": "data", "stream": 3, "payloadHex": "474554202f", "hex": "0300000003474554202f" },
+    { "type": 4, "name": "fin", "stream": 3, "payloadHex": "", "hex": "0400000003" },
+    { "type": 5, "name": "reset", "stream": 258, "payloadHex": "72656675736564", "hex": "050000010272656675736564" },
+    { "type": 6, "name": "window", "stream": 5, "payloadHex": "00040000", "hex": "060000000500040000" }
+  ]
+}

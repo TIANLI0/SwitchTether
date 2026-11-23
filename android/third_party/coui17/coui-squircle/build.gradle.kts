@@ -179,7 +179,7 @@ kotlin {
     android {
         namespace = "io.github.suqi8.coui.kmp.squircle"
         compileSdk {
-            version = release(37) { minorApiLevel = 0 }
+            version = release(37) { minorApiLevel = 2 }
         }
         buildToolsVersion = "37.0.0"
         minSdk = 23

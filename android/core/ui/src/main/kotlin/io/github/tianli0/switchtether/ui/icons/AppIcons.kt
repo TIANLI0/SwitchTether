@@ -17,6 +17,8 @@ import com.adamglin.phosphoricons.regular.ChartBar
 import com.adamglin.phosphoricons.regular.Check
 import com.adamglin.phosphoricons.regular.ClipboardText
 import com.adamglin.phosphoricons.regular.Copy
+import com.adamglin.phosphoricons.regular.Export
+import com.adamglin.phosphoricons.regular.Share
 import com.adamglin.phosphoricons.regular.X
 import com.adamglin.phosphoricons.regular.TextAlignLeft
 import com.adamglin.phosphoricons.regular.ArrowsHorizontal
@@ -36,6 +38,7 @@ import com.adamglin.phosphoricons.regular.MagnifyingGlass
 import com.adamglin.phosphoricons.regular.Notepad
 import com.adamglin.phosphoricons.regular.PencilSimple
 import com.adamglin.phosphoricons.regular.Plugs
+import com.adamglin.phosphoricons.regular.PlugsConnected
 import com.adamglin.phosphoricons.regular.Plus
 import com.adamglin.phosphoricons.regular.PlusCircle
 import com.adamglin.phosphoricons.regular.PuzzlePiece
@@ -50,6 +53,8 @@ import com.adamglin.phosphoricons.regular.Trash
 import com.adamglin.phosphoricons.regular.UploadSimple
 import com.adamglin.phosphoricons.regular.Warning
 import com.adamglin.phosphoricons.regular.Wrench
+import com.adamglin.phosphoricons.regular.ClockCounterClockwise
+import com.adamglin.phosphoricons.regular.Toolbox
 import com.adamglin.phosphoricons.fill.ChatsCircle as ChatsCircleFill
 import com.adamglin.phosphoricons.fill.FolderOpen as FolderOpenFill
 import com.adamglin.phosphoricons.fill.GearSix as GearSixFill
@@ -84,6 +89,8 @@ object AppIcons {
     // Actions.
     val Back: ImageVector get() = PhosphorIcons.Regular.ArrowLeft
     val Refresh: ImageVector get() = PhosphorIcons.Regular.ArrowClockwise
+    val Share: ImageVector get() = PhosphorIcons.Regular.Share
+    val OpenWith: ImageVector get() = PhosphorIcons.Regular.Export
     val Add: ImageVector get() = PhosphorIcons.Regular.Plus
     val AddCircle: ImageVector get() = PhosphorIcons.Regular.PlusCircle
     val Info: ImageVector get() = PhosphorIcons.Regular.Info
@@ -108,6 +115,7 @@ object AppIcons {
     val Terminal: ImageVector get() = PhosphorIcons.Regular.TerminalWindow
     val Files: ImageVector get() = PhosphorIcons.Regular.Folder
     val Git: ImageVector get() = PhosphorIcons.Regular.GitBranch
+    val PortForward: ImageVector get() = PhosphorIcons.Regular.PlugsConnected
     val ChevronRight: ImageVector get() = PhosphorIcons.Regular.CaretRight
     /** Follow a task in the live notification (Fluid Cloud). */
     val Pin: ImageVector get() = PhosphorIcons.Regular.Broadcast
@@ -132,6 +140,10 @@ object AppIcons {
     val Web: ImageVector get() = PhosphorIcons.Regular.Globe
     val Mcp: ImageVector get() = PhosphorIcons.Regular.Plugs
     val Tool: ImageVector get() = PhosphorIcons.Regular.Wrench
+    /** Rewind files to before a message (Claude Code session tools). */
+    val Rewind: ImageVector get() = PhosphorIcons.Regular.ClockCounterClockwise
+    /** Claude Code session tools. */
+    val SessionTools: ImageVector get() = PhosphorIcons.Regular.Toolbox
     val Providers: ImageVector get() = PhosphorIcons.Regular.ArrowsLeftRight
     val Usage: ImageVector get() = PhosphorIcons.Regular.ChartBar
     val Skills: ImageVector get() = PhosphorIcons.Regular.PuzzlePiece

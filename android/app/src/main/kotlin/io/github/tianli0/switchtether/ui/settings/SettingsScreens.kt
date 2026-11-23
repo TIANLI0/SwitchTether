@@ -35,6 +35,7 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.ui.common.GroupCard
 import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.connection.ConnectionManager
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.notify.Notifier
@@ -80,7 +81,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
 
     Page(title = stringResource(R.string.tab_manage)) {
         ConnectionBanner(conn, { container.connection.retryNow() })
-        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
                 PageCard {
                     ArrowPreference(
@@ -167,6 +168,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
                         summary = stringResource(R.string.settings_background_summary),
                         cardListPosition = CardListPosition.Head,
                     )
+                    CompanionPreference(cardListPosition = CardListPosition.Middle)
                     val ctx = LocalContext.current
                     var unrestricted by remember { mutableStateOf(true) }
                     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -288,7 +290,7 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
     val conn by container.connection.state.collectAsStateWithLifecycle()
     Page(title = stringResource(R.string.settings_desktop), onBack = onBack) {
         val d = desktop ?: return@Page
-        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
                 PageCard {
                     KeyValueRow(stringResource(R.string.field_desktop), d.name)
@@ -319,7 +321,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
     val prefs by container.notifyPrefsState.collectAsStateWithLifecycle()
     fun update(t: (NotifyPrefs) -> NotifyPrefs) = container.appScope.launch { container.settingsStore.updateNotifyPrefs(t) }
     Page(title = stringResource(R.string.settings_notifications), onBack = onBack) {
-        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { SectionHeader(stringResource(R.string.live_settings_title)) }
             item {
                 val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -473,7 +475,7 @@ data class LicenseEntry(val name: String, val license: String, val note: String)
 
 /** Mirrors android/THIRD_PARTY_LICENSES.md. */
 val LICENSES = listOf(
-    LicenseEntry("coui17 (Costben/coui17 @ 0fc9b44)", "Apache-2.0 (+ MPL-2.0 files in kit/**)", "Vendored source, see third_party/coui17. MPL-2.0 sources: https://github.com/Costben/coui17/tree/0fc9b44aadf01632dd2e43ae3db6bcf10621bc8d/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit"),
+    LicenseEntry("coui17 (Costben/coui17 @ 7135f75)", "Apache-2.0 (+ MPL-2.0 files in kit/**)", "Vendored source, see third_party/coui17. MPL-2.0 sources: https://github.com/Costben/coui17/tree/7135f75aa4346fa03e589e0e41235386f309bdd8/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/kit and https://github.com/Costben/coui17/tree/7135f75aa4346fa03e589e0e41235386f309bdd8/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit"),
     LicenseEntry("COUI (suqi8/coui), Miuix (compose-miuix-ui/miuix)", "Apache-2.0", "Upstream projects of coui17 (NOTICE)"),
     LicenseEntry("COUI-Kit (ItosEO/COUI-Kit)", "MPL-2.0", "Ported files keep their MPL-2.0 headers"),
     LicenseEntry("Jetpack Compose / Compose Multiplatform", "Apache-2.0", "Google LLC, JetBrains s.r.o."),
@@ -481,6 +483,9 @@ val LICENSES = listOf(
     LicenseEntry("Kotlin stdlib, kotlinx.coroutines, kotlinx.serialization", "Apache-2.0", "JetBrains s.r.o."),
     LicenseEntry("OkHttp / Okio", "Apache-2.0", "Square, Inc."),
     LicenseEntry("ZXing core", "Apache-2.0", "ZXing authors"),
+    LicenseEntry("Telephoto (zoomable, sub-sampling-image)", "Apache-2.0", "Saket Narayan"),
+    LicenseEntry("multiplatform-markdown-renderer, JetBrains Markdown", "Apache-2.0", "Mike Penz; JetBrains s.r.o."),
+    LicenseEntry("Highlights (dev.snipme)", "Apache-2.0", "SnipMe"),
     LicenseEntry("AndroidX Media3 ExoPlayer (video / audio preview)", "Apache-2.0", "The Android Open Source Project"),
     LicenseEntry("material-color-utilities (com.materialkolor)", "Apache-2.0", "Google LLC / Jordon de Hoog"),
     LicenseEntry("material3-window-size-class (JetBrains)", "Apache-2.0", "JetBrains s.r.o."),
@@ -491,7 +496,7 @@ val LICENSES = listOf(
 @Composable
 fun LicensesScreen(onBack: () -> Unit) {
     Page(title = stringResource(R.string.settings_licenses), onBack = onBack) {
-        LazyColumn(Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
             items(LICENSES) { l ->
                 PageCard {

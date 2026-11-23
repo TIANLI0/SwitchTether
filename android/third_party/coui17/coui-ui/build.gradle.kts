@@ -13,7 +13,7 @@ kotlin {
     android {
         namespace = "io.github.suqi8.coui.kmp.ui"
         compileSdk {
-            version = release(37) { minorApiLevel = 0 }
+            version = release(37) { minorApiLevel = 2 }
         }
         buildToolsVersion = "37.0.0"
         minSdk = 23
@@ -31,7 +31,6 @@ kotlin {
         }
         androidMain.dependencies {
             // org.lsposed.hiddenapibypass intentionally NOT included: see ../PATCHES.md (0001).
-            implementation(libs.androidx.dynamicanimation)
         }
     }
 }

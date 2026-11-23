@@ -35,6 +35,8 @@ pub struct ManagedCodexOptions {
     pub approval_policy: String,
     /// Continue an existing thread (`thread/resume`) instead of starting one.
     pub resume_thread: Option<String>,
+    /// Reasoning effort for turns (`turn/start` `effort`).
+    pub effort: Option<String>,
 }
 
 struct PendingApproval {
@@ -50,6 +52,10 @@ struct State {
     thread_id: Option<String>,
     turn_id: Option<String>,
     model: Option<String>,
+    /// Model / effort chosen from the phone: sent with the next `turn/start` (Codex applies them
+    /// to that turn and the ones after it).
+    next_model: Option<String>,
+    effort: Option<String>,
     title: Option<String>,
     created_at_ms: i64,
     last_active_at_ms: i64,
@@ -178,6 +184,23 @@ impl CodexConn {
             self.threads.lock().contains_key(id) || self.subagent_parents.lock().contains_key(id)
         };
         let mut out = Vec::new();
+        // Multi-agent v2 announces a child only as a `subAgentActivity` item of its parent (no
+        // `thread/started`): link it before any of its own events arrive, so it is never taken
+        // for a new top-level thread.
+        if let (Some(parent), Some(item)) = (
+            v.pointer("/params/threadId").and_then(Value::as_str),
+            v.pointer("/params/item")
+                .filter(|i| s(i, "type").as_deref() == Some("subAgentActivity")),
+        ) {
+            if let Some(child) = s(item, "agentThreadId").filter(|c| c != parent) {
+                if known(parent) && s(item, "kind").as_deref() == Some("started") {
+                    self.subagent_parents
+                        .lock()
+                        .entry(child)
+                        .or_insert_with(|| parent.to_string());
+                }
+            }
+        }
         // Replies to thread/start | thread/resume | thread/fork (host or ours).
         if let Some(t) = v.pointer("/result/thread") {
             if let Some(id) = s(t, "id") {
@@ -486,6 +509,17 @@ fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string())
 }
 
+/// Event id of a child thread's item in its parent's log. Codex item ids are per-thread
+/// counters, so a child's `item-3` must not replace the parent's. Sub-agent rows
+/// (`cx-sa-<thread id>`) are already unique and keep their id.
+fn scope_child_id(id: &str, tid: &str) -> String {
+    if id.starts_with("cx-sa-") || id.ends_with(&format!("@{tid}")) {
+        id.to_string()
+    } else {
+        format!("{id}@{tid}")
+    }
+}
+
 impl ManagedCodex {
     pub async fn spawn(
         id: String,
@@ -526,6 +560,8 @@ impl ManagedCodex {
                 thread_id: None,
                 turn_id: None,
                 model: options.model.clone(),
+                next_model: None,
+                effort: options.effort.clone(),
                 title: None,
                 created_at_ms: now,
                 last_active_at_ms: now,
@@ -619,6 +655,7 @@ impl ManagedCodex {
                 model: None,
                 approval_policy: String::new(),
                 resume_thread: None,
+                effort: None,
             },
             log,
             stdin: tokio::sync::Mutex::new(None),
@@ -634,6 +671,8 @@ impl ManagedCodex {
                 thread_id: Some(thread_id),
                 turn_id: None,
                 model: None,
+                next_model: None,
+                effort: None,
                 title: None,
                 created_at_ms: now,
                 last_active_at_ms: now,
@@ -744,6 +783,30 @@ impl ManagedCodex {
                 ))
             }
         }
+    }
+
+    pub fn effort(&self) -> Option<String> {
+        self.state.lock().effort.clone()
+    }
+
+    /// Model for the following turns (`turn/start` `model`); `None` keeps the thread's model.
+    pub fn set_model(&self, model: Option<&str>) {
+        let mut st = self.state.lock();
+        st.next_model = model.map(String::from);
+        if let Some(m) = model {
+            st.model = Some(m.to_string());
+        }
+    }
+
+    /// Reasoning effort for the following turns (`turn/start` `effort`).
+    pub fn set_effort(&self, effort: Option<&str>) {
+        self.state.lock().effort = effort.map(String::from);
+    }
+
+    /// Models this Codex offers (`model/list`), as returned by the app-server.
+    pub async fn list_models(&self) -> ApiResult<Value> {
+        self.request("model/list", json!({}), Duration::from_secs(15))
+            .await
     }
 
     fn thread_id(&self) -> ApiResult<String> {
@@ -959,6 +1022,8 @@ impl ManagedCodex {
         let id = s(item, "id").unwrap_or_default();
         let eid = format!("cx-item-{id}");
         let mut out = Vec::new();
+        // Drafts that keep the turn they already have (a sub-agent row updated by a later call).
+        let mut kept_turn: Vec<EventDraft> = Vec::new();
         let mut push = |mut d: EventDraft| {
             d.turn_id = turn_id.map(|t| t.to_string());
             out.push(d);
@@ -1212,36 +1277,120 @@ impl ManagedCodex {
                     })
                     .unwrap_or_default();
                 let states = item.get("agentsStates").and_then(|s| s.as_object());
+                let spawn = tool == "spawnAgent";
                 for tid in receivers {
                     let st = states.and_then(|m| m.get(&tid));
                     let sa_status = match st.and_then(|v| s(v, "status")).as_deref() {
-                        Some("completed") => "completed",
-                        Some("errored") => "failed",
-                        Some("interrupted") => "interrupted",
-                        Some("shutdown") => "completed",
-                        Some("notFound") => "failed",
-                        _ => {
-                            if status == "failed" {
-                                "failed"
-                            } else {
-                                "running"
-                            }
-                        }
+                        Some("completed") | Some("shutdown") => Some("completed"),
+                        Some("errored") | Some("notFound") => Some("failed"),
+                        Some("interrupted") => Some("interrupted"),
+                        Some("running") | Some("pendingInit") => Some("running"),
+                        _ if spawn && status == "failed" => Some("failed"),
+                        _ if spawn => Some("running"),
+                        _ => None,
                     };
+                    let message = st
+                        .and_then(|v| s(v, "message"))
+                        .filter(|m| !m.trim().is_empty());
+                    let sa_id = format!("cx-sa-{tid}");
+                    // Only the spawn defines the row (what it was asked, where it hangs); a later
+                    // wait / sendInput / closeAgent on the same child only updates its state.
+                    let existing = self.log.lock().get(&sa_id).cloned();
+                    let mut data = existing
+                        .as_ref()
+                        .map(|e| e.data.clone())
+                        .unwrap_or_else(|| json!({ "agentId": tid }));
+                    if spawn {
+                        if prompt.is_some() {
+                            data["description"] = json!(prompt);
+                        }
+                        data["callId"] = json!(id);
+                        if let Some(m) = s(item, "model") {
+                            data["model"] = json!(m);
+                        }
+                    }
+                    if let Some(st) = sa_status {
+                        data["status"] = json!(st);
+                    }
+                    if let Some(m) = &message {
+                        data["message"] = json!(m);
+                        if sa_status == Some("completed") {
+                            data["result"] = json!(preview(m, 4000).0);
+                        }
+                    }
                     let mut sa = EventDraft::new(
-                        format!("cx-sa-{tid}"),
+                        &sa_id,
                         "subagent",
-                        &ts,
-                        json!({
-                            "agentId": tid,
-                            "description": prompt,
-                            "status": sa_status,
-                            "message": st.and_then(|v| s(v, "message")),
-                            "callId": id,
-                        }),
+                        existing.as_ref().map_or(ts.clone(), |e| e.ts.clone()),
+                        data,
                     );
-                    sa.parent_id = Some(id.clone());
-                    push(sa);
+                    sa.parent_id = match &existing {
+                        Some(e) if !spawn || e.parent_id.is_some() => e.parent_id.clone(),
+                        _ => Some(id.clone()),
+                    };
+                    match existing.and_then(|e| e.turn_id) {
+                        // Stays in the turn that spawned it (`push` would move it to this one).
+                        Some(t) => {
+                            sa.turn_id = Some(t);
+                            kept_turn.push(sa);
+                        }
+                        None => push(sa),
+                    }
+                }
+            }
+            // Multi-agent v2: the only sign of a child in its parent (spawns make no
+            // collabAgentToolCall). Sent as item/started and item/completed: idempotent.
+            Some("subAgentActivity") => {
+                let (Some(tid), kind) = (s(item, "agentThreadId"), s(item, "kind")) else {
+                    return out;
+                };
+                let status = match kind.as_deref() {
+                    Some("started") => Some("running"),
+                    Some("completed") => Some("completed"),
+                    Some("interrupted") => Some("interrupted"),
+                    _ => None, // interacted: mail sent to it
+                };
+                let sa_id = format!("cx-sa-{tid}");
+                let existing = self.log.lock().get(&sa_id).cloned();
+                if existing.is_none() && kind.as_deref() != Some("started") {
+                    return out;
+                }
+                let path = s(item, "agentPath");
+                let mut data = existing.as_ref().map(|e| e.data.clone()).unwrap_or_else(|| {
+                    json!({
+                        "agentId": tid,
+                        "agentPath": path,
+                        "description": path.as_deref().map(|p| p.rsplit('/').next().unwrap_or(p)),
+                        "background": true,
+                    })
+                });
+                if let Some(m) = s(item, "model") {
+                    data["model"] = json!(m);
+                }
+                // A late `started` (it can arrive after the child's own completion) never
+                // reopens a finished child.
+                let finished = matches!(
+                    data.get("status").and_then(Value::as_str),
+                    Some("completed" | "failed" | "interrupted")
+                );
+                if let Some(st) =
+                    status.filter(|_| !(finished && kind.as_deref() == Some("started")))
+                {
+                    data["status"] = json!(st);
+                }
+                let mut sa = EventDraft::new(
+                    &sa_id,
+                    "subagent",
+                    existing.as_ref().map_or(ts.clone(), |e| e.ts.clone()),
+                    data,
+                );
+                match existing {
+                    Some(e) => {
+                        sa.parent_id = e.parent_id;
+                        sa.turn_id = e.turn_id;
+                        kept_turn.push(sa);
+                    }
+                    None => push(sa),
                 }
             }
             Some("imageView") => {
@@ -1297,6 +1446,7 @@ impl ManagedCodex {
             )),
             None => {}
         }
+        out.extend(kept_turn);
         out
     }
 
@@ -1311,18 +1461,28 @@ impl ManagedCodex {
             crate::util::now_rfc3339(),
             json!({
                 "agentId": tid,
-                "agentType": s(thread, "agentRole"),
+                "agentType": s(thread, "agentRole").or_else(|| s(thread, "agentNickname")),
                 "description": desc,
                 "status": "running",
             }),
         );
-        // Preserve existing parent_id if collabAgentToolCall already created this subagent row.
+        // collabAgentToolCall may have created the row already: keep what the spawn said (its
+        // prompt, parent, turn) and add what only the thread knows.
         let mut log = self.log.lock();
         if let Some(existing) = log.get(&d.id) {
-            d.parent_id = existing.parent_id.clone();
-            if d.data["description"].is_null() {
-                d.data["description"] = existing.data["description"].clone();
+            let mut data = existing.data.clone();
+            for k in ["agentType", "description"] {
+                if data.get(k).is_none_or(Value::is_null) {
+                    data[k] = d.data[k].clone();
+                }
             }
+            if data.get("status").is_none_or(Value::is_null) {
+                data["status"] = json!("running");
+            }
+            d.data = data;
+            d.parent_id = existing.parent_id.clone();
+            d.turn_id = existing.turn_id.clone();
+            d.ts = existing.ts.clone();
         }
         log.upsert(d, true);
     }
@@ -1362,7 +1522,7 @@ impl ManagedCodex {
                 let (Some(item_id), Some(delta)) = (s(&p, "itemId"), s(&p, "delta")) else {
                     return;
                 };
-                let eid = format!("cx-item-{item_id}");
+                let eid = scope_child_id(&format!("cx-item-{item_id}"), tid);
                 let mut log = self.log.lock();
                 let existing = log
                     .get(&eid)
@@ -1379,7 +1539,9 @@ impl ManagedCodex {
                 draft.streaming = true;
                 log.upsert(draft, true);
             }
-            "item/commandExecution/outputDelta" => self.on_notification(method, p),
+            // Item ids are per-thread counters: a child's output delta would land on the
+            // parent's item of the same id. The child's completed item carries the output.
+            "item/commandExecution/outputDelta" => {}
             "item/started" | "item/completed" => {
                 if let Some(item) = p.get("item") {
                     let done = method == "item/completed";
@@ -1387,9 +1549,11 @@ impl ManagedCodex {
                     let drafts = self.item_events(item, turn_id.as_deref(), done);
                     let mut log = self.log.lock();
                     for mut d in drafts {
-                        if d.parent_id.is_none() {
-                            d.parent_id = Some(sa_id.clone());
-                        }
+                        d.id = scope_child_id(&d.id, tid);
+                        d.parent_id = match d.parent_id.take() {
+                            None => Some(sa_id.clone()),
+                            Some(p) => Some(scope_child_id(&p, tid)),
+                        };
                         log.upsert(d, true);
                     }
                 }
@@ -1607,6 +1771,29 @@ impl ManagedSession for ManagedCodex {
     fn last_active_at_ms(&self) -> i64 {
         self.state.lock().last_active_at_ms
     }
+    fn effort(&self) -> Option<String> {
+        ManagedCodex::effort(self)
+    }
+    fn can_change_model(&self) -> bool {
+        self.remote.is_none()
+    }
+    async fn models(&self) -> Value {
+        self.list_models().await.unwrap_or(Value::Null)
+    }
+    async fn set_model(&self, model: Option<&str>) -> ApiResult<()> {
+        if self.remote.is_some() {
+            return crate::agents::managed::ManagedSessionDefaults::set_model_blocked();
+        }
+        ManagedCodex::set_model(self, model);
+        Ok(())
+    }
+    async fn set_effort(&self, effort: Option<&str>) -> ApiResult<()> {
+        if self.remote.is_some() {
+            return crate::agents::managed::ManagedSessionDefaults::set_model_blocked();
+        }
+        ManagedCodex::set_effort(self, effort);
+        Ok(())
+    }
     fn model(&self) -> Option<String> {
         self.state.lock().model.clone()
     }
@@ -1656,12 +1843,18 @@ impl ManagedSession for ManagedCodex {
                 .await?;
             }
             None => {
-                self.request(
-                    "turn/start",
-                    json!({ "threadId": thread_id, "input": input }),
-                    Duration::from_secs(60),
-                )
-                .await?;
+                let mut params = json!({ "threadId": thread_id, "input": input });
+                {
+                    let st = self.state.lock();
+                    if let Some(m) = &st.next_model {
+                        params["model"] = json!(m);
+                    }
+                    if let Some(e) = &st.effort {
+                        params["effort"] = json!(e);
+                    }
+                }
+                self.request("turn/start", params, Duration::from_secs(60))
+                    .await?;
                 self.set_status("busy");
             }
         }
@@ -1986,6 +2179,146 @@ mod version_tests {
                 Some("parent")
             );
         }
+    }
+
+    /// A `wait` (or sendInput / closeAgent) on a child spawned earlier updates only its state:
+    /// the row keeps the spawn's prompt, parent call and turn, and takes the child's answer.
+    #[tokio::test]
+    async fn collab_wait_updates_the_spawned_row_in_place() {
+        use super::*;
+        use crate::agents::store::SessionLog;
+        use parking_lot::Mutex;
+        use std::sync::Arc;
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let conn = CodexConn::new(tx, "desktop_app", PathBuf::from("."));
+        let log = Arc::new(Mutex::new(SessionLog::new("attached:p2", None)));
+        let parent = ManagedCodex::attached(
+            "attached:p2".into(),
+            conn,
+            "th-p".into(),
+            PathBuf::from("."),
+            log.clone(),
+        );
+        let item = |id: &str, tool: &str, prompt: Option<&str>, states: Value| {
+            json!({"threadId":"th-p","turnId":"turn-1","item":{"type":"collabAgentToolCall","id":id,"tool":tool,
+                "status":"completed","senderThreadId":"th-p","receiverThreadIds":["th-c"],"prompt":prompt,
+                "model":"gpt-x","agentsStates":states}})
+        };
+        parent.on_notification(
+            "item/completed",
+            item(
+                "spawn-1",
+                "spawnAgent",
+                Some("Review the login flow"),
+                json!({"th-c":{"status":"pendingInit"}}),
+            ),
+        );
+        let row = log.lock().get("cx-sa-th-c").cloned().unwrap();
+        assert_eq!(row.parent_id.as_deref(), Some("spawn-1"));
+        assert_eq!(row.data["description"], "Review the login flow");
+        assert_eq!(row.data["status"], "running");
+
+        // The child thread announces itself: the spawn's prompt stays the description.
+        parent.on_subagent_started("th-c", &json!({"id":"th-c","agentNickname":"Scout"}));
+        let row = log.lock().get("cx-sa-th-c").cloned().unwrap();
+        assert_eq!(row.data["description"], "Review the login flow");
+        assert_eq!(row.data["agentType"], "Scout");
+        assert_eq!(row.parent_id.as_deref(), Some("spawn-1"));
+
+        let mut later = item(
+            "wait-1",
+            "wait",
+            None,
+            json!({"th-c":{"status":"completed","message":"Login is fine."}}),
+        );
+        later["turnId"] = json!("turn-2");
+        parent.on_notification("item/completed", later);
+        let row = log.lock().get("cx-sa-th-c").cloned().unwrap();
+        assert_eq!(
+            row.parent_id.as_deref(),
+            Some("spawn-1"),
+            "not moved under the wait"
+        );
+        assert_eq!(row.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(row.data["description"], "Review the login flow");
+        assert_eq!(row.data["status"], "completed");
+        assert_eq!(row.data["result"], "Login is fine.");
+        assert_eq!(row.data["callId"], "spawn-1");
+    }
+
+    /// Multi-agent v2 over the app-server: the parent only gets `subAgentActivity` items (no
+    /// `thread/started` for the child); the child's events must be routed under its row, with
+    /// item ids that cannot collide with the parent's.
+    #[tokio::test]
+    async fn v2_sub_agent_activity_links_and_scopes_the_child() {
+        use super::*;
+        use crate::agents::store::SessionLog;
+        use parking_lot::Mutex;
+        use std::sync::Arc;
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let conn = CodexConn::new(tx, "desktop_app", PathBuf::from("."));
+        let log = Arc::new(Mutex::new(SessionLog::new("attached:p3", None)));
+        let parent = ManagedCodex::attached(
+            "attached:p3".into(),
+            conn.clone(),
+            "th-p".into(),
+            PathBuf::from("."),
+            log.clone(),
+        );
+        conn.threads.lock().insert("th-p".into(), parent.clone());
+        let frame = |line: Value| json!({"t":"out","line": line.to_string()});
+        let activity = |kind: &str, method: &str| {
+            frame(
+                json!({"method":method,"params":{"threadId":"th-p","turnId":"t1","item":{
+                "type":"subAgentActivity","id":"call-1","kind":kind,"agentThreadId":"th-c","agentPath":"/root/review","model":"gpt-x"}}}),
+            )
+        };
+        for m in ["item/started", "item/completed"] {
+            let f = activity("started", m);
+            assert!(conn.discover(&f).is_empty());
+            conn.on_frame(f).await;
+        }
+        let row = log.lock().get("cx-sa-th-c").cloned().unwrap();
+        assert_eq!(row.data["description"], "review");
+        assert_eq!(row.data["status"], "running");
+        assert_eq!(
+            log.lock().iter().filter(|e| e.kind == "subagent").count(),
+            1
+        );
+
+        // Same item id in parent and child: two events.
+        let item = |tid: &str, text: &str| {
+            frame(
+                json!({"method":"item/completed","params":{"threadId":tid,"turnId":"t","item":{
+                "type":"agentMessage","id":"item-1","text":text}}}),
+            )
+        };
+        let f = item("th-c", "child says");
+        assert!(
+            conn.discover(&f).is_empty(),
+            "the child is not a new top-level thread"
+        );
+        conn.on_frame(f).await;
+        conn.on_frame(item("th-p", "parent says")).await;
+        {
+            // Scoped (not `drop(lg)`): the lock guard must be gone before the next `.await`.
+            let lg = log.lock();
+            let child = lg.get("cx-item-item-1@th-c").unwrap();
+            assert_eq!(child.parent_id.as_deref(), Some("cx-sa-th-c"));
+            assert_eq!(
+                lg.get("cx-item-item-1").unwrap().data["text"],
+                "parent says"
+            );
+        }
+
+        conn.on_frame(activity("completed", "item/completed")).await;
+        conn.on_frame(activity("started", "item/completed")).await; // late spawn echo
+        assert_eq!(
+            log.lock().get("cx-sa-th-c").unwrap().data["status"],
+            "completed"
+        );
     }
 
     #[tokio::test]

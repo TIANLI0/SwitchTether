@@ -349,3 +349,172 @@ error states, attachments and the small child-steps toggle. Windows and Android 
 - Android: signed `SwitchTether-0.1.7-release.apk` (8,581,866 bytes), versionName 0.1.7 /
   versionCode 8; apksigner verifies (v3); signing-certificate digest unchanged.
 - `SwitchTether-0.1.7-SHA256SUMS.txt` written next to them. Not installed on a device; no commit or release.
+
+## Port forwarding (2026-11-19)
+
+The phone opens the computer's loopback services (dev servers) at the same `localhost:<port>` in
+any phone browser, directly or through the relay. PROTOCOL.md §7.11, SECURITY.md §7a,
+ANDROID_UI.md §16, KNOWN_LIMITATIONS 10a–10e.
+
+- Core `forward`: leases (step-up `port_forward`, per device and port, 2 h default / 12 h max,
+  memory only, ended by stop / expiry / revocation), one multiplexed WebSocket tunnel per lease
+  (OPEN / OPENED / DATA / FIN / RESET / WINDOW, 256 KiB per-stream windows, 128 streams), targets
+  only `127.0.0.1` / `::1` (parallel connect), listening-port listing (Windows: IP Helper table with
+  process names; Linux: `/proc/net/tcp*`; else common-port probe; dev servers ranked first).
+  Endpoints `GET/POST /v1/forwards`, `GET /v1/forwards/ports`, `DELETE /v1/forwards/{id}`,
+  `GET /v1/forwards/{id}/tunnel`; audit entries; feature `port_forward` in capabilities.
+- Desktop: Settings → Remote → 端口转发 lists every phone's forwards with a stop button
+  (`remote_list_forwards` / `remote_stop_forward`, 8 locales).
+- Android: `:core:remote` `forward/PortForward.kt` (`LocalForwarder`: loopback listener, streams,
+  flow control, half-close, reconnect with backoff, self-reloading 502/503 page for browsers),
+  `RemoteApi` forward calls + tunnel adapter (20 s pings); app `PortForwards` (step-up, leases,
+  resume without step-up, expiry, stats), Workspace card + `PortForwardScreen`, monitor-service
+  notification "正在转发 N 个端口" with a stop action.
+- Fixtures `forward_view.json`, `forward_frames.json` (Rust and Kotlin).
+- `dev_client forward-get <lease> [path] [streams]` (smoke test through a tunnel, honours `ST_RELAY`).
+
+| Check | Result |
+|---|---|
+| `cargo test -p switchtether-core` | 129 unit + 4 attach + 15 e2e passed (new: `forward::tests::*` ×10, `port_forward_tunnel_carries_http_over_mtls`) |
+| core / desktop clippy `-D warnings`, `cargo test --lib switchtether`, `cargo fmt --check` | Passed |
+| `pnpm typecheck`, `pnpm vitest run tests/config tests/components/RemoteSection.test.tsx` | Passed (1,226; new RemoteSection forward case) |
+| Android `testDebugUnitTest :core:remote:test :app:assembleDebug` | 215 test cases, 0 failures, 1 existing skip; Debug APK built (new: `PortForwardTest` ×5, fixtures) |
+
+Live check on this machine (loopback only, scratch data): the real Go relay (`relay/`, built
+locally, `-keys`), `dev_server` registered with it, a Python HTTP server on 39173 standing in for a
+dev server, `dev_client` paired, step-up `port_forward`, lease created (`listening: true`).
+Through the relay: 8 parallel streams × 5 MiB, every SHA-256 equal to the file, 1.2 s, the relay
+log shows **one** relay tunnel carrying 42 MB; direct path identical hashes; a port with nothing
+listening returns `RESET refused` through the relay; the port list was also fetched through the
+relay; after a desktop restart the old lease's tunnel answers 404 (memory-only leases).
+
+Not verified: the Android app on a device or emulator (the `LocalForwarder` is tested on the JVM
+against a fake desktop and the wire format through shared fixtures, but the OkHttp tunnel adapter,
+biometric prompt, browser opening, notification action and background behaviour have not run on
+Android yet); a real dev server with HMR (Vite) in a phone browser; macOS / Linux port listings on
+real machines. No agent configuration was touched; no commit or release was made.
+
+## Android fixes and notification actions (2026-11-19)
+
+From a code audit of the Android app; details in ANDROID_UI.md §17. Fixed: approvals silently not
+notified for auto-pinned sessions when Live Updates were off or the card was dismissed; double
+alerts per wait; repeated allow / deny taps; question drafts lost on scroll; reading position lost
+after a sub-agent page; Git diff retry closing the page; terminal keys dropped while connecting;
+typed pairing address locked after a failure; connection notifications piling up. Added: allow /
+deny / answer / reply from notifications, question text in the notification, edit for failed
+messages, copy for sent messages, waiting-first live list, project filter.
+
+| Check | Result |
+|---|---|
+| Android `testDebugUnitTest :core:remote:test :app:assembleDebug` | 219 test cases, 0 failures, 1 existing skip; Debug APK built (new: `NotificationTurnTest` ×3, `LiveUpdatesCoverTest`) |
+
+Not verified on a device: notification buttons and inline reply (including the unlock prompt and
+the background connection start), the reply spinner being replaced by the outcome, ColorOS
+behaviour of RemoteInput choices.
+
+## Local 0.1.8 packages (2026-11-19)
+
+Changes since 0.1.7: port forwarding (direct and through the relay), the Android fixes and
+notification actions above. Versions: package.json, tauri.conf.json, FluentSetup 0.1.8; Android
+versionName 0.1.8 / versionCode 9.
+
+- Windows x64: `node scripts/package-windows.mjs`; FluentSetup verify OK for
+  `SwitchTether-0.1.8-Setup.exe` (19,609,304 bytes, unsigned, sha256 `a124ba93…85d7d8b0`).
+- Android: signed `SwitchTether-0.1.8-release.apk` (8,655,630 bytes, sha256 `33763ba5…dadd6688`),
+  apksigner verifies (v3); signing-certificate digest unchanged (`214a252b…`).
+- `SwitchTether-0.1.8-SHA256SUMS.txt` written next to them in `D:/Downloads`; checksums verified;
+  earlier versions kept. Not installed on a device; no commit or public release.
+
+## Official session ids, resume on send, model / effort, request log, cached state (2026-11-21)
+
+User report: request log fails to load; a fresh app start shows nothing from last time; tasks vanish after a desktop
+restart; notification order; file viewer hard to use; model / effort only settable (as free text) at creation; sessions
+started from the phone are a separate "托管" kind that is hard to find.
+
+- Request log: `GET /v1/usage/logs` answered **400 for every request**: `LogParams` used `#[serde(flatten)]` inside axum's
+  `Query`, where serde_urlencoded passes flattened values as strings, so `page=0` never parsed as a number (reproduced
+  with the old struct: "Failed to deserialize query string"). Fields inlined; test `request_log_query_parses_numbers`.
+- Sessions SwitchTether starts are keyed by the agent's own conversation id (`claude:<uuid>` with `--session-id`,
+  `codex:<thread>`, `dsh:<id>`) instead of `managed:<random>`; logs are re-keyed when Codex / dsh name the conversation.
+  After the process ends or the desktop restarts the same id is the conversation's history, and **sending to it resumes it**
+  (`claude --resume`, `thread/resume`, `session/resume`). No custom `CLAUDE_CODE_ENTRYPOINT` any more.
+- `POST /v1/sessions/{id}/options` (model / effort of a running session) and `GET /v1/agents/{agent}/models`; `effort` on
+  create and in `SessionSummary`; capability `changeModel`; features `session_options`, `resume_on_send`.
+  Fixtures `session_options.json`, `model_options.json` (Rust and Kotlin).
+- Android: cached session list + newest events per conversation (`SessionCache`), sessions page opens on "全部";
+  model / effort chips in the launcher and a "模型 · 强度" sheet on the session page; resumable history keeps the
+  composer; wording no longer presents phone-started sessions as a separate "托管" kind (origin "从手机启动").
+- Tests: core `history_is_resumed_on_send_under_the_same_id`, `invalid_model_and_effort_are_refused_before_starting`,
+  `model_catalog_merges_agent_lists_with_aliases`, `rekeyed_logs_relabel_their_events`, fixture test; Android
+  `SessionCacheTest` (6).
+- Live (Claude Code 2.1.325, scratch directory, `haiku`/`sonnet`): see AGENT_COMPATIBILITY §6 `resume_smoke` — official
+  id and transcript, model switch effective, resume after a simulated restart remembered the first turn. Codex / dsh
+  paths and the Android UI on a device are not verified live.
+
+## Agent map, background tasks, Codex multi-agent v2 (2026-11-21)
+
+- Claude Code managed sessions (stream-json): `tool_use_result` (snake case) and `system` `task_started` /
+  `task_progress` / `task_notification` / `background_tasks_changed` are read, so background `Bash` stays running until it
+  ends and background / foreground agents get a live row (counters, current activity) from the moment they start.
+  Verified with a real managed `claude` 2.1.325 run in a scratch folder (background shell + background agent, idle with
+  `backgroundTasks: 1` between turns, no duplicate rows with `--replay-user-messages`).
+- Observed Claude Code sessions: a running foreground agent gets its row from the sidecar `meta.json` (`toolUseId`);
+  verified against a real 15 s foreground agent (row at ~10 s, result at ~33 s).
+- Codex multi-agent v2: rollout `spawn_agent {task_name, message}` + `SubAgentActivity` (both history modes) +
+  `agent_message` mail; encrypted messages never shown; child rollouts skip the inherited parent history; app-server
+  `subAgentActivity` items, child threads linked without `thread/started`, child item ids scoped per thread; `wait` /
+  `sendInput` no longer rewrite the spawned row. Checked against real Codex 0.137 rollouts (parent with three children,
+  one child) read-only.
+- Agent map (Claude Code IDE "Agent map" for the phone): `GET …/subagents` carries live state, background tasks and
+  `stoppable`; `POST …/subagents/{taskId}/stop` (managed Claude Code only, `stop_task`). Android: the sub-agents capsule
+  shows a waiting / working / failed dot and opens the map (session root, agent tree with live time and tokens,
+  background tasks, in-place cards with activity, result, prompt, "Open transcript", "Stop"). Unit-tested and built;
+  not yet run on a device or emulator.
+- Notification order (Android): a finished Live Update card no longer flips back to "running" when late transcript steps
+  arrive; LiveUpdates state changes and posts are serialised (no lost / out-of-order posts); REST summaries that raced
+  newer stream events are dropped; a late reply / tool call no longer replaces "finished"; notifications carry the
+  event time (`when`) so re-posts do not reshuffle the shade. Tests `NotificationOrderingTest` (11),
+  `LiveUpdatesOrderingTest` (4). Not checked on a device.
+- Files (Android): list/viewer rebuilt (sticky path bar, sort, quick filter, icons, lazy list; code viewer with line
+  numbers, highlighting, wrap, find, go to line; rendered Markdown; zoomable images / PDF pages) on Telephoto 0.19.0,
+  multiplatform-markdown-renderer 0.46.0, Highlights 1.2.0 (all Apache-2.0; release APK +483 KiB). ANDROID_UI §18,
+  `FileBrowsingTest` (15). Not checked on a device.
+- Full checks after all changes: core clippy / tests (144 + 4 + 15), desktop clippy and `test --lib switchtether`,
+  `pnpm typecheck`, `vitest tests/config` (1,219), Android `:core:remote:test testDebugUnitTest :app:assembleDebug`
+  (`:app` 122 tests, 0 failures) all passed. No commit.
+
+## Local 0.1.9 packages (2026-11-21)
+
+Agent map, Claude Code background tasks / sub-agents, Codex multi-agent v2, Claude Code session tools (permission
+mode, context usage, plan, MCP status, side question, rename, export, run in background, withdraw a queued message,
+background task output). "Rewind files" is built but switched off (`REWIND_FILES_ENABLED = false` on both sides;
+managed processes run without file checkpoints). Versions: package.json, tauri.conf.json, FluentSetup 0.1.9; Android
+versionName 0.1.9 / versionCode 10.
+
+- Windows x64: `node scripts/package-windows.mjs`; FluentSetup verify OK for `SwitchTether-0.1.9-Setup.exe`
+  (19,022,576 bytes, unsigned, sha256 `1b164e47…4369d20`).
+- Android: signed `SwitchTether-0.1.9-release.apk`, rebuilt the same day after updating vendored coui17 to
+  `d2b627e` (patches regenerated, apply strictly; `androidx.dynamicanimation` dropped as upstream did; MPL-2.0 kit
+  sources now in commonMain + androidMain, license screen updated). 9,456,218 bytes, sha256 `ce67e0e0…f8436fad4c9b6e1`;
+  apksigner verifies (v3); signing-certificate digest unchanged (`214a252b…`); no `org/lsposed` classes in the dex.
+  Same version (0.1.9 / 10) as the first 0.1.9 APK, which it replaces in `D:/Downloads`.
+- `SwitchTether-0.1.9-SHA256SUMS.txt` next to them in `D:/Downloads`; checksums verified; earlier versions kept. Not
+  installed on a device; no commit or public release.
+
+- Android rebuilt again (same 0.1.9 / 10, replaces the APK in `D:/Downloads`): Agent map connectors drawn as lines and
+  root "This session", New agent scrolls, file preview redesign (COUI header, Rich text / Code switch, code cards), session
+  tools for attached sessions and read-only tools for observed Claude sessions. 9,473,706 bytes, sha256
+  `6dc464a6…dde077daf`; apksigner v3, certificate `214a252b…`; no `org/lsposed` classes. Not run on a device.
+
+## Local 0.1.10 packages (2026-11-21)
+
+Official model lists (probe), effort slider, options kept for a resume, session tools for attached sessions and
+read-only tools for observed ones, photo thumbnails / previews in the composer and in sent messages; the session page
+keeps the original title bar (back, Live Update tracking) and capsule row, with a session-tools capsule added next to
+the sub-agents. Versions 0.1.10 (Android versionCode 11).
+
+- Windows x64: `SwitchTether-0.1.10-Setup.exe` (19,040,728 bytes, unsigned, sha256 `22c77247…512c26bd`), FluentSetup
+  verify OK; installed on this machine with `/quiet` over 0.1.9 (registered 0.1.10) and relaunched.
+- Android: signed `SwitchTether-0.1.10-release.apk` (9,490,362 bytes, sha256 `e1ac2058…a9eb7afd`), apksigner v3,
+  certificate `214a252b…`. Not run on a device.
+- `SwitchTether-0.1.10-SHA256SUMS.txt` in `D:/Downloads`; checksums verified.

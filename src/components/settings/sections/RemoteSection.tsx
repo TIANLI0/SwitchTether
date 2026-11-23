@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Smartphone,
   SquareTerminal,
+  Cable,
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import {
   type RemoteDevice,
   type RemoteStatus,
   type RemoteTerminal,
+  type RemoteForward,
   type RemoteUiEvent,
   type TakeoverHook,
   type TakeoverStatus,
@@ -64,6 +66,7 @@ export function RemoteSection() {
   const [status, setStatus] = useState<RemoteStatus | null>(null);
   const [devices, setDevices] = useState<RemoteDevice[]>([]);
   const [terminals, setTerminals] = useState<RemoteTerminal[]>([]);
+  const [forwards, setForwards] = useState<RemoteForward[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [takeover, setTakeoverState] = useState<TakeoverStatus | null>(null);
   const [takeoverBusy, setTakeoverBusy] = useState<TakeoverHook | null>(null);
@@ -84,15 +87,17 @@ export function RemoteSection() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, d, term, a] = await Promise.all([
+      const [s, d, term, a, fw] = await Promise.all([
         remoteApi.status(),
         remoteApi.listDevices(),
         remoteApi.listTerminals(),
         remoteApi.auditLog(40),
+        remoteApi.listForwards().catch(() => [] as RemoteForward[]),
       ]);
       setStatus(s);
       setDevices(d);
       setTerminals(term.filter((x) => !x.exited));
+      setForwards(fw);
       setAudit(a);
       setLoadError(null);
       remoteApi
@@ -692,6 +697,51 @@ export function RemoteSection() {
                     {t("remote.terminals.end")}
                   </Button>
                 )
+              }
+            />
+          ))}
+        </SettingsCard>
+      </SettingsBlock>
+
+      <SettingsBlock
+        title={t("remote.forwards.title")}
+        help={{
+          title: t("remote.forwards.title"),
+          body: t("remote.forwards.help"),
+        }}
+      >
+        <SettingsCard>
+          {forwards.length === 0 && (
+            <div className="px-4 py-4 text-body text-fg-2">
+              {t("remote.forwards.empty")}
+            </div>
+          )}
+          {forwards.map((fw) => (
+            <SettingsRow
+              key={fw.id}
+              label={
+                <span className="flex items-center gap-2">
+                  <Cable className="h-4 w-4 text-fg-2" />
+                  {t("remote.forwards.port", { port: fw.port })}
+                </span>
+              }
+              description={t("remote.forwards.detail", {
+                device:
+                  devices.find((d) => d.id === fw.deviceId)?.name ??
+                  fw.deviceId.slice(0, 8),
+                connections: fw.activeStreams,
+                time: formatTime(fw.expiresAtMs),
+              })}
+              control={
+                <Button
+                  variant="neutral"
+                  size="compact"
+                  onClick={() =>
+                    void remoteApi.stopForward(fw.id).then(refresh)
+                  }
+                >
+                  {t("remote.forwards.stop")}
+                </Button>
               }
             />
           ))}

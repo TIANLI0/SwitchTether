@@ -76,8 +76,16 @@ async fn main() -> anyhow::Result<()> {
             let (s, v) = call(&me, &state, &m.to_uppercase(), path, body).await?;
             println!("{s} {}", serde_json::to_string_pretty(&v)?);
         }
+        Some("forward-get") => {
+            // Port forward smoke test (PROTOCOL.md §7.11): one HTTP/1.0 GET through the lease's
+            // tunnel, with WINDOW credit returned like the phone does.
+            let lease = args.get(1).expect("lease id");
+            let path = args.get(2).map(|s| s.as_str()).unwrap_or("/");
+            let streams: u32 = args.get(3).map(|s| s.parse()).transpose()?.unwrap_or(1);
+            forward_get(&me, &state, lease, path, streams).await?;
+        }
         _ => eprintln!(
-            "usage: dev_client pair <uri> | stepup <scope> | get <path> | post <path> <json>"
+            "usage: dev_client pair <uri> | stepup <scope> | get <path> | post <path> <json> | forward-get <lease> [path] [streams]"
         ),
     }
     Ok(())
@@ -124,13 +132,11 @@ fn url_parse(uri: &str) -> std::collections::HashMap<String, String> {
         .collect()
 }
 
-async fn call(
+/// Pinned mTLS stream to the desktop (through the relay when `ST_RELAY` is set).
+async fn connect(
     me: &ServerIdentity,
     state: &std::path::Path,
-    method: &str,
-    path: &str,
-    body: Option<Value>,
-) -> anyhow::Result<(u16, Value)> {
+) -> anyhow::Result<tokio_rustls::client::TlsStream<tokio::net::TcpStream>> {
     let target: Value = serde_json::from_str(&std::fs::read_to_string(state.join("target.json"))?)?;
     let host = target["host"]
         .as_str()
@@ -197,6 +203,17 @@ async fn call(
             tcp,
         )
         .await?;
+    Ok(tls)
+}
+
+async fn call(
+    me: &ServerIdentity,
+    state: &std::path::Path,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> anyhow::Result<(u16, Value)> {
+    let tls = connect(me, state).await?;
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls)).await?;
     tokio::spawn(conn);
     let req = hyper::Request::builder()
@@ -211,4 +228,81 @@ async fn call(
     let s = resp.status().as_u16();
     let bytes = resp.into_body().collect().await?.to_bytes();
     Ok((s, serde_json::from_slice(&bytes).unwrap_or(Value::Null)))
+}
+
+async fn forward_get(
+    me: &ServerIdentity,
+    state: &std::path::Path,
+    lease: &str,
+    path: &str,
+    streams: u32,
+) -> anyhow::Result<()> {
+    use futures::{SinkExt, StreamExt};
+    use sha2::Digest;
+    use switchtether_core::forward::{decode, encode, FrameType};
+    use tokio_tungstenite::tungstenite::Message;
+    let started = std::time::Instant::now();
+    let tls = connect(me, state).await?;
+    let (mut ws, _) = tokio_tungstenite::client_async(
+        format!("wss://switchtether.local/v1/forwards/{lease}/tunnel"),
+        tls,
+    )
+    .await?;
+    let opened_at = started.elapsed();
+    let mut bodies: std::collections::HashMap<u32, Vec<u8>> = Default::default();
+    for i in 0..streams {
+        let id = 2 * i + 1;
+        ws.send(Message::Binary(encode(FrameType::Open, id, &[])))
+            .await?;
+        let req = format!("GET {path} HTTP/1.0\r\nHost: localhost\r\n\r\n");
+        ws.send(Message::Binary(encode(FrameType::Data, id, req.as_bytes())))
+            .await?;
+        bodies.insert(id, Vec::new());
+    }
+    let mut open = streams;
+    while open > 0 {
+        let Some(m) = ws.next().await else {
+            anyhow::bail!("tunnel closed")
+        };
+        let Message::Binary(b) = m? else { continue };
+        let (kind, id, payload) = decode(&b).ok_or_else(|| anyhow::anyhow!("bad frame"))?;
+        match kind {
+            FrameType::Data => {
+                bodies.get_mut(&id).unwrap().extend_from_slice(payload);
+                let credit = (payload.len() as u32).to_be_bytes();
+                ws.send(Message::Binary(encode(FrameType::Window, id, &credit)))
+                    .await?;
+            }
+            FrameType::Fin => open -= 1,
+            FrameType::Reset => {
+                println!("stream {id}: RESET {}", String::from_utf8_lossy(payload));
+                open -= 1;
+            }
+            _ => {}
+        }
+    }
+    for (id, body) in bodies.iter() {
+        let status = String::from_utf8_lossy(&body[..body.len().min(64)])
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string();
+        let split = body
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|p| p + 4)
+            .unwrap_or(0);
+        println!(
+            "stream {id}: {status} | body {} bytes | sha256 {}",
+            body.len() - split,
+            hex::encode(sha2::Sha256::digest(&body[split..]))
+        );
+    }
+    println!(
+        "tunnel open after {:?}, all streams done after {:?}",
+        opened_at,
+        started.elapsed()
+    );
+    let _ = ws.close(None).await;
+    Ok(())
 }

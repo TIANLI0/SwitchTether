@@ -232,8 +232,16 @@ pub fn merge_registry(
 
 #[cfg(unix)]
 pub fn pid_alive(pid: u32) -> bool {
+    // kill() treats 0 and negative pids as process groups; a u32 above i32::MAX would
+    // wrap negative and could report EPERM for some unrelated group.
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
     // Signal 0 checks existence without sending anything.
-    let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    let r = unsafe { libc::kill(pid, 0) };
     r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 

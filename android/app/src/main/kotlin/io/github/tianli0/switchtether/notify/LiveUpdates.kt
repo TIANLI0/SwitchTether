@@ -13,6 +13,8 @@ import io.github.tianli0.switchtether.remote.live.LiveText
 import io.github.tianli0.switchtether.remote.live.LiveUpdateRenderer
 import io.github.tianli0.switchtether.remote.live.PinnedSessionState
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
+import io.github.tianli0.switchtether.remote.protocol.EventKinds
+import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.remote.protocol.SessionSummary
 import java.util.concurrent.ConcurrentHashMap
@@ -71,6 +73,28 @@ class LiveUpdates(
     @Volatile private var baselineMs: Long = 0L
     @Volatile private var currentServerId: String = ""
 
+    /**
+     * All state changes and posts run under this lock. The app scope is multi-threaded: the event
+     * collector, the reconnect refresh, the pin made from the UI and the throttled post jobs ran in
+     * parallel, so a read-modify-write could drop a newer change (finished → running again) and an
+     * older snapshot could be posted after a newer one.
+     */
+    private val lock = Any()
+
+    /** Per session, a counter bumped by every stream input: a REST read that raced with the stream is stale. */
+    private val streamTick = java.util.concurrent.atomic.AtomicLong()
+    private val streamMark = ConcurrentHashMap<String, Long>()
+
+    /** Requests the stream reported resolved (bounded): a REST read made before must not reopen them. */
+    private val resolvedRequests: MutableSet<String> = java.util.Collections.synchronizedSet(
+        java.util.Collections.newSetFromMap(object : java.util.LinkedHashMap<String, Boolean>() {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > 500
+        }),
+    )
+
+    private fun requestKey(sessionId: String, e: AgentEvent): String =
+        "$sessionId|${(e.data["requestId"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: e.id}"
+
     /** Auto-pin newly started live tasks to the phone (respects manual unpin and ignores history). */
     var autoPinPhoneSessions: Boolean
         get() = prefs.getBoolean("auto_pin_new", true)
@@ -80,13 +104,23 @@ class LiveUpdates(
 
     fun isPinned(sessionId: String) = sessionId in _pins.value
 
+    /**
+     * Whether a Live Update card is actually showing this session's state, so ordinary notifications
+     * may stay quiet. Not when Live Updates are switched off (the card is withdrawn) or the user
+     * swiped the card away: then approvals and questions must still be notified.
+     */
+    fun covers(sessionId: String): Boolean =
+        sessionId in _pins.value && sessionId !in restoredPins && enabled() && states[sessionId]?.dismissed != true
+
     fun start() {
         scope.launch {
             val serverId = pairingStore.current()?.serverId ?: ""
             loadServerState(serverId)
             // Restore after a restart (only ids are stored): start as an old, idle card until the
             // first summary arrives, so a restart does not announce a turn that finished long ago.
-            _pins.value.forEach { id -> states.putIfAbsent(id, PinnedSessionState(id, id.substringAfter(':').take(8), "unknown", phase = LivePhase.DONE, phaseSinceMs = 0)) }
+            // Nothing is posted for it before then ([post]): only the id is known, and a card titled
+            // with a fragment of it ("3fa9c2d1 · 运行中") that opens an unknown session is noise.
+            _pins.value.forEach { id -> states.putIfAbsent(id, PinnedSessionState(id, context.getString(R.string.app_name), "unknown", phase = LivePhase.DONE, phaseSinceMs = 0)) }
         }
         scope.launch {
             pairingStore.desktop.collect { d ->
@@ -99,12 +133,9 @@ class LiveUpdates(
                 val data = ev.data as? JsonObject ?: return@collect
                 when (ev.topic) {
                     "session.upserted" -> runCatching { ProtocolJson.decodeFromJsonElement(SessionSummary.serializer(), (data["session"] as? JsonObject) ?: data) }.getOrNull()
-                        ?.let(::onUpsert)
+                        ?.let { onStreamUpsert(it) }
                     "session.event" -> runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()
-                        ?.let { e ->
-                            val at = runCatching { java.time.Instant.parse(e.ts).toEpochMilli() }.getOrNull()
-                            if (at == null || at >= startedAtMs) mutate(e.sessionId) { LiveReducer.onEvent(it, e, clock()) }
-                        }
+                        ?.let { onStreamEvent(it) }
                     "session.removed" -> (data["sessionId"] ?: data["id"])?.toString()?.trim('"')?.let {
                         // The process exited; the same conversation resumed later is a new run to follow.
                         runState[it] = AutoFollow.Run.ENDED
@@ -124,7 +155,20 @@ class LiveUpdates(
         }
     }
 
-    private fun loadServerState(serverId: String) {
+    private fun loadServerState(serverId: String): Unit = synchronized(lock) {
+        // Another computer: the previous one's cards are not about it (and open sessions it does not have).
+        if (serverId != currentServerId) {
+            (_pins.value + states.keys).forEach { id ->
+                pending.remove(id)?.cancel()
+                posted.remove(id)
+                postedPhase.remove(id)
+                channel.end(id)
+            }
+            states.clear()
+            pinnedAt.clear()
+            liveSeen.clear()
+            runState.clear()
+        }
         currentServerId = serverId
         _pins.value = prefs.getStringSet(key(serverId), emptySet()).orEmpty().toSet()
         restoredPins.clear()
@@ -138,7 +182,27 @@ class LiveUpdates(
         baselineMs = prefs.getLong(baselineKey(serverId), 0L)
     }
 
-    private fun onUpsert(s: SessionSummary) {
+    /** `session.upserted` from the event stream (newer than any REST read still in flight). */
+    internal fun onStreamUpsert(s: SessionSummary): Unit = synchronized(lock) {
+        streamMark[s.id] = streamTick.incrementAndGet()
+        onUpsert(s)
+    }
+
+    /** `session.event` from the event stream. */
+    internal fun onStreamEvent(e: AgentEvent): Unit = synchronized(lock) {
+        streamMark[e.sessionId] = streamTick.incrementAndGet()
+        val resolved = when (e.kind) {
+            EventKinds.APPROVAL_RESOLVED -> true
+            EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION -> e.data.bool("resolved") == true
+            else -> false
+        }
+        if (resolved) resolvedRequests.add(requestKey(e.sessionId, e))
+        val at = runCatching { java.time.Instant.parse(e.ts).toEpochMilli() }.getOrNull()
+        if (at == null || at >= startedAtMs) mutate(e.sessionId) { LiveReducer.onEvent(it, e, clock()) }
+    }
+
+    private fun onUpsert(raw: SessionSummary): Unit = synchronized(lock) {
+        val s = forCard(raw)
         // A persisted pin is a subscription, not evidence of a turn completing now.
         if (restoredPins.remove(s.id) && (!s.isLive || s.status !in setOf("busy", "waiting") && s.waitingFor == null)) {
             unpin(s.id, userInitiated = false, refill = false)
@@ -161,6 +225,8 @@ class LiveUpdates(
     private fun maybeAutoPin(s: SessionSummary) {
         val prev = runState.put(s.id, AutoFollow.runOf(s))
         if (!autoPinPhoneSessions) return
+        // Live Updates switched off: nothing would show, so do not take a pin slot either.
+        if (!enabled()) return
         if (!s.isLive) return
         if (s.id in unpinned) return
         val isNew = knownLive.add(s.id)
@@ -187,7 +253,10 @@ class LiveUpdates(
     private suspend fun refreshSummaries() {
         _pins.value.toList().forEach { id -> refresh(id) }
         val api = conn.apiOrNull() ?: return
-        val live = runCatching { api.sessions(limit = 50).items.filter { it.isLive } }.getOrNull() ?: return
+        val marks = HashMap(streamMark)
+        val listed = runCatching { api.sessions(limit = 50).items.filter { it.isLive } }.getOrNull() ?: return
+        // A session the stream reported on while the list was read: the list is older, skip it.
+        val live = listed.filter { streamMark[it.id] == marks[it.id] }
         if (baselineMs == 0L) {
             // Initial baseline: record existing live tasks without mis-pinning historical/old ones.
             live.forEach { knownLive.add(it.id) }
@@ -198,7 +267,7 @@ class LiveUpdates(
                 .apply()
             return
         }
-        live.forEach { s -> maybeAutoPin(s) }
+        synchronized(lock) { live.forEach { s -> maybeAutoPin(s) } }
     }
 
     /**
@@ -207,17 +276,51 @@ class LiveUpdates(
      */
     private suspend fun refresh(id: String) {
         val api = conn.apiOrNull() ?: return
-        val detail = runCatching { api.session(id) }.getOrNull() ?: return
-        if (!detail.summary.isLive) {
-            unpin(id, userInitiated = false, refill = false)
+        val mark = streamMark[id]
+        val result = runCatching { api.session(id) }
+        if (result.exceptionOrNull()?.let { e -> generateSequence(e) { it.cause }.any { (it as? io.github.tianli0.switchtether.remote.api.ApiException)?.httpStatus == 404 } } == true) {
+            // The computer no longer knows this session (removed, or the pin is from an older run):
+            // a card for it would open an empty page.
+            unpin(id, userInitiated = false)
             return
         }
-        onUpsert(detail.summary)
-        detail.pendingRequests.forEach { e -> mutate(id) { LiveReducer.onEvent(it, e, clock()) } }
+        val detail = result.getOrNull() ?: return
+        applyRefresh(id, detail.summary, detail.pendingRequests, streamMovedSince = streamMark[id] != mark)
+    }
+
+    /**
+     * Applies a REST read of a pinned session. When the stream delivered something for it while the
+     * read was in flight, the summary is older than what the card shows and is dropped (it turned a
+     * just-finished card back to running); still-open requests are applied unless the stream resolved
+     * them meanwhile (and the reducer drops requests older than the turn's outcome).
+     */
+    internal fun applyRefresh(id: String, summary: SessionSummary, pendingRequests: List<AgentEvent>, streamMovedSince: Boolean): Unit = synchronized(lock) {
+        if (!streamMovedSince) {
+            if (!summary.isLive) {
+                unpin(id, userInitiated = false, refill = false)
+                return
+            }
+            onUpsert(summary)
+        } else if (id in restoredPins) {
+            // The summary is older than the stream, but a restored pin still needs its name, and a
+            // restored pin of a task that is no longer running is void.
+            if (!summary.isLive || summary.status !in setOf("busy", "waiting") && summary.waitingFor == null) {
+                unpin(id, userInitiated = false, refill = false)
+                return
+            }
+            restoredPins.remove(id)
+            val named = forCard(summary)
+            states.computeIfPresent(id) { _, st -> st.copy(title = named.title ?: st.title, agent = named.agent, project = named.project ?: st.project, version = st.version + 1) }
+            schedule(id, immediate = true)
+        }
+        pendingRequests
+            .filter { e -> requestKey(id, e) !in resolvedRequests }
+            .forEach { e -> mutate(id) { LiveReducer.onEvent(it, e, clock()) } }
     }
 
     /** Pins a session; false when [MAX_PINS] are already pinned. */
-    fun pin(summary: SessionSummary, manual: Boolean = true): Boolean {
+    fun pin(raw: SessionSummary, manual: Boolean = true): Boolean = synchronized(lock) {
+        val summary = forCard(raw)
         if (manual && unpinned.remove(summary.id)) {
             persistSet(unpinnedKey(currentServerId), unpinned)
         }
@@ -239,7 +342,7 @@ class LiveUpdates(
         pinnedAt[summary.id] = clock()
         setPins(_pins.value + summary.id)
         states[summary.id] = LiveReducer.onUpsert(
-            PinnedSessionState(summary.id, io.github.tianli0.switchtether.domain.SessionNaming.title(summary) ?: io.github.tianli0.switchtether.domain.SessionNaming.projectName(summary) ?: summary.id, summary.agent, phase = LivePhase.DONE, phaseSinceMs = 0),
+            PinnedSessionState(summary.id, summary.title ?: context.getString(R.string.app_name), summary.agent, phase = LivePhase.DONE, phaseSinceMs = 0),
             summary,
             clock(),
         ).let { if (it.phase == LivePhase.DONE && summary.status != "busy") it.copy(phaseSinceMs = 0) else it }
@@ -248,7 +351,7 @@ class LiveUpdates(
         return true
     }
 
-    fun unpin(sessionId: String, keepFinal: Boolean = false, userInitiated: Boolean = true, refill: Boolean = true) {
+    fun unpin(sessionId: String, keepFinal: Boolean = false, userInitiated: Boolean = true, refill: Boolean = true): Unit = synchronized(lock) {
         if (manualPins.remove(sessionId)) persistSet(manualKey(currentServerId), manualPins)
         pinnedAt.remove(sessionId)
         if (userInitiated && unpinned.add(sessionId)) {
@@ -263,7 +366,7 @@ class LiveUpdates(
         if (refill) fillSlots()
     }
 
-    fun onDismissed(sessionId: String) {
+    fun onDismissed(sessionId: String): Unit = synchronized(lock) {
         states.computeIfPresent(sessionId) { _, s -> LiveReducer.onDismissed(s) }
     }
 
@@ -283,7 +386,7 @@ class LiveUpdates(
         }
     }
 
-    private fun mutate(sessionId: String, f: (PinnedSessionState) -> PinnedSessionState) {
+    private fun mutate(sessionId: String, f: (PinnedSessionState) -> PinnedSessionState): Unit = synchronized(lock) {
         if (sessionId !in _pins.value) return
         val old = states[sessionId] ?: return
         val new = f(old)
@@ -299,23 +402,29 @@ class LiveUpdates(
         pending[sessionId]?.cancel()
         pending[sessionId] = scope.launch {
             if (wait > 0) delay(wait)
-            post(sessionId)
+            val s = synchronized(lock) {
+                post(sessionId)
+                states[sessionId]
+            } ?: return@launch
             // Demote a finished turn after it has been shown for a minute (the pin stays).
-            val s = states[sessionId] ?: return@launch
             if (s.phase == LivePhase.DONE || s.phase == LivePhase.FAILED || s.phase == LivePhase.INTERRUPTED) {
                 delay(LiveUpdateRenderer.DONE_PROMOTED_MS + 500)
-                if (states[sessionId]?.version == s.version) {
-                    // The task ended and its final card has been shown: the pin is void (a pin that
-                    // never saw a turn run, e.g. just made on an idle session, is kept).
-                    if (s.turnStartedMs > 0) unpin(sessionId, userInitiated = false) else post(sessionId, force = true)
+                synchronized(lock) {
+                    if (states[sessionId]?.version == s.version) {
+                        // The task ended and its final card has been shown: the pin is void (a pin that
+                        // never saw a turn run, e.g. just made on an idle session, is kept).
+                        if (s.turnStartedMs > 0) unpin(sessionId, userInitiated = false) else post(sessionId, force = true)
+                    }
                 }
             }
         }
     }
 
-    private fun post(sessionId: String, force: Boolean = false) {
+    private fun post(sessionId: String, force: Boolean = false): Unit = synchronized(lock) {
         val s = states[sessionId] ?: return
         if (!enabled()) return channel.end(sessionId)
+        // A pin restored after a restart is shown only once a summary has named it.
+        if (sessionId in restoredPins) return
         if (s.dismissed) return
         if (!force && posted[sessionId] == s.version) return
         val spec = LiveUpdateRenderer.render(s, clock(), text, postedPhase[sessionId])
@@ -324,6 +433,20 @@ class LiveUpdates(
         posted[sessionId] = s.version
         postedPhase[sessionId] = s.phase
         lastPost[sessionId] = clock()
+    }
+
+    /**
+     * The summary as the card names it: the same cleaned title as the session list (never the raw
+     * one, which can be injected markup or an auto-generated "<project>-<hex>" slug), else the
+     * project, else the agent; never the session id.
+     */
+    private fun forCard(s: SessionSummary): SessionSummary {
+        val title = io.github.tianli0.switchtether.domain.SessionNaming.title(s)
+            ?: io.github.tianli0.switchtether.domain.SessionNaming.projectName(s)
+            ?: io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(s.agent).takeIf { s.agent != "unknown" }
+            ?: context.getString(R.string.app_name)
+        val project = io.github.tianli0.switchtether.domain.SessionNaming.projectName(s)
+        return s.copy(title = title, project = project ?: s.project)
     }
 
     private fun setPins(p: Set<String>) {

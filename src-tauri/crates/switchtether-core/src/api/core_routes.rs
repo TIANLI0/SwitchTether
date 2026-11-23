@@ -199,7 +199,8 @@ async fn capabilities(State(ctx): State<Arc<ApiContext>>, _dev: AuthDevice) -> J
         "agents": ctx.agents.capability_matrix(),
         "features": [
             "providers", "usage", "mcp", "skills", "prompts", "settings", "proxy",
-            "sessions", "managed_sessions", "terminal", "files", "git", "step_up", "attachments"
+            "sessions", "managed_sessions", "terminal", "files", "git", "step_up", "attachments", "port_forward",
+            "session_options", "resume_on_send"
         ],
         "terminalShells": crate::terminal::available_shells(),
     }))

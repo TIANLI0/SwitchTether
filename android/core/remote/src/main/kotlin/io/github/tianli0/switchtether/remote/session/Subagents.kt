@@ -19,6 +19,45 @@ data class SubagentNode(
     val spawnDepth: Int? = null,
     val finished: Boolean? = null,
     val updatedAtMs: Long? = null,
+    // Live state from the session log (Agent map; absent on older desktops and for nested agents
+    // whose rows are only in their parent's transcript).
+    /** `running` | `completed` | `failed` | `interrupted`. */
+    val status: String? = null,
+    /** A permission request or question raised inside this agent is unanswered. */
+    val waiting: Boolean? = null,
+    val background: Boolean? = null,
+    val model: String? = null,
+    val tokens: Long? = null,
+    val toolUses: Long? = null,
+    val durationMs: Long? = null,
+    /** What it is doing now ("Running …"), while it runs. */
+    val activity: String? = null,
+    val summary: String? = null,
+    val result: String? = null,
+    val prompt: String? = null,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+)
+
+/** A background shell task of the session (`Bash` with `run_in_background`). */
+@Serializable
+data class BackgroundTaskNode(
+    val taskId: String? = null,
+    val callId: String? = null,
+    val title: String? = null,
+    val status: String? = null,
+    val summary: String? = null,
+    val exitCode: Long? = null,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+)
+
+/** `GET /v1/sessions/{id}/subagents` as the Agent map: agents, background tasks, and whether
+ *  the phone may stop them (a session SwitchTether started). */
+data class AgentMap(
+    val agents: List<SubagentNode>,
+    val backgroundTasks: List<BackgroundTaskNode> = emptyList(),
+    val stoppable: Boolean = false,
 )
 
 /** `GET /v1/sessions/{id}/subagents/{agentId}/events`: the sub-agent's own steps (read-only). */

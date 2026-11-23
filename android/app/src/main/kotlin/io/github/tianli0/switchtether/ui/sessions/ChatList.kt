@@ -88,8 +88,14 @@ suspend fun LazyListState.scrollToEnd() {
     if (last >= 0) scrollToItem(last, scrollOffset = 1_000_000)
 }
 
+/** Saveable: returning to the page keeps "not following" while the user was reading further up. */
 @Composable
-fun rememberFollowState() = remember { FollowState() }
+fun rememberFollowState() = androidx.compose.runtime.saveable.rememberSaveable(
+    saver = androidx.compose.runtime.saveable.Saver<FollowState, Boolean>(
+        save = { it.following },
+        restore = { FollowState().apply { following = it } },
+    ),
+) { FollowState() }
 
 /** Wires [listState] to [follow]; call once per list. [sendTick] changes on every send. */
 @Composable
@@ -181,7 +187,14 @@ fun BoxScope.NewMessagesPill(listState: LazyListState, follow: FollowState, rows
 
 /** This phone's message before the desktop echoes it: same bubble as a sent message, plus its state. */
 @Composable
-fun OutgoingBubble(m: OutgoingMessage, onRetry: (String) -> Unit, onDelete: (String) -> Unit) {
+fun OutgoingBubble(
+    m: OutgoingMessage,
+    onRetry: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onEdit: (String) -> Unit = {},
+    /** Withdraw a message Claude Code queued behind a busy turn (null = not offered). */
+    onWithdraw: ((String) -> Unit)? = null,
+) {
     val dev = LocalDevColors.current
     val pending = m.status == OutgoingStatus.SENDING || m.status == OutgoingStatus.WAITING_CONNECTION
     Column(
@@ -190,7 +203,7 @@ fun OutgoingBubble(m: OutgoingMessage, onRetry: (String) -> Unit, onDelete: (Str
     ) {
         ChatBubble(Modifier.alpha(if (pending) 0.6f else 1f)) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (m.attachmentNames.isNotEmpty()) io.github.tianli0.switchtether.ui.sessions.render.AttachmentNames(m.attachmentNames)
+                if (m.attachmentNames.isNotEmpty()) io.github.tianli0.switchtether.ui.sessions.render.AttachmentNames(m.attachmentNames.map { it to null })
                 if (m.text.isNotBlank()) Text(m.text, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
             }
         }
@@ -201,7 +214,15 @@ fun OutgoingBubble(m: OutgoingMessage, onRetry: (String) -> Unit, onDelete: (Str
                     Spacer(Modifier.size(4.dp))
                     Meta(stringResource(R.string.outgoing_sending))
                 }
-                OutgoingStatus.DELIVERED -> Meta(stringResource(R.string.outgoing_delivered))
+                OutgoingStatus.DELIVERED -> if (m.messageUuid != null && onWithdraw != null) {
+                    // Queued behind the running turn: it can still be taken back until the agent reads it.
+                    Meta(stringResource(R.string.outgoing_delivered) + " · " + stringResource(R.string.outgoing_queued))
+                    Spacer(Modifier.size(8.dp))
+                    if (m.withdrawing) Meta(stringResource(R.string.outgoing_withdrawing))
+                    else SmallAction(stringResource(R.string.outgoing_withdraw), "outgoing-withdraw") { onWithdraw(m.commandId) }
+                } else {
+                    Meta(stringResource(R.string.outgoing_delivered))
+                }
                 OutgoingStatus.WAITING_CONNECTION -> {
                     Icon(AppIcons.Clock, contentDescription = null, tint = dev.warn, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.size(4.dp))
@@ -218,6 +239,11 @@ fun OutgoingBubble(m: OutgoingMessage, onRetry: (String) -> Unit, onDelete: (Str
                         Spacer(Modifier.size(8.dp))
                         SmallAction(stringResource(R.string.outgoing_retry), "outgoing-retry") { onRetry(m.commandId) }
                     }
+                    // Never lose a long prompt: "edit" puts the text back into the composer.
+                    if (m.text.isNotBlank()) {
+                        Spacer(Modifier.size(4.dp))
+                        SmallAction(stringResource(R.string.outgoing_edit), "outgoing-edit") { onEdit(m.commandId) }
+                    }
                     Spacer(Modifier.size(4.dp))
                     SmallAction(stringResource(R.string.outgoing_delete), "outgoing-delete") { onDelete(m.commandId) }
                 }
@@ -232,7 +258,7 @@ private fun Meta(text: String) = Text(text, style = COUITheme.textStyles.footnot
 @Composable
 private fun SmallAction(text: String, tag: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(SquircleShape(8.dp)).clickable(role = Role.Button, onClick = onClick).heightIn(min = 32.dp).padding(horizontal = 8.dp).testTag(tag),
+        Modifier.clip(SquircleShape(8.dp)).clickable(role = Role.Button, onClick = onClick).heightIn(min = 40.dp).padding(horizontal = 8.dp).testTag(tag),
         contentAlignment = Alignment.Center,
     ) { Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary) }
 }

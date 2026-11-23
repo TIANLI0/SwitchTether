@@ -1,6 +1,24 @@
 package io.github.tianli0.switchtether.ui.files
 
 import android.content.ActivityNotFoundException
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
+import io.github.suqi8.coui.kmp.basic.Icon
+import me.saket.telephoto.subsamplingimage.SubSamplingImage
+import me.saket.telephoto.subsamplingimage.SubSamplingImageErrorReporter
+import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
+import me.saket.telephoto.subsamplingimage.rememberSubSamplingImageState
+import me.saket.telephoto.subsamplingimage.util.canBeSubSampled
+import me.saket.telephoto.zoomable.ZoomSpec
+import me.saket.telephoto.zoomable.ZoomableContentLocation
+import me.saket.telephoto.zoomable.rememberZoomableState
+import me.saket.telephoto.zoomable.zoomable
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -9,13 +27,10 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.view.SurfaceView
 import android.widget.Toast
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -44,12 +59,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -111,9 +123,11 @@ fun RemoteFileViewer(
     onBack: () -> Unit,
     onManageDownloads: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /** A file link inside a rendered Markdown file; null leaves such links inert. */
+    onOpenPath: ((String) -> Unit)? = null,
 ) {
     if (ref.kind == FileKind.TEXT || (ref.kind == FileKind.OTHER && io.github.tianli0.switchtether.files.FileTypes.extension(ref.name).isEmpty())) {
-        RemoteTextFileViewer(ref, onBack, modifier)
+        RemoteTextFileViewer(ref, onBack, modifier, onOpenPath)
         return
     }
     val store = appContainer().fileStore
@@ -137,9 +151,17 @@ fun RemoteFileViewer(
     val noApp = stringResource(R.string.viewer_no_app)
 
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), onBack)
-            Text(ref.name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val where = ready?.let { stringResource(if (it.fromDownload) R.string.viewer_saved_copy else R.string.viewer_temp_copy) }
+        FilePreviewHeader(
+            title = ref.name,
+            subtitle = listOfNotNull(previewFolder(ref.path), (ready?.size ?: ref.size)?.let(Formatters::bytes), where).joinToString(" · "),
+            onBack = onBack,
+        ) {
+            if (ready != null) {
+                ToolbarIcon(AppIcons.Share, stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(ready), noApp) })
+                ToolbarIcon(AppIcons.OpenWith, stringResource(R.string.viewer_open_with), { startSafely(context, store.viewIntent(ready), noApp) })
+                if (!ready.fromDownload) ToolbarIcon(AppIcons.Refresh, stringResource(R.string.viewer_refresh), { reload++ })
+            }
             ToolbarIcon(
                 AppIcons.Download, stringResource(R.string.files_download),
                 onClick = {
@@ -157,19 +179,6 @@ fun RemoteFileViewer(
                     }
                 },
                 enabled = !save.running && ready?.fromDownload != true,
-            )
-        }
-        if (ready != null) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(text = stringResource(R.string.viewer_open_with), onClick = { startSafely(context, store.viewIntent(ready), noApp) })
-                TextButton(text = stringResource(R.string.viewer_share), onClick = { startSafely(context, store.shareIntent(ready), noApp) })
-                if (!ready.fromDownload) TextButton(text = stringResource(R.string.viewer_refresh), onClick = { reload++ })
-            }
-            val where = if (ready.fromDownload) stringResource(R.string.viewer_saved_copy) else stringResource(R.string.viewer_temp_copy)
-            Text(
-                listOf(Formatters.bytes(ready.size), where).joinToString(" · "),
-                style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.gutter,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
             )
         }
         SaveRow(save, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
@@ -197,7 +206,7 @@ fun RemoteFileViewer(
 
 /** Source and text links use fs/read and remain in memory, just like the workspace editor. */
 @Composable
-private fun RemoteTextFileViewer(ref: RemoteFileRef, onBack: () -> Unit, modifier: Modifier) {
+private fun RemoteTextFileViewer(ref: RemoteFileRef, onBack: () -> Unit, modifier: Modifier, onOpenPath: ((String) -> Unit)?) {
     val connection = appContainer().connection
     var reload by remember(ref.path) { mutableIntStateOf(0) }
     val content by produceState<io.github.tianli0.switchtether.ui.common.Loadable<io.github.tianli0.switchtether.remote.protocol.FileContent>>(
@@ -209,24 +218,21 @@ private fun RemoteTextFileViewer(ref: RemoteFileRef, onBack: () -> Unit, modifie
             api.fsRead(ref.path)
         }
     }
+    val loaded = content.valueOrNull
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), onBack)
-            Text(ref.name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        FilePreviewHeader(
+            title = ref.name,
+            subtitle = listOfNotNull(
+                previewFolder(ref.path),
+                (loaded?.size ?: ref.size)?.let(Formatters::bytes),
+                loaded?.text?.let { t -> stringResource(R.string.files_line_count, t.count { it == '\n' } + 1) },
+            ).joinToString(" · "),
+            onBack = onBack,
+        ) {
             ToolbarIcon(AppIcons.Refresh, stringResource(R.string.viewer_refresh), { reload++ })
         }
         io.github.tianli0.switchtether.ui.common.LoadableContent(content, onRetry = { reload++ }) { file ->
-            Text(file.path, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 16.dp))
-            if (file.truncated) Text(stringResource(R.string.viewer_text_truncated), color = LocalDevColors.current.warn, modifier = Modifier.padding(16.dp))
-            if (file.text == null) {
-                Text(stringResource(R.string.files_binary), color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp))
-            } else {
-                androidx.compose.foundation.text.selection.SelectionContainer {
-                    Column(Modifier.fillMaxSize().then(Modifier.verticalScroll(rememberScrollState())).padding(12.dp)) {
-                        io.github.tianli0.switchtether.ui.code.CodeBlockView(file.text.orEmpty(), file.language ?: io.github.tianli0.switchtether.ui.code.SyntaxHighlighter.languageForPath(file.path))
-                    }
-                }
-            }
+            TextFileBody(file, Modifier.weight(1f), onOpenPath = onOpenPath)
         }
     }
 }
@@ -279,56 +285,73 @@ fun LocalFileBody(file: LocalFile, kind: FileKind, modifier: Modifier = Modifier
 
 private const val MAX_IMAGE_DIM = 3072
 
+/**
+ * Pinch / double-tap zoom, pan and fling via Telephoto (Saket Narayan, Apache-2.0). JPEG / PNG / WebP / HEIF
+ * are shown with `SubSamplingImage`: tiles are decoded at the zoom level on screen, so a 50-megapixel photo stays
+ * sharp at full zoom without running out of memory. GIF / AVIF / BMP / ICO (not tileable by Android's region
+ * decoder) are decoded once, down-sampled, and zoomed with `Modifier.zoomable`.
+ */
 @Composable
 private fun ZoomableImage(file: LocalFile, modifier: Modifier) {
     val context = LocalContext.current
-    val bitmap by produceState<ImageBitmap?>(null, file.uri) {
+    val source = remember(file.uri) { SubSamplingImageSource.contentUriOrNull(file.uri) }
+    val tileable by produceState<Boolean?>(null, source) {
+        value = source != null && runCatching { source.canBeSubSampled(context) }.getOrDefault(false)
+    }
+    var tilingFailed by remember(file.uri) { mutableStateOf(false) }
+    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+        when {
+            tileable == null -> ImageMessage(stringResource(R.string.state_loading))
+            tileable == true && source != null && !tilingFailed -> TiledImage(file, source) { tilingFailed = true }
+            else -> DecodedZoomableImage(file)
+        }
+    }
+}
+
+@Composable
+private fun TiledImage(file: LocalFile, source: SubSamplingImageSource, onFailed: () -> Unit) {
+    val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 8f))
+    val reporter = remember(onFailed) {
+        object : SubSamplingImageErrorReporter {
+            override fun onImageLoadingFailed(e: java.io.IOException, imageSource: SubSamplingImageSource) = onFailed()
+        }
+    }
+    val state = rememberSubSamplingImageState(imageSource = source, zoomableState = zoom, errorReporter = reporter)
+    SubSamplingImage(state = state, contentDescription = file.name, modifier = Modifier.fillMaxSize().zoomable(zoom))
+    if (!state.isImageDisplayed) ImageMessage(stringResource(R.string.state_loading))
+}
+
+@Composable
+private fun DecodedZoomableImage(file: LocalFile) {
+    val context = LocalContext.current
+    val bitmap by produceState<Result<ImageBitmap>?>(null, file.uri) {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val src = ImageDecoder.createSource(context.contentResolver, file.uri)
                 ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
-                    // Large photos are decoded at reduced size: bounded memory, still sharp when zoomed on a phone.
+                    // Large images are decoded at reduced size: bounded memory, still sharp when zoomed on a phone.
                     val longSide = maxOf(info.size.width, info.size.height)
                     if (longSide > MAX_IMAGE_DIM) decoder.setTargetSampleSize((longSide + MAX_IMAGE_DIM - 1) / MAX_IMAGE_DIM)
                     decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 }.asImageBitmap()
-            }.getOrNull()
-        }
-    }
-    var failed by remember(file.uri) { mutableStateOf(false) }
-    LaunchedEffect(bitmap) { if (bitmap == null) { delay(1500); failed = bitmap == null } }
-    var scale by remember(file.uri) { mutableFloatStateOf(1f) }
-    var offset by remember(file.uri) { mutableStateOf(Offset.Zero) }
-    Box(
-        modifier
-            .background(Color.Black)
-            .clipToBounds()
-            .pointerInput(file.uri) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 8f)
-                    offset = if (scale > 1f) offset + pan else Offset.Zero
-                }
             }
-            .pointerInput(file.uri) {
-                detectTapGestures(onDoubleTap = {
-                    if (scale > 1f) { scale = 1f; offset = Offset.Zero } else scale = 2.5f
-                })
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        val bmp = bitmap
-        if (bmp != null) {
-            Image(
-                bitmap = bmp, contentDescription = file.name, contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-            )
-        } else {
-            Text(
-                if (failed) stringResource(R.string.viewer_image_failed) else stringResource(R.string.state_loading),
-                style = COUITheme.textStyles.body2, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(24.dp),
-            )
         }
     }
+    val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 6f))
+    val bmp = bitmap?.getOrNull()
+    LaunchedEffect(bmp) {
+        if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
+    }
+    when {
+        bitmap == null -> ImageMessage(stringResource(R.string.state_loading))
+        bmp == null -> ImageMessage(stringResource(R.string.viewer_image_failed))
+        else -> Image(bitmap = bmp, contentDescription = file.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().zoomable(zoom))
+    }
+}
+
+@Composable
+private fun ImageMessage(text: String) {
+    Text(text, style = COUITheme.textStyles.body2, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(24.dp))
 }
 
 // ---- pdf --------------------------------------------------------------------------------------------------
@@ -360,6 +383,10 @@ private class PdfDoc(private val fd: ParcelFileDescriptor, private val renderer:
     }
 }
 
+/**
+ * Android's built-in `PdfRenderer` (no extra library): a lazily rendered page list; tapping a page opens it
+ * full screen at higher resolution with Telephoto zoom, swiping sideways between pages.
+ */
 @Composable
 private fun PdfPages(file: LocalFile, modifier: Modifier) {
     val context = LocalContext.current
@@ -386,6 +413,7 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
         else -> {
             val pdf = d.getOrThrow()
             val listState = rememberLazyListState()
+            var zoomedPage by remember(file.uri) { mutableStateOf<Int?>(null) }
             BoxWithConstraints(modifier.background(COUITheme.colorScheme.surfaceContainer)) {
                 val widthPx = constraints.maxWidth.coerceAtMost(2000)
                 LazyColumn(Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -394,22 +422,70 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
                             value = withContext(Dispatchers.IO) { pdf.render(index, widthPx)?.asImageBitmap() }
                         }
                         val bmp = page
+                        val label = stringResource(R.string.viewer_pdf_page, index + 1, pdf.pageCount)
+                        val pageModifier = Modifier.fillMaxWidth().clickable(onClickLabel = stringResource(R.string.files_pdf_zoom)) { zoomedPage = index }
                         if (bmp != null) {
-                            Image(bmp, contentDescription = stringResource(R.string.viewer_pdf_page, index + 1, pdf.pageCount), contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth())
+                            Image(bmp, contentDescription = label, contentScale = ContentScale.FillWidth, modifier = pageModifier)
                         } else {
-                            Box(Modifier.fillMaxWidth().aspectRatio(0.72f).background(Color.White))
+                            Box(pageModifier.aspectRatio(0.72f).background(Color.White))
                         }
                     }
                 }
-                Text(
-                    stringResource(R.string.viewer_pdf_page, listState.firstVisibleItemIndex + 1, pdf.pageCount),
-                    style = COUITheme.textStyles.footnote1, color = Color.White,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
-                )
+                PageBadge(stringResource(R.string.viewer_pdf_page, listState.firstVisibleItemIndex + 1, pdf.pageCount), Modifier.align(Alignment.BottomCenter))
+                zoomedPage?.let { start ->
+                    BackHandler { zoomedPage = null }
+                    PdfZoomPager(pdf, start, (constraints.maxWidth * 2).coerceIn(800, 2400), onClose = { page ->
+                        zoomedPage = null
+                        listState.requestScrollToItem(page)
+                    })
+                }
             }
         }
     }
+}
+
+@Composable
+private fun PdfZoomPager(pdf: PdfDoc, start: Int, renderWidthPx: Int, onClose: (Int) -> Unit) {
+    val pager = rememberPagerState(initialPage = start) { pdf.pageCount }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        HorizontalPager(state = pager, beyondViewportPageCount = 0, key = { it }, modifier = Modifier.fillMaxSize()) { index ->
+            val page by produceState<ImageBitmap?>(null, index, renderWidthPx) {
+                value = withContext(Dispatchers.IO) { pdf.render(index, renderWidthPx)?.asImageBitmap() }
+            }
+            val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 5f))
+            val bmp = page
+            LaunchedEffect(bmp) {
+                if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (bmp != null) {
+                    Image(bmp, contentDescription = stringResource(R.string.viewer_pdf_page, index + 1, pdf.pageCount), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().zoomable(zoom))
+                } else {
+                    ImageMessage(stringResource(R.string.state_loading))
+                }
+            }
+        }
+        val closeLabel = stringResource(R.string.action_close)
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(12.dp).size(40.dp).clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .clickable(onClickLabel = closeLabel) { onClose(pager.currentPage) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AppIcons.Close, contentDescription = closeLabel, tint = Color.White, modifier = Modifier.size(20.dp))
+        }
+        PageBadge(stringResource(R.string.viewer_pdf_page, pager.currentPage + 1, pdf.pageCount), Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+@Composable
+private fun PageBadge(text: String, modifier: Modifier) {
+    Text(
+        text,
+        style = COUITheme.textStyles.footnote1, color = Color.White,
+        modifier = modifier.padding(bottom = 12.dp)
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
+    )
 }
 
 // ---- video / audio ----------------------------------------------------------------------------------------

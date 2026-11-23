@@ -1,0 +1,11 @@
+{
+  "id": "6f1d2c3b-4a5e-4f60-8a9b-0c1d2e3f4a5b",
+  "port": 5173,
+  "createdAtMs": 1763452800000,
+  "expiresAtMs": 1763460000000,
+  "connected": true,
+  "activeStreams": 3,
+  "totalStreams": 42,
+  "bytesDown": 1048576,
+  "bytesUp": 8192
+}

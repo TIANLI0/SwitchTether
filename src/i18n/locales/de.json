@@ -5499,6 +5499,14 @@
       "end": "Beenden",
       "external": "Dein Terminalfenster"
     },
+    "forwards": {
+      "title": "Portweiterleitung",
+      "help": "Ein Telefon erreicht über seine verschlüsselte Verbindung einen Port, der nur lokal auf diesem Computer lauscht (z. B. einen Entwicklungsserver) – so, als würde es hier localhost öffnen. Jede Weiterleitung wird auf dem Telefon biometrisch bestätigt, endet beim Ablauf und kann hier jederzeit beendet werden.",
+      "empty": "Kein Telefon leitet einen Port weiter.",
+      "port": "Lokaler Port {{port}}",
+      "detail": "{{device}} · {{connections}} Verbindung(en) · läuft ab {{time}}",
+      "stop": "Beenden"
+    },
     "audit": {
       "title": "Sicherheitsprotokoll",
       "help": "Kopplung, Widerruf sowie Terminal-, Datei- und Konfigurationsaktionen von Handys. Terminaleingaben und geheime Werte werden nie aufgezeichnet.",

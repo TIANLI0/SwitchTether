@@ -180,8 +180,14 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
         }.ifEmpty { cleaned.context }
     }
     // Files sent from the phone: the desktop moves the path block out of the text into this list.
-    val files = remember(item.event) { d["attachments"].arr().orEmpty().mapNotNull { it.obj()?.str("name") } }
-    if (text.isBlank() && imageItems.isEmpty() && files.isEmpty()) return
+    // Photos among them are shown as pictures (read from the computer), the rest as file rows.
+    val attached = remember(item.event) { d["attachments"].arr().orEmpty().mapNotNull { it.obj() } }
+    val photoItems = remember(attached) {
+        attached.filter { a -> a.str("name")?.let { io.github.tianli0.switchtether.files.FileTypes.kindOf(it) } == io.github.tianli0.switchtether.files.FileKind.IMAGE && a.str("path") != null }
+            .map { a -> kotlinx.serialization.json.buildJsonObject { put("kind", kotlinx.serialization.json.JsonPrimitive("local")); put("path", a["path"]!!) } }
+    }
+    val files = remember(attached) { attached.filter { a -> photoItems.none { it["path"] == a["path"] } }.mapNotNull { a -> a.str("name")?.let { it to a.str("path") } } }
+    if (text.isBlank() && imageItems.isEmpty() && photoItems.isEmpty() && files.isEmpty()) return
     Column(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalAlignment = Alignment.End) {
         if (context.isNotEmpty()) {
             SubtleMeta(
@@ -193,9 +199,17 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
         }
         ChatBubble {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (imageItems.isNotEmpty()) ImageStrip(imageItems, ctx)
-                if (files.isNotEmpty()) AttachmentNames(files)
+                if (imageItems.isNotEmpty() || photoItems.isNotEmpty()) ImageStrip(imageItems + photoItems, ctx)
+                if (files.isNotEmpty()) AttachmentNames(files, onOpen = { path -> ctx.onLink(path) })
                 if (text.isNotBlank()) MarkdownView(text, onLinkClick = ctx.onLink)
+            }
+        }
+        // Re-using an earlier prompt is common: one tap copies it (replies have the same button).
+        val rewind = ctx.onRewindFiles?.takeIf { io.github.tianli0.switchtether.remote.session.ClaudeTools.canRewindTo(item.event) }
+        if (text.isNotBlank() || rewind != null) {
+            Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (rewind != null) RewindFilesButton(enabled = ctx.online) { rewind(item.event.id) }
+                if (text.isNotBlank()) io.github.tianli0.switchtether.ui.code.CopyButton(text, stringResource(R.string.message_copy_mine))
             }
         }
         val images = d.long("images")?.toInt() ?: imageItems.size
@@ -207,14 +221,49 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
     }
 }
 
-/** Files attached to a user message, one line each (icon by type, name). */
+/** Claude Code session tools: restore files to before this message (the conversation stays). */
 @Composable
-fun AttachmentNames(names: List<String>) {
+private fun RewindFilesButton(enabled: Boolean, onClick: () -> Unit) {
+    val label = stringResource(R.string.rewind_action)
+    Box(
+        Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label }
+            .testTag("rewind-files"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(AppIcons.Rewind, contentDescription = null, tint = LocalDevColors.current.gutter, modifier = Modifier.size(16.dp))
+    }
+}
+
+/** "Run in background" for a running foreground Bash / Agent call (Ctrl+B in Claude Code's IDE extension). */
+@Composable
+private fun RunInBackgroundAction(item: RenderItem, ctx: RenderContext, modifier: Modifier = Modifier) {
+    val onRun = ctx.onRunInBackground ?: return
+    val callId = io.github.tianli0.switchtether.remote.session.ClaudeTools.backgroundableCallId(item.event) ?: return
+    val busy = ctx.isBackgrounding(callId)
+    TextButton(
+        text = stringResource(if (busy) R.string.tools_run_background_busy else R.string.tools_run_background),
+        onClick = { if (!busy) onRun(callId) },
+        enabled = ctx.online && !busy,
+        modifier = modifier.testTag("run-in-background"),
+    )
+}
+
+/** Files attached to a user message, one line each (icon by type, name); a tap opens the file. */
+@Composable
+fun AttachmentNames(files: List<Pair<String, String?>>, onOpen: ((String) -> Unit)? = null) {
     val label = stringResource(R.string.render_attachments)
-    Column(Modifier.semantics { contentDescription = label + ": " + names.joinToString() }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        names.forEach { n ->
+    Column(Modifier.semantics { contentDescription = label + ": " + files.joinToString { it.first } }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        files.forEach { (n, path) ->
             val image = io.github.tianli0.switchtether.files.FileTypes.kindOf(n) == io.github.tianli0.switchtether.files.FileKind.IMAGE
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            val open = path?.let { p -> onOpen?.let { { it(p) } } }
+            Row(
+                Modifier.clip(SquircleShape(8.dp)).then(if (open != null) Modifier.clickable(role = Role.Button, onClick = open) else Modifier).padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Icon(if (image) AppIcons.Image else AppIcons.File, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.size(6.dp))
                 Text(n, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -454,6 +503,7 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                 } else if (status == StepStatus.Running || status == StepStatus.Pending) {
                     Spacer(Modifier.size(8.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    RunInBackgroundAction(item, ctx, Modifier.padding(top = 6.dp))
                 }
             }
         } else if (result?.data?.bool("isError") == true) {
@@ -676,7 +726,8 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
             ResolvedLine(resolutionLabel(d.str("decision") ?: resolution?.str("decision"), d.str("by") ?: resolution?.str("by")))
         } else {
             val options = d["options"].arr().orEmpty().mapNotNull { it.obj() }
-            val enabled = ctx.approve.usable && ctx.online
+            // Disabled while a decision is on its way: a second tap must not send a second decision.
+            val enabled = ctx.approve.usable && ctx.online && !ctx.requestBusy
             Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 options.forEach { o ->
                     val id = o.str("id") ?: return@forEach
@@ -753,11 +804,13 @@ fun Question(item: RenderItem, ctx: RenderContext) {
     val resolved = d.bool("resolved") == true || resolution != null
     val questions = d["questions"].arr().orEmpty().mapNotNull { it.obj() }
     val cancellable = d.bool("cancellable") ?: true
-    // question key -> selected labels (UI state only)
-    val selections = remember(item.key) { mutableStateMapOf<String, Set<String>>() }
+    // Saveable (per list item and page): a half-written answer survives scrolling away to re-read
+    // the context, opening a sub-agent page and coming back, and rotation.
+    // question key -> selected labels
+    val selections = rememberSaveable(item.key, saver = stateMapSaver()) { mutableStateMapOf<String, Set<String>>() }
     // question key -> free-text / "other" input
-    val freeTexts = remember(item.key) { mutableStateMapOf<String, String>() }
-    val otherChosen = remember(item.key) { mutableStateMapOf<String, Boolean>() }
+    val freeTexts = rememberSaveable(item.key, saver = stateMapSaver()) { mutableStateMapOf<String, String>() }
+    val otherChosen = rememberSaveable(item.key, saver = stateMapSaver()) { mutableStateMapOf<String, Boolean>() }
     val enabled = !resolved && ctx.answer.usable && ctx.online && !ctx.requestBusy
     val accent = COUITheme.colorScheme.primary
     AttentionCard(active = !resolved, color = accent) {
@@ -941,6 +994,7 @@ fun Subagent(item: RenderItem, ctx: RenderContext) {
                     Text(stringResource(R.string.subagent_waiting_result), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                     Spacer(Modifier.size(8.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    RunInBackgroundAction(item, ctx, Modifier.padding(top = 6.dp))
                 }
             }
         } else if (!open && summary != null && !running) {
@@ -1080,3 +1134,16 @@ object BuiltinUiComponents {
         },
     )
 }
+
+/** Saves a [androidx.compose.runtime.snapshots.SnapshotStateMap] whose values are bundle-able (String, Boolean, Set<String>). */
+private fun <V : Any> stateMapSaver(): androidx.compose.runtime.saveable.Saver<androidx.compose.runtime.snapshots.SnapshotStateMap<String, V>, Any> =
+    androidx.compose.runtime.saveable.Saver(
+        save = { m -> HashMap(m.mapValues { (_, v) -> if (v is Set<*>) ArrayList(v) else v }) },
+        restore = { saved ->
+            @Suppress("UNCHECKED_CAST")
+            val m = saved as Map<String, Any>
+            androidx.compose.runtime.mutableStateMapOf<String, V>().apply {
+                m.forEach { (k, v) -> put(k, (if (v is List<*>) v.toSet() else v) as V) }
+            }
+        },
+    )

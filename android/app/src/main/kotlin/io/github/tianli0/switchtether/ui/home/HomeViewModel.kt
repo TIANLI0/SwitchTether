@@ -55,6 +55,11 @@ class HomeViewModel(
     val state: StateFlow<HomeState> = _state.asStateFlow()
 
     init {
+        // Last list seen from this desktop, at once (replaced by the first successful load).
+        viewModelScope.launch {
+            val cached = runCatching { sessions.cachedList() }.getOrNull().orEmpty()
+            if (cached.isNotEmpty()) _state.update { if (it.sessions is Loadable.Ready) it else it.copy(sessions = Loadable.Ready(cached)) }
+        }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
                 _state.update { it.copy(connection = s) }
@@ -89,7 +94,8 @@ class HomeViewModel(
 
     private fun refreshSessions() = viewModelScope.launch {
         val r = loadable { sessions.list(SessionQuery(), limit = 50).items }
-        _state.update { it.copy(sessions = r) }
+        // A failed refresh keeps the list that is already shown.
+        _state.update { if (r is Loadable.Failed && it.sessions is Loadable.Ready) it else it.copy(sessions = r) }
     }
 
     /** Pull-to-refresh: reload sessions and usage, showing the indicator until the list is back. */

@@ -105,7 +105,7 @@ High-risk scopes require a short-lived grant proven by a signature from the Keys
 step-up key (`setUserAuthenticationRequired(true)`), i.e. only after BiometricPrompt /
 device credential succeeded on the phone. The server never trusts a client-side flag.
 
-- `POST /v1/auth/step-up/challenge` `{ "scope": "terminal" | "files_write" | "config_write" }`
+- `POST /v1/auth/step-up/challenge` `{ "scope": "terminal" | "files_write" | "config_write" | "port_forward" }`
   → `{ "challengeId": "…", "nonce": "<base64url 32B>", "expiresAt": "…" }` (TTL 60 s)
 - Phone signs UTF-8 bytes of
   `"switchtether-stepup-v1\n" + deviceId + "\n" + challengeId + "\n" + nonce + "\n" + scope`
@@ -119,6 +119,7 @@ device credential succeeded on the phone. The server never trusts a client-side 
 | `terminal` | create terminal, attach input stream |
 | `files_write` | write / create / rename / delete / upload files |
 | `config_write` | provider credential update, config restore, MCP/skill writes |
+| `port_forward` | start (or renew) a port forward lease (§7.11); the lease, not the grant, authorises its tunnel |
 
 Devices paired without a step-up key cannot use these scopes (`step_up_required` with
 `details.reason = "no_step_up_key"`).
@@ -215,13 +216,33 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `GET /v1/sessions/{sessionId}` → `SessionDetail` (includes `liveness`, `control`, `capabilities`)
 - `GET /v1/sessions/{sessionId}/events?before=<eventSeq>&after=<eventSeq>&limit=` → paged `AgentEvent`s
 - `GET /v1/sessions/{sessionId}/events/{eventId}/payload?offset&limit` → large tool output chunks
-- `POST /v1/sessions` `{commandId, agent, cwd?, prompt?, model?, permissionMode?, resumeFrom?, mode?}` → creates a **SwitchTether-managed** session (clearly labelled `origin: "managed"`).
+- `POST /v1/sessions` `{commandId, agent, cwd?, prompt?, model?, effort?, permissionMode?, resumeFrom?, mode?}` → starts a session in a process SwitchTether runs (labelled `origin: "managed"`, `managed: true`).
+  It is an ordinary conversation of the agent, created the official way, and its **id is the agent's own conversation id**:
+  `claude:<uuid>` (Claude Code gets `--session-id <uuid>`; its transcript is Claude Code's own
+  `~/.claude/projects/<dir>/<uuid>.jsonl`, listed by `claude --resume` and the IDE's history), `codex:<thread id>`,
+  `dsh:<session id>`. The same id names the conversation as history after the process ends or the desktop restarts.
+  `effort`: Claude Code `low|medium|high|xhigh|max` (`--effort`), Codex `none|minimal|low|medium|high|xhigh`
+  (`turn/start` `effort`); `model` and `effort` are validated (plain names only).
   With `resumeFrom` (an existing `claude:`/`codex:` session) it **continues that conversation** ("接续会话"):
   `mode: "continue"` (default) keeps the same session/thread id; `mode: "fork"` (Claude only) starts a fork. `cwd` defaults
   to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
   while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
   Session capabilities advertise this as `continueSession: "PARTIAL"`.
-- `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}], attachments?: [attachmentId]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event; fixture `send_message_attachments.json`)
+- `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}], attachments?: [attachmentId]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event; fixture `send_message_attachments.json`).
+  Feature `resume_on_send`: a Claude Code / Codex / dsh conversation that is **not running anywhere** (history, or a run that
+  ended, e.g. with a desktop restart) takes messages too: the desktop first resumes it the official way (`claude --resume <id>`,
+  `thread/resume`, `session/resume`) under the same id, then delivers the message. Such sessions advertise
+  `sendMessage: "PARTIAL"` with `approve`/`interrupt` `BLOCKED` until they run. A session live in a window on the computer is
+  never resumed implicitly (observe-only; `continueSession` explains the explicit way).
+- `POST /v1/sessions/{id}/options` `{commandId, model?, effort?}` (feature `session_options`, fixture `session_options.json`) —
+  changes model and / or effort of a **running** session SwitchTether started; absent = unchanged, `""` or `"default"` = the
+  agent's default. Claude Code: `set_model` and `apply_flag_settings {effortLevel}` control requests (as the Agent SDK);
+  Codex: sent with the next `turn/start`. Answers the updated `SessionSummary` (with `model`, `effort`). `409` when the
+  session is not running, `422 capability_unavailable` for sessions owned by a window on the computer (attached) and dsh.
+  Advertised per session as `capabilities.changeModel`.
+- `GET /v1/agents/{agent}/models?session=` → `{agent, models: [{id, label, description?, efforts?}], efforts, source}`
+  (fixture `model_options.json`): with a running `session`, the agent's own list (Claude Code's initialize response, Codex
+  `model/list`, `source: "agent"`); otherwise the aliases every installation accepts (`source: "builtin"`).
 - Attachments (feature `attachments`; any file type, ≤ 64 MiB each, ≤ 10 per message; same device and session only): `POST /v1/sessions/{id}/attachments` `{name, size, mediaType?}` → `AttachmentView` `{attachmentId, name, size, received, complete, mediaType}` (fixture `attachment_view.json`), then `PUT /v1/sessions/{id}/attachments/{attachmentId}?offset=` raw chunks ≤ 8 MiB in order (wrong offset → 409 with `details.received`), `DELETE …/{attachmentId}` discards it. Refused for sessions the phone cannot send to. Files are stored under the desktop's data directory (`<data dir>/attachments/<date>/<id>/<name>`, kept 7 days, 2 GiB cap) — never in the project. Every agent receives them the same way: the message text gets a block starting `[SwitchTether attachments: …]` with one absolute path per line; images ≤ 3 MiB are also inlined for agents that accept images (Claude Code, Codex). SwitchTether-started Claude Code sessions get `--add-dir <attachments dir>`; other agents may ask for permission to read the path.
 - `POST /v1/sessions/{id}/interrupt` `{commandId}`
 - `POST /v1/sessions/{id}/approvals/{requestId}` `{commandId, decision: "allow"|"allow_session"|"deny"|"abort", message?, updatedInput?}`
@@ -260,6 +281,54 @@ The desktop runs the terminal emulator (vt100 state machine) and streams screen 
 - `GET /v1/fs/download?path=` (streamed, single `Range` supported; sensitive files refused) · `POST /v1/fs/upload` `{commandId, path, size, sha256?, overwrite?}` → `{uploadId}`, then `PUT /v1/fs/upload/{id}?offset=` raw chunks ≤ 8 MiB, `DELETE /v1/fs/upload/{id}` cancels *(files_write)*
 - `GET /v1/git/status?repo=` · `GET /v1/git/diff?repo=&path=&staged=` · `GET /v1/git/log?repo=&path=&limit=` · `GET /v1/git/show?repo=&rev=&path=` (file at a commit)
 
+### 7.11 Port forwarding (step-up `port_forward`, feature `port_forward`)
+
+The phone reaches a TCP port listening on the desktop's **loopback**, like `ssh -L`. The desktop
+only ever connects to `127.0.0.1:<port>` and `[::1]:<port>` (both tried at once, first success
+wins); the target host is not a parameter.
+
+- `GET /v1/forwards/ports` → `{ "ports": [{ "port": 5173, "process": "node.exe", "pid": 4242 }] }`:
+  listeners on loopback or the any-address, below 49152, without system services and without
+  the Remote port itself. `process`/`pid` only where the OS tells (Windows); Linux lists ports
+  from `/proc/net/tcp*`; other systems probe common development ports.
+- `POST /v1/forwards` *(port_forward)* `{ "port": 5173, "ttlMinutes": 120 }` → `ForwardView` plus
+  `"listening": bool` (whether something accepted a connection just now). A device has at most
+  8 leases; posting a port the device already forwards renews that lease (same `id`). Default
+  lifetime 2 h, at most 12 h; leases live in desktop memory only. The Remote port itself is
+  refused (`403 forbidden`); a 9th port is `409 conflict`.
+- `GET /v1/forwards` → `{ "forwards": [ForwardView] }` (this device's leases).
+- `DELETE /v1/forwards/{id}` → `{ "removed": true }`; closes the tunnel with 4410.
+- `GET /v1/forwards/{id}/tunnel` → WebSocket. Unknown, expired or another device's lease: `404`
+  before the upgrade. No step-up grant is needed here: the lease is the authorisation, so a
+  browser keeps working for the lease's lifetime. A newer tunnel for the same lease replaces the
+  old one (4409 on the old one).
+
+`ForwardView` (fixture `protocol/fixtures/forward_view.json`):
+`{ id, port, createdAtMs, expiresAtMs, connected, activeStreams, totalStreams, bytesDown, bytesUp }`.
+
+**Tunnel frames** (fixture `protocol/fixtures/forward_frames.json`). Every binary WebSocket message
+is `[type: u8][stream: u32 big-endian][payload]`; text messages are ignored. The phone opens
+streams (non-zero ids, odd numbers by convention); one stream = one TCP connection.
+
+| Type | Name | Direction | Payload |
+|---|---|---|---|
+| 1 | `OPEN` | phone → desktop | empty. The phone may send `DATA` right after it without waiting. |
+| 2 | `OPENED` | desktop → phone | empty: connected to the port |
+| 3 | `DATA` | both | ≤ 32 KiB of bytes |
+| 4 | `FIN` | both | empty: no more data in this direction (half-close) |
+| 5 | `RESET` | both | ASCII reason: `refused` (nothing listens), `limit` (> 128 streams), `window`, `error`, `closed` |
+| 6 | `WINDOW` | both | u32 big-endian: bytes consumed (credit returned) |
+
+Flow control: each side may have at most 256 KiB of unacknowledged `DATA` per stream; the
+receiver sends `WINDOW` after writing bytes to its socket. A phone that exceeds the window gets
+`RESET window`. Protocol violations (unknown type, short frame, re-used id, `OPENED` from the
+phone) close the tunnel with 1002.
+
+Close codes: `4410` the lease was stopped or expired (start again with step-up), `4409` replaced
+by a newer tunnel, `4403` device revoked / connection closed by the desktop. Any other close is
+transient: reconnect to the same lease. Through the relay (docs/RELAY.md) a forward uses one
+relay tunnel regardless of how many browser connections it carries.
+
 ## 8. Capability negotiation
 
 `GET /v1/capabilities`:
@@ -295,6 +364,7 @@ Session-level `capabilities` override the agent defaults (e.g. a managed session
 | `project` | Folder of `cwd`; an agent worktree (`<project>/.claude/worktrees/<name>`) maps to its containing project |
 | `origin` | `cli`, `vscode`, `desktop_app`, `managed` (started by SwitchTether), `unknown` |
 | `managed` | `true` only for sessions SwitchTether started. A session of the user's own process that SwitchTether is attached to through an opt-in takeover hook has its real origin, `managed: false` and `control: "full"` |
+| `effort` | optional; effort / reasoning level chosen for a session SwitchTether runs (`low` … `max`), absent when the agent's default applies |
 | `terminalId` | optional; set for sessions running in the user's terminal window (`st-claude` / `st-codex`). The id of an **external** terminal (`/v1/terminals`, `external: true`) mirroring that window; prompts are answered there |
 | `liveness` | `live` (process running), `ended`, `unknown` |
 | `status` | `busy`, `idle`, `waiting`, `completed`, `error`, `unknown` |
@@ -304,7 +374,9 @@ Session-level `capabilities` override the agent defaults (e.g. a managed session
 `GET /v1/sessions/{id}` adds `"capabilities": { "sendMessage": "VERIFIED|PARTIAL|BLOCKED|UNTESTED", "approve": …, "interrupt": …, "answerQuestion": …, "liveEvents": …, "readHistory": … }`
 and `"pendingRequests": [AgentEvent]` (open approvals/questions).
 
-Session ids are opaque; the prefix is informative only.
+Session ids are opaque; the prefix is informative only. Sessions SwitchTether starts use the agent's own conversation id
+(`claude:<uuid>`, `codex:<thread>`, `dsh:<id>`), so one conversation keeps one id across process restarts; desktops before
+this change used `managed:<random>` ids that disappeared with the process.
 
 ### 10.2 AgentEvent
 
@@ -321,8 +393,46 @@ Session ids are opaque; the prefix is informative only.
 - **Claude Code sub-agent branches** (read-only). Claude Code keeps each sub-agent's own transcript next to the session's
   (`<session>/subagents/agent-<agentId>.jsonl` + `.meta.json`):
   - `GET /v1/sessions/{id}/subagents` → `{ sessionId, agents: [{ agentId, description?, agentType?, toolUseId?, parentAgentId?,
-    spawnDepth?, finished?, updatedAtMs? }] }` — every sub-agent of the session, nested ones included; `parentAgentId` builds the
-    branch tree (null = started by the session). Metadata is whitelisted (never the prompt). Empty for other agents / none.
+    spawnDepth?, finished?, updatedAtMs?, …live }], backgroundTasks: [{ taskId, callId, title, status, summary?, exitCode?,
+    startedAt, finishedAt? }], stoppable }` — the **Agent map**: every sub-agent of the session, nested ones included;
+    `parentAgentId` builds the branch tree (null = started by the session). Sidecar metadata is whitelisted. Agents that have
+    a `subagent` row in the session log add their live state (`…live`): `status`, `waiting` (a permission request or
+    question raised inside it is open), `background`, `model`, `tokens`, `toolUses`, `durationMs`, `activity` (what it does
+    now), `summary`/`result` (≤ 600 chars), `prompt` (the Agent call's own input, ≤ 2000 chars, already part of the session's
+    events), `startedAt`, `finishedAt`. `backgroundTasks` are the session's background shells. `stoppable` is true only for a
+    Claude Code process SwitchTether started.
+  - `POST /v1/sessions/{id}/subagents/{taskId}/stop` `{commandId}` → `{ stopped, taskId }`: stops one sub-agent (`agentId`)
+    or background shell (`taskId`) with Claude Code's `stop_task` control request, like the IDE's "Stop agent". Idempotent
+    and audited like `interrupt`; any other session → `422 capability_unavailable` (sessions started elsewhere are
+    observe-only).
+  - **Claude Code session tools** (the IDE extension's session features, for a Claude Code process SwitchTether started
+    or one attached through the opt-in takeover hook — sent through switchtether-shim like messages and approvals; the
+    session detail then has `claudeTools: true` and `permissionMode`; Stop in the Agent map likewise): `POST /v1/sessions/{id}/claude/{action}`
+    with the action's parameters and an optional `commandId` (idempotent, audited as `session.claude.<action>`). Each is
+    one whitelisted control request; replies are reduced to these fields, texts redacted, MCP configuration never sent:
+    `permission_mode {mode}` → `{mode}`; `context_usage` → `{totalTokens, maxTokens, percentage, categories[{id, name,
+    tokens, kind}]}`; `task_output {taskId}` → `{output (newest 64 KiB), totalBytes, truncated}`; `plan` → `{exists,
+    content?, path?}`; `mcp_status` → `{servers[{name, status, title?, version?, transport?, scope?, tools?, error?}]}`;
+    `mcp_reconnect {server}`; `run_in_background {toolUseId}` → `{backgrounded}` (a running foreground Bash / Agent, the
+    IDE's Ctrl+B); `cancel_message {messageUuid}` → `{cancelled}`; `side_question {question}` → `{answer}`; `rename
+    {title}`; `rewind {userMessageId, dryRun}` → `{dryRun, canRewind, error?, filesChanged (relative), insertions,
+    deletions}` (files only; managed processes run with file checkpoints on); `export` → `{text, filename}`. Other
+    sessions → `422 capability_unavailable`, except that a Claude Code session started on the computer
+    (observe-only, detail `claudeReadTools: true`) gets the three tools its files can answer, read-only: `task_output`
+    (only the file Claude Code named `<taskId>.output` for that task, kept as `outputFile` on the task's row), `plan`
+    (the last `ExitPlanMode` plan in the transcript) and `export` (the log as text). `POST …/messages` answers `messageUuid` for these sessions: the user
+    message's id in the log, and the handle to cancel it while queued.
+  - **Models** (`GET /v1/agents/{agent}/models?session=`): the agent's own list — from the running session, else read by a
+    short SwitchTether-owned probe (Claude Code `initialize` with no MCP servers, Codex app-server `model/list`; no
+    message, no conversation) and cached 30 min. With an official list the built-in aliases are not added, hidden Codex
+    models are left out, and a model without effort levels has `efforts: []`. `source`: `agent` | `builtin`.
+  - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
+    when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`); the detail then has
+    `resumable: true` and `nextStart {model, effort, permissionMode}`, and `changeModel` is `PARTIAL`. A session attached
+    through the opt-in hook can switch model / effort while it runs (through switchtether-shim). A session running in a
+    window SwitchTether does not control stays observe-only (`capability_unavailable`).
+  - While a foreground sub-agent runs (before its result exists) its `subagent` row is already there with `status:
+    "running"`: from the stream's `task_started` (managed) or from its sidecar `agent-<id>.meta.json` `toolUseId` (observed).
   - `GET /v1/sessions/{id}/subagents/{agentId}/events?before&after&limit` → `{ sessionId, agentId, events, hasMore, lastSeq, meta }`:
     the sub-agent's steps parsed like a session transcript (same event kinds), tailed on every request so a running sub-agent
     can be followed by polling. `agentId` must match `[A-Za-z0-9_-]{1,64}` (`422`), unknown → `404`.
@@ -346,8 +456,8 @@ Session ids are opaque; the prefix is informative only.
 | `approval_request` | `{ requestId, kind: "command"|"file_change"|"tool"|"network"|"other", title, detail, command?, cwd?, toolName?, input?, options: [{ id, label }] , resolved: false }` |
 | `approval_resolved` | `{ requestId, decision, by: "phone"|"desktop"|"other" }` |
 | `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, required?, allowOther?, isSecret?, options: [{ label, description, value? }] }] }` |
-| `subagent` | `{ agentId, description, agentType?, model?, background, status: "running"|"completed"|"failed"|"interrupted", callId, summary?, result?, resultTruncated?, tokens?, toolUses?, durationMs?, finishedAt? }` — id `sa:<callId>`, `parentId` = the Agent/Task call. A background agent starts `running` and is updated in place when its task notification arrives. A notification for anything else (unknown task, monitor) is a `system` event with `subtype: "task_notification"`, `{status?, text}`. Task notifications and messages the user typed while the agent was busy are read both from `user` records and from mid-turn `attachment` records (`queued_command`, `commandMode` `task-notification` / `prompt`; the latter becomes a normal `user_message`) |
-| `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail? }` |
+| `subagent` | `{ agentId, description, agentType?, model?, background, status: "running"|"completed"|"failed"|"interrupted", callId, summary?, result?, resultTruncated?, tokens?, toolUses?, durationMs?, activity?, agentPath?, finishedAt? }` — id `sa:<callId>` (Claude Code; Codex: `cx-sa-<child thread id>`), `parentId` = the Agent/Task (spawn) call. A sub-agent row exists from the moment the agent starts and is updated in place: live counters and `activity` from stream-json `task_progress`, the end from its task notification (transcript `<task-notification>` or stream-json `system` `task_notification`) or its result. Codex multi-agent v2 rows come from `SubAgentActivity` (rollout `item_completed` / legacy `sub_agent_activity`, app-server `subAgentActivity` items) and take the child's `FINAL_ANSWER` mail as `result`; a child rollout skips the parent history it inherited as a fork. A notification for anything else (unknown task, monitor) is a `system` event with `subtype: "task_notification"`, `{status?, text}`. Task notifications and messages the user typed while the agent was busy are read both from `user` records and from mid-turn `attachment` records (`queued_command`, `commandMode` `task-notification` / `prompt`; the latter becomes a normal `user_message`) |
+| `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail?, backgroundTasks? }` — `backgroundTasks` (managed Claude Code): background agents / shells still running; a session can be `idle` with work still going on |
 | `error` | `{ message }` |
 | `system` | `{ subtype, text }` (compaction, retries, informational) |
 | `usage` | `{ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd? }` |

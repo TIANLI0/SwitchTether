@@ -356,7 +356,15 @@ private fun CodeContent(
     onSubmit: (address: String, code: String) -> Unit,
     onBack: () -> Unit,
 ) {
-    var address by remember(state.manual) { mutableStateOf("") }
+    // After a failed attempt the typed address comes back pre-filled, ready to correct.
+    var address by remember(state.manual, state.host) {
+        mutableStateOf(
+            state.host?.takeIf { state.manual }?.let { h ->
+                val host = if (h.contains(':')) "[$h]" else h
+                if (state.port == io.github.tianli0.switchtether.remote.pairing.PairingLink.DEFAULT_PORT) host else "$host:${state.port}"
+            }.orEmpty(),
+        )
+    }
     var code by remember(state.host, state.manual) { mutableStateOf("") }
     Title(stringResource(R.string.pair_code_title), stringResource(R.string.pair_code_subtitle))
     if (state.manual) {

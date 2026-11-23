@@ -708,3 +708,132 @@ async fn pairing_with_code_and_status_reports_hosts() {
     assert_eq!(s, 410);
     f.handle.shutdown().await;
 }
+
+#[tokio::test]
+async fn port_forward_tunnel_carries_http_over_mtls() {
+    use futures::{SinkExt, StreamExt};
+    use switchtether_core::forward::{decode, encode, FrameType};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    // A tiny HTTP server on the desktop's loopback.
+    let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = http.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (mut s, _) = http.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 4096];
+                let n = s.read(&mut buf).await.unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = format!("hello from {}", req.lines().next().unwrap_or(""));
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                s.write_all(resp.as_bytes()).await.unwrap();
+            });
+        }
+    });
+
+    let f = start().await;
+    let c = Client::new(&f);
+    let (kp, spki) = step_up_key();
+    let device_id = pair(&f, &c, Some(&spki)).await;
+
+    // Listing needs no step-up; creating a forward does.
+    let (s, v) = c.get("/v1/forwards/ports").await;
+    assert_eq!(s, 200, "{v}");
+    assert!(v["ports"].is_array());
+    let (s, v) = c.post("/v1/forwards", json!({ "port": port })).await;
+    assert_eq!(s, 403, "{v}");
+    assert_eq!(v["error"]["details"]["scope"], "port_forward");
+    grant(&c, &device_id, &kp, "port_forward").await;
+    let (s, v) = c.post("/v1/forwards", json!({ "port": 0 })).await;
+    assert_eq!(s, 400, "{v}");
+    let (s, v) = c
+        .post("/v1/forwards", json!({ "port": port, "ttlMinutes": 30 }))
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["listening"], true);
+    let lease = v["id"].as_str().unwrap().to_string();
+
+    // Another paired phone cannot use this lease.
+    let other = Client::new(&f);
+    pair(&f, &other, None).await;
+    let err = tokio_tungstenite::client_async(
+        format!("wss://switchtether.local/v1/forwards/{lease}/tunnel"),
+        other.tls().await.unwrap(),
+    )
+    .await
+    .expect_err("foreign lease");
+    match err {
+        tokio_tungstenite::tungstenite::Error::Http(r) => assert_eq!(r.status(), 404),
+        e => panic!("unexpected {e}"),
+    }
+
+    let tls = c.tls().await.unwrap();
+    let (mut ws, _) = tokio_tungstenite::client_async(
+        format!("wss://switchtether.local/v1/forwards/{lease}/tunnel"),
+        tls,
+    )
+    .await
+    .unwrap();
+    // Two requests on two streams, sent before OPENED (as the phone does).
+    for (id, path) in [(1u32, "/one"), (3u32, "/two")] {
+        ws.send(Message::Binary(encode(FrameType::Open, id, &[])))
+            .await
+            .unwrap();
+        ws.send(Message::Binary(encode(
+            FrameType::Data,
+            id,
+            format!("GET {path} HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n").as_bytes(),
+        )))
+        .await
+        .unwrap();
+    }
+    let mut bodies: std::collections::HashMap<u32, Vec<u8>> = Default::default();
+    let mut fins = 0;
+    while fins < 2 {
+        let m = tokio::time::timeout(Duration::from_secs(10), ws.next())
+            .await
+            .expect("frame in time")
+            .unwrap()
+            .unwrap();
+        let Message::Binary(b) = m else { continue };
+        let (k, id, p) = decode(&b).unwrap();
+        match k {
+            FrameType::Data => bodies.entry(id).or_default().extend_from_slice(p),
+            FrameType::Fin => fins += 1,
+            FrameType::Reset => panic!("reset {}", String::from_utf8_lossy(p)),
+            _ => {}
+        }
+    }
+    assert!(String::from_utf8_lossy(&bodies[&1]).ends_with("hello from GET /one HTTP/1.1"));
+    assert!(String::from_utf8_lossy(&bodies[&3]).ends_with("hello from GET /two HTTP/1.1"));
+
+    let (s, v) = c.get("/v1/forwards").await;
+    assert_eq!(s, 200);
+    assert_eq!(v["forwards"][0]["port"], port);
+    assert_eq!(v["forwards"][0]["connected"], true);
+    assert_eq!(v["forwards"][0]["totalStreams"], 2);
+
+    // Stopping the forward closes its tunnel with 4410; the lease is gone.
+    let (s, _, _) = c
+        .req("DELETE", &format!("/v1/forwards/{lease}"), None)
+        .await
+        .unwrap();
+    assert_eq!(s, 200);
+    let mut code = None;
+    while let Ok(Some(Ok(m))) = tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
+        if let Message::Close(Some(cf)) = m {
+            code = Some(u16::from(cf.code));
+            break;
+        }
+    }
+    assert_eq!(code, Some(4410));
+    let (s, v) = c.get("/v1/forwards").await;
+    assert_eq!(s, 200);
+    assert_eq!(v["forwards"].as_array().unwrap().len(), 0);
+    f.handle.shutdown().await;
+}

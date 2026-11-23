@@ -271,8 +271,14 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: Term
                 )
                 if (state.screen.exited) {
                     Text(stringResource(R.string.term_exited, state.screen.flags.exitCode?.toString() ?: "?"), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                } else if (state.link == TermLink.CLOSED) {
-                    TextButton(text = stringResource(R.string.term_reconnect), onClick = { vm.connect() }, modifier = Modifier.padding(horizontal = 8.dp))
+                } else if (state.link == TermLink.CLOSED || state.link == TermLink.IDLE) {
+                    // Keys cannot reach the computer now: say so next to the keys, with the way back.
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.term_disconnected), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.weight(1f))
+                        TextButton(text = stringResource(R.string.term_reconnect), onClick = { vm.connect() })
+                    }
+                } else if (state.link == TermLink.CONNECTING) {
+                    Text(stringResource(R.string.term_connecting), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 }
                 val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
                 ExtraKeys(state, vm, imeVisible = imeVisible, onKeyboard = {

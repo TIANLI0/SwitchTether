@@ -12,6 +12,7 @@ import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.tianli0.switchtether.ui.common.GroupCard
 import io.github.tianli0.switchtether.ui.common.pageListPadding
 import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,7 +80,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
         // Only problems are shown (connecting / offline / revoked / incompatible), as a thin strip.
         io.github.tianli0.switchtether.ui.common.ConnectionBanner(state.connection, onRetry)
         io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh, topAppBarScrollBehavior = null) {
-        LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
+        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
             when (val s = state.sessions) {
                 Loadable.Loading -> item(key = "loading") { CompactNote(stringResource(R.string.state_loading)) }
                 is Loadable.Failed -> item(key = "error") {

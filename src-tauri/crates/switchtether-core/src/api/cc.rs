@@ -252,11 +252,29 @@ usage_route!(usage_providers, usage_providers);
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LogParams {
-    #[serde(flatten)]
-    usage: UsageParams,
+    // No `#[serde(flatten)]` here: with a flattened struct serde_urlencoded hands every value over
+    // as a string, so `page=0` failed to parse as a number and every request answered 400
+    // ("请求日志加载失败" on the phone).
+    from: Option<i64>,
+    to: Option<i64>,
+    app: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
     status: Option<u16>,
     page: Option<u32>,
     page_size: Option<u32>,
+}
+
+impl LogParams {
+    fn usage(&self) -> UsageQuery {
+        UsageQuery {
+            from: self.from,
+            to: self.to,
+            app: self.app.clone(),
+            provider: self.provider.clone(),
+            model: self.model.clone(),
+        }
+    }
 }
 
 /// `GET /v1/usage/logs?from&to&app&provider&model&status&page&pageSize`
@@ -268,7 +286,7 @@ async fn usage_logs(
 ) -> ApiResult<Json<Value>> {
     let page_size = p.page_size.unwrap_or(20).clamp(1, 100);
     ctx.backend
-        .usage_logs(p.usage.into(), p.status, p.page.unwrap_or(0), page_size)
+        .usage_logs(p.usage(), p.status, p.page.unwrap_or(0), page_size)
         .await
         .map(|mut v| {
             crate::redact::redact_json(&mut v);
@@ -509,4 +527,24 @@ async fn health(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> ApiResult
         "backend": redacted(backend),
         "agents": ctx.agents.health().await,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::Query;
+    use axum::http::Uri;
+
+    #[test]
+    fn request_log_query_parses_numbers() {
+        let uri: Uri = "/v1/usage/logs?from=1700000000&to=1700086400&app=claude&page=0&pageSize=20"
+            .parse()
+            .unwrap();
+        let Query(p) = Query::<LogParams>::try_from_uri(&uri).expect("query parses");
+        assert_eq!(p.page, Some(0));
+        assert_eq!(p.page_size, Some(20));
+        let q = p.usage();
+        assert_eq!(q.from, Some(1_700_000_000));
+        assert_eq!(q.app.as_deref(), Some("claude"));
+    }
 }

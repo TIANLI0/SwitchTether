@@ -42,6 +42,12 @@ data class RenderContext(
     val subagentPreview: (agentId: String) -> SubagentPreview? = { null },
     /** Asks for (or refreshes) [subagentPreview]; throttled by the owner. */
     val onWantSubagentPreview: (agentId: String) -> Unit = {},
+    /** Claude Code session tools: move a running foreground Bash / Agent call to the background (null = not offered). */
+    val onRunInBackground: ((toolUseId: String) -> Unit)? = null,
+    /** Whether a run-in-background request for that tool use id is in flight. */
+    val isBackgrounding: (toolUseId: String) -> Boolean = { false },
+    /** Claude Code session tools: "rewind files to before this message" for a user message id (null = not offered). */
+    val onRewindFiles: ((userMessageId: String) -> Unit)? = null,
 )
 
 typealias EventRenderer = @Composable (item: RenderItem, ctx: RenderContext) -> Unit

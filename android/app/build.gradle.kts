@@ -9,7 +9,7 @@ plugins {
 android {
     namespace = "io.github.tianli0.switchtether"
     compileSdk {
-        version = release(37) { minorApiLevel = 0 }
+        version = release(37) { minorApiLevel = 2 }
     }
     buildToolsVersion = "37.0.0"
 
@@ -18,8 +18,8 @@ android {
         minSdk = 29
         // Android 17. Local network access needs ACCESS_LOCAL_NETWORK (requested at runtime).
         targetSdk = 37
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 11
+        versionName = "0.1.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 64-bit ARM (ARMv8) devices only; smaller APK.
         ndk { abiFilters += "arm64-v8a" }
@@ -125,6 +125,12 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.zxing.core)
+    // File viewer: zoomable / tiled images, rendered Markdown, syntax highlighting (all Apache-2.0).
+    implementation(libs.telephoto.zoomable)
+    implementation(libs.telephoto.sub.sampling.image)
+    implementation(libs.markdown.renderer)
+    implementation(libs.markdown.renderer.code)
+    implementation(libs.highlights)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
 

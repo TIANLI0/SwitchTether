@@ -3,8 +3,12 @@ package io.github.tianli0.switchtether.remote.notify
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
 import io.github.tianli0.switchtether.remote.protocol.EventKinds
 import io.github.tianli0.switchtether.remote.protocol.SessionSummary
+import io.github.tianli0.switchtether.remote.protocol.ControlLevel
+import io.github.tianli0.switchtether.remote.protocol.arr
 import io.github.tianli0.switchtether.remote.protocol.bool
+import io.github.tianli0.switchtether.remote.protocol.obj
 import io.github.tianli0.switchtether.remote.protocol.str
+import kotlinx.serialization.json.JsonObject
 
 /** Notification categories; each maps to one Android channel and one Settings toggle. */
 enum class NotifyType(val defaultOn: Boolean) {
@@ -67,7 +71,37 @@ data class NotifyIntent(
     val silent: Boolean,
     /** For [NotifyType.TERMINAL_EXITED]: the terminal to open on tap. */
     val terminalId: String? = null,
+    /** An approval request: the notification offers allow / deny (phone unlocked). */
+    val requestId: String? = null,
+    /** A single question that can be answered from the notification. */
+    val prompt: QuestionPrompt? = null,
+    /** The phone controls this live session: the notification offers an inline reply. */
+    val replyable: Boolean = false,
+    /** The same "needs you" moment was already announced: update the notification without a second alert. */
+    val alertOnce: Boolean = false,
+    /**
+     * When the reported moment happened on the computer (event `ts` / summary `lastActiveAtMs`, epoch
+     * ms); null = now. Becomes the notification's `when`, so the shade orders by when things happened,
+     * not by when the phone got to post them.
+     */
+    val atMs: Long? = null,
 )
+
+/**
+ * A question answerable inline: one question, single choice, not secret. [labels] are offered as
+ * choices; [values] are what is sent for them (`value` when the option has one, else the label).
+ * [freeText]: other answers may be typed.
+ */
+data class QuestionPrompt(
+    val requestId: String,
+    val key: String,
+    val labels: List<String>,
+    val values: List<String>,
+    val freeText: Boolean,
+) {
+    /** What to send for a typed or chosen reply: a chosen label maps to its value. */
+    fun valueFor(reply: String): String = labels.indexOf(reply).takeIf { it >= 0 }?.let { values[it] } ?: reply
+}
 
 /** Notification wording, kept out of the rules so the app can localize it. */
 interface NotifyText {
@@ -158,7 +192,54 @@ class NotificationEngine(
     /** Session ids whose current turn is open (started and not yet closed by an outcome). */
     private val openTurn = HashSet<String>()
     private val localActions = HashMap<String, Pair<LocalAction, Long>>()
+
+    /**
+     * Sessions whose last turn has been closed and no new one started (no new prompt, `running` or
+     * busy since), with the outcome notification produced for it (null: none, e.g. type disabled).
+     * A tool call or reply that arrives now is the tail of that turn (observed sessions take their
+     * status from the registry and their steps from the transcript, which can lag behind) and must not
+     * replace "finished" in the session's status slot.
+     */
+    private val settled = HashMap<String, NotifyIntent?>()
+
+    private fun settle(sid: String, outcome: NotifyIntent?): NotifyIntent? {
+        settled[sid] = outcome
+        return outcome
+    }
     private val terminalTitles = HashMap<String, String>()
+
+    /**
+     * Per session, how the current "needs you" moment was announced: `true` by the request event
+     * (with what is asked), `false` by the generic status change. Both describe the same wait, so
+     * only the first alerts; a later request event still replaces the generic text silently.
+     */
+    private val attentionBy = HashMap<String, Boolean>()
+
+    private inline fun attention(sid: String, make: () -> NotifyIntent?): NotifyIntent? {
+        val n = make() ?: return null
+        val genericShown = attentionBy[sid] == false
+        attentionBy[sid] = true
+        return if (genericShown) n.copy(alertOnce = true) else n
+    }
+
+    /** A message can be sent to the session from the phone (managed / attached, still running). */
+    private fun canReply(s: SessionSummary?): Boolean = s != null && s.isLive && s.controlLevel == ControlLevel.FULL
+
+    private fun questions(e: AgentEvent): List<JsonObject> = e.data["questions"].arr().orEmpty().mapNotNull { it.obj() }
+
+    /** The question(s) as asked, for the notification body. */
+    private fun questionText(e: AgentEvent): String =
+        questions(e).mapNotNull { it.str("question", "header") }.joinToString("  ·  ").ifBlank { e.data.str("question", "text").orEmpty() }.take(300)
+
+    /** One single-choice, non-secret question: answerable inline (choices and, if allowed, free text). */
+    private fun questionPrompt(e: AgentEvent): QuestionPrompt? {
+        val requestId = e.data.str("requestId") ?: return null
+        val q = questions(e).singleOrNull() ?: return null
+        if (q.bool("multiSelect") == true || q.bool("isSecret") == true) return null
+        val options = q["options"].arr().orEmpty().mapNotNull { it.obj() }.mapNotNull { o -> o.str("label")?.let { it to (o.str("value") ?: it) } }
+        val freeText = options.isEmpty() || q.bool("allowOther") == true
+        return QuestionPrompt(requestId, q.str("id") ?: q.str("question") ?: "", options.map { it.first }, options.map { it.second }, freeText)
+    }
 
     /** The phone just did [action] on [target] (session or terminal id): don't notify the echo. */
     fun noteLocalAction(target: String, action: LocalAction) {
@@ -171,6 +252,7 @@ class NotificationEngine(
     }
 
     private fun startTurn(sid: String) {
+        settled.remove(sid)
         if (openTurn.add(sid)) turn[sid] = (turn[sid] ?: 0) + 1
     }
 
@@ -184,15 +266,29 @@ class NotificationEngine(
         if (at != null && at < startedAtMs) return null
         val sid = e.sessionId
         val name = sessionName(session, sid)
+        return eventIntent(e, sid, session, name)?.let { if (it.atMs == null && at != null) it.copy(atMs = at) else it }
+    }
+
+    private fun eventIntent(e: AgentEvent, sid: String, session: SessionSummary?, name: String): NotifyIntent? {
         return when (e.kind) {
-            EventKinds.APPROVAL_REQUEST -> if (e.data.bool("resolved") == true) null else build(
-                NotifyType.WAITING_APPROVAL, "approval:${e.data.str("requestId") ?: e.id}", session, sid,
-                t.needsApproval(name), e.data.str("title") ?: t.approvalRequested(),
-            )
-            EventKinds.QUESTION -> if (e.data.bool("resolved") == true) null else build(
-                NotifyType.WAITING_INPUT, "question:${e.data.str("requestId") ?: e.id}", session, sid,
-                t.asksQuestion(name), t.answerHint(),
-            )
+            // A new prompt: what follows belongs to the next turn.
+            EventKinds.USER_MESSAGE -> {
+                if (e.parentId == null) settled.remove(sid)
+                null
+            }
+            EventKinds.APPROVAL_REQUEST -> if (e.data.bool("resolved") == true) null else attention(sid) {
+                build(
+                    NotifyType.WAITING_APPROVAL, "approval:${e.data.str("requestId") ?: e.id}", session, sid,
+                    t.needsApproval(name), e.data.str("title") ?: t.approvalRequested(),
+                )?.copy(requestId = e.data.str("requestId"))
+            }
+            EventKinds.QUESTION -> if (e.data.bool("resolved") == true) null else attention(sid) {
+                // The question itself, not "answer in the app": often it can be answered right here.
+                build(
+                    NotifyType.WAITING_INPUT, "question:${e.data.str("requestId") ?: e.id}", session, sid,
+                    t.asksQuestion(name), questionText(e).ifBlank { t.answerHint() },
+                )?.copy(prompt = questionPrompt(e))
+            }
             EventKinds.STATUS -> {
                 val state = e.data.str("state") ?: return null
                 val prev = lastStatus.put("evt:$sid", state)
@@ -204,43 +300,64 @@ class NotificationEngine(
                         if (fresh) build(NotifyType.TASK_STARTED, "start:$sid:${turn[sid]}", session, sid, t.started(name), "") else null
                     }
                     "completed", "idle" -> closeTurn(sid)?.let { n ->
-                        build(NotifyType.TASK_COMPLETED, "done:$sid:$n", session, sid, t.finished(name), e.data.str("detail").orEmpty())
+                        settle(sid, build(NotifyType.TASK_COMPLETED, "done:$sid:$n", session, sid, t.finished(name), e.data.str("detail").orEmpty())
+                            ?.copy(replyable = canReply(session), atMs = eventMs(e)))
                     }
-                    "error" -> failTurn(sid, session, name, e.data.str("detail").orEmpty())
-                    "interrupted" -> interruptTurn(sid, session, name, t.interrupted(name), e.data.str("detail").orEmpty())
+                    "error" -> failTurn(sid, session, name, e.data.str("detail").orEmpty(), eventMs(e))
+                    "interrupted" -> interruptTurn(sid, session, name, t.interrupted(name), e.data.str("detail").orEmpty(), eventMs(e))
                     "waiting_input" -> build(NotifyType.WAITING_INPUT, "wait-input:$sid:${turn[sid] ?: 0}", session, sid, t.waitingInput(name), "")
+                        ?.copy(replyable = canReply(session))
                     // waiting_approval is announced by the approval_request event (with its title).
                     else -> null
                 }
             }
-            EventKinds.ERROR -> failTurn(sid, session, name, e.data.str("message", "text").orEmpty().take(140))
+            EventKinds.ERROR -> failTurn(sid, session, name, e.data.str("message", "text").orEmpty().take(140), eventMs(e))
             EventKinds.SYSTEM -> if (e.data.str("subtype") == "turn_stopped") {
-                interruptTurn(sid, session, name, t.stopped(name), "")
+                interruptTurn(sid, session, name, t.stopped(name), "", eventMs(e))
             } else {
                 null
             }
-            EventKinds.TOOL_CALL -> if (e.data.str("status") == "running") build(
+            EventKinds.TOOL_CALL -> if (e.data.str("status") == "running" && sid !in settled) build(
                 NotifyType.TOOL_CALL, "tool:${e.id}", session, sid, t.toolCall(name, e.data.str("name")), e.data.str("title") ?: "",
             ) else null
-            EventKinds.ASSISTANT_MESSAGE -> if (!e.streaming) build(
+            EventKinds.ASSISTANT_MESSAGE -> if (e.streaming) null else if (sid in settled) lateReply(e, sid, session, name) else build(
                 NotifyType.AGENT_REPLY, "reply:${e.id}", session, sid, t.replied(name), (e.data.str("text") ?: "").take(140),
-            ) else null
+            )
             else -> null
         }
     }
 
-    private fun failTurn(sid: String, s: SessionSummary?, name: String, detail: String): NotifyIntent? {
+    /**
+     * The final reply of a turn that has already been reported finished (its transcript line arrived
+     * after the status). It must not replace "finished" with "replied": with replies switched on, the
+     * finished notification is updated quietly with the reply text instead; otherwise nothing.
+     */
+    private fun lateReply(e: AgentEvent, sid: String, session: SessionSummary?, name: String): NotifyIntent? {
+        val outcome = settled[sid]
+        val text = (e.data.str("text") ?: "").take(140)
+        // No outcome notification is showing: an ordinary reply notification does not hide anything.
+        if (outcome == null) return build(NotifyType.AGENT_REPLY, "reply:${e.id}", session, sid, t.replied(name), text)
+        if (NotifyType.AGENT_REPLY !in prefs().enabled || text.isBlank()) return null
+        if (outcome.type != NotifyType.TASK_COMPLETED || !seen.add("late-reply:${e.id}")) return null
+        return outcome.copy(key = "late-reply:${e.id}", body = text, alertOnce = true).also { settled[sid] = it }
+    }
+
+    private fun failTurn(sid: String, s: SessionSummary?, name: String, detail: String, atMs: Long? = null): NotifyIntent? {
         // `status: error`, `error` events and `session.upserted status=error` describe the same failed
         // turn: the key is the turn number, so only the first source notifies.
         val n = closeTurn(sid) ?: (turn[sid] ?: 0)
-        return build(NotifyType.TASK_FAILED, "fail:$sid:$n", s, sid, t.failed(name), detail)
+        val key = "fail:$sid:$n"
+        if (key in seen) return null
+        return settle(sid, build(NotifyType.TASK_FAILED, key, s, sid, t.failed(name), detail)?.copy(atMs = atMs))
     }
 
-    private fun interruptTurn(sid: String, s: SessionSummary?, name: String, title: String, detail: String): NotifyIntent? {
+    private fun interruptTurn(sid: String, s: SessionSummary?, name: String, title: String, detail: String, atMs: Long? = null): NotifyIntent? {
         val n = closeTurn(sid) ?: return null
-        if (recentLocal(sid, LocalAction.INTERRUPT, LocalAction.STOP)) return null
-        return build(NotifyType.SESSION_INTERRUPTED, "interrupt:$sid:$n", s, sid, title, detail)
+        if (recentLocal(sid, LocalAction.INTERRUPT, LocalAction.STOP)) return settle(sid, null)
+        return settle(sid, build(NotifyType.SESSION_INTERRUPTED, "interrupt:$sid:$n", s, sid, title, detail)?.copy(atMs = atMs))
     }
+
+    private fun eventMs(e: AgentEvent): Long? = runCatching { java.time.Instant.parse(e.ts).toEpochMilli() }.getOrNull()
 
     /** `session.upserted`: status/waitingFor/liveness transitions (also pushed for external sessions). */
     fun onSessionUpsert(s: SessionSummary): NotifyIntent? {
@@ -252,32 +369,41 @@ class NotificationEngine(
         if (s.liveness == "ended" && wasLive != true) return null
         // Process gone while the session was working or waiting: report it (unless the phone stopped it).
         if (wasLive == true && !s.isLive) {
+            settled.remove(s.id)
             val n = closeTurn(s.id)
             val prevStatus = prev?.substringBefore('|')
             if ((n != null || prevStatus == "busy" || prevStatus == "waiting") && !recentLocal(s.id, LocalAction.STOP, LocalAction.INTERRUPT)) {
-                return build(NotifyType.SESSION_EXITED, "exit:${s.id}:${n ?: turn[s.id] ?: 0}", s, s.id, t.exited(name), "")
+                return build(NotifyType.SESSION_EXITED, "exit:${s.id}:${n ?: turn[s.id] ?: 0}", s, s.id, t.exited(name), "")?.copy(atMs = s.lastActiveAtMs)
             }
             return null
         }
+        val waiting = s.status == "waiting" || s.waitingFor != null
+        // The "needs you" moment is over: the next one is announced afresh.
+        if (!waiting) attentionBy.remove(s.id)
         if (prev == sig) return null
         val prevStatus = prev?.substringBefore('|')
         return when {
-            s.status == "waiting" || s.waitingFor != null -> {
+            waiting -> {
+                // The request event (with what is asked) already announced this wait: no second alert.
+                if (attentionBy.containsKey(s.id)) return null
                 val approval = isApprovalWait(s.waitingFor)
                 build(
                     if (approval) NotifyType.WAITING_APPROVAL else NotifyType.WAITING_INPUT,
                     "wait:${s.id}:$sig:${turn[s.id] ?: 0}", s, s.id,
                     if (approval) t.needsApproval(name) else t.waitingForYou(name),
                     if (approval) t.approvalRequested() else "",
-                )
+                )?.copy(atMs = s.lastActiveAtMs)?.let { n ->
+                    attentionBy[s.id] = false
+                    if (approval) n else n.copy(replyable = canReply(s))
+                }
             }
             s.status == "busy" -> {
                 startTurn(s.id)
                 null
             }
-            s.status == "error" && prev != null -> failTurn(s.id, s, name, "")
+            s.status == "error" && prev != null -> failTurn(s.id, s, name, "", s.lastActiveAtMs)
             (s.status == "idle" || s.status == "completed") && (prevStatus == "busy" || prevStatus == "waiting" || s.id in openTurn) ->
-                closeTurn(s.id)?.let { n -> build(NotifyType.TASK_COMPLETED, "done:${s.id}:$n", s, s.id, t.finished(name), "") }
+                closeTurn(s.id)?.let { n -> settle(s.id, build(NotifyType.TASK_COMPLETED, "done:${s.id}:$n", s, s.id, t.finished(name), "")?.copy(replyable = canReply(s), atMs = s.lastActiveAtMs)) }
             else -> null
         }
     }

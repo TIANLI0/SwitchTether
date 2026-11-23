@@ -50,12 +50,15 @@ class Notifier(
     private val conn: ConnectionController,
     private val prefs: StateFlow<NotifyPrefs>,
     private val isForeground: () -> Boolean,
-    /** Pinned sessions are followed by their Live Update; their waits and outcomes are not notified twice. */
-    private val isPinned: (String) -> Boolean = { false },
+    /** A Live Update card shows this session; its waits and outcomes are not notified twice. */
+    private val coveredByLiveUpdate: (String) -> Boolean = { false },
 ) {
     private val engine = NotificationEngine({ prefs.value }, { LocalTime.now().let { it.hour * 60 + it.minute } }, t = ResourceNotifyText(context))
     private val sessions = ConcurrentHashMap<String, SessionSummary>()
     private val nm = NotificationManagerCompat.from(context)
+
+    /** `when` of each posted notification id, kept when the same moment is updated in place. */
+    private val postedWhen = ConcurrentHashMap<Int, Long>()
 
     private val _activeSessions = kotlinx.coroutines.flow.MutableStateFlow(0)
 
@@ -94,16 +97,33 @@ class Notifier(
             }
         }
         scope.launch {
-            var wasOnline: String? = null
+            // One connection notification, replaced in place: "lost" only after the computer has been
+            // unreachable for a while (short Wi-Fi hiccups heal on their own), and once it is back
+            // the same notification says so quietly and goes away.
+            var wasOnline = false
+            var lostShown = false
+            var pendingLost: kotlinx.coroutines.Job? = null
+            var droppedAt = 0L
             conn.state.collect { s ->
                 when (s) {
                     is ConnectionState.Online -> {
-                        if (wasOnline == "lost") engine.connection(false, s.desktop.name)?.let(::post)
-                        wasOnline = "online"
+                        pendingLost?.cancel()
+                        pendingLost = null
+                        if (lostShown) {
+                            lostShown = false
+                            engine.connection(false, s.desktop.name)?.let { post(it.copy(silent = true), timeoutMs = RECONNECTED_VISIBLE_MS) }
+                        }
+                        wasOnline = true
                     }
-                    is ConnectionState.Offline -> if (wasOnline == "online") {
-                        engine.connection(true, s.desktop.name)?.let(::post)
-                        wasOnline = "lost"
+                    is ConnectionState.Offline -> if (wasOnline && !lostShown && pendingLost == null) {
+                        val name = s.desktop.name
+                        droppedAt = System.currentTimeMillis()
+                        pendingLost = scope.launch {
+                            delay(CONNECTION_LOST_GRACE_MS)
+                            // Dated when the connection dropped, not 30 s later.
+                            engine.connection(true, name)?.let { post(it.copy(atMs = droppedAt)); lostShown = true }
+                            pendingLost = null
+                        }
                     }
                     else -> Unit
                 }
@@ -125,11 +145,16 @@ class Notifier(
     /** The phone itself interrupted/stopped a session or killed a terminal: don't notify the echo. */
     fun noteLocalAction(target: String, action: LocalAction) = engine.noteLocalAction(target, action)
 
-    private fun notificationId(sessionId: String?, slot: NotifySlot, key: String): Int =
-        if (sessionId != null && slot != NotifySlot.OTHER) "$sessionId:$slot".hashCode() else key.hashCode()
+    private fun notificationId(type: NotifyType, sessionId: String?, slot: NotifySlot, key: String): Int = when {
+        type == NotifyType.CONNECTION -> CONNECTION_NOTIFICATION_ID
+        sessionId != null && slot != NotifySlot.OTHER -> "$sessionId:$slot".hashCode()
+        else -> key.hashCode()
+    }
 
     private fun cancel(sessionId: String, slot: NotifySlot) {
-        runCatching { nm.cancel(notificationId(sessionId, slot, "")) }
+        val id = "$sessionId:$slot".hashCode()
+        postedWhen.remove(id)
+        runCatching { nm.cancel(id) }
     }
 
     private fun createChannels() {
@@ -149,10 +174,12 @@ class Notifier(
         mgr.createNotificationChannel(NotificationChannel(SERVICE_CHANNEL, context.getString(R.string.notif_ch_service), NotificationManager.IMPORTANCE_MIN))
     }
 
-    private fun post(n: NotifyIntent) {
+    private fun post(n: NotifyIntent) = post(n, timeoutMs = null)
+
+    private fun post(n: NotifyIntent, timeoutMs: Long?) {
         if (isForeground()) return
         val sid = n.sessionId
-        if (sid != null && isPinned(sid) && n.type in COVERED_BY_LIVE_UPDATE) return
+        if (sid != null && coveredByLiveUpdate(sid) && n.type in COVERED_BY_LIVE_UPDATE) return
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -171,7 +198,13 @@ class Notifier(
             .setContentTitle(context.getString(R.string.app_name))
             .setContentText(n.publicBody)
             .build()
-        val notif = NotificationCompat.Builder(context, channelId(n.type))
+        val id = notificationId(n.type, n.sessionId, n.type.slot, n.key)
+        val whenMs = whenFor(id, n, System.currentTimeMillis())
+        val b = NotificationCompat.Builder(context, channelId(n.type))
+            // Ordered by when it happened: an update of the same moment keeps its place, and an event
+            // posted late (lookup, reconnect replay) does not jump above newer ones.
+            .setWhen(whenMs)
+            .setShowWhen(true)
             .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentTitle(n.title)
             .setContentText(n.body.ifBlank { null })
@@ -180,15 +213,49 @@ class Notifier(
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(public)
             .setSilent(n.silent)
+            // The same wait announced again with more detail: update in place, no second sound.
+            .setOnlyAlertOnce(n.alertOnce)
             .setCategory(if (n.type == NotifyType.WAITING_APPROVAL || n.type == NotifyType.WAITING_INPUT) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
             // One "needs you" and one "status" notification per session, grouped by session.
             .setGroup(n.sessionId ?: "switchtether")
-            .build()
-        runCatching { nm.notify(notificationId(n.sessionId, n.type.slot, n.key), notif) }
+        // Long questions / commands are readable when expanded.
+        if (n.body.length > 40) b.setStyle(NotificationCompat.BigTextStyle().bigText(n.body))
+        timeoutMs?.let(b::setTimeoutAfter)
+        // Act without opening the app (each button needs the phone unlocked).
+        if (sid != null) {
+            val requestId = n.requestId
+            val prompt = n.prompt
+            when {
+                n.type == NotifyType.WAITING_APPROVAL && requestId != null -> {
+                    b.addAction(NotifyActionReceiver.decisionAction(context, allow = true, sid, requestId, id))
+                    b.addAction(NotifyActionReceiver.decisionAction(context, allow = false, sid, requestId, id))
+                }
+                prompt != null -> b.addAction(NotifyActionReceiver.answerAction(context, sid, prompt, id))
+                n.replyable && n.type != NotifyType.WAITING_APPROVAL -> b.addAction(NotifyActionReceiver.replyAction(context, sid, id))
+            }
+        }
+        runCatching { nm.notify(id, b.build()) }
+    }
+
+    private fun whenFor(id: Int, n: NotifyIntent, now: Long): Long {
+        val w = notificationWhen(n, now, postedWhen[id])
+        postedWhen[id] = w
+        return w
     }
 
     companion object {
+        /**
+         * The `when` of a notification: when the moment happened on the computer (never in the
+         * future, so a computer clock running ahead does not pin it to the top); an in-place update
+         * of the same moment ([NotifyIntent.alertOnce]) keeps the time already shown ([previous]).
+         */
+        internal fun notificationWhen(n: NotifyIntent, now: Long, previous: Long?): Long =
+            if (n.alertOnce && previous != null) previous else minOf(n.atMs ?: now, now)
+
         const val SERVICE_CHANNEL = "service"
+        private const val CONNECTION_NOTIFICATION_ID = 0x5357_0C0A
+        private const val CONNECTION_LOST_GRACE_MS = 30_000L
+        private const val RECONNECTED_VISIBLE_MS = 8_000L
 
         private val COVERED_BY_LIVE_UPDATE = setOf(
             NotifyType.WAITING_APPROVAL, NotifyType.WAITING_INPUT, NotifyType.TASK_STARTED, NotifyType.TASK_COMPLETED,

@@ -35,7 +35,12 @@ const { listeners, api, toastError } = vi.hoisted(() => {
       enabled: false,
       foreignValue: "C:\other\codex.exe",
     },
-    cli: { available: true, enabled: false, binDir: "C:\bin", pathAdded: false },
+    cli: {
+      available: true,
+      enabled: false,
+      binDir: "C:\bin",
+      pathAdded: false,
+    },
   };
   const api = {
     status: vi.fn(async () => status),
@@ -94,6 +99,21 @@ const { listeners, api, toastError } = vi.hoisted(() => {
     forgetDevice: vi.fn(async () => true),
     renameDevice: vi.fn(async () => {}),
     killTerminal: vi.fn(async () => true),
+    listForwards: vi.fn(async () => [
+      {
+        id: "f1",
+        deviceId: "d1",
+        port: 5173,
+        createdAtMs: 1,
+        expiresAtMs: 2,
+        connected: true,
+        activeStreams: 2,
+        totalStreams: 9,
+        bytesDown: 1,
+        bytesUp: 1,
+      },
+    ]),
+    stopForward: vi.fn(async () => true),
     takeoverStatus: vi.fn(async () => takeover),
     setTakeover: vi.fn(async (hook: string, enabled: boolean) => ({
       report: [{ editor: "Code", result: enabled ? "enabled" : "disabled" }],
@@ -207,13 +227,22 @@ describe("RemoteSection", () => {
     await waitFor(() => expect(api.killTerminal).toHaveBeenCalledWith("t1"));
   });
 
+  it("lists a phone's port forward and stops it", async () => {
+    render(<RemoteSection />);
+    await screen.findByText('remote.forwards.port:{"port":5173}');
+    fireEvent.click(screen.getByText("remote.forwards.stop"));
+    await waitFor(() => expect(api.stopForward).toHaveBeenCalledWith("f1"));
+  });
+
   it("turns the VS Code takeover hook on and never overrides a foreign CODEX_CLI_PATH", async () => {
     render(<RemoteSection />);
     const vscode = await screen.findByRole("switch", {
       name: "remote.takeover.vscode.label",
     });
     expect(
-      screen.getByRole("switch", { name: "remote.takeover.codex_desktop.label" }),
+      screen.getByRole("switch", {
+        name: "remote.takeover.codex_desktop.label",
+      }),
     ).toBeDisabled();
     expect(
       screen.getByText(/remote.takeover.codex_desktop.foreign/),

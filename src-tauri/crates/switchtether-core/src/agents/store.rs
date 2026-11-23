@@ -43,6 +43,15 @@ impl SessionLog {
         }
     }
 
+    /// The session became known under its own conversation id (Codex thread, dsh session):
+    /// events carry the new id from now on, earlier ones are relabelled.
+    pub fn rekey(&mut self, session_id: &str) {
+        self.session_id = session_id.to_string();
+        for e in &mut self.events {
+            e.session_id = session_id.to_string();
+        }
+    }
+
     /// Remember that `text` was just sent with `client_id` (the command id).
     pub fn expect_user_message(&mut self, text: &str, client_id: &str) {
         self.expected

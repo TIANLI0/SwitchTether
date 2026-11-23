@@ -71,6 +71,9 @@ class TerminalViewModel(
     private val _state = MutableStateFlow(TerminalUiState(fontSp = initialFontSp.coerceIn(8, 22)))
     val state: StateFlow<TerminalUiState> = _state.asStateFlow()
     private var ws: WebSocket? = null
+
+    /** Keys typed while the stream is (re)connecting: sent once it opens, never silently dropped. */
+    private val pendingInput = StringBuilder()
     private var streamGen = 0
     private var resizeJob: Job? = null
     private var lastSize: Pair<Int, Int>? = null
@@ -154,6 +157,10 @@ class TerminalViewModel(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     if (gen == streamGen) _state.update { it.copy(link = TermLink.OPEN) }
                     lastSize?.let { (c, r) -> webSocket.send(resizeMsg(c, r)) }
+                    if (gen == streamGen) {
+                        val queued = synchronized(pendingInput) { pendingInput.toString().also { pendingInput.setLength(0) } }
+                        if (queued.isNotEmpty()) webSocket.send(inputMsg(queued))
+                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -190,6 +197,7 @@ class TerminalViewModel(
     }
 
     fun disconnect() {
+        synchronized(pendingInput) { pendingInput.setLength(0) }
         streamGen++
         ws?.close(1000, null)
         ws = null
@@ -230,9 +238,19 @@ class TerminalViewModel(
 
     private fun clearLatches() = _state.update { if (it.ctrl || it.alt) it.copy(ctrl = false, alt = false) else it }
 
+    private fun inputMsg(data: String) = buildJsonObject { put("type", "input"); put("data", data) }.toString()
+
     private fun send(data: String) {
-        if (data.isEmpty() || _state.value.link != TermLink.OPEN) return
-        ws?.send(buildJsonObject { put("type", "input"); put("data", data) }.toString())
+        if (data.isEmpty()) return
+        when (_state.value.link) {
+            TermLink.OPEN -> ws?.send(inputMsg(data))
+            // Typed before the stream opened: kept (bounded) and sent on open.
+            TermLink.CONNECTING -> synchronized(pendingInput) {
+                if (pendingInput.length + data.length <= MAX_PENDING_INPUT) pendingInput.append(data)
+            }
+            // Disconnected: the page shows a "not connected" strip with a reconnect button.
+            else -> Unit
+        }
     }
 
     /** Debounced resize from the measured cell grid. */
@@ -280,5 +298,9 @@ class TerminalViewModel(
     override fun onCleared() {
         streamGen++
         ws?.cancel()
+    }
+
+    private companion object {
+        const val MAX_PENDING_INPUT = 4096
     }
 }

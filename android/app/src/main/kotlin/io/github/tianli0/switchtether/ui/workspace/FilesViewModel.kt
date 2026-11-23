@@ -10,6 +10,8 @@ import io.github.tianli0.switchtether.files.DownloadRecord
 import io.github.tianli0.switchtether.files.FileKind
 import io.github.tianli0.switchtether.files.FileStore
 import io.github.tianli0.switchtether.files.FileTypes
+import io.github.tianli0.switchtether.files.SortKey
+import io.github.tianli0.switchtether.files.SortOrder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.tianli0.switchtether.connection.ConnectionController
@@ -99,6 +101,10 @@ data class FilesUiState(
     val confirmDiscard: Boolean = false,
     /** Pull-to-refresh of the current folder is running (the list stays visible). */
     val refreshing: Boolean = false,
+    /** Folder order (folders first, then by this key). */
+    val sort: SortOrder = SortOrder(),
+    /** A folder is being opened: the previous list stays on screen (with a progress bar) until it arrives. */
+    val navigatingTo: String? = null,
     // git
     val repo: String? = null,
     val git: Loadable<RepoStatus>? = null,
@@ -146,15 +152,30 @@ class FilesViewModel(
         }
     }
 
+    private var browseJob: Job? = null
+
     fun browse(path: String) {
         val api = api() ?: return
-        // Opening a folder always shows that folder: drop a file / viewer left open from before.
-        _state.update { it.copy(listing = Loadable.Loading, results = null, file = null, viewer = null, editing = false, conflict = null, confirmDiscard = false) }
-        viewModelScope.launch {
+        // Opening a folder always shows that folder: drop a file / viewer left open from before. The quick filter
+        // belongs to the folder it was typed in. The old list stays visible until the new one arrives (no flash).
+        browseJob?.cancel()
+        _state.update {
+            it.copy(
+                listing = if (it.listing is Loadable.Ready) it.listing else Loadable.Loading,
+                navigatingTo = path, query = "", results = null, file = null, viewer = null, editing = false, conflict = null, confirmDiscard = false,
+            )
+        }
+        browseJob = viewModelScope.launch {
             val r = loadable { api.fsList(path, _state.value.showHidden) }
-            _state.update { it.copy(listing = r) }
+            _state.update { it.copy(listing = r, navigatingTo = null) }
         }
     }
+
+    /** UI-only: list scroll position (first item, offset) per folder path, kept while the page lives. */
+    val scrollPositions: MutableMap<String, Pair<Int, Int>> = mutableMapOf()
+
+    /** Sorts the folder by [key]; choosing the current key again flips the direction. */
+    fun sortBy(key: SortKey) = _state.update { it.copy(sort = it.sort.toggled(key)) }
 
     fun toggleHidden() {
         _state.update { it.copy(showHidden = !it.showHidden) }
@@ -498,7 +519,11 @@ class FilesViewModel(
         }
     }
 
+    /** The diff / file-at-commit request on screen, so "retry" repeats it. */
+    private var lastGitDetail: (() -> Unit)? = null
+
     fun gitDiff(path: String, staged: Boolean = false) {
+        lastGitDetail = { gitDiff(path, staged) }
         val api = api() ?: return
         val repo = _state.value.repo ?: return
         _state.update { it.copy(gitDiff = path to Loadable.Loading) }
@@ -509,6 +534,7 @@ class FilesViewModel(
     }
 
     fun gitShow(rev: String, path: String) {
+        lastGitDetail = { gitShow(rev, path) }
         val api = api() ?: return
         val repo = _state.value.repo ?: return
         _state.update { it.copy(gitShow = "$rev:$path" to Loadable.Loading) }
@@ -518,5 +544,13 @@ class FilesViewModel(
         }
     }
 
-    fun closeGitDetail() = _state.update { it.copy(gitDiff = null, gitShow = null) }
+    /** Loads the diff / file on screen again (the error state's retry; it used to close the page). */
+    fun retryGitDetail() {
+        lastGitDetail?.invoke() ?: closeGitDetail()
+    }
+
+    fun closeGitDetail() {
+        lastGitDetail = null
+        _state.update { it.copy(gitDiff = null, gitShow = null) }
+    }
 }

@@ -19,6 +19,13 @@ data class OutgoingMessage(
     val error: String? = null,
     /** Names of the files sent with it (shown on the bubble until the desktop echoes it). */
     val attachmentNames: List<String> = emptyList(),
+    /**
+     * Claude Code's id for the message when it was queued behind a busy turn (`messageUuid` of the
+     * send response): while it is not echoed it can be withdrawn (`cancel_message`).
+     */
+    val messageUuid: String? = null,
+    /** A withdraw request is in flight. */
+    val withdrawing: Boolean = false,
 )
 
 const val MAX_ATTACHMENTS = 10
@@ -39,6 +46,8 @@ data class DraftAttachment(
     val ready: Boolean = false,
     val failure: AttachmentFailure? = null,
     val detail: String? = null,
+    /** The picked file on this phone (content URI), for the composer's photo preview. */
+    val localUri: String? = null,
 ) {
     val uploading: Boolean get() = !ready && failure == null
     val isImage: Boolean get() = mediaType?.startsWith("image/") == true
