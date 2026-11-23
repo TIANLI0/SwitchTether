@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.components.ExpandBody
 import io.github.tianli0.switchtether.ui.common.TextGutter
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.basic.SmallTitle
@@ -432,7 +433,7 @@ fun NewSessionContent(
                 modifier = Modifier.semantics { stateDescription = if (options) expanded else collapsed },
             )
         }
-        if (options) {
+        ExpandBody(options) {
             if (state.agent == "claude_code") {
                 SmallTitle(stringResource(R.string.tools_permission))
                 TabRowWithContour(

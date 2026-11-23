@@ -147,6 +147,23 @@ fun SheetButtons(
     )
 }
 
+/**
+ * A page shown in its own window over the current one (a file or picture opened from the chat).
+ * The window runs edge to edge like the activity's: [content] draws under the status and navigation
+ * bars and pads itself with the insets, the bars keep the page's icon colours, and there is no dim
+ * or window animation. A plain `Dialog` stopped at the bars and left a strip of its own colour there.
+ */
+@Composable
+fun FullScreenDialog(onDismissRequest: () -> Unit, content: @Composable () -> Unit) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        io.github.suqi8.coui.kmp.utils.RemovePlatformDialogDefaultEffects()
+        content()
+    }
+}
+
 /** Confirmation for every write (provider switch, toggles, approvals…). */
 @Composable
 fun ConfirmDialog(

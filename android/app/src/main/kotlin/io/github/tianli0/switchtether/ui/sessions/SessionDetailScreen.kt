@@ -1,5 +1,15 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.components.glassBottomEdge
+import io.github.tianli0.switchtether.ui.components.glassSurface
+import io.github.tianli0.switchtether.ui.components.LocalGlassBackdrop
+import io.github.suqi8.coui.kmp.blur.rememberLayerBackdrop
+import io.github.suqi8.coui.kmp.blur.layerBackdrop
+import io.github.suqi8.coui.kmp.blur.isRuntimeShaderSupported
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.CompositionLocalProvider
 import io.github.tianli0.switchtether.ui.common.TextGutter
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
 import io.github.tianli0.switchtether.ui.common.SheetButtons
@@ -404,11 +414,9 @@ fun SessionDetailScreen(
         ImageViewerDialog(preview = img, onLoadBytes = vm::loadImageBytes, onDismiss = { viewingImage = null })
     }
     viewingFile?.let { ref ->
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { viewingFile = null },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            Box(Modifier.fillMaxSize().background(COUITheme.colorScheme.background).statusBarsPadding()) {
+        io.github.tianli0.switchtether.ui.common.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
+            // The page colour runs under the status and gesture bars; the viewer sits between them.
+            Box(Modifier.fillMaxSize().background(pageContainerColor()).statusBarsPadding().navigationBarsPadding()) {
                 io.github.tianli0.switchtether.ui.files.RemoteFileViewer(ref, onBack = { viewingFile = null }, onManageDownloads = null)
             }
         }
@@ -481,7 +489,14 @@ fun SessionDetailContent(
             }
         },
         modifier = Modifier.imePadding(),
+        // The conversation starts at the top of the screen and scrolls under the title bar, whose own
+        // progressive blur is then the only fade up there (a second, page-coloured fade under the
+        // capsules used to sit on top of it).
+        immersive = true,
     ) {
+        val topInset = io.github.tianli0.switchtether.ui.common.LocalPageTopInset.current
+        // Notices that used to take rows above the list now float over its top, under the title bar.
+        val topNotices: @Composable () -> Unit = {
         ConnectionBanner(state.connection, onRetryConnection)
         val d = state.detail.valueOrNull
         if (d != null && state.online && !state.canSend) {
@@ -516,25 +531,58 @@ fun SessionDetailContent(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("pending-banner"),
             )
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (val ev = state.events) {
-                Loadable.Loading -> LoadingState(stringResource(R.string.state_loading))
-                is Loadable.Failed -> ErrorState(ev.error.title(), ev.error.detail, stringResource(R.string.action_retry), onReload)
-                is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing)
-            }
-            // Floats over the top of the conversation instead of taking a row of its own.
-            StatusChipRow(
-                state,
-                onInfo = { showInfo = true },
-                onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
-                subagentCount = state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT },
-                agentsDot = agentsPillState(state),
-                onOpenTools = onOpenTools,
-                onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
-                modifier = Modifier.align(Alignment.TopStart),
-            )
         }
-        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) })
+        // The conversation runs the full height of the page and scrolls under the capsules at its
+        // top and the composer at its bottom. Both float over it as frosted glass: the list is
+        // recorded as a backdrop layer that they blur (they are its siblings, never inside it).
+        val pageColor = pageContainerColor()
+        val chatBackdrop = if (isRuntimeShaderSupported()) {
+            rememberLayerBackdrop {
+                drawRect(pageColor)
+                drawContent()
+            }
+        } else {
+            null
+        }
+        var composerHeightPx by remember { mutableStateOf(0) }
+        var topOverlayPx by remember { mutableStateOf(0) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val composerHeight = with(density) { composerHeightPx.toDp() }
+        // Title bar + notices + capsules: where the first message starts at rest.
+        val topOverlay = with(density) { topOverlayPx.toDp() }.coerceAtLeast(topInset)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            Box(Modifier.fillMaxSize().then(if (chatBackdrop != null) Modifier.layerBackdrop(chatBackdrop) else Modifier)) {
+                when (val ev = state.events) {
+                    Loadable.Loading -> LoadingState(stringResource(R.string.state_loading), Modifier.padding(top = topOverlay))
+                    is Loadable.Failed -> ErrorState(ev.error.title(), ev.error.detail, stringResource(R.string.action_retry), onReload, Modifier.padding(top = topOverlay))
+                    is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing, bottomInset = composerHeight, topInset = topOverlay)
+                }
+            }
+            CompositionLocalProvider(LocalGlassBackdrop provides chatBackdrop) {
+                // Notices and capsules float over the top of the conversation, below the title bar.
+                Column(Modifier.align(Alignment.TopStart).fillMaxWidth().onSizeChanged { topOverlayPx = it.height }.padding(top = topInset)) {
+                    topNotices()
+                    StatusChipRow(
+                        state,
+                        onInfo = { showInfo = true },
+                        onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
+                        subagentCount = state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT },
+                        agentsDot = agentsPillState(state),
+                        onOpenTools = onOpenTools,
+                        onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
+                    )
+                }
+                // The composer floats too, over the bottom edge's own glass (the title bar's
+                // counterpart): the last lines blur away under it instead of ending at a line.
+                Box(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .onSizeChanged { composerHeightPx = it.height }
+                        .glassBottomEdge(pageColor),
+                ) {
+                    Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) })
+                }
+            }
+        }
     }
     SessionInfoSheet(show = showInfo, detail = state.detail.valueOrNull, activity = state.rollingStatus?.data?.takeIf { it.str("state") !in setOf("idle", "completed", null) }?.let { listOfNotNull(statusStateLabel(it.str("state")).ifEmpty { null }, it.str("detail")).joinToString(" · ") }, onDismiss = { showInfo = false })
 }
@@ -561,11 +609,12 @@ private fun StatusChipRow(
     val terminalLabel = stringResource(R.string.open_terminal)
     val toolsLabel = stringResource(R.string.tools_open)
     val bg = io.github.tianli0.switchtether.ui.common.pageContainerColor().compositeOver(COUITheme.colorScheme.background)
+    // No fade of their own: the title bar's progressive blur above them is the page's only one.
     Column(
-        modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(SquircleShape(16.dp))
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 2.dp),
+        modifier.padding(horizontal = 8.dp, vertical = 2.dp).clip(SquircleShape(18.dp))
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 4.dp),
     ) {
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status), backdrop = bg)
             else InfoChip(stringResource(R.string.badge_ended), dot = dev.neutral, backdrop = bg)
             s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn, backdrop = bg) }
@@ -617,8 +666,6 @@ private fun agentsPillState(state: SessionDetailState): AgentMapState? {
     }
 }
 
-/** Room above the first message so the floating capsules do not cover it at rest. */
-private val StatusChipInset = 32.dp
 
 @Composable
 private fun EventList(
@@ -631,6 +678,10 @@ private fun EventList(
     onDeleteOutgoing: (String) -> Unit,
     onEditOutgoing: (String) -> Unit,
     onWithdrawOutgoing: ((String) -> Unit)? = null,
+    /** Height of the composer floating over the list's bottom edge. */
+    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
+    /** Height of the title bar, notices and capsules floating over the list's top. */
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val rows = chatRows(state)
     val follow = rememberFollowState()
@@ -648,11 +699,11 @@ private fun EventList(
         snapshotFlow { listState.firstVisibleItemIndex }.collect { if (it <= 1 && initialScrollDone) onLoadOlder() }
     }
     if (rows.isEmpty()) {
-        Text(stringResource(R.string.session_no_events), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp + StatusChipInset, bottom = 24.dp))
+        Text(stringResource(R.string.session_no_events), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp + topInset, bottom = 24.dp))
         return
     }
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(top = StatusChipInset, bottom = 8.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(top = topInset + 4.dp, bottom = bottomInset + 8.dp)) {
             item(key = "older") {
                 Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
                     when {
@@ -670,15 +721,19 @@ private fun EventList(
                     TimelineRow.Typing -> "typing"
                 }
             }) { row ->
-                when (row) {
-                    is TimelineRow.Event -> TimelineEventRow(row.item, row.segment, ctx)
-                    is TimelineRow.Steps -> StepsHeader(row, onToggleSteps)
-                    is TimelineRow.Outgoing -> OutgoingBubble(row.message, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdraw = onWithdrawOutgoing?.takeIf { state.online })
-                    TimelineRow.Typing -> TypingRow(ctx)
+                // Rows fade in and out and slide to their new place: a step group opening or
+                // closing, a new message, the "replying…" row giving way to the reply.
+                Box(Modifier.animateItem()) {
+                    when (row) {
+                        is TimelineRow.Event -> TimelineEventRow(row.item, row.segment, ctx)
+                        is TimelineRow.Steps -> StepsHeader(row, onToggleSteps)
+                        is TimelineRow.Outgoing -> OutgoingBubble(row.message, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdraw = onWithdrawOutgoing?.takeIf { state.online })
+                        TimelineRow.Typing -> TypingRow(ctx)
+                    }
                 }
             }
         }
-        NewMessagesPill(listState, follow, rows)
+        NewMessagesPill(listState, follow, rows, bottomInset)
     }
 }
 
@@ -744,7 +799,7 @@ private fun Composer(
 ) {
     val s = state.detail.valueOrNull?.summary
     Column(
-        Modifier.fillMaxWidth().background(pageContainerColor()).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
     ) {
         // Full control (managed, or the user's own process attached via the wrapper) keeps the normal
         // composer; only observe/history sessions get the read-only bar.
@@ -753,7 +808,7 @@ private fun Composer(
         if (blocked) {
             // Read-only: say so plainly instead of showing a dead input field.
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 48.dp).segment(SegmentPosition.Single, radius = 24.dp).padding(start = 18.dp, end = 6.dp),
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).glassSurface(RoundedCornerShape(24.dp)).padding(start = 18.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(AppIcons.Lock, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(18.dp))
@@ -780,12 +835,7 @@ private fun Composer(
             return@Column
         }
         if (!state.online) {
-            Text(
-                stringResource(if (state.canQueue) R.string.composer_queue_hint else R.string.composer_offline),
-                style = COUITheme.textStyles.footnote2,
-                color = LocalDevColors.current.warn,
-                modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
-            )
+            ComposerNote(stringResource(if (state.canQueue) R.string.composer_queue_hint else R.string.composer_offline), LocalDevColors.current.warn)
         }
         if (state.attachedImages.isNotEmpty()) {
             Row(
@@ -846,10 +896,11 @@ private fun Composer(
                     // Model and effort of the running session, one tap away (like the IDE's model picker).
                     Row(
                         Modifier
-                            .padding(start = 4.dp, bottom = 6.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable(onClick = onModelClick)
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(bottom = 8.dp)
+                            .heightIn(min = 30.dp)
+                            .glassSurface(RoundedCornerShape(50))
+                            .clickable(role = Role.Button, onClick = onModelClick)
+                            .padding(horizontal = 11.dp)
                             .testTag("model-chip"),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -868,12 +919,7 @@ private fun Composer(
                 }
             }
         } else if (state.resumesOnSend) {
-            Text(
-                stringResource(R.string.composer_resume_hint),
-                style = COUITheme.textStyles.footnote2,
-                color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
-            )
+            ComposerNote(stringResource(R.string.composer_resume_hint), COUITheme.colorScheme.onSurfaceSecondary)
         }
         Row(verticalAlignment = Alignment.Bottom) {
             val showInterrupt = state.canInterrupt && s != null && s.isLive && s.status != "idle"
@@ -916,6 +962,14 @@ private fun Composer(
                 sendModifier = Modifier.testTag("send"),
             )
         }
+    }
+}
+
+/** A line the composer says about itself (offline, resumes on send): a small glass capsule over the conversation. */
+@Composable
+private fun ComposerNote(text: String, color: Color) {
+    Box(Modifier.padding(bottom = 8.dp).glassSurface(RoundedCornerShape(16.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Text(text, style = COUITheme.textStyles.footnote2, color = color)
     }
 }
 
@@ -1218,10 +1272,7 @@ private fun ImageViewerDialog(
         scale = (scale * zoomChange).coerceIn(1f, 5f)
         offset = if (scale > 1f) offset + panChange else androidx.compose.ui.geometry.Offset.Zero
     }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-    ) {
+    io.github.tianli0.switchtether.ui.common.FullScreenDialog(onDismissRequest = onDismiss) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -1263,7 +1314,7 @@ private fun ImageViewerDialog(
                 // Viewing is already cached in memory; keeping the file or handing it to another app is explicit.
                 val saved = stringResource(R.string.viewer_saved_to, io.github.tianli0.switchtether.files.FileStore.DOWNLOAD_FOLDER)
                 val noApp = stringResource(R.string.viewer_no_app)
-                Row(Modifier.align(Alignment.BottomCenter).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     RoundIconButton(
                         icon = AppIcons.Download,
                         label = stringResource(R.string.files_download),

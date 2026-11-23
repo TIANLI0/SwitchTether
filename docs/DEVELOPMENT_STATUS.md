@@ -542,3 +542,10 @@ Half-screen panels are drawn on the page colour with the page's gutters; the new
 Filled buttons use the brand accent (`containerTheme`). A second pass on whole rendered pages (§22.6): one 32dp text gutter,
 chat-row copy / time alignment, session-row icon gap, arrows on Workspace rows, the folder picker's confirm in its title bar.
 Rendered with `SheetGalleryScreenshotTest` and `PageGalleryScreenshotTest` (Robolectric, API 32); not run on a device or emulator.
+
+## Android 0.1.13: session page glass, keyboard, motion; menus; terminal width; file previews (2026-11-24)
+
+docs/ANDROID_UI.md §23. The conversation scrolls under floating glass controls (composer, header capsules), follows the
+keyboard with its bottom edge, collapsible rows and timeline rows animate; one `AppMenu` (no divider bars, frosted from a
+window snapshot); the terminal can keep 80 / 120 columns and scroll sideways. Robolectric only (opaque fallback): the blur
+and the animations have not been seen on a device.

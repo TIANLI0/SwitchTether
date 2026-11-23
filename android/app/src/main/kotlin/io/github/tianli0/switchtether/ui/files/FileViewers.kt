@@ -169,7 +169,7 @@ fun RemoteFileViewer(
                     save = SaveState(running = true)
                     scope.launch {
                         save = try {
-                            val r = store.download(ref.path, ref.name) { n, total -> save = SaveState(n, total, running = true) }
+                            val r = store.download(ref.path, ref.name, ref.size, ref.modifiedMs) { n, total -> save = SaveState(n, total, running = true) }
                             SaveState(record = r)
                         } catch (e: CancellationException) {
                             throw e

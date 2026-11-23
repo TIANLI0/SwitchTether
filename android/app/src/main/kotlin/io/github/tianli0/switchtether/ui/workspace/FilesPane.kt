@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.common.MenuEntry
+import io.github.tianli0.switchtether.ui.common.AppMenu
 import io.github.tianli0.switchtether.ui.common.TextGutter
 import io.github.tianli0.switchtether.ui.components.ActionTone
 import io.github.tianli0.switchtether.ui.components.LinkButton
@@ -218,55 +220,34 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                         if (state.sort.descending) PhosphorIcons.Regular.SortDescending else PhosphorIcons.Regular.SortAscending,
                         stringResource(R.string.files_sort), { showSortMenu = true },
                     )
-                    WindowListPopup(show = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                        val keys = listOf(
-                            SortKey.NAME to stringResource(R.string.files_sort_name),
-                            SortKey.MODIFIED to stringResource(R.string.files_sort_modified),
-                            SortKey.SIZE to stringResource(R.string.files_sort_size),
-                            SortKey.TYPE to stringResource(R.string.files_sort_type),
-                        )
-                        ListPopupColumn {
-                            keys.forEachIndexed { idx, (key, label) ->
-                                val active = state.sort.key == key
-                                DropdownImpl(
-                                    text = if (active) label + if (state.sort.descending) "  ↓" else "  ↑" else label,
-                                    optionSize = keys.size,
-                                    isSelected = active,
-                                    index = idx,
-                                    onSelectedIndexChange = {
-                                        showSortMenu = false
-                                        vm.sortBy(key)
-                                    },
-                                )
-                            }
-                        }
-                    }
+                    val keys = listOf(
+                        SortKey.NAME to stringResource(R.string.files_sort_name),
+                        SortKey.MODIFIED to stringResource(R.string.files_sort_modified),
+                        SortKey.SIZE to stringResource(R.string.files_sort_size),
+                        SortKey.TYPE to stringResource(R.string.files_sort_type),
+                    )
+                    AppMenu(
+                        show = showSortMenu,
+                        entries = keys.map { (key, label) ->
+                            val active = state.sort.key == key
+                            MenuEntry(if (active) label + if (state.sort.descending) "  ↓" else "  ↑" else label, selected = active) { vm.sortBy(key) }
+                        },
+                        onDismiss = { showSortMenu = false },
+                    )
                 }
                 Box {
                     ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { showMoreMenu = true })
-                    WindowListPopup(show = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
-                        val menuItems = listOf(
-                            stringResource(R.string.files_new_file) to { if (listing != null) nameDialog = "file" },
-                            stringResource(R.string.files_new_folder) to { if (listing != null) nameDialog = "folder" },
-                            stringResource(R.string.files_upload) to { if (listing != null) picker.launch(arrayOf("*/*")) },
-                            stringResource(R.string.files_hidden) to { vm.toggleHidden() },
-                            stringResource(R.string.files_downloads_manage) to onOpenDownloads,
-                        )
-                        ListPopupColumn {
-                            menuItems.forEachIndexed { idx, (label, act) ->
-                                DropdownImpl(
-                                    text = label,
-                                    optionSize = menuItems.size,
-                                    isSelected = idx == 3 && state.showHidden,
-                                    index = idx,
-                                    onSelectedIndexChange = {
-                                        showMoreMenu = false
-                                        act()
-                                    },
-                                )
-                            }
-                        }
-                    }
+                    AppMenu(
+                        show = showMoreMenu,
+                        entries = listOf(
+                            MenuEntry(stringResource(R.string.files_new_file)) { if (listing != null) nameDialog = "file" },
+                            MenuEntry(stringResource(R.string.files_new_folder)) { if (listing != null) nameDialog = "folder" },
+                            MenuEntry(stringResource(R.string.files_upload)) { if (listing != null) picker.launch(arrayOf("*/*")) },
+                            MenuEntry(stringResource(R.string.files_hidden), selected = state.showHidden) { vm.toggleHidden() },
+                            MenuEntry(stringResource(R.string.files_downloads_manage)) { onOpenDownloads() },
+                        ),
+                        onDismiss = { showMoreMenu = false },
+                    )
                 }
             }
         }

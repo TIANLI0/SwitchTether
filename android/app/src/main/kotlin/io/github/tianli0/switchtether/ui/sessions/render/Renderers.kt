@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions.render
 
+import io.github.tianli0.switchtether.ui.components.ExpandBody
 import androidx.compose.foundation.layout.offset
 import io.github.tianli0.switchtether.ui.components.ActionTone
 import io.github.tianli0.switchtether.ui.components.LinkButton
@@ -424,7 +425,7 @@ fun Reasoning(item: RenderItem) {
             iconTint = secondary,
             showArrow = text.isNotBlank(),
         )
-        if (open && text.isNotBlank()) {
+        ExpandBody(open && text.isNotBlank()) {
             Row(Modifier.padding(start = 26.dp, end = 12.dp, bottom = 8.dp)) {
                 Box(Modifier.size(width = 2.dp, height = 20.dp).background(secondary.copy(alpha = 0.3f)))
                 Spacer(Modifier.size(12.dp))
@@ -486,7 +487,7 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                 )
             }
         }
-        if (open) {
+        ExpandBody(open) {
             Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
                 val input = d["input"]
                 if (input != null && input.toString() != "{}") {
@@ -513,7 +514,9 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                     RunInBackgroundAction(item, ctx, Modifier.padding(top = 6.dp))
                 }
             }
-        } else if (result?.data?.bool("isError") == true) {
+        }
+        // Collapsed, a failed step still says why in one line.
+        if (!open && result?.data?.bool("isError") == true) {
             Text(
                 result.data.str("text").orEmpty().lineSequence().firstOrNull().orEmpty(),
                 style = DevType.codeSmall,
@@ -550,7 +553,7 @@ fun ToolResultStandalone(item: RenderItem, ctx: RenderContext) {
             onToggle = { open = !open },
             toggleLabel = stringResource(R.string.render_toggle),
         )
-        if (open) Box(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) { ResultBody(item.event.id, item.event.data, ctx) }
+        ExpandBody(open) { Box(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) { ResultBody(item.event.id, item.event.data, ctx) } }
     }
 }
 
@@ -595,7 +598,7 @@ fun FileChange(item: RenderItem) {
             )
             ExpandArrow(expanded = open)
         }
-        if (open) {
+        ExpandBody(open) {
             val diff = d.str("diff").orEmpty()
             Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
                 if (diff.isNotBlank()) {
@@ -984,7 +987,7 @@ fun Subagent(item: RenderItem, ctx: RenderContext) {
                 )
             }
         }
-        if (open && hasBody) {
+        ExpandBody(open && hasBody) {
             Column(Modifier.padding(start = 50.dp, end = 12.dp, bottom = 10.dp)) {
                 if (summary != null && summary != result) {
                     SectionLabel(stringResource(R.string.subagent_summary))
@@ -1001,7 +1004,8 @@ fun Subagent(item: RenderItem, ctx: RenderContext) {
                     RunInBackgroundAction(item, ctx, Modifier.padding(top = 6.dp))
                 }
             }
-        } else if (!open && summary != null && !running) {
+        }
+        if (!open && summary != null && !running) {
             Text(
                 summary,
                 style = COUITheme.textStyles.footnote2,

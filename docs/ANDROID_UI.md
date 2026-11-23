@@ -1122,3 +1122,86 @@ the touch area of a clickable to the 48dp minimum on its own, the layout bounds 
   使用此文件夹 (Small `Primary`, `use-folder`). The full-width button under the list is gone, and
   with it the disabled slab shown while browsing the locations.
 
+## 23. Session page: floating glass, keyboard, motion; menus; terminal width (2026-11-24)
+
+### 23.1 The conversation runs under its controls
+The page is immersive (§21.2): the list starts at the top of the screen and fills it. It scrolls
+under the title bar, whose own progressive blur is the only fade up there; the notices and capsules
+float below the bar and the composer floats at the bottom (Telegram's layout). The bottom edge has
+the title bar's counterpart, `glassBottomEdge`: one material in which the content blurs
+progressively toward the edge while the page colour fades in, so the last lines dissolve under the
+composer. The list's content padding is the measured height of the top overlay (title bar, notices,
+capsules) and of the composer; the "new messages" pill sits above the composer.
+
+A first version laid a page-coloured gradient under the capsules, on top of the title bar's blur:
+an opaque fade over a translucent one, visible as a band on the device. A floating control never
+gets a scrim of its own; each edge has exactly one fade.
+
+### 23.2 Frosted glass
+`glassSurface(shape, tint)` (`core:ui` `components/Chat.kt`) is the surface of everything that
+floats over the conversation: the input pill, the round attach / interrupt buttons, the read-only
+bar, the model capsule, the composer's notes and the header capsules. The page records the list as
+a coui `LayerBackdrop` (`LocalGlassBackdrop`); the surface blurs it (`couiGlassSurface`, 24dp)
+under ColorOS 17's floating-toolbar tint layers (`BottomFloatingToolbarDefaults.BlurColorsLight` /
+`BlurColorsDark`: `ColorDodge` + `Luminosity` in light, `Overlay` + `Luminosity` in dark) and a
+hairline rim. The `Luminosity` layer sets the surface's brightness whatever is behind it. The first
+version tinted with the card colour at 62–72 % alpha: over white message text in the dark theme
+that let the brightness through and the composer read as a light-grey slab (seen on the device).
+The floating controls are siblings of the recorded layer, never inside it. Without runtime shaders (below Android 13), with system blur off,
+on the wide (rail) layout and in tests the surface is the opaque card colour.
+
+### 23.3 Header capsules
+30dp high, 13sp medium, 8dp apart, glass. A state capsule keeps its colour as a soft tint with a
+7dp dot; an action capsule (terminal, sub-agents, session tools) has an accent icon. Tapping the row
+still opens the session info panel.
+
+### 23.4 Keyboard
+The page shrinks with the keyboard (`imePadding`). The list used to keep its top anchored, so the
+keyboard covered the newest messages. Now the conversation moves with its bottom edge
+(`FollowBottomEffects`): shorter viewport → scroll by the lost height; taller → move by what is
+still missing for the row at the edge to keep its distance (the list already follows by itself when
+it was at its end). The same happens when the composer grows a line. Reading further up stays
+"reading": the pill stays, nothing jumps to the latest. Covered by
+`ChatListTest.theKeyboardPushesTheConversationUpInsteadOfCoveringIt`.
+
+### 23.5 Motion
+- `ExpandBody(expanded) { … }`: the body under a collapsible row grows out of the row and fades in
+  (spring), folds back the same way; the arrow turns with it. Used by thinking, tool calls, tool
+  output, diffs, sub-agent rows, usage details, the agent map's cards and New session's options.
+- Timeline rows are `animateItem()`: a step group opening or closing, a new message and the
+  "replying…" row fade and slide to their place.
+- The send button eases between idle and ready (colour, a small spring).
+
+### 23.6 Menus (`AppMenu`)
+One component for every dropdown (new terminal's shells, the terminal and Files "more" menus,
+sort): a COUI17 list popup whose rows are one group, so there are **no divider bars between rows**,
+on frosted glass. The popup is its own window with no page to blur, so `rememberPopupGlass` takes a
+PixelCopy of the activity window at 1/8 size when the menu opens, box-blurs it, and hands it to the
+popup as its static backdrop; with blur off or below Android 8 the popup keeps COUI's opaque surface.
+
+### 23.7 Terminal width
+A terminal sized to the phone's width has 40–50 columns, so programs wrap every long line. The
+terminal's "more" menu now offers the width: fit the screen, 80 columns or 120 columns
+(`TerminalUiState.columns`, remembered in `terminalPrefs`). With a fixed width the desktop PTY is
+resized to it, lines stay whole and the grid scrolls sideways at a stable width.
+
+### 23.8 File previews
+- **Keeping a previewed file does not fetch it again.** `FileStore.download` copies the preview
+  copy into `Downloads/SwitchTether` when it is still good by `resolve`'s rules (same size and
+  modified time, or made without them less than 10 minutes ago) and only otherwise downloads from
+  the computer. It used to transfer the file a second time even while it was on screen.
+- **Previews opened from the chat run under the system bars.** `FullScreenDialog` (file viewer,
+  picture viewer) is an edge-to-edge window: the page colour continues under the status and gesture
+  bars, the bar icons keep the page's colours, and there is no dim or window animation. A plain
+  `Dialog` stopped at the bars and showed a strip of its own colour.
+
+### 23.9 Evidence and limits
+Robolectric (API 32): `PageGalleryScreenshotTest` `page-session-*` for the layout in its opaque
+fallback, `ChatListTest` for the keyboard behaviour, the existing chat / approval / question tests
+for the collapsible rows. On the user's device (dark theme, one screenshot of the first version):
+the floating layout and the keyboard push work; the glass tint and the doubled top fade were wrong
+and were replaced as described above. **Not seen on a device after those fixes:** the toolbar-recipe
+glass, the bottom edge, the menus' frosted snapshot, the animations in motion, the IME animation
+frame by frame (the list follows one frame behind the inset), the fixed-width terminal against a
+real shell, the edge-to-edge preview windows, and the download-from-cache path (no automated test:
+it needs MediaStore).

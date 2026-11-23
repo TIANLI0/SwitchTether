@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import androidx.compose.foundation.layout.width
+import io.github.tianli0.switchtether.ui.common.MenuEntry
+import io.github.tianli0.switchtether.ui.common.AppMenu
 import io.github.tianli0.switchtether.ui.components.ActionTone
 import io.github.tianli0.switchtether.ui.components.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
@@ -148,17 +151,18 @@ fun shortShellName(raw: String): String =
  * prompt) is not wrapped for a different width.
  */
 @Composable
-fun rememberTerminalSizeEstimate(fontSp: Int): Pair<Int, Int> {
+fun rememberTerminalSizeEstimate(fontSp: Int, columns: Int = 0): Pair<Int, Int> {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val window = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
-    return remember(fontSp, window, density) {
+    return remember(fontSp, columns, window, density) {
         val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSp.sp, lineHeight = (fontSp * 1.25f).sp)
         val cellW = measurer.measure("M".repeat(128), style).size.width / 128f
         val cellH = measurer.measure("M", style).size.height.toFloat()
         val w = window.width - with(density) { 40.dp.toPx() }
         val h = window.height - with(density) { 300.dp.toPx() }
-        (w / cellW).toInt().coerceIn(20, 400) to (h / cellH).toInt().coerceIn(8, 200)
+        // A fixed width wider than the screen is the grid the terminal will get.
+        maxOf((w / cellW).toInt().coerceIn(20, 400), columns) to (h / cellH).toInt().coerceIn(8, 200)
     }
 }
 
@@ -168,53 +172,39 @@ fun TerminalActions(state: TerminalUiState, vm: TerminalViewModel, controller: T
     val clipboard = LocalClipboardManager.current
     var menu by remember { mutableStateOf(false) }
     // No terminal on screen yet: its size is not measured, so estimate it from the screen.
-    val estimate = rememberTerminalSizeEstimate(state.fontSp).takeIf { state.selectedId == null }
+    val estimate = rememberTerminalSizeEstimate(state.fontSp, state.columns).takeIf { state.selectedId == null }
     if (state.selectedId != null) {
         ToolbarIcon(AppIcons.Paste, stringResource(R.string.term_paste), { clipboard.getText()?.text?.let(vm::paste) }, enabled = state.link == TermLink.OPEN)
     }
     Box {
         ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { menu = true })
-        WindowListPopup(show = menu, onDismissRequest = { menu = false }) {
-            val items = buildList<Pair<String, () -> Unit>> {
-                add(stringResource(R.string.term_new) to { controller.showShells = true })
+        AppMenu(
+            show = menu,
+            entries = buildList {
+                add(MenuEntry(stringResource(R.string.term_new)) { controller.showShells = true })
                 if (state.selectedId != null) {
-                    add(stringResource(R.string.term_copy_screen) to { clipboard.setText(AnnotatedString(state.screen.plainText())) })
-                    add(stringResource(R.string.action_refresh) to { vm.refresh() })
-                    add(stringResource(R.string.term_kill) to { controller.confirmKill = true })
+                    add(MenuEntry(stringResource(R.string.term_copy_screen)) { clipboard.setText(AnnotatedString(state.screen.plainText())) })
+                    add(MenuEntry(stringResource(R.string.action_refresh)) { vm.refresh() })
+                    // How wide the terminal claims to be: the phone's width wraps every long line.
+                    COLUMN_CHOICES.forEach { n ->
+                        add(
+                            MenuEntry(
+                                if (n == 0) stringResource(R.string.term_cols_fit) else stringResource(R.string.term_cols_fixed, n),
+                                selected = state.columns == n,
+                            ) { vm.setColumns(n) },
+                        )
+                    }
+                    add(MenuEntry(stringResource(R.string.term_kill), danger = true) { controller.confirmKill = true })
                 }
-            }
-            ListPopupColumn {
-                items.forEachIndexed { idx, (label, act) ->
-                    DropdownImpl(
-                        text = label,
-                        optionSize = items.size,
-                        isSelected = false,
-                        index = idx,
-                        onSelectedIndexChange = {
-                            menu = false
-                            act()
-                        },
-                    )
-                }
-            }
-        }
-        WindowListPopup(show = controller.showShells, onDismissRequest = { controller.showShells = false }) {
-            val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
-            ListPopupColumn {
-                shells.forEachIndexed { idx, sh ->
-                    DropdownImpl(
-                        text = sh.name.ifBlank { sh.id },
-                        optionSize = shells.size,
-                        isSelected = false,
-                        index = idx,
-                        onSelectedIndexChange = {
-                            controller.showShells = false
-                            vm.create(sh.id.ifBlank { null }, estimate)
-                        },
-                    )
-                }
-            }
-        }
+            },
+            onDismiss = { menu = false },
+        )
+        val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
+        AppMenu(
+            show = controller.showShells,
+            entries = shells.map { sh -> MenuEntry(sh.name.ifBlank { sh.id }) { vm.create(sh.id.ifBlank { null }, estimate) } },
+            onDismiss = { controller.showShells = false },
+        )
     }
 }
 
@@ -321,8 +311,15 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
     val screenStart = state.scrollback.size
     val termDesc = androidx.compose.ui.res.stringResource(io.github.tianli0.switchtether.R.string.terminal_desc)
     BoxWithConstraints(modifier.semantics { contentDescription = termDesc }.testTag("terminal")) {
-        val cols = with(density) { ((maxWidth - 16.dp).toPx() / cellWidthPx).toInt() }
+        val fitCols = with(density) { ((maxWidth - 16.dp).toPx() / cellWidthPx).toInt() }
+        // A fixed width only when it is wider than the screen; otherwise the screen's own width.
+        val wide = state.columns > fitCols
+        val cols = if (wide) state.columns else fitCols
         val rows = with(density) { ((maxHeight - 8.dp).toPx() / cell.size.height).toInt() }
+        // The grid's width when it scrolls sideways: every row the same, so the range does not
+        // change with whichever lines happen to be on screen.
+        val gridWidth = with(density) { (cols * cellWidthPx).toDp() + 16.dp }
+        val sideways = rememberScrollState()
         LaunchedEffect(cols, rows) { onSize(cols, rows) }
         // Follow new output only while the user is at the bottom; scrolling up to read stops it.
         var follow by remember { mutableStateOf(true) }
@@ -337,7 +334,12 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
             prevScrollback = state.scrollback.size
             if (added > 0 && !follow) listState.scrollToItem(listState.firstVisibleItemIndex + added, listState.firstVisibleItemScrollOffset)
         }
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp)) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().horizontalScroll(sideways)
+                .then(if (wide) Modifier.width(gridWidth) else Modifier)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
             item(key = "sb") {
                 // A quiet line, not a button over the output.
                 if (!state.scrollbackDone) {

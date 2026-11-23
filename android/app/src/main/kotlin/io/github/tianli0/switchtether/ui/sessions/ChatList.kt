@@ -134,8 +134,48 @@ fun FollowBottomEffects(listState: LazyListState, follow: FollowState, rows: Lis
             prevTotal = total
             if (lastSize > 0) prevLastSize = lastSize
             if (grew && follow.following && total > 0 && !atEnd) {
+                // Scroll from the next frame's callback, never from inside the layout pass that
+                // reported the growth (a scroll forces a remeasure).
+                androidx.compose.runtime.withFrameNanos { }
+                if (follow.following && listState.canScrollForward) {
+                    follow.autoScrolling = true
+                    try { listState.scrollToEnd() } finally { follow.autoScrolling = false }
+                }
+            }
+        }
+    }
+    // The viewport got shorter or taller under the same content (the keyboard opening or closing,
+    // the composer growing a line): the conversation moves with its bottom edge, as in any
+    // messenger, so the message that sat above the composer still sits there. Without this the
+    // keyboard simply covered the newest messages.
+    LaunchedEffect(listState) {
+        // Height of the part of the viewport that shows messages, and the row at its bottom edge
+        // with its distance from that edge.
+        data class Edge(val height: Int, val index: Int, val gap: Int)
+        var prev: Edge? = null
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val end = info.viewportEndOffset - info.afterContentPadding
+            val last = info.visibleItemsInfo.lastOrNull { it.offset < end }
+            Edge(info.viewportSize.height - info.afterContentPadding, last?.index ?: -1, if (last != null) end - (last.offset + last.size) else 0)
+        }.collect { now ->
+            val before = prev
+            prev = now
+            if (before == null || before.height <= 0 || now.height <= 0 || now.height == before.height || before.index < 0) return@collect
+            val info = listState.layoutInfo
+            val delta = if (now.height < before.height) {
+                // Shorter: what was at the edge is now below it by exactly the lost height.
+                (before.height - now.height).toFloat()
+            } else {
+                // Taller: the list may already have followed (it does when it was at its end), so
+                // move by what is still missing for the same row to sit at the same distance.
+                val end = info.viewportEndOffset - info.afterContentPadding
+                val row = info.visibleItemsInfo.firstOrNull { it.index == before.index } ?: return@collect
+                (before.gap - (end - (row.offset + row.size))).toFloat()
+            }
+            if (delta != 0f) {
                 follow.autoScrolling = true
-                try { listState.scrollToEnd() } finally { follow.autoScrolling = false }
+                try { listState.dispatchRawDelta(delta) } finally { follow.autoScrolling = false }
             }
         }
     }
@@ -150,14 +190,14 @@ fun FollowBottomEffects(listState: LazyListState, follow: FollowState, rows: Lis
 
 /** Floating "N 条新消息 ↓" / "回到最新" pill above the composer while the user reads older rows. */
 @Composable
-fun BoxScope.NewMessagesPill(listState: LazyListState, follow: FollowState, rows: List<TimelineRow>) {
+fun BoxScope.NewMessagesPill(listState: LazyListState, follow: FollowState, rows: List<TimelineRow>, bottomInset: androidx.compose.ui.unit.Dp = 0.dp) {
     val scope = rememberCoroutineScope()
     val newCount = (rows.count { it.isMessage() } - follow.baseMessages).coerceAtLeast(0)
     AnimatedVisibility(
         visible = !follow.following,
         enter = fadeIn() + scaleIn(initialScale = 0.9f),
         exit = fadeOut() + scaleOut(targetScale = 0.9f),
-        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp + bottomInset),
     ) {
         val label = if (newCount > 0) pluralStringResource(R.plurals.new_messages, newCount, newCount) else stringResource(R.string.jump_latest)
         val shape = RoundedCornerShape(50)

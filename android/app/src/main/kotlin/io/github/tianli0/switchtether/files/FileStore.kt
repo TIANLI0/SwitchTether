@@ -125,14 +125,33 @@ class FileStore(
     
     // ---- explicit download ---------------------------------------------------------------------------
 
-    /** Saves [path] into `Downloads/SwitchTether` and records it. A cancelled or failed download leaves nothing behind. */
+    /**
+     * The preview copy of [path] when it is still good: the same rules as [resolve] (same size and
+     * modified time, or made without them less than [UNKNOWN_META_MAX_AGE_MS] ago).
+     */
+    private fun cachedCopy(server: String, path: String, size: Long?, modifiedMs: Long?): File? {
+        val unknown = size == null && modifiedMs == null
+        cache.get(FileCache.keyFor(server, path, size, modifiedMs), if (unknown) UNKNOWN_META_MAX_AGE_MS else null)?.let { return it }
+        if (unknown) return null
+        // Opened from a link (no size / time known then) and now kept from a listing that has them.
+        return cache.get(FileCache.keyFor(server, path, null, null), UNKNOWN_META_MAX_AGE_MS)?.takeIf { size == null || it.length() == size }
+    }
+
+    /**
+     * Saves [path] into `Downloads/SwitchTether` and records it. A file that is already on the phone
+     * as a fresh preview copy is copied from there (no second transfer from the computer, works
+     * offline); otherwise it is fetched. A cancelled or failed download leaves nothing behind.
+     */
     suspend fun download(
         path: String,
         name: String = FileTypes.fileName(path),
+        size: Long? = null,
+        modifiedMs: Long? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
     ): DownloadRecord = withContext(Dispatchers.IO) {
         val server = serverId() ?: throw NotConnectedForFilesException()
-        val a = api() ?: throw NotConnectedForFilesException()
+        val cached = cachedCopy(server, path, size?.takeIf { it > 0 }, modifiedMs)
+        val a = if (cached == null) api() ?: throw NotConnectedForFilesException() else null
         val safe = FileTypes.safeFileName(name)
         val mime = FileTypes.mimeFor(safe)
         val values = ContentValues().apply {
@@ -143,7 +162,25 @@ class FileStore(
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IOException("cannot create download")
         try {
-            val written = (resolver.openOutputStream(uri) ?: throw IOException("cannot write download")).use { out -> a.download(path, out, onProgress) }
+            val written = (resolver.openOutputStream(uri) ?: throw IOException("cannot write download")).use { out ->
+                if (cached != null) {
+                    val total = cached.length()
+                    var done = 0L
+                    cached.inputStream().use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            out.write(buffer, 0, n)
+                            done += n
+                            onProgress(done, total)
+                        }
+                    }
+                    done
+                } else {
+                    a!!.download(path, out, onProgress)
+                }
+            }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
             val record = DownloadRecord(
                 id = UUID.randomUUID().toString(), serverId = server, remotePath = path, name = displayNameOf(uri) ?: safe,

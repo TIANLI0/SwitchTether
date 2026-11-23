@@ -8,6 +8,8 @@
     <string name="term_copy_screen">Copy screen</string>
     <string name="term_paste">Paste</string>
     <string name="term_kill">Close terminal</string>
+    <string name="term_cols_fit">Width: fit the screen</string>
+    <string name="term_cols_fixed">Width: %1$d columns, scroll sideways</string>
     <string name="term_kill_confirm">End this terminal and its running programs on the computer?</string>
     <string name="term_no_stepup">Terminals need biometric confirmation, but this phone was paired without a secure lock screen. Set a screen lock and pair again.</string>
     <string name="term_needs_stepup">Confirm it is you to use the terminal.</string>

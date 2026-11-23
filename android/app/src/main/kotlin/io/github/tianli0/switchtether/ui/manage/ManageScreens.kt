@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.manage
 
+import io.github.tianli0.switchtether.ui.components.ExpandBody
 import io.github.tianli0.switchtether.ui.common.TextGutter
 import io.github.tianli0.switchtether.ui.components.ActionTone
 import io.github.tianli0.switchtether.ui.components.LinkButton
@@ -418,7 +419,7 @@ private fun SummaryHero(s: UsageSummary) {
             Text(stringResource(R.string.usage_details), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary, modifier = Modifier.weight(1f))
             io.github.suqi8.coui.kmp.basic.ExpandArrow(expanded = open)
         }
-        if (open) {
+        ExpandBody(open) {
             Row {
                 Stat(stringResource(R.string.usage_input), dash(UsageFormat.tokens(s.inputTokens)), Modifier.weight(1f))
                 Stat(stringResource(R.string.usage_output), dash(UsageFormat.tokens(s.outputTokens)), Modifier.weight(1f))

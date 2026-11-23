@@ -1,6 +1,8 @@
 package io.github.tianli0.switchtether
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
@@ -85,9 +87,55 @@ class ChatListTest {
     }
 
     @Test
+    fun theKeyboardPushesTheConversationUpInsteadOfCoveringIt() {
+        // The keyboard shrinks the page from below (imePadding): the newest message must stay
+        // above the composer, and come back down when the keyboard closes.
+        var height by mutableStateOf(891)
+        current = state(messages(40))
+        rule.setContent {
+            SwitchTetherTheme {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.height(height.dp)) {
+                    SessionDetailContent(
+                        state = current!!, initialTitle = null, ctx = ctx, busy = null,
+                        onBack = {}, onReload = {}, onLoadOlder = {}, onToggleSteps = {}, onDraft = {}, onSend = {}, onInterrupt = {},
+                        onContinue = {}, onRetryConnection = {},
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        val last = "Message number 40 with some text to fill the row."
+        rule.onNodeWithText(last).assertIsDisplayed()
+        height = 891 - 320
+        rule.waitForIdle()
+        rule.onNodeWithText(last).assertIsDisplayed()
+        assertTrue("still following", noPill())
+        height = 891
+        rule.waitForIdle()
+        rule.onNodeWithText(last).assertIsDisplayed()
+        assertTrue(noPill())
+
+        // Reading further up: the same lines stay above the composer, and it still counts as reading.
+        rule.onNodeWithTag("event-list").performTouchInput { swipeDown(startY = height * 0.35f, endY = height * 0.8f) }
+        rule.waitForIdle()
+        rule.onNodeWithTag("new-messages-pill").assertIsDisplayed()
+        val listBottom = rule.onNodeWithTag("event-list").fetchSemanticsNode().boundsInRoot.bottom
+        val atEdge = rule.onAllNodes(androidx.compose.ui.test.hasText("Message number", substring = true)).fetchSemanticsNodes()
+            .filter { it.boundsInRoot.bottom <= listBottom }.maxByOrNull { it.boundsInRoot.bottom }!!
+        val edgeText = atEdge.config[androidx.compose.ui.semantics.SemanticsProperties.Text].first().text
+        val gap = listBottom - atEdge.boundsInRoot.bottom
+        height = 891 - 320
+        rule.waitForIdle()
+        val shrunkBottom = rule.onNodeWithTag("event-list").fetchSemanticsNode().boundsInRoot.bottom
+        val after = rule.onNodeWithText(edgeText).fetchSemanticsNode().boundsInRoot.bottom
+        assertEquals("the line above the composer stays there", gap, shrunkBottom - after, 2f)
+        rule.onNodeWithTag("new-messages-pill").assertIsDisplayed()
+    }
+
+    @Test
     fun readingHistoryIsNotYankedAndThePillJumpsBack() {
         show(state(messages(40)))
-        rule.onNodeWithTag("event-list").performTouchInput { swipeDown() }
+        rule.onNodeWithTag("event-list").performTouchInput { swipeDown(startY = height * 0.35f, endY = height * 0.8f) }
         rule.waitForIdle()
         rule.onNodeWithTag("new-messages-pill").assertIsDisplayed()
         rule.onNodeWithText("Back to latest").assertExists()
@@ -105,7 +153,7 @@ class ChatListTest {
     @Test
     fun sendingAlwaysScrollsToTheOwnBubble() {
         show(state(messages(40)))
-        rule.onNodeWithTag("event-list").performTouchInput { swipeDown() }
+        rule.onNodeWithTag("event-list").performTouchInput { swipeDown(startY = height * 0.35f, endY = height * 0.8f) }
         rule.waitForIdle()
         val out = OutgoingMessage("c1", "please run the tests", OutgoingStatus.SENDING, afterSeq = 40)
         current = state(messages(40), listOf(out), sendTick = 1)

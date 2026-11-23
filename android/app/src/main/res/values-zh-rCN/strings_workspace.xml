@@ -8,6 +8,8 @@
     <string name="term_copy_screen">复制屏幕</string>
     <string name="term_paste">粘贴</string>
     <string name="term_kill">关闭终端</string>
+    <string name="term_cols_fit">列宽：适应屏幕</string>
+    <string name="term_cols_fixed">列宽：%1$d 列，横向滚动</string>
     <string name="term_kill_confirm">结束此终端及其在电脑上运行的程序？</string>
     <string name="term_no_stepup">终端需要生物识别确认，但此手机配对时没有安全锁屏。请设置锁屏后重新配对。</string>
     <string name="term_needs_stepup">请确认是你本人后使用终端。</string>

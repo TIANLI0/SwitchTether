@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.common.MenuEntry
+import io.github.tianli0.switchtether.ui.common.AppMenu
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.nav.Route
@@ -83,6 +85,8 @@ private fun terminalViewModel(): TerminalViewModel =
             { id -> c.noteLocalAction(id, io.github.tianli0.switchtether.remote.notify.LocalAction.KILL_TERMINAL) },
             initialFontSp = c.terminalPrefs.getInt("font_sp", 12),
             saveFontSp = { sp -> c.terminalPrefs.edit().putInt("font_sp", sp).apply() },
+            initialColumns = c.terminalPrefs.getInt("columns", 0),
+            saveColumns = { n -> c.terminalPrefs.edit().putInt("columns", n).apply() },
         )
     }
 
@@ -117,7 +121,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
     }
     androidx.compose.runtime.LaunchedEffect(term.online) { if (term.online) termVm.refresh() }
     var showShells by remember { mutableStateOf(false) }
-    val sizeEstimate = rememberTerminalSizeEstimate(term.fontSp)
+    val sizeEstimate = rememberTerminalSizeEstimate(term.fontSp, term.columns)
     Page(
         title = stringResource(R.string.tab_workspace),
         actions = {
@@ -152,24 +156,17 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                             onClick = { showShells = true },
                             cardListPosition = cardListPositionOf(term.terminals.size, term.terminals.size + 1),
                         )
-                        WindowListPopup(show = showShells, onDismissRequest = { showShells = false }) {
-                            val shells = term.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
-                            ListPopupColumn {
-                                shells.forEachIndexed { idx, sh ->
-                                    DropdownImpl(
-                                        text = sh.name.ifBlank { sh.id },
-                                        optionSize = shells.size,
-                                        isSelected = false,
-                                        index = idx,
-                                        onSelectedIndexChange = {
-                                            showShells = false
-                                            termVm.create(sh.id.ifBlank { null }, sizeEstimate)
-                                            onOpen(Route.Terminal(null))
-                                        },
-                                    )
+                        val shells = term.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
+                        AppMenu(
+                            show = showShells,
+                            entries = shells.map { sh ->
+                                MenuEntry(sh.name.ifBlank { sh.id }) {
+                                    termVm.create(sh.id.ifBlank { null }, sizeEstimate)
+                                    onOpen(Route.Terminal(null))
                                 }
-                            }
-                        }
+                            },
+                            onDismiss = { showShells = false },
+                        )
                     }
                 }
             }

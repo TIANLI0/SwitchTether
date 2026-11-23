@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.components.ExpandBody
 import io.github.tianli0.switchtether.ui.common.TextGutter
 import io.github.tianli0.switchtether.ui.components.ActionTone
 import io.github.tianli0.switchtether.ui.components.SmallButton
@@ -245,7 +246,7 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
                                 AgentRow(node, b.depth, b.rails, b.last, hasChildren && !open, now) {
                                     selected = if (open) null else "a:${node.agentId}"
                                 }
-                                if (open) {
+                                ExpandBody(open) {
                                     val taskId = node.agentId
                                     AgentCard(
                                         node = node,
@@ -273,7 +274,7 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
                                     val key = "t:${t.taskId ?: t.callId}"
                                     val open = selected == key
                                     TaskRow(t, now) { selected = if (open) null else key }
-                                    if (open) {
+                                    ExpandBody(open) {
                                         val taskId = t.taskId
                                         TaskCard(
                                             task = t,

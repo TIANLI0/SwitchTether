@@ -47,6 +47,11 @@ data class TerminalUiState(
     val ctrl: Boolean = false,
     val alt: Boolean = false,
     val fontSp: Int = 12,
+    /**
+     * Columns the terminal is told it has. 0 = as many as fit the screen (programs wrap at the
+     * phone's width); a fixed count (80, 120) keeps lines whole and the page scrolls sideways.
+     */
+    val columns: Int = 0,
     val scrollback: List<TermLine> = emptyList(),
     val scrollbackTotal: Int = 0,
     /** Every earlier line is loaded (the "load earlier output" button goes away). */
@@ -54,6 +59,9 @@ data class TerminalUiState(
     val busy: Boolean = false,
     val online: Boolean = false,
 )
+
+/** Column modes offered for a terminal: fit the screen (0) or a fixed width that scrolls sideways. */
+val COLUMN_CHOICES = listOf(0, 80, 120)
 
 /**
  * Terminal workspace: lists/creates terminals, keeps ONE live stream (the selected terminal) and
@@ -67,8 +75,10 @@ class TerminalViewModel(
     private val onKill: (String) -> Unit = {},
     initialFontSp: Int = 12,
     private val saveFontSp: (Int) -> Unit = {},
+    initialColumns: Int = 0,
+    private val saveColumns: (Int) -> Unit = {},
 ) : ViewModel() {
-    private val _state = MutableStateFlow(TerminalUiState(fontSp = initialFontSp.coerceIn(8, 22)))
+    private val _state = MutableStateFlow(TerminalUiState(fontSp = initialFontSp.coerceIn(8, 22), columns = initialColumns.takeIf { it in COLUMN_CHOICES } ?: 0))
     val state: StateFlow<TerminalUiState> = _state.asStateFlow()
     private var ws: WebSocket? = null
 
@@ -265,6 +275,13 @@ class TerminalViewModel(
     }
 
     private fun resizeMsg(c: Int, r: Int) = buildJsonObject { put("type", "resize"); put("cols", c); put("rows", r) }.toString()
+
+    /** 0 = fit the screen, else a fixed column count; the grid is resized by the next measure. */
+    fun setColumns(columns: Int) {
+        val c = columns.takeIf { it in COLUMN_CHOICES } ?: 0
+        _state.update { it.copy(columns = c) }
+        saveColumns(c)
+    }
 
     fun fontSize(delta: Int) {
         _state.update { it.copy(fontSp = (it.fontSp + delta).coerceIn(8, 22)) }

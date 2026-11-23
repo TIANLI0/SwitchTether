@@ -490,7 +490,7 @@ class FilesViewModel(
         uploadJob = viewModelScope.launch {
             _state.update { it.copy(transfer = TransferState(entry.name, 0, entry.size.takeIf { s -> s > 0 })) }
             try {
-                val record = store.download(entry.path, entry.name) { n, total -> _state.update { it.copy(transfer = it.transfer?.copy(done = n, total = total)) } }
+                val record = store.download(entry.path, entry.name, entry.size.takeIf { it > 0 }, entry.modifiedMs) { n, total -> _state.update { it.copy(transfer = it.transfer?.copy(done = n, total = total)) } }
                 _state.update { it.copy(transfer = it.transfer?.copy(finished = true, downloaded = record)) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 _state.update { it.copy(transfer = it.transfer?.copy(error = "cancelled")) }

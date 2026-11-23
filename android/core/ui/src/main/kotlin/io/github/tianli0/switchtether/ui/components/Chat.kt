@@ -1,5 +1,32 @@
 package io.github.tianli0.switchtether.ui.components
 
+import io.github.suqi8.coui.kmp.blur.progressiveTextureBlur
+import io.github.suqi8.coui.kmp.blur.isBlurEnabled
+import io.github.suqi8.coui.kmp.blur.ProgressiveBlur
+import io.github.suqi8.coui.kmp.blur.BlurDefaults
+import io.github.suqi8.coui.kmp.blur.BlendColorEntry
+import io.github.suqi8.coui.kmp.basic.BottomFloatingToolbarDefaults
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.runtime.remember
+import io.github.suqi8.coui.kmp.blur.Backdrop
+import io.github.suqi8.coui.kmp.basic.couiGlassSurface
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedVisibility
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.background
@@ -258,6 +285,85 @@ fun TimelineCard(modifier: Modifier = Modifier, border: Color? = null, padding: 
 data class InputPillState(val enabled: Boolean, val sendEnabled: Boolean, val busy: Boolean)
 
 /**
+ * The layer a floating chat control blurs: the conversation, recorded by its page as a coui
+ * `LayerBackdrop`. Null (no recording, blur unsupported, tests) means opaque fills.
+ */
+val LocalGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+/**
+ * The surface of a control floating over the conversation (composer, capsules): ColorOS 17's
+ * floating-toolbar glass. The tint layers are coui's `BottomFloatingToolbarDefaults` recipe (the
+ * Gallery toolbar material), not a translucent card colour: its `Luminosity` layer pulls whatever
+ * is behind to the surface's own brightness, so the glass stays dark over white text in the dark
+ * theme and light over dark text in the light one. A plain alpha tint let bright content through
+ * and read as a light-grey slab in dark mode. [tint] adds a state's colour on top. A hairline rim,
+ * clipped to [shape]. Without a backdrop it is the opaque card colour.
+ */
+@Composable
+fun Modifier.glassSurface(shape: Shape, tint: Color? = null): Modifier {
+    val scheme = COUITheme.colorScheme
+    val dark = scheme.background.luminance() < 0.5f
+    val fill = tint?.compositeOver(scheme.surfaceContainer) ?: scheme.surfaceContainer
+    val rim = if (dark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.06f)
+    val layers = remember(dark, tint) {
+        val base = if (dark) BottomFloatingToolbarDefaults.BlurColorsDark else BottomFloatingToolbarDefaults.BlurColorsLight
+        if (tint != null) base + BlendColorEntry(color = tint) else base
+    }
+    return this
+        .couiGlassSurface(
+            backdrop = LocalGlassBackdrop.current,
+            shape = shape,
+            containerColor = fill,
+            fallback = Modifier.clip(shape).background(fill),
+            blurRadius = 24f,
+            blendColors = layers,
+        )
+        .border(0.5.dp, rim, shape)
+        .clip(shape)
+}
+
+/**
+ * The band behind a bar floating at the bottom of the conversation: the mirror image of the
+ * ColorOS 17 glass header at the top. The content blurs progressively toward the bottom edge and
+ * [containerColor] fades in with it, as ONE material, so the last lines dissolve under the bar
+ * (no opaque scrim laid over the glass). Without blur it is a plain fade to [containerColor].
+ */
+@Composable
+fun Modifier.glassBottomEdge(containerColor: Color): Modifier {
+    val backdrop = LocalGlassBackdrop.current
+    if (backdrop == null || !isBlurEnabled()) {
+        return background(Brush.verticalGradient(0f to containerColor.copy(alpha = 0f), 0.4f to containerColor.copy(alpha = 0.86f), 1f to containerColor))
+    }
+    return progressiveTextureBlur(
+        backdrop = backdrop,
+        shape = RectangleShape,
+        blurRadius = 25f,
+        gradient = ProgressiveBlur.Bottom.copy(curve = 3f),
+        colors = BlurDefaults.blurColors(),
+    ).drawBehind {
+        drawRect(Brush.verticalGradient(0f to containerColor.copy(alpha = 0f), 0.5f to containerColor.copy(alpha = 0.45f), 1f to containerColor.copy(alpha = 0.8f)))
+    }
+}
+
+/**
+ * The body under a collapsible row: it grows out of the row's bottom edge and fades in, and folds
+ * back the same way (COUI expand motion; the row's arrow turns with it). The content is a column.
+ */
+@Composable
+fun ExpandBody(expanded: Boolean, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    AnimatedVisibility(
+        visible = expanded,
+        modifier = modifier,
+        enter = expandVertically(animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f), expandFrom = Alignment.Top) +
+            fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 40)),
+        exit = shrinkVertically(animationSpec = spring(dampingRatio = 1f, stiffness = 520f), shrinkTowards = Alignment.Top) +
+            fadeOut(animationSpec = tween(durationMillis = 110)),
+    ) {
+        Column(Modifier.fillMaxWidth(), content = content)
+    }
+}
+
+/**
  * The composer: a full-radius input pill with a round accent send button inside it. When
  * [InputPillState.enabled] is false the field still accepts a local draft (callers decide), but the
  * send button is greyed out.
@@ -280,8 +386,7 @@ fun InputPill(
         modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clip(SquircleShape(24.dp))
-            .background(scheme.surfaceContainer)
+            .glassSurface(RoundedCornerShape(24.dp))
             .padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -300,11 +405,15 @@ fun InputPill(
         }
         Spacer(Modifier.size(6.dp))
         val canSend = state.sendEnabled && !state.busy
+        // The button wakes up when there is something to send: colour and a small spring.
+        val sendFill by animateColorAsState(if (canSend) scheme.primary else scheme.onSurface.copy(alpha = 0.10f), label = "send-fill")
+        val sendScale by animateFloatAsState(if (canSend) 1f else 0.9f, animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f), label = "send-scale")
         Box(
             sendModifier
                 .size(36.dp)
+                .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
                 .clip(CircleShape)
-                .background(if (canSend) scheme.primary else scheme.onSurface.copy(alpha = 0.10f))
+                .background(sendFill)
                 .clickable(enabled = canSend, role = Role.Button, onClickLabel = sendLabel, onClick = onSend)
                 .semantics { contentDescription = sendLabel },
             contentAlignment = Alignment.Center,
@@ -324,8 +433,7 @@ fun RoundIconButton(icon: ImageVector, label: String, onClick: () -> Unit, modif
     Box(
         modifier
             .size(48.dp)
-            .clip(CircleShape)
-            .background(COUITheme.colorScheme.surfaceContainer)
+            .glassSurface(CircleShape)
             .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
@@ -333,9 +441,10 @@ fun RoundIconButton(icon: ImageVector, label: String, onClick: () -> Unit, modif
 }
 
 /**
- * Capsule for the session header. A state capsule ([dot] given) is tinted with that state's colour
- * (soft fill, coloured dot, readable text); a plain one sits on the neutral card colour. No outline.
- * With [onClick] it is a button.
+ * Capsule of the session header: 30dp high, 13sp medium. A state capsule ([dot] given) carries its
+ * state's colour as a soft tint with a coloured dot; an action capsule ([onClick]) has an accent
+ * icon. Floating over the conversation ([backdrop] given) it is frosted glass, see [glassSurface];
+ * otherwise it sits on the card colour.
  */
 @Composable
 fun InfoChip(
@@ -345,32 +454,31 @@ fun InfoChip(
     color: Color = COUITheme.colorScheme.onSurfaceSecondary,
     icon: ImageVector? = null,
     onClick: (() -> Unit)? = null,
-    /** Opaque colour under a chip floating over content: the tint is blended onto it so text
-     *  scrolling underneath never shows through. */
+    /** Non-null for a chip floating over content (the colour itself is no longer used: the chip is glass). */
     backdrop: Color? = null,
 ) {
-    val tint = if (dot != null) dot.copy(alpha = 0.14f) else COUITheme.colorScheme.surfaceContainer
-    val fill = if (backdrop != null) tint.compositeOver(backdrop) else tint
-    val label = if (dot != null) COUITheme.colorScheme.onSurface else color
+    val scheme = COUITheme.colorScheme
+    val tint = dot?.copy(alpha = 0.16f)
+    val label = if (dot != null || onClick != null) scheme.onSurface else color
     val shape = RoundedCornerShape(50)
+    val surface = if (backdrop != null) Modifier.glassSurface(shape, tint) else Modifier.clip(shape).background(tint ?: scheme.surfaceContainer)
     Row(
         modifier
-            .heightIn(min = 24.dp)
-            .clip(shape)
-            .background(fill)
+            .heightIn(min = 30.dp)
+            .then(surface)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-            .padding(horizontal = 9.dp),
+            .padding(horizontal = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (dot != null) {
-            StatusDot(dot, size = 6.dp)
-            Spacer(Modifier.size(5.dp))
+            StatusDot(dot, size = 7.dp)
+            Spacer(Modifier.size(6.dp))
         }
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = label, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.size(4.dp))
+            Icon(icon, contentDescription = null, tint = if (onClick != null) scheme.primary else label, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.size(5.dp))
         }
-        Text(text, style = COUITheme.textStyles.footnote2, fontWeight = FontWeight.Medium, color = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text, style = COUITheme.textStyles.footnote1, fontWeight = FontWeight.Medium, color = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
