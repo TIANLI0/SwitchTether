@@ -448,8 +448,11 @@ class NotificationEngine(
         return NotifyIntent(type, key, sessionId, title, body, public, silent = p.inQuietHours(minuteOfDay()))
     }
 
+    /** The cleaned first line of the title (raw titles can be injected markup), else the project / folder. */
     private fun sessionName(s: SessionSummary?, id: String): String =
-        s?.title?.takeIf { it.isNotBlank() } ?: s?.project?.takeIf { it.isNotBlank() }
+        s?.title?.let { io.github.tianli0.switchtether.remote.session.InjectedText.clean(it).text }
+            ?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() && !it.startsWith("<") }
+            ?: s?.project?.takeIf { it.isNotBlank() }
             ?: s?.cwd?.trimEnd('/', '\\')?.substringAfterLast('/')?.substringAfterLast('\\')?.takeIf { it.isNotBlank() }
             ?: id.substringAfter(':').take(8)
 

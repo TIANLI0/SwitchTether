@@ -592,13 +592,13 @@ the offline banner (UDP magic packet to the subnet broadcast and 255.255.255.255
 ColorOS 16 shows Android 16 Live Updates in Fluid Cloud (流体云); the app posts standard Live
 Updates only (no OPPO SDK).
 - Pin up to 3 sessions ("钉到流体云" in the session toolbar, long-press on a row; optional
-  "从手机发起的任务自动钉住"). One promoted ongoing notification per pin, updated at most once per
-  second; a pin keeps the connection alive (the keep-alive service starts when the first pin is
+  "从手机发起的任务自动钉住"). One promoted ongoing notification per pin, re-posted only when what
+  it shows changed (§21.1); a pin keeps the connection alive (the keep-alive service starts when the first pin is
   added and stops with the last one unless "后台保持连接" is on).
 - States: 运行中 (step text + timer), 待确认 (alerts once; 批准 / 拒绝 need the phone unlocked;
-  a 409 says "已在电脑上处理"; questions offer 回答), 已完成 / 出错 / 已中断 (promoted for 60 s, then
-  demoted), 离线 (promoted only while a turn was running), session ended (final card, then the pin
-  is removed). Swiping the card away is respected until the state changes.
+  a 409 says "已在电脑上处理"; questions offer 回答), 已完成 / 出错 / 已中断 (outcome for 8 s, then a
+  result notification, §21.1), 离线 (only for a turn in flight, after 20 s), session ended (settles
+  at once). Swiping the card away is respected until the state changes.
 - Automatic follow is per run, not per session id (`AutoFollow` in `notify/LiveUpdates.kt`): a new
   session, the next turn of a known one (idle → busy / waiting) and a conversation resumed after
   its process ended are all followed again, since a follow ends with its task. A manual unpin of a
@@ -982,3 +982,57 @@ The Claude Code IDE extension's session features, for Claude Code sessions Switc
   removed, too late → it stays a normal message).
 - **Rewind files**: a small icon next to copy under user messages whose id is a Claude Code UUID: dry run → dialog
   listing the files (+/− lines) that says only files are restored, not the conversation → confirm → toast.
+
+## 21. Live Updates lifecycle, immersive pages, page actions (2026-11-23)
+
+### 21.1 Live Updates: when a card is posted and when it ends
+Every re-post of a promoted notification makes Fluid Cloud / the status chip animate, so a post must
+mean something on screen (`notify/LiveUpdates.kt`, timings in `LiveUpdates.Timing`):
+- **Deduplicated by what is rendered**, not by state changes: the spec (+ subtitle) about to be
+  posted is compared with the one showing; identical → nothing is posted (token counts, a row
+  updated in place, a status that changes nothing).
+- **Tiered coalescing**: a new phase goes out at once; the collapsed line / capsule (chip, step text,
+  icon, actions) at most every 3 s; expanded-only details (step count, files, tokens, the agent's
+  latest words) at most every 15 s.
+- **Connection drops**: shown only after 20 s, and only on a card whose turn is in flight; an idle or
+  finished card is never touched by a drop or a reconnect.
+- **Stale reads**: a REST read (reconnect / pin refresh) saying `busy` that is not newer than the
+  turn's outcome cannot restart a finished card; a tool row seen again (in-place update) is neither a
+  new step nor a new turn.
+
+End of a task (iOS Live Activities' "end with final content", on Android terms):
+1. The turn finishes → the capsule shows 已完成 / 出错 / 已中断 for **8 s**. It sounds once if the user's
+   ordinary "任务完成 / 失败 / 中断" notification would have (type on, agent / project not muted, not
+   quiet hours, app not in front) — the card replaces that notification.
+2. Then it **settles**: the same notification id becomes an ordinary result ("本轮已完成 · 12 步"):
+   not promoted, swipeable, tap opens the session and clears it, no 取消钉住. The pin slot is freed.
+3. The result disappears when the user swipes / taps it, opens the session in the app, or the
+   session's next turn starts (auto-follow re-pins and the same id becomes live again).
+4. The process exits → settles at once (the finished turn's outcome, or 会话已结束 mid-turn).
+
+**Background work** (Claude Code `run_in_background` shells, background agents): the turn's `idle`
+is not the end of the job. Counted from `status.backgroundTasks` (managed sessions) or the
+`background: true` tool / sub-agent rows still `running` (observed sessions). After the turn the card
+reads "本轮已完成 · 后台 2 个任务运行中" (capsule 后台), is demoted after 8 s but **keeps its pin**,
+so the agent waking up for a task's result continues on the same card. It settles 10 s after the last
+background task ended without a new turn, at the latest 30 min after the turn (a dev server never
+ends); its slot is the first one a new task takes. The completion sound plays when the whole job is
+over, not at the turn's end.
+
+### 21.2 Immersive pages and system bars
+- `Page(immersive = true)`: the body is one scrolling list that starts at the top of the screen and
+  scrolls under the status bar and the frosted title bar; `pageListPadding()` adds the bar height
+  (`LocalPageTopInset`) so the first item starts below it, and the gesture bar height at the bottom
+  of pages without the navigation capsule. Anything fixed above the list (the connection banner)
+  moves into it as its first item. Used by Home, Manage, Workspace, notification / computer /
+  licenses settings, port forwarding, downloads, session tools, the Agent map and sub-agent pages.
+  Pages with fixed tabs / chips / a composer above or below the list stay non-immersive.
+- Status / navigation bar icons follow the app's theme setting, not the system's
+  (`SwitchTetherTheme`), and the system contrast scrim is off.
+
+### 21.3 Actions inside pages
+A filled full-width button belongs at the bottom of a sheet or an onboarding step, not in a page.
+Inside a settings-style page an action is a row of the group card (导出对话, 扫描附近的电脑); in a
+form or a chat card it is a small (`ButtonSize.Small`) button aligned to the end (提问, approval
+options, 取消 / 提交回答; long desktop labels wrap onto the next line).
+

@@ -191,7 +191,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
         subagentPreview = { vm.previews[it] },
         onWantSubagentPreview = vm::loadPreview,
     )
-    Page(title = heading, subtitle = subtitle, onBack = onBack) {
+    Page(title = heading, subtitle = subtitle, onBack = onBack, immersive = true) {
         LoadableContent(state.page, onRetry = vm::retry) { page ->
             val items = AgentEventLog.of(page.events).renderItems(state.collapsed)
                 .filter { it.event.kind != EventKinds.STATUS }

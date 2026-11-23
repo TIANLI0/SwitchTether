@@ -60,6 +60,11 @@
     <string name="live_chip_interrupted">已中断</string>
     <string name="live_chip_offline">离线</string>
     <string name="live_chip_ended">已结束</string>
+    <string name="live_chip_background">后台</string>
+    <plurals name="live_background_running">
+        <item quantity="one">后台 %d 个任务运行中</item>
+        <item quantity="other">后台 %d 个任务运行中</item>
+    </plurals>
     <string name="live_thinking">思考中…</string>
     <string name="live_waiting_approval">需要你批准</string>
     <string name="live_waiting_input">需要你回答</string>

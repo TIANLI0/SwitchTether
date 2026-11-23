@@ -728,7 +728,13 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
             val options = d["options"].arr().orEmpty().mapNotNull { it.obj() }
             // Disabled while a decision is on its way: a second tap must not send a second decision.
             val enabled = ctx.approve.usable && ctx.online && !ctx.requestBusy
-            Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Compact, end-aligned actions (a card's buttons, not a page's): they wrap onto the next
+            // line when the desktop's labels are long.
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.fillMaxWidth().padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 options.forEach { o ->
                     val id = o.str("id") ?: return@forEach
                     val label = decisionOptionLabel(id, o.str("label"))
@@ -737,8 +743,7 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
                         onClick = { ctx.onApprove(d.str("requestId").orEmpty(), id, label) },
                         enabled = enabled,
                         colors = if (primary) ButtonDefaults.buttonColorsPrimary() else ButtonDefaults.buttonColors(),
-                        minHeight = 44.dp,
-                        modifier = Modifier.fillMaxWidth(),
+                        size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
                     ) {
                         Text(
                             label,
@@ -884,14 +889,13 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                 val freeOk = (opts.isEmpty() || otherChosen[key] == true) && freeTexts[key].orEmpty().isNotBlank()
                 q.bool("required") == false || if (otherChosen[key] == true || opts.isEmpty()) freeOk else selOk
             }
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                 if (cancellable) {
                     Button(
                         onClick = { ctx.onAnswerAction(d.str("requestId").orEmpty(), null, "cancel") },
                         enabled = enabled,
                         colors = ButtonDefaults.buttonColors(),
-                        minHeight = 44.dp,
-                        modifier = Modifier.weight(1f),
+                        size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
                     ) { Text(stringResource(R.string.action_cancel), color = LocalDevColors.current.danger) }
                 }
                 Button(
@@ -918,8 +922,7 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                     },
                     enabled = enabled && complete,
                     colors = ButtonDefaults.buttonColorsPrimary(),
-                    minHeight = 44.dp,
-                    modifier = Modifier.weight(1f),
+                    size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
                 ) { Text(stringResource(R.string.render_submit_answer), color = COUITheme.colorScheme.onPrimary) }
             }
             if (!ctx.answer.usable) BlockedNote(ctx.answer, ctx.capabilityReason)

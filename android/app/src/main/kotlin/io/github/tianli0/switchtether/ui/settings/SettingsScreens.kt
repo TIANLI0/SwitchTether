@@ -79,9 +79,9 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
     val okFmt = stringResource(R.string.stepup_ok)
     val failFmt = stringResource(R.string.stepup_failed)
 
-    Page(title = stringResource(R.string.tab_manage)) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
+    Page(title = stringResource(R.string.tab_manage), immersive = true) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             item {
                 PageCard {
                     ArrowPreference(
@@ -288,7 +288,7 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
     val container = appContainer()
     val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(null)
     val conn by container.connection.state.collectAsStateWithLifecycle()
-    Page(title = stringResource(R.string.settings_desktop), onBack = onBack) {
+    Page(title = stringResource(R.string.settings_desktop), onBack = onBack, immersive = true) {
         val d = desktop ?: return@Page
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
@@ -320,7 +320,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val prefs by container.notifyPrefsState.collectAsStateWithLifecycle()
     fun update(t: (NotifyPrefs) -> NotifyPrefs) = container.appScope.launch { container.settingsStore.updateNotifyPrefs(t) }
-    Page(title = stringResource(R.string.settings_notifications), onBack = onBack) {
+    Page(title = stringResource(R.string.settings_notifications), onBack = onBack, immersive = true) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { SectionHeader(stringResource(R.string.live_settings_title)) }
             item {
@@ -495,7 +495,7 @@ val LICENSES = listOf(
 
 @Composable
 fun LicensesScreen(onBack: () -> Unit) {
-    Page(title = stringResource(R.string.settings_licenses), onBack = onBack) {
+    Page(title = stringResource(R.string.settings_licenses), onBack = onBack, immersive = true) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
             items(LICENSES) { l ->

@@ -518,3 +518,18 @@ the sub-agents. Versions 0.1.10 (Android versionCode 11).
 - Android: signed `SwitchTether-0.1.10-release.apk` (9,490,362 bytes, sha256 `e1ac2058…a9eb7afd`), apksigner v3,
   certificate `214a252b…`. Not run on a device.
 - `SwitchTether-0.1.10-SHA256SUMS.txt` in `D:/Downloads`; checksums verified.
+
+## coui17 → `7135f75` (2026-11-23, uncommitted)
+
+Vendored coui17 synced to upstream `main` `7135f75` (2026-11-22); patches 0001–0004 apply unchanged; no new
+dependencies. New in the library: tap the top app bar (and on ColorOS the status bar, via the `com.oplus.clicktop`
+broadcast) to scroll to the top, a media progress slider, conic light and a material backdrop API. The app binds its
+top-level page lists and scroll bodies (`rememberPageListState()` / `rememberPageScrollState()` in
+`ui/common/Page.kt`: home, sessions, workspace, manage, settings, downloads, port forwards, agent map, sub-agents,
+session tools, New session, onboarding) plus the file browser, code viewer and PDF page lists; chat and terminal
+(bottom-following, chat loads older history near the top) are deliberately not bound.
+The video/audio viewer's hand-drawn seek bar is replaced by coui17 `IntentSlider` (COUI 17 `COUIIntentSeekBar`) in its
+over-media style: fixed white palette, conic light, thumb while touched/paused, ExoPlayer buffered position as the
+secondary track, loading sweep while buffering; a drag seeks once on release. No `LocalMaterialBackdrop` is provided:
+the only consumer is that slider, which sits over a `SurfaceView` a `LayerBackdrop` cannot record, so it keeps COUI's
+own translucent non-blur fill. Touch motion (press / deform / rubber band) comes with coui buttons and bars as-is.

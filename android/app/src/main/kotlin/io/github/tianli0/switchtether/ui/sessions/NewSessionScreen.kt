@@ -8,7 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,6 +43,7 @@ import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import androidx.compose.runtime.saveable.rememberSaveable
+import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
 import io.github.tianli0.switchtether.domain.SessionQuery
 import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.icons.AppIcons
@@ -316,7 +316,7 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
     ) {
         ConnectionBanner(state.connection, { container.connection.retryNow() })
         // The options fold out and the keyboard takes half the screen: the launcher must scroll.
-        Column(Modifier.weight(1f, fill = false).pageScroll().verticalScroll(rememberScrollState())) {
+        Column(Modifier.weight(1f, fill = false).pageScroll().verticalScroll(rememberPageScrollState())) {
             NewSessionContent(
                 state = state,
                 busy = busy != null,
@@ -631,7 +631,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
         onDismissRequest = onDismiss,
     ) {
         Box(Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
-            Column(Modifier.pageScroll().verticalScroll(rememberScrollState())) {
+            Column(Modifier.pageScroll().verticalScroll(rememberPageScrollState())) {
                 NewSessionContent(
                     state = state,
                     busy = busy != null,

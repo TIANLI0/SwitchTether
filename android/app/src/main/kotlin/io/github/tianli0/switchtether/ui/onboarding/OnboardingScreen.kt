@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -59,6 +58,7 @@ import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
+import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
 import io.github.tianli0.switchtether.BuildConfig
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.PairingException
@@ -156,7 +156,7 @@ fun OnboardingContent(
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(rememberPageScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

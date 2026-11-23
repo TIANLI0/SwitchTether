@@ -60,6 +60,11 @@
     <string name="live_chip_interrupted">Stopped</string>
     <string name="live_chip_offline">Offline</string>
     <string name="live_chip_ended">Ended</string>
+    <string name="live_chip_background">Bg</string>
+    <plurals name="live_background_running">
+        <item quantity="one">1 background task running</item>
+        <item quantity="other">%d background tasks running</item>
+    </plurals>
     <string name="live_thinking">Thinking…</string>
     <string name="live_waiting_approval">Needs your approval</string>
     <string name="live_waiting_input">Needs your answer</string>

@@ -11,6 +11,7 @@ import io.github.tianli0.switchtether.remote.live.LivePhase
 import io.github.tianli0.switchtether.remote.live.LiveReducer
 import io.github.tianli0.switchtether.remote.live.LiveText
 import io.github.tianli0.switchtether.remote.live.LiveUpdateRenderer
+import io.github.tianli0.switchtether.remote.live.LiveUpdateSpec
 import io.github.tianli0.switchtether.remote.live.PinnedSessionState
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
 import io.github.tianli0.switchtether.remote.protocol.EventKinds
@@ -34,10 +35,27 @@ import kotlinx.serialization.json.JsonObject
  * Slots: the newest [MAX_PINS] running tasks are pinned automatically. A newer task takes the slot of
  * the oldest automatic pin (they rotate); a task that is waiting for a free slot gets it when one
  * ends. A manual pin outranks every automatic one (it can displace one, and is never displaced by
- * one); when all slots are manual a further pin is refused. A pin is void once its task has finished:
- * after the final card has been shown, the slot is released and the next running task moves in. Updates are coalesced (at most one post per session per [THROTTLE_MS]); nothing
- * is posted when nothing visible changed; a dismissed card is not reposted until its phase
- * changes; a finished turn stays promoted for a minute and is then demoted (the pin remains).
+ * one); when all slots are manual a further pin is refused.
+ *
+ * Posting (every re-post makes Fluid Cloud / the status chip animate, so it must mean something): a
+ * card is re-posted only when what it shows changed — a new phase at once, the collapsed line /
+ * capsule at most every [Timing.headlineMs], expanded-only details (counters, the agent's latest
+ * words) at most every [Timing.detailMs]. A connection drop shorter than [Timing.offlineGraceMs] is
+ * never shown, and only a turn in flight shows one at all. A dismissed card is not reposted until
+ * its phase changes.
+ *
+ * End of a task (docs/ANDROID_UI.md, "Live Updates lifecycle"):
+ * - The turn finishes → the capsule shows the outcome for [Timing.settleMs] (sounding once if the
+ *   user's "task finished / failed / interrupted" notification is on), then the card **settles**: the
+ *   same notification becomes an ordinary, swipeable result ("本轮已完成 · 12 步"), the pin slot is
+ *   released, and the session's next turn is followed again on the same card.
+ * - Background work still running after the turn (`run_in_background` shells, background agents):
+ *   the card says so ("本轮已完成 · 后台 2 个任务运行中") and is demoted after [Timing.settleMs] but
+ *   keeps its pin, so the agent waking up for a task's result continues on the same card. It settles
+ *   [Timing.bgSettleGraceMs] after the last background task ended without a new turn, at the latest
+ *   [Timing.bgFollowMaxMs] after the turn (a dev server never ends). Its slot is the first given up.
+ * - The process exits → settles at once ("会话已结束", or the finished turn's outcome).
+ * - Opening the session in the app clears its result notification (it has been seen).
  */
 class LiveUpdates(
     private val context: Context,
@@ -49,13 +67,35 @@ class LiveUpdates(
     private val resolveApproval: suspend (sessionId: String, requestId: String, decision: String, commandId: String) -> CommandOutcome,
     private val enabled: () -> Boolean,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Whether a finished turn (DONE / FAILED / INTERRUPTED) should sound, per the user's notification settings. */
+    private val alertOnFinish: (PinnedSessionState) -> Boolean = { false },
+    private val timing: Timing = Timing(),
 ) {
+    data class Timing(
+        val headlineMs: Long = 3_000L,
+        val detailMs: Long = 15_000L,
+        val offlineGraceMs: Long = 20_000L,
+        val settleMs: Long = LiveUpdateRenderer.DONE_PROMOTED_MS,
+        val bgSettleGraceMs: Long = 10_000L,
+        val bgFollowMaxMs: Long = 30 * 60_000L,
+    )
+
     private val startedAtMs = clock()
     private val prefs = context.getSharedPreferences("live_pins", Context.MODE_PRIVATE)
     private val states = ConcurrentHashMap<String, PinnedSessionState>()
-    private val posted = ConcurrentHashMap<String, Int>()
+    /** What each card shows now (spec + subtitle): a post that would show the same is skipped. */
+    private val postedSpec = ConcurrentHashMap<String, Pair<LiveUpdateSpec, String?>>()
     private val postedPhase = ConcurrentHashMap<String, LivePhase>()
     private val pending = ConcurrentHashMap<String, Job>()
+    private val pendingDue = ConcurrentHashMap<String, Long>()
+    /** Demote / settle timers of a finished turn, and what they were armed for. */
+    private val endJobs = ConcurrentHashMap<String, Job>()
+    private val endArmedFor = ConcurrentHashMap<String, List<Any>>()
+    /** When the last background task of a finished turn ended (phone clock). */
+    private val bgClearedAt = ConcurrentHashMap<String, Long>()
+    /** Turn (start time) whose outcome has been announced, so a re-post never sounds twice. */
+    private val announcedTurn = ConcurrentHashMap<String, Long>()
+    @Volatile private var offlineJob: Job? = null
     private val lastPost = ConcurrentHashMap<String, Long>()
     private val _pins = MutableStateFlow<Set<String>>(emptySet())
     val pins: StateFlow<Set<String>> = _pins.asStateFlow()
@@ -139,7 +179,7 @@ class LiveUpdates(
                     "session.removed" -> (data["sessionId"] ?: data["id"])?.toString()?.trim('"')?.let {
                         // The process exited; the same conversation resumed later is a new run to follow.
                         runState[it] = AutoFollow.Run.ENDED
-                        unpin(it, userInitiated = false)
+                        ended(it)
                     }
                 }
             }
@@ -148,9 +188,19 @@ class LiveUpdates(
             conn.state.collect { s ->
                 // Only a real drop counts as "离线"; the first connect after start is not one.
                 if (s !is ConnectionState.Online && s !is ConnectionState.Offline) return@collect
-                val online = s is ConnectionState.Online
-                if (online) refreshSummaries()
-                states.keys.forEach { id -> mutate(id) { LiveReducer.onConnection(it, online, clock()) } }
+                if (s is ConnectionState.Online) {
+                    offlineJob?.cancel()
+                    offlineJob = null
+                    refreshSummaries()
+                    states.keys.forEach { id -> mutate(id) { LiveReducer.onConnection(it, true, clock()) } }
+                } else if (offlineJob?.isActive != true) {
+                    // A blip (network handover, relay reconnect) is not news: only a lasting drop is shown.
+                    offlineJob = scope.launch {
+                        delay(timing.offlineGraceMs)
+                        if (conn.state.value is ConnectionState.Online) return@launch
+                        states.keys.forEach { id -> mutate(id) { LiveReducer.onConnection(it, false, clock()) } }
+                    }
+                }
             }
         }
     }
@@ -160,7 +210,10 @@ class LiveUpdates(
         if (serverId != currentServerId) {
             (_pins.value + states.keys).forEach { id ->
                 pending.remove(id)?.cancel()
-                posted.remove(id)
+                pendingDue.remove(id)
+                endJobs.remove(id)?.cancel()
+                endArmedFor.remove(id)
+                postedSpec.remove(id)
                 postedPhase.remove(id)
                 channel.end(id)
             }
@@ -185,7 +238,7 @@ class LiveUpdates(
     /** `session.upserted` from the event stream (newer than any REST read still in flight). */
     internal fun onStreamUpsert(s: SessionSummary): Unit = synchronized(lock) {
         streamMark[s.id] = streamTick.incrementAndGet()
-        onUpsert(s)
+        onUpsert(s, fromRest = false)
     }
 
     /** `session.event` from the event stream. */
@@ -201,7 +254,7 @@ class LiveUpdates(
         if (at == null || at >= startedAtMs) mutate(e.sessionId) { LiveReducer.onEvent(it, e, clock()) }
     }
 
-    private fun onUpsert(raw: SessionSummary): Unit = synchronized(lock) {
+    private fun onUpsert(raw: SessionSummary, fromRest: Boolean): Unit = synchronized(lock) {
         val s = forCard(raw)
         // A persisted pin is a subscription, not evidence of a turn completing now.
         if (restoredPins.remove(s.id) && (!s.isLive || s.status !in setOf("busy", "waiting") && s.waitingFor == null)) {
@@ -214,12 +267,15 @@ class LiveUpdates(
             return
         }
         runState[s.id] = AutoFollow.runOf(s)
-        mutate(s.id) { LiveReducer.onUpsert(it, s, clock()) }
-        if (!s.isLive) scope.launch {
-            // Session ended / process exited: the final card stays briefly, then the pin is removed.
-            delay(LiveUpdateRenderer.DONE_PROMOTED_MS)
-            unpin(s.id, keepFinal = true, userInitiated = false)
-        }
+        if (!s.isLive) return ended(s.id)
+        mutate(s.id) { LiveReducer.onUpsert(it, s, clock(), fromRest) }
+    }
+
+    /** The session's process exited: the card settles at once (its outcome, or "会话已结束"). */
+    private fun ended(sessionId: String): Unit = synchronized(lock) {
+        if (sessionId !in _pins.value) return
+        mutate(sessionId) { LiveReducer.onEnded(it, clock()) }
+        settle(sessionId)
     }
 
     private fun maybeAutoPin(s: SessionSummary) {
@@ -236,9 +292,9 @@ class LiveUpdates(
         pin(s, manual = false)
     }
 
-    /** Oldest automatic pin, finished ones first; null when every pin is manual. */
+    /** Oldest automatic pin, finished ones (also those with only background work left) first; null when every pin is manual. */
     private fun oldestAuto(): String? = _pins.value.filter { it !in manualPins }
-        .minWithOrNull(compareBy<String> { states[it]?.phase.let { p -> if (p == LivePhase.DONE || p == LivePhase.FAILED || p == LivePhase.INTERRUPTED || p == LivePhase.ENDED) 0 else 1 } }.thenBy { pinnedAt[it] ?: 0L })
+        .minWithOrNull(compareBy<String> { states[it]?.phase.let { p -> if (p == null || LiveReducer.isFinished(p) || p == LivePhase.ENDED) 0 else 1 } }.thenBy { pinnedAt[it] ?: 0L })
 
     /** A slot is free: pin the newest running tasks that are waiting for one (not ones the user unpinned). */
     private fun fillSlots() {
@@ -296,11 +352,7 @@ class LiveUpdates(
      */
     internal fun applyRefresh(id: String, summary: SessionSummary, pendingRequests: List<AgentEvent>, streamMovedSince: Boolean): Unit = synchronized(lock) {
         if (!streamMovedSince) {
-            if (!summary.isLive) {
-                unpin(id, userInitiated = false, refill = false)
-                return
-            }
-            onUpsert(summary)
+            onUpsert(summary, fromRest = true)
         } else if (id in restoredPins) {
             // The summary is older than the stream, but a restored pin still needs its name, and a
             // restored pin of a task that is no longer running is void.
@@ -311,7 +363,7 @@ class LiveUpdates(
             restoredPins.remove(id)
             val named = forCard(summary)
             states.computeIfPresent(id) { _, st -> st.copy(title = named.title ?: st.title, agent = named.agent, project = named.project ?: st.project, version = st.version + 1) }
-            schedule(id, immediate = true)
+            schedule(id, phaseChanged = true)
         }
         pendingRequests
             .filter { e -> requestKey(id, e) !in resolvedRequests }
@@ -346,12 +398,15 @@ class LiveUpdates(
             summary,
             clock(),
         ).let { if (it.phase == LivePhase.DONE && summary.status != "busy") it.copy(phaseSinceMs = 0) else it }
-        schedule(summary.id, immediate = true)
+        // A new pin always shows (the session's result notification, if any, becomes live again).
+        postedSpec.remove(summary.id)
+        schedule(summary.id, phaseChanged = true)
         scope.launch { refresh(summary.id) }
         return true
     }
 
-    fun unpin(sessionId: String, keepFinal: Boolean = false, userInitiated: Boolean = true, refill: Boolean = true): Unit = synchronized(lock) {
+    /** @param keepCard leave the notification up (a settled result); otherwise it is withdrawn. */
+    fun unpin(sessionId: String, keepCard: Boolean = false, userInitiated: Boolean = true, refill: Boolean = true): Unit = synchronized(lock) {
         if (manualPins.remove(sessionId)) persistSet(manualKey(currentServerId), manualPins)
         pinnedAt.remove(sessionId)
         if (userInitiated && unpinned.add(sessionId)) {
@@ -359,14 +414,36 @@ class LiveUpdates(
         }
         setPins(_pins.value - sessionId)
         pending.remove(sessionId)?.cancel()
+        pendingDue.remove(sessionId)
+        endJobs.remove(sessionId)?.cancel()
+        endArmedFor.remove(sessionId)
+        bgClearedAt.remove(sessionId)
         states.remove(sessionId)
-        posted.remove(sessionId)
+        postedSpec.remove(sessionId)
         postedPhase.remove(sessionId)
-        channel.end(sessionId) // keepFinal: the final card was already shown for a minute
+        if (keepCard) channel.release(sessionId) else channel.end(sessionId)
         if (refill) fillSlots()
     }
 
+    /** The user opened the session in the app: its result notification has been seen. */
+    fun onSessionOpened(sessionId: String): Unit = synchronized(lock) {
+        if (sessionId !in _pins.value) channel.end(sessionId)
+    }
+
+    /**
+     * The finished card's outcome has been shown: the same notification becomes an ordinary result
+     * (swipeable, not promoted, no unpin action) and the slot is released.
+     */
+    private fun settle(sessionId: String): Unit = synchronized(lock) {
+        if (sessionId !in _pins.value) return
+        val s = states[sessionId] ?: return
+        states[sessionId] = LiveReducer.onSettled(s)
+        post(sessionId)
+        unpin(sessionId, keepCard = true, userInitiated = false)
+    }
+
     fun onDismissed(sessionId: String): Unit = synchronized(lock) {
+        postedSpec.remove(sessionId)
         states.computeIfPresent(sessionId) { _, s -> LiveReducer.onDismissed(s) }
     }
 
@@ -392,45 +469,113 @@ class LiveUpdates(
         val new = f(old)
         if (new === old) return
         states[sessionId] = new
-        schedule(sessionId, immediate = new.phase != old.phase)
+        if (LiveReducer.isFinished(new.phase) && old.background > 0 && new.background == 0) bgClearedAt[sessionId] = clock()
+        if (!LiveReducer.isFinished(new.phase)) bgClearedAt.remove(sessionId)
+        schedule(sessionId, phaseChanged = new.phase != old.phase)
+        armEnd(sessionId)
     }
 
-    /** Coalesces updates: at most one post per session per [THROTTLE_MS]; phase changes go out at once. */
-    private fun schedule(sessionId: String, immediate: Boolean) {
-        val since = clock() - (lastPost[sessionId] ?: 0)
-        val wait = if (immediate || since >= THROTTLE_MS) 0 else THROTTLE_MS - since
-        pending[sessionId]?.cancel()
-        pending[sessionId] = scope.launch {
-            if (wait > 0) delay(wait)
-            val s = synchronized(lock) {
-                post(sessionId)
-                states[sessionId]
-            } ?: return@launch
-            // Demote a finished turn after it has been shown for a minute (the pin stays).
-            if (s.phase == LivePhase.DONE || s.phase == LivePhase.FAILED || s.phase == LivePhase.INTERRUPTED) {
-                delay(LiveUpdateRenderer.DONE_PROMOTED_MS + 500)
-                synchronized(lock) {
-                    if (states[sessionId]?.version == s.version) {
-                        // The task ended and its final card has been shown: the pin is void (a pin that
-                        // never saw a turn run, e.g. just made on an idle session, is kept).
-                        if (s.turnStartedMs > 0) unpin(sessionId, userInitiated = false) else post(sessionId, force = true)
-                    }
-                }
+    private fun render(sessionId: String, s: PinnedSessionState): Pair<LiveUpdateSpec, String?> {
+        val spec = LiveUpdateRenderer.render(s, clock(), text, postedPhase[sessionId], timing.settleMs)
+        val subtitle = listOfNotNull(io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(s.agent).takeIf { s.agent != "unknown" }, s.project, spec.progressNote.takeIf { it.isNotEmpty() && s.phase == LivePhase.RUNNING }).joinToString(" · ").ifEmpty { null }
+        return spec to subtitle
+    }
+
+    /**
+     * Coalesces updates by what changed on screen: a new phase goes out at once, the collapsed line /
+     * capsule at most every [Timing.headlineMs], expanded-only details at most every [Timing.detailMs];
+     * nothing visible changed → nothing is posted.
+     */
+    private fun schedule(sessionId: String, phaseChanged: Boolean) {
+        val s = states[sessionId] ?: return
+        val now = clock()
+        val last = postedSpec[sessionId]
+        val wait = if (phaseChanged || last == null) 0L else {
+            val (spec, sub) = render(sessionId, s)
+            when {
+                spec.headline() != last.first.headline() -> timing.headlineMs
+                spec.copy(alert = false) != last.first.copy(alert = false) || sub != last.second -> timing.detailMs
+                else -> return
             }
         }
+        val due = if (wait == 0L) now else maxOf(now, (lastPost[sessionId] ?: 0L) + wait)
+        // A post already due sooner carries this change too (it posts the state of its time).
+        if (pending[sessionId]?.isActive == true && (pendingDue[sessionId] ?: Long.MAX_VALUE) <= due) return
+        pending.remove(sessionId)?.cancel()
+        pendingDue[sessionId] = due
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            if (due > now) delay(due - now)
+            synchronized(lock) {
+                if (pendingDue[sessionId] == due) {
+                    pending.remove(sessionId)
+                    pendingDue.remove(sessionId)
+                }
+                post(sessionId)
+            }
+        }
+        pending[sessionId] = job
+        job.start()
+    }
+
+    /**
+     * Timers of a finished turn: demote the capsule after [Timing.settleMs], then settle — at the same
+     * time, or, with background work still running, [Timing.bgSettleGraceMs] after it ended (at the
+     * latest [Timing.bgFollowMaxMs] after the turn). A pin that never saw a turn run (made on an idle
+     * session) is kept as it is.
+     */
+    private fun armEnd(sessionId: String) {
+        val s = states[sessionId]
+        if (s == null || !LiveReducer.isFinished(s.phase) || s.turnStartedMs == 0L || s.settled) {
+            endJobs.remove(sessionId)?.cancel()
+            endArmedFor.remove(sessionId)
+            return
+        }
+        val key = listOf(s.phase, s.phaseSinceMs, s.background > 0, bgClearedAt[sessionId] ?: 0L)
+        if (endArmedFor[sessionId] == key && endJobs[sessionId]?.isActive == true) return
+        endJobs.remove(sessionId)?.cancel()
+        endArmedFor[sessionId] = key
+        val demoteAt = s.phaseSinceMs + timing.settleMs
+        val settleAt = if (s.background > 0) s.phaseSinceMs + timing.bgFollowMaxMs
+        else maxOf(demoteAt, (bgClearedAt[sessionId] ?: 0L) + timing.bgSettleGraceMs)
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            val toDemote = demoteAt - clock()
+            if (settleAt > demoteAt) {
+                delay(toDemote.coerceAtLeast(0) + 50) // just past the window, so the render is demoted
+                synchronized(lock) { if (endArmedFor[sessionId] == key) post(sessionId) } // promoted → quiet, same words
+            }
+            val toSettle = settleAt - clock()
+            if (toSettle > 0) delay(toSettle)
+            synchronized(lock) {
+                if (endArmedFor[sessionId] != key) return@synchronized
+                endArmedFor.remove(sessionId)
+                endJobs.remove(sessionId)
+                val cur = states[sessionId] ?: return@synchronized
+                if (cur.background == 0 || clock() - cur.phaseSinceMs >= timing.bgFollowMaxMs) settle(sessionId)
+            }
+        }
+        endJobs[sessionId] = job
+        job.start()
     }
 
     private fun post(sessionId: String, force: Boolean = false): Unit = synchronized(lock) {
         val s = states[sessionId] ?: return
-        if (!enabled()) return channel.end(sessionId)
+        if (!enabled()) {
+            postedSpec.remove(sessionId)
+            return channel.end(sessionId)
+        }
         // A pin restored after a restart is shown only once a summary has named it.
         if (sessionId in restoredPins) return
         if (s.dismissed) return
-        if (!force && posted[sessionId] == s.version) return
-        val spec = LiveUpdateRenderer.render(s, clock(), text, postedPhase[sessionId])
-        val subtitle = listOfNotNull(io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(s.agent).takeIf { s.agent != "unknown" }, s.project, spec.progressNote.takeIf { it.isNotEmpty() && s.phase == LivePhase.RUNNING }).joinToString(" · ").ifEmpty { null }
+        var (spec, subtitle) = render(sessionId, s)
+        val last = postedSpec[sessionId]
+        if (!force && last != null && spec.copy(alert = false) == last.first.copy(alert = false) && subtitle == last.second) return
+        // The whole job is over (no background work left): announce it once, per the user's settings.
+        if (LiveReducer.isFinished(s.phase) && s.background == 0 && s.turnStartedMs > 0 && announcedTurn[sessionId] != s.turnStartedMs) {
+            announcedTurn[sessionId] = s.turnStartedMs
+            if (alertOnFinish(s)) spec = spec.copy(alert = true)
+        }
         channel.update(spec, s.agent, subtitle)
-        posted[sessionId] = s.version
+        postedSpec[sessionId] = spec to subtitle
         postedPhase[sessionId] = s.phase
         lastPost[sessionId] = clock()
     }
@@ -471,7 +616,6 @@ class LiveUpdates(
 
     companion object {
         const val MAX_PINS = 3
-        const val THROTTLE_MS = 1_000L
     }
 }
 
@@ -562,6 +706,8 @@ private class ResourceLiveText(private val c: Context) : LiveText {
     override fun interrupted() = s(R.string.live_interrupted)
     override fun offline() = s(R.string.live_offline)
     override fun ended() = s(R.string.live_ended)
+    override fun chipBackground() = s(R.string.live_chip_background)
+    override fun backgroundRunning(n: Int) = c.resources.getQuantityString(R.plurals.live_background_running, n, n)
     override fun resolvedElsewhere() = s(R.string.live_resolved_elsewhere)
     override fun publicText() = s(R.string.app_name)
 }

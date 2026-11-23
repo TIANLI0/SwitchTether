@@ -76,11 +76,17 @@ fun HomeScreen(onOpen: (Route) -> Unit, onSelectTab: (Tab) -> Unit) {
 fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) -> Unit, onRetry: () -> Unit, onRefresh: () -> Unit) {
     // Task-first: no "connected" card when healthy, attention items on top, compact rows.
     val online = state.connection as? ConnectionState.Online
-    Page(title = online?.desktop?.name ?: stringResource(R.string.tab_home), large = false) {
-        // Only problems are shown (connecting / offline / revoked / incompatible), as a thin strip.
-        io.github.tianli0.switchtether.ui.common.ConnectionBanner(state.connection, onRetry)
-        io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh, topAppBarScrollBehavior = null) {
+    Page(title = online?.desktop?.name ?: stringResource(R.string.tab_home), large = false, immersive = true) {
+        io.github.suqi8.coui.kmp.basic.PullToRefresh(
+            isRefreshing = state.refreshing,
+            onRefresh = onRefresh,
+            topAppBarScrollBehavior = null,
+            // The list runs under the title bar; the pull indicator appears below it.
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = io.github.tianli0.switchtether.ui.common.LocalPageTopInset.current),
+        ) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
+            // Only problems are shown (connecting / offline / revoked / incompatible), as a thin strip.
+            item(key = "connection") { io.github.tianli0.switchtether.ui.common.ConnectionBanner(state.connection, onRetry) }
             when (val s = state.sessions) {
                 Loadable.Loading -> item(key = "loading") { CompactNote(stringResource(R.string.state_loading)) }
                 is Loadable.Failed -> item(key = "error") {

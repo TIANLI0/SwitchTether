@@ -139,11 +139,15 @@ class NotificationOrderingTest {
         // Bug: every pin's phase start became the reconnect time, so all cards were re-ranked (and
         // turns that finished long ago were promoted again).
         var s = finished(now = 10_000)
-        s = LiveReducer.onConnection(s, online = false, now = 20_000)
-        assertEquals(LivePhase.OFFLINE, s.phase)
-        s = LiveReducer.onConnection(s, online = true, now = 30_000)
-        assertEquals(LivePhase.DONE, s.phase)
-        assertEquals(10_000L, s.phaseSinceMs)
+        // A finished card is not touched by a drop at all.
+        assertEquals(LivePhase.DONE, LiveReducer.onConnection(s, online = false, now = 20_000).phase)
+        // A turn in flight shows the drop and comes back to its phase, since when it was in it.
+        val running = s.copy(phase = LivePhase.RUNNING, phaseSinceMs = 10_000, turnStartedMs = 10_000)
+        val off = LiveReducer.onConnection(running, online = false, now = 20_000)
+        assertEquals(LivePhase.OFFLINE, off.phase)
+        val back = LiveReducer.onConnection(off, online = true, now = 30_000)
+        assertEquals(LivePhase.RUNNING, back.phase)
+        assertEquals(10_000L, back.phaseSinceMs)
         assertEquals(10_000L, LiveUpdateRenderer.render(s, 30_000, LiveText.English, null).whenMs)
     }
 

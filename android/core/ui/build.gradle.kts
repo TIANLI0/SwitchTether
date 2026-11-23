@@ -35,6 +35,7 @@ dependencies {
     api(libs.phosphor.icon)
     api(libs.androidx.compose.ui)
     api(libs.androidx.compose.foundation)
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.compose.ui.tooling.preview)
 
     testImplementation(libs.junit4)
