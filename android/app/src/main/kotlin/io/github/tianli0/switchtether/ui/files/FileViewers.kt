@@ -29,8 +29,6 @@ import android.view.SurfaceView
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -62,9 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +75,9 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.compose.ui.platform.testTag
+import io.github.suqi8.coui.kmp.basic.IntentSlider
+import io.github.suqi8.coui.kmp.basic.IntentSliderPlaybackState
 import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
@@ -413,6 +412,7 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
         else -> {
             val pdf = d.getOrThrow()
             val listState = rememberLazyListState()
+            io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
             var zoomedPage by remember(file.uri) { mutableStateOf<Int?>(null) }
             BoxWithConstraints(modifier.background(COUITheme.colorScheme.surfaceContainer)) {
                 val widthPx = constraints.maxWidth.coerceAtMost(2000)
@@ -503,6 +503,8 @@ private fun MediaPlayerBody(file: LocalFile, video: Boolean, modifier: Modifier)
     var playing by remember(player) { mutableStateOf(true) }
     var position by remember(player) { mutableLongStateOf(0L) }
     var duration by remember(player) { mutableLongStateOf(0L) }
+    var buffered by remember(player) { mutableLongStateOf(0L) }
+    var buffering by remember(player) { mutableStateOf(true) }
     var error by remember(player) { mutableStateOf<String?>(null) }
     var aspect by remember(player) { mutableFloatStateOf(16f / 9f) }
     DisposableEffect(player) {
@@ -526,6 +528,8 @@ private fun MediaPlayerBody(file: LocalFile, video: Boolean, modifier: Modifier)
             playing = player.isPlaying
             position = player.currentPosition
             duration = player.duration.takeIf { it > 0 } ?: 0L
+            buffered = player.bufferedPosition
+            buffering = player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_IDLE
             delay(250)
         }
     }
@@ -542,7 +546,14 @@ private fun MediaPlayerBody(file: LocalFile, video: Boolean, modifier: Modifier)
             }
             error?.let { Text(stringResource(R.string.viewer_media_error, it), style = COUITheme.textStyles.body2, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(24.dp)) }
         }
-        SeekBar(position, duration) { player.seekTo(it) }
+        val playback = when {
+            error != null -> IntentSliderPlaybackState.Paused
+            buffering && duration <= 0 -> IntentSliderPlaybackState.LoadingInitial
+            buffering -> IntentSliderPlaybackState.LoadingBuffering
+            playing -> IntentSliderPlaybackState.Playing
+            else -> IntentSliderPlaybackState.Paused
+        }
+        MediaProgress(position, duration, buffered, playback) { player.seekTo(it) }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(
                 text = stringResource(if (playing) R.string.viewer_pause else R.string.viewer_play),
@@ -556,25 +567,33 @@ private fun MediaPlayerBody(file: LocalFile, video: Boolean, modifier: Modifier)
     }
 }
 
+/**
+ * COUI 17 media progress bar (`COUIIntentSeekBar` via coui17 `IntentSlider`) in its over-media style:
+ * fixed white palette, conic light trailing the progress while playing or dragging, thumb while
+ * touched or paused, the buffered position underneath and a loading sweep while buffering. A drag
+ * moves by the finger's travel and seeks once on release, so the 250 ms position poll never fights it.
+ */
 @Composable
-private fun SeekBar(position: Long, duration: Long, onSeek: (Long) -> Unit) {
-    val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
-    var widthPx by remember { mutableIntStateOf(1) }
-    Box(
-        Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 16.dp)
-            .pointerInput(duration) {
-                detectTapGestures { o -> if (duration > 0) onSeek((o.x / widthPx * duration).toLong().coerceIn(0, duration)) }
-            }
-            .pointerInput(duration) {
-                detectHorizontalDragGestures { change, _ ->
-                    if (duration > 0) onSeek((change.position.x / widthPx * duration).toLong().coerceIn(0, duration))
-                }
-            },
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(Modifier.fillMaxWidth().height(4.dp).background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(2.dp)).onSizeChanged { widthPx = it.width.coerceAtLeast(1) })
-        Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(COUITheme.colorScheme.primary, RoundedCornerShape(2.dp)))
-    }
+private fun MediaProgress(position: Long, duration: Long, buffered: Long, playback: IntentSliderPlaybackState, onSeek: (Long) -> Unit) {
+    val total = duration.coerceAtLeast(0L)
+    var dragValue by remember { mutableStateOf<Float?>(null) }
+    val max = if (total > 0) total.toFloat() else 1f
+    IntentSlider(
+        value = dragValue ?: position.coerceIn(0L, total).toFloat().coerceAtMost(max),
+        onValueChange = { dragValue = it },
+        onValueChangeFinished = {
+            dragValue?.let { if (total > 0) onSeek(it.toLong().coerceIn(0L, total)) }
+            dragValue = null
+        },
+        enabled = total > 0,
+        showThumb = true,
+        followSystemTheme = false,
+        conicLight = true,
+        playbackState = playback,
+        valueRange = 0f..max,
+        secondaryValue = if (total > 0) buffered.coerceIn(0L, total).toFloat() else null,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp).testTag("media-progress"),
+    )
 }
 
 internal fun clock(ms: Long): String {

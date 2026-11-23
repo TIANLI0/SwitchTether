@@ -129,6 +129,7 @@ fun CodeViewer(
         value = withContext(Dispatchers.Default) { doc.find(query) }
     }
     val listState = rememberLazyListState()
+    io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
