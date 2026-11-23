@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.adamglin.PhosphorIcons
 import com.adamglin.phosphoricons.Fill
 import com.adamglin.phosphoricons.Regular
+import com.adamglin.phosphoricons.regular.CaretDown
 import com.adamglin.phosphoricons.regular.CaretRight
 import com.adamglin.phosphoricons.regular.Folder
 import com.adamglin.phosphoricons.regular.GitBranch
@@ -117,6 +118,7 @@ object AppIcons {
     val Git: ImageVector get() = PhosphorIcons.Regular.GitBranch
     val PortForward: ImageVector get() = PhosphorIcons.Regular.PlugsConnected
     val ChevronRight: ImageVector get() = PhosphorIcons.Regular.CaretRight
+    val ChevronDown: ImageVector get() = PhosphorIcons.Regular.CaretDown
     /** Follow a task in the live notification (Fluid Cloud). */
     val Pin: ImageVector get() = PhosphorIcons.Regular.Broadcast
     /** Shown while a task is followed (tap to stop). */

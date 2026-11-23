@@ -303,7 +303,7 @@
     <string name="new_session_explainer">Starts a new session on the computer the official way: it is an ordinary Claude Code / Codex conversation, listed by claude --resume and in VS Code\'s history. Send messages, answer approvals, interrupt and switch the model from the phone; after the computer or SwitchTether restarts, just send a message to continue. Sessions open in a terminal or VS Code are not taken over.</string>
     <string name="new_session_agent">Agent</string>
     <string name="new_session_cwd">Working directory</string>
-    <string name="new_session_cwd_none">Pick a folder below</string>
+    <string name="new_session_cwd_none">Choose a folder</string>
     <string name="new_session_use_folder">Use this folder</string>
     <string name="new_session_no_subdirs">No sub-folders.</string>
     <string name="new_session_listing_note">Some entries are not shown (%1$d blocked by the desktop\'s file policy).</string>
@@ -317,6 +317,7 @@
     <string name="perm_accept_edits">Auto-accept file edits, ask for the rest</string>
     <string name="perm_plan">Plan only, no changes</string>
     <string name="new_session_start">Start session</string>
+    <string name="new_session_start_short">Start</string>
     <string name="new_session_confirm_title">Start a new session?</string>
     <string name="new_session_confirm_body">Start %1$s in %2$s on the computer.</string>
     <string name="provider_credential">Update credential</string>
@@ -429,8 +430,6 @@
     <string name="new_session_recent_folders">Recent</string>
     <string name="new_session_all_locations">All locations</string>
     <string name="new_session_filter">Filter folders</string>
-    <string name="new_session_use_named_folder">Use “%1$s”</string>
-    <string name="new_session_pick_hint">Open a folder to use it</string>
     <string name="onboarding_paste">Paste from clipboard</string>
     <string name="pair_enter_address">Enter the computer\'s address</string>
     <string name="pair_code_title">Enter the pairing code</string>

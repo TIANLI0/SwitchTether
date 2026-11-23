@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether.ui.files
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +36,6 @@ import io.github.suqi8.coui.kmp.basic.BasicComponentDefaults
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
@@ -91,9 +94,9 @@ fun DownloadsScreen(onBack: () -> Unit) {
     viewing?.let { r ->
         Page(title = r.name, onBack = { viewing = null }, large = false) {
             val local = remember(r) { store.asLocal(r) }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(text = stringResource(R.string.viewer_open_with), onClick = { startSafely(context, store.viewIntent(local), noApp) })
-                TextButton(text = stringResource(R.string.viewer_share), onClick = { startSafely(context, store.shareIntent(local), noApp) })
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallButton(stringResource(R.string.viewer_open_with), { startSafely(context, store.viewIntent(local), noApp) })
+                SmallButton(stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(local), noApp) })
             }
             Text(Formatters.bytes(r.size) + " · " + stringResource(R.string.viewer_saved_copy), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.gutter, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
             LocalFileBody(local, FileTypes.kindOf(r.name), Modifier.weight(1f).fillMaxWidth())
@@ -108,9 +111,11 @@ fun DownloadsScreen(onBack: () -> Unit) {
         immersive = true,
         actions = {
             if (items.isNotEmpty()) {
-                TextButton(
+                // A text action of the title bar, as in ColorOS list pages ("选择" / "完成").
+                LinkButton(
                     text = stringResource(if (selecting) R.string.downloads_done else R.string.downloads_select),
                     onClick = { selecting = !selecting; selected = emptySet() },
+                    modifier = Modifier.padding(end = 6.dp),
                 )
             }
         },
@@ -121,11 +126,11 @@ fun DownloadsScreen(onBack: () -> Unit) {
                 Text(
                     stringResource(R.string.downloads_saved_hint, FileStore.DOWNLOAD_FOLDER),
                     style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                    modifier = Modifier.padding(horizontal = TextGutter).padding(bottom = 8.dp),
                 )
             }
             if (items.isEmpty()) {
-                item { Text(stringResource(R.string.downloads_empty), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
+                item { Text(stringResource(R.string.downloads_empty), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) }
             } else {
                 item {
                     Text(
@@ -158,18 +163,19 @@ fun DownloadsScreen(onBack: () -> Unit) {
                 item {
                     if (selecting) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(
+                            SmallButton(
                                 text = stringResource(R.string.downloads_select_all),
                                 onClick = { selected = if (selected.size == items.size) emptySet() else items.map { it.id }.toSet() },
                             )
-                            TextButton(
+                            SmallButton(
                                 text = stringResource(R.string.downloads_delete_selected, selected.size),
                                 enabled = selected.isNotEmpty(),
+                                tone = ActionTone.Danger,
                                 onClick = { pending = PendingDelete.Some(selected) },
                             )
                         }
                     } else {
-                        TextButton(text = stringResource(R.string.downloads_delete_all), onClick = { pending = PendingDelete.All }, modifier = Modifier.padding(horizontal = 8.dp))
+                        LinkButton(stringResource(R.string.downloads_delete_all), { pending = PendingDelete.All }, modifier = Modifier.padding(horizontal = 14.dp), color = LocalDevColors.current.danger)
                     }
                 }
             }
@@ -179,7 +185,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
                     BasicComponent(
                         title = stringResource(R.string.downloads_cache_title),
                         summary = stringResource(R.string.downloads_cache_summary, Formatters.bytes(cacheBytes), Formatters.bytes(FileCache.DEFAULT_MAX_BYTES)),
-                        endActions = { TextButton(text = stringResource(R.string.downloads_cache_clear), onClick = { confirmClearCache = true }, enabled = cacheBytes > 0) },
+                        endActions = { SmallButton(stringResource(R.string.downloads_cache_clear), { confirmClearCache = true }, enabled = cacheBytes > 0) },
                     )
                 }
             }
@@ -187,10 +193,10 @@ fun DownloadsScreen(onBack: () -> Unit) {
                 Text(
                     stringResource(R.string.downloads_cache_hint),
                     style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    modifier = Modifier.padding(horizontal = TextGutter),
                 )
             }
-            notice?.let { n -> item { Text(n, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.padding(16.dp)) } }
+            notice?.let { n -> item { Text(n, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) } }
         }
     }
 

@@ -135,6 +135,9 @@ fun SwitchTetherTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable (
                 primaryContainer = BrandBlue,
                 tertiaryContainer = BrandBlue.copy(alpha = 0.15f),
                 onTertiaryContainer = BrandBlue,
+                // The fill of a filled (primary) button. Left at COUI's stock #0080FF it disagreed
+                // with the accent of switches, radios and links on the same screen.
+                containerTheme = BrandBlue,
             ),
             darkColors = darkColorScheme(
                 primary = BrandBlueDark,
@@ -142,6 +145,7 @@ fun SwitchTetherTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable (
                 primaryContainer = BrandBlueDark,
                 tertiaryContainer = BrandBlueDark.copy(alpha = 0.2f),
                 onTertiaryContainer = BrandBlueDark,
+                containerTheme = BrandBlueDark,
             ),
         )
     }

@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import androidx.compose.foundation.background
@@ -40,7 +41,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import io.github.suqi8.coui.kmp.basic.BasicComponent
-import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import androidx.compose.runtime.saveable.rememberSaveable
 import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
@@ -48,11 +48,17 @@ import io.github.tianli0.switchtether.domain.SessionQuery
 import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.home.RowIcon
-import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.TabRowWithContour
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
-import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
+import io.github.suqi8.coui.kmp.preference.ArrowPreference
+import io.github.tianli0.switchtether.ui.common.SheetConfirm
+import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.ui.common.GroupCard
@@ -313,6 +319,15 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
         title = stringResource(R.string.new_session_title),
         onBack = onBack,
         modifier = Modifier.imePadding(),
+        actions = {
+            SmallButton(
+                text = stringResource(if (busy != null) R.string.state_loading else R.string.new_session_start_short),
+                onClick = { vm.start(startLabel) },
+                enabled = state.canStart && busy == null,
+                tone = ActionTone.Primary,
+                modifier = Modifier.padding(end = 12.dp).testTag("start-session"),
+            )
+        },
     ) {
         ConnectionBanner(state.connection, { container.connection.retryNow() })
         // The options fold out and the keyboard takes half the screen: the launcher must scroll.
@@ -326,7 +341,6 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
                 onPrompt = vm::setPrompt,
                 onModel = vm::setModel,
                 onPermissionMode = vm::setPermissionMode,
-                onStart = { vm.start(startLabel) },
                 onEffort = vm::setEffort,
             )
         }
@@ -336,7 +350,8 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
 
 /**
  * The launcher: agent, project (last-used folders one tap away, the folder browser on its own page),
- * the first message, and — folded away — model and permission mode. Starting needs no extra dialog.
+ * the first message, and — folded away — model and permission mode. The start action is not part of
+ * the form: the panel shows it as its toolbar's confirm capsule, the page as a top-bar action.
  */
 @Composable
 fun NewSessionContent(
@@ -348,35 +363,36 @@ fun NewSessionContent(
     onPrompt: (String) -> Unit,
     onModel: (String) -> Unit,
     onPermissionMode: (String) -> Unit,
-    onStart: () -> Unit,
     onEffort: (String) -> Unit = {},
 ) {
     val dev = LocalDevColors.current
     var options by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
         TabRowWithContour(
             tabs = MANAGED_AGENTS.map { io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(it) },
             selectedTabIndex = MANAGED_AGENTS.indexOf(state.agent).coerceAtLeast(0),
             onTabSelected = { onAgent(MANAGED_AGENTS[it]) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
         )
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            GroupCard {
-                BasicComponent(
-                    title = state.cwd?.let(::folderName) ?: stringResource(R.string.new_session_cwd_none),
-                    summary = state.cwd ?: stringResource(R.string.new_session_cwd),
-                    startAction = { RowIcon(AppIcons.Files) },
-                    endActions = { io.github.suqi8.coui.kmp.basic.Icon(AppIcons.ChevronRight, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary) },
-                    onClick = onPickFolder,
-                    cardListPosition = CardListPosition.Full,
-                    modifier = Modifier.testTag("selected-cwd"),
-                )
-            }
-            val others = state.recent.filter { it.path != state.cwd }
-            if (others.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(others, key = { it.path }) { r -> FilterChip(r.name, false, { onSelect(r.path) }) }
-                }
+        SmallTitle(stringResource(R.string.new_session_cwd))
+        val others = state.recent.filter { it.path != state.cwd }
+        GroupCard(bottom = if (others.isNotEmpty()) 10.dp else 16.dp) {
+            ArrowPreference(
+                title = state.cwd?.let(::folderName) ?: stringResource(R.string.new_session_cwd_none),
+                summary = state.cwd,
+                startAction = { RowIcon(AppIcons.Files) },
+                onClick = onPickFolder,
+                cardListPosition = CardListPosition.Full,
+                modifier = Modifier.testTag("selected-cwd"),
+            )
+        }
+        if (others.isNotEmpty()) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                modifier = Modifier.padding(bottom = 16.dp),
+            ) {
+                items(others, key = { it.path }) { r -> FilterChip(r.name, false, { onSelect(r.path) }) }
             }
         }
         TextInput(
@@ -385,7 +401,7 @@ fun NewSessionContent(
             label = stringResource(R.string.new_session_prompt_hint),
             singleLine = false,
             maxLines = 5,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
         )
         // Model and permission mode: rarely changed, so folded into one summary row.
         val permLabel = when (state.permissionMode) {
@@ -393,6 +409,9 @@ fun NewSessionContent(
             "plan" -> stringResource(R.string.perm_plan_short)
             else -> stringResource(R.string.perm_default_short)
         }
+        val expanded = stringResource(R.string.state_expanded)
+        val collapsed = stringResource(R.string.state_collapsed)
+        val turn by androidx.compose.animation.core.animateFloatAsState(if (options) 180f else 0f, label = "options-chevron")
         GroupCard {
             BasicComponent(
                 title = stringResource(R.string.new_session_options),
@@ -400,13 +419,22 @@ fun NewSessionContent(
                     if (state.agent == "claude_code") permLabel else null,
                     modelEffortSummary(state.model, state.effort.takeIf { supportsEffort(state.agent) }),
                 ).joinToString(" · "),
-                endActions = { Text(stringResource(if (options) R.string.state_expanded else R.string.state_collapsed), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary) },
+                endActions = {
+                    io.github.suqi8.coui.kmp.basic.Icon(
+                        AppIcons.ChevronDown,
+                        contentDescription = null,
+                        tint = COUITheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = turn },
+                    )
+                },
                 onClick = { options = !options },
                 cardListPosition = CardListPosition.Full,
+                modifier = Modifier.semantics { stateDescription = if (options) expanded else collapsed },
             )
         }
         if (options) {
             if (state.agent == "claude_code") {
+                SmallTitle(stringResource(R.string.tools_permission))
                 TabRowWithContour(
                     tabs = CLAUDE_PERMISSION_MODES.map {
                         when (it) {
@@ -417,7 +445,7 @@ fun NewSessionContent(
                     },
                     selectedTabIndex = CLAUDE_PERMISSION_MODES.indexOf(state.permissionMode).coerceAtLeast(0),
                     onTabSelected = { onPermissionMode(CLAUDE_PERMISSION_MODES[it]) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
                 )
             }
             ModelEffortChooser(
@@ -431,23 +459,21 @@ fun NewSessionContent(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        Button(
-            onClick = onStart,
-            enabled = state.canStart && !busy,
-            colors = ButtonDefaults.buttonColorsPrimary(),
-            modifier = Modifier.fillMaxWidth().testTag("start-session"),
-        ) {
-            Text(if (busy) stringResource(R.string.state_loading) else stringResource(R.string.new_session_start), color = COUITheme.colorScheme.onPrimary)
-        }
         // Say why Start is disabled instead of leaving a grey button.
         if (!state.canStart && !busy) {
             Text(
                 stringResource(if (state.connection !is ConnectionState.Online) R.string.new_session_need_connection else R.string.new_session_need_folder),
                 style = COUITheme.textStyles.footnote1,
                 color = dev.warn,
+                modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 6.dp),
             )
         }
-        Text(stringResource(R.string.new_session_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+        Text(
+            stringResource(R.string.new_session_note),
+            style = COUITheme.textStyles.footnote1,
+            color = COUITheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.padding(horizontal = SheetTextGutter),
+        )
     }
 }
 
@@ -483,7 +509,26 @@ fun PickFolderScreen(onBack: () -> Unit) {
         }
     }
     androidx.activity.compose.BackHandler(onBack = goBack)
-    Page(title = stringResource(R.string.new_session_cwd), onBack = done, large = false) {
+    Page(
+        // Inside a folder the page is named after it, and the title bar's action picks that folder:
+        // no full-width button under the list (and no disabled one while browsing the locations).
+        title = listing?.path?.let(::folderName) ?: stringResource(R.string.new_session_cwd),
+        onBack = done,
+        large = false,
+        actions = {
+            if (listing != null) {
+                SmallButton(
+                    text = stringResource(R.string.new_session_use_folder),
+                    onClick = {
+                        vm.select(listing.path)
+                        done()
+                    },
+                    tone = ActionTone.Primary,
+                    modifier = Modifier.padding(end = 12.dp).testTag("use-folder"),
+                )
+            }
+        },
+    ) {
         Column(Modifier.fillMaxSize()) {
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = pageListPadding()) {
                 when (val l = state.listing) {
@@ -494,7 +539,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
                                 BasicComponent(
                                     title = roots.error.title(),
                                     summary = roots.error.detail,
-                                    endActions = { TextButton(text = stringResource(R.string.action_retry), onClick = vm::loadRoots) },
+                                    endActions = { SmallButton(stringResource(R.string.action_retry), vm::loadRoots) },
                                     cardListPosition = CardListPosition.Full,
                                 )
                             }
@@ -519,7 +564,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
                             BasicComponent(
                                 title = l.error.title(),
                                 summary = l.error.detail,
-                                endActions = { TextButton(text = stringResource(R.string.action_back), onClick = goBack) },
+                                endActions = { SmallButton(stringResource(R.string.action_back), goBack) },
                                 cardListPosition = CardListPosition.Full,
                             )
                         }
@@ -531,7 +576,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
                         item(key = "path") {
                             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(l.value.path, style = DevType.codeSmall, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
-                                TextButton(text = stringResource(R.string.new_session_all_locations), onClick = vm::closeBrowser)
+                                LinkButton(stringResource(R.string.new_session_all_locations), vm::closeBrowser)
                             }
                         }
                         if (all.size > 12) {
@@ -555,26 +600,10 @@ fun PickFolderScreen(onBack: () -> Unit) {
                             FolderRow(d.name, null, d.sensitive, cardListPositionOf(i + offset, total)) { vm.browse(d.path) }
                         }
                         if (l.value.truncated || l.value.blocked > 0) {
-                            item(key = "note") { Text(stringResource(R.string.new_session_listing_note, l.value.blocked), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
+                            item(key = "note") { Text(stringResource(R.string.new_session_listing_note, l.value.blocked), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) }
                         }
                     }
                 }
-            }
-            Button(
-                onClick = {
-                    listing?.path?.let(vm::select)
-                    done()
-                },
-                enabled = listing != null,
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding(),
-            ) {
-                Text(
-                    listing?.path?.let { stringResource(R.string.new_session_use_named_folder, folderName(it)) } ?: stringResource(R.string.new_session_pick_hint),
-                    color = COUITheme.colorScheme.onPrimary,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
             }
         }
     }
@@ -629,6 +658,12 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
         show = show,
         title = stringResource(R.string.new_session_title),
         onDismissRequest = onDismiss,
+        confirm = SheetConfirm(
+            text = stringResource(if (busy != null) R.string.state_loading else R.string.new_session_start_short),
+            enabled = state.canStart && busy == null,
+            testTag = "start-session",
+            onClick = { vm.start(startLabel) },
+        ),
     ) {
         Box(Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
             Column(Modifier.pageScroll().verticalScroll(rememberPageScrollState())) {
@@ -641,8 +676,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
                     onPrompt = vm::setPrompt,
                     onModel = vm::setModel,
                     onPermissionMode = vm::setPermissionMode,
-                    onStart = { vm.start(startLabel) },
-            onEffort = vm::setEffort,
+                    onEffort = vm::setEffort,
                 )
             }
         }

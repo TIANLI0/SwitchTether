@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.files
 
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,7 +30,6 @@ import io.github.suqi8.coui.kmp.basic.HighlightedIconButton
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.TabRowWithContour
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.couiTopAppBarActionItem
 import io.github.suqi8.coui.kmp.icon.COUIIcons
 import io.github.suqi8.coui.kmp.icon.extended.Back
@@ -165,8 +165,8 @@ fun MarkdownCodeCard(code: String, language: String?, content: @Composable () ->
     }
 }
 
-/** Actions of a notice: a text button in the notice's style. */
+/** Action of a notice: a compact capsule, not a page-level button. */
 @Composable
 fun NoticeAction(text: String, onClick: () -> Unit) {
-    TextButton(text = text, onClick = onClick)
+    SmallButton(text, onClick)
 }

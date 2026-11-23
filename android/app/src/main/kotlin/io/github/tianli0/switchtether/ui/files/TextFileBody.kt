@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.files
 
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,7 +17,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.files.FileTypes
@@ -83,9 +84,9 @@ private fun BinaryNotice(file: FileContent, onDownload: (() -> Unit)?, onOpenBin
                 listOf(Formatters.bytes(file.size), stringResource(R.string.files_binary)).joinToString(" · "),
                 style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (onOpenBinary != null) TextButton(text = stringResource(R.string.files_view_binary), onClick = onOpenBinary)
-                if (onDownload != null) TextButton(text = stringResource(R.string.files_download), onClick = onDownload)
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onOpenBinary != null) SmallButton(stringResource(R.string.files_view_binary), onOpenBinary, tone = ActionTone.Primary)
+                if (onDownload != null) SmallButton(stringResource(R.string.files_download), onDownload)
             }
         }
     }

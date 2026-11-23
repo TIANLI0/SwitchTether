@@ -31,7 +31,6 @@ import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.InfiniteProgressIndicator
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.ui.theme.DevType
@@ -87,7 +86,7 @@ fun ErrorState(title: String, message: String?, retryLabel: String?, onRetry: ((
         }
         if (retryLabel != null && onRetry != null) {
             Spacer(Modifier.height(16.dp))
-            TextButton(text = retryLabel, onClick = onRetry)
+            SmallButton(retryLabel, onRetry)
         }
     }
 }

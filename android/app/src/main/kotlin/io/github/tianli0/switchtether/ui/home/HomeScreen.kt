@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.home
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.background
@@ -43,7 +46,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
@@ -103,7 +105,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                             GroupCard {
                                 BasicComponent(
                                     title = stringResource(R.string.home_no_live),
-                                    endActions = { val c = io.github.tianli0.switchtether.ui.appContainer(); TextButton(text = stringResource(R.string.new_session_title), onClick = { c.newSessionReopen.value = true }) },
+                                    endActions = { val c = io.github.tianli0.switchtether.ui.appContainer(); SmallButton(stringResource(R.string.new_session_title), { c.newSessionReopen.value = true }) },
                                     cardListPosition = CardListPosition.Full,
                                 )
                             }
@@ -118,11 +120,10 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                     }
                     if (state.running.size > MAX_ROWS || state.idle.size > MAX_IDLE_ROWS) {
                         item(key = "all-live") {
-                            TextButton(
-                                text = stringResource(R.string.home_see_all_live, state.live.size),
-                                onClick = { onSelectTab(Tab.SESSIONS) },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
-                            )
+                            // A quiet link under the groups, not a slab across the page.
+                            Box(Modifier.fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
+                                LinkButton(stringResource(R.string.home_see_all_live, state.live.size), { onSelectTab(Tab.SESSIONS) })
+                            }
                         }
                     }
                     if (state.recent.isNotEmpty()) {
@@ -177,13 +178,13 @@ private fun CompactTitle(text: String, highlight: Boolean = false) {
         style = COUITheme.textStyles.footnote1,
         fontWeight = FontWeight.Medium,
         color = if (highlight) LocalDevColors.current.warn else COUITheme.colorScheme.onSurfaceVariantSummary,
-        modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 14.dp, bottom = 6.dp).semantics { heading() },
+        modifier = Modifier.padding(start = TextGutter, end = TextGutter, top = 14.dp, bottom = 6.dp).semantics { heading() },
     )
 }
 
 @Composable
 private fun CompactNote(text: String) {
-    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp))
+    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp))
 }
 
 /** One line: today's cost and tokens (or why usage is unavailable); opens the Usage page. */

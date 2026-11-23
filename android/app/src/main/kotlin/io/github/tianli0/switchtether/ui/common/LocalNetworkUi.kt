@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.common
 
+import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
+import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import io.github.tianli0.switchtether.ui.common.SheetButtons
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -23,11 +26,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.suqi8.coui.kmp.basic.Button
-import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.LocalNetworkAccess
@@ -87,34 +87,37 @@ fun LocalNetworkPermissionHost() {
             then?.invoke()
         },
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf(R.string.lan_perm_point_direct, R.string.lan_perm_point_discovery, R.string.lan_perm_point_optional).forEach {
-                Row(verticalAlignment = Alignment.Top) {
-                    Icon(AppIcons.Done, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(18.dp).padding(top = 2.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text(stringResource(it), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+        Column(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = SheetTextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf(R.string.lan_perm_point_direct, R.string.lan_perm_point_discovery, R.string.lan_perm_point_optional).forEach {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(AppIcons.Done, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(18.dp).padding(top = 2.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text(stringResource(it), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                    }
                 }
             }
-            Button(
-                onClick = {
-                    val permanent = activity != null && access.permanentlyDenied(activity)
-                    access.rationaleShown = true
-                    if (permanent) {
-                        // The system will not ask again: open this app's settings page.
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            SheetButtons(
+                primary = DialogButtonBarAction(
+                    text = stringResource(R.string.lan_perm_continue),
+                    onClick = {
+                        val permanent = activity != null && access.permanentlyDenied(activity)
+                        access.rationaleShown = true
+                        if (permanent) {
+                            // The system will not ask again: open this app's settings page.
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }
+                            val then = localNetworkAsk.value?.then
+                            localNetworkAsk.value = null
+                            then?.invoke()
+                        } else {
+                            launcher.launch(LocalNetworkAccess.PERMISSION)
                         }
-                        val then = localNetworkAsk.value?.then
-                        localNetworkAsk.value = null
-                        then?.invoke()
-                    } else {
-                        launcher.launch(LocalNetworkAccess.PERMISSION)
-                    }
-                },
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                minHeight = 48.dp,
-                modifier = Modifier.fillMaxWidth().testTag("lan-perm-allow"),
-            ) { Text(stringResource(R.string.lan_perm_continue), color = COUITheme.colorScheme.onPrimary) }
+                    },
+                ),
+                modifier = Modifier.testTag("lan-perm-allow"),
+            )
         }
     }
 }

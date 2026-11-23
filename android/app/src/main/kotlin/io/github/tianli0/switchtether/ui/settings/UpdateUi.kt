@@ -1,5 +1,10 @@
 package io.github.tianli0.switchtether.ui.settings
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
+import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import io.github.tianli0.switchtether.ui.common.SheetButtons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,8 +25,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.github.suqi8.coui.kmp.basic.Button
-import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
@@ -93,7 +96,15 @@ fun UpdateSheet(
     ) {
         val r = release ?: return@AppBottomSheet
         val dev = LocalDevColors.current
-        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        val (label, action) = when (state) {
+            is UpdateState.Available -> stringResource(R.string.update_download) to { onDownload(r) }
+            is UpdateState.ReadyToInstall -> stringResource(R.string.update_install) to onInstall
+            is UpdateState.NeedsInstallPermission -> stringResource(R.string.update_grant) to onGrant
+            is UpdateState.Failed -> if (state.reason == UpdateState.Reason.NETWORK) stringResource(R.string.update_retry) to { onDownload(r) } else null to null
+            else -> null to null
+        }
+        Column(Modifier.fillMaxWidth()) {
+          Column(Modifier.fillMaxWidth().padding(horizontal = SheetTextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 listOfNotNull(r.name.takeIf { it != r.tag }, r.publishedAt?.take(10), r.apk?.size?.takeIf { it > 0 }?.let(Formatters::bytes)).joinToString(" · "),
                 style = COUITheme.textStyles.footnote1,
@@ -118,23 +129,14 @@ fun UpdateSheet(
                 }
                 else -> Unit
             }
-            val (label, action) = when (state) {
-                is UpdateState.Available -> stringResource(R.string.update_download) to { onDownload(r) }
-                is UpdateState.ReadyToInstall -> stringResource(R.string.update_install) to onInstall
-                is UpdateState.NeedsInstallPermission -> stringResource(R.string.update_grant) to onGrant
-                is UpdateState.Failed -> if (state.reason == UpdateState.Reason.NETWORK) stringResource(R.string.update_retry) to { onDownload(r) } else null to null
-                else -> null to null
-            }
             if (state is UpdateState.NeedsInstallPermission) {
                 Text(stringResource(R.string.update_grant_hint), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
             }
+          }
             if (label != null && action != null) {
-                Button(
-                    onClick = action,
-                    colors = ButtonDefaults.buttonColorsPrimary(),
-                    minHeight = 48.dp,
-                    modifier = Modifier.fillMaxWidth().testTag("update-action"),
-                ) { Text(label, color = COUITheme.colorScheme.onPrimary) }
+                SheetButtons(primary = DialogButtonBarAction(text = label, onClick = action), modifier = Modifier.testTag("update-action"))
+            } else {
+                Spacer(Modifier.height(12.dp))
             }
         }
     }

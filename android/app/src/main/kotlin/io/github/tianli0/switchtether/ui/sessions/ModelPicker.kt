@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import androidx.compose.foundation.layout.heightIn
+import io.github.suqi8.coui.kmp.basic.SmallTitle
+import io.github.tianli0.switchtether.ui.components.LinkButton
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -9,7 +13,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextAlign
 import io.github.suqi8.coui.kmp.basic.Slider
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
 import io.github.tianli0.switchtether.ui.common.GroupCard
@@ -85,8 +88,6 @@ fun ModelEffortChooser(
     allowCustom: Boolean = true,
     enabled: Boolean = true,
 ) {
-    val labelStyle = COUITheme.textStyles.footnote1
-    val labelColor = COUITheme.colorScheme.onSurfaceVariantSummary
     val listed = options?.models.orEmpty()
     val official = listed.firstOrNull { it.id == "default" }
     // Rows: the default (with the agent's own description of it), the main models, then pinned versions.
@@ -99,15 +100,17 @@ fun ModelEffortChooser(
     // A model that lists its own effort levels decides; an empty list means it has none.
     val efforts = selectedModel?.efforts ?: options?.efforts?.takeIf { it.isNotEmpty() } ?: fallbackEfforts(agent)
     val defaultLabel = stringResource(R.string.model_default)
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.model_title), style = labelStyle, color = labelColor)
+    // Laid out like a settings page: a heading, the models as one group card, then the rest at the
+    // page's 16dp gutter. The caller adds no side padding.
+    Column(modifier) {
+        SmallTitle(stringResource(R.string.model_title))
         val rows = buildList {
             add(Triple("", official?.label?.takeIf { it != "default" } ?: defaultLabel, official?.description))
             main.forEach { add(Triple(it.id, it.label, it.description)) }
             extra.forEach { add(Triple(it, it, null)) }
             if (showPinned) pinned.forEach { add(Triple(it.id, it.label, it.description)) }
         }
-        GroupCard {
+        GroupCard(bottom = if (pinned.isNotEmpty()) 4.dp else 16.dp) {
             rows.forEachIndexed { i, (id, label, description) ->
                 RadioButtonPreference(
                     title = label,
@@ -121,9 +124,10 @@ fun ModelEffortChooser(
             }
         }
         if (pinned.isNotEmpty()) {
-            TextButton(
+            LinkButton(
                 text = stringResource(if (showPinned) R.string.model_fewer_versions else R.string.model_more_versions, pinned.size),
                 onClick = { showPinned = !showPinned },
+                modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 8.dp),
             )
         }
         if (allowCustom) {
@@ -133,7 +137,7 @@ fun ModelEffortChooser(
                 onValueChange = { custom = it; if (it.isNotBlank()) onModel(it.trim()) },
                 label = stringResource(R.string.new_session_model_hint),
                 enabled = enabled,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
             )
         }
         if (efforts.isNotEmpty()) {
@@ -156,9 +160,10 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
     val committed = stops.indexOf(effort).coerceAtLeast(0)
     var pos by remember(stops, committed) { mutableFloatStateOf(committed.toFloat()) }
     val index = pos.roundToInt().coerceIn(0, stops.lastIndex)
-    Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+    GroupCard {
+      Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.effort_title), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.effort_title), style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
             Text(effortLabel(stops[index]), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.primary)
         }
         Slider(
@@ -192,6 +197,7 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
                 )
             }
         }
+      }
     }
 }
 
@@ -211,7 +217,7 @@ fun ModelEffortSheet(
     extra: @Composable () -> Unit = {},
 ) {
     AppBottomSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             ModelEffortChooser(
                 agent = agent,
                 options = options,
@@ -228,6 +234,7 @@ fun ModelEffortSheet(
                 stringResource(R.string.model_sheet_note),
                 style = COUITheme.textStyles.footnote1,
                 color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(horizontal = SheetTextGutter),
             )
         }
     }

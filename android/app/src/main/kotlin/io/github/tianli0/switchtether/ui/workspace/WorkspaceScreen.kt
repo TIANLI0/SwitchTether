@@ -134,11 +134,11 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
             item {
                 GroupCard {
                     term.terminals.forEachIndexed { i, t ->
-                        BasicComponent(
+                        ArrowPreference(
                             title = shortShellName(t.title.ifBlank { t.shell.ifBlank { t.id.take(8) } }),
                             summary = listOfNotNull(t.shell.takeIf { it.isNotBlank() && it != t.title }, t.cwd.takeIf { it.isNotBlank() }?.substringAfterLast('/')?.substringAfterLast('\\')).joinToString(" · ").ifEmpty { null },
                             startAction = { RowIcon(AppIcons.Terminal) },
-                            endActions = if (t.exited) ({ StatusPill(stringResource(R.string.ws_exited), LocalDevColors.current.neutral) }) else null,
+                            endActions = { if (t.exited) StatusPill(stringResource(R.string.ws_exited), LocalDevColors.current.neutral) },
                             onClick = { onOpen(Route.Terminal(t.id)) },
                             cardListPosition = cardListPositionOf(i, term.terminals.size + 1),
                         )
@@ -178,7 +178,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                 val roots = (files.roots as? Loadable.Ready)?.value.orEmpty()
                 GroupCard {
                     if (roots.isEmpty()) {
-                        BasicComponent(
+                        ArrowPreference(
                             title = stringResource(R.string.ws_files_open),
                             startAction = { RowIcon(AppIcons.Files) },
                             onClick = { onOpen(Route.Files) },
@@ -186,7 +186,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                         )
                     }
                     roots.forEachIndexed { i, r ->
-                        BasicComponent(
+                        ArrowPreference(
                             // Desktop roots named after their full path read as the path twice: show the folder name.
                             title = r.name.takeIf { it.isNotBlank() && it != r.path }
                                 ?: r.path.trimEnd('\\', '/').substringAfterLast('\\').substringAfterLast('/').ifBlank { r.path },
@@ -205,7 +205,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
             item {
                 val forwards by container.portForwards.active.collectAsStateWithLifecycle()
                 GroupCard {
-                    BasicComponent(
+                    ArrowPreference(
                         title = if (forwards.isEmpty()) stringResource(R.string.forward_title)
                         else forwards.joinToString(" · ") { "localhost:${it.localPort}" },
                         summary = if (forwards.isEmpty()) stringResource(R.string.forward_ws_summary)
@@ -219,7 +219,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
             item { SmallTitle(stringResource(R.string.ws_git)) }
             item {
                 GroupCard {
-                    BasicComponent(
+                    ArrowPreference(
                         title = files.repo?.substringAfterLast('\\')?.substringAfterLast('/')?.ifBlank { null } ?: stringResource(R.string.ws_git_open),
                         summary = files.repo ?: stringResource(R.string.ws_git_hint),
                         startAction = { RowIcon(AppIcons.Git) },

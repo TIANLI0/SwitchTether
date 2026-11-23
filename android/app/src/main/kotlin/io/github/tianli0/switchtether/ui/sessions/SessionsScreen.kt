@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Box
+import io.github.tianli0.switchtether.ui.components.LinkButton
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,7 +27,6 @@ import io.github.suqi8.coui.kmp.basic.Scaffold
 import io.github.suqi8.coui.kmp.basic.SearchFilterTopAppBar
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.TabRowWithContour
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.TopAppBarSearchBar
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.tianli0.switchtether.R
@@ -187,12 +189,14 @@ fun SessionsContent(
                         }
                         if (state.nextCursor != null) {
                             item(key = "more") {
-                                TextButton(
-                                    text = if (state.loadingMore) stringResource(R.string.state_loading) else stringResource(R.string.action_load_more),
-                                    onClick = onLoadMore,
-                                    enabled = !state.loadingMore,
-                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                )
+                                // The list's footer: a quiet link, as ColorOS lists end ("加载更多").
+                                Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+                                    LinkButton(
+                                        text = if (state.loadingMore) stringResource(R.string.state_loading) else stringResource(R.string.action_load_more),
+                                        onClick = onLoadMore,
+                                        enabled = !state.loadingMore,
+                                    )
+                                }
                             }
                         }
                     }

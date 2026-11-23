@@ -52,9 +52,9 @@ fun SessionRow(
         modifier = if (onLongClick != null) modifier.clip(rowShape(position)).combinedClickable(onClick = onClick, onLongClick = onLongClick) else modifier,
         title = title,
         startAction = {
+            // No extra end padding: the row's own icon gap is the same as every other list row's.
             AgentBadge(
                 session.agent,
-                modifier = Modifier.padding(end = 12.dp),
                 size = if (compact) 32.dp else 40.dp,
                 statusColor = if (session.isLive) sessionStatusColor(session.status) else null,
                 running = session.isLive && session.status == "busy",

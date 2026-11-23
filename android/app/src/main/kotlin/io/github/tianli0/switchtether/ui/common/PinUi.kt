@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.common
 
+import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
+import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import io.github.tianli0.switchtether.ui.common.SheetButtons
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -17,10 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.suqi8.coui.kmp.basic.Button
-import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.SessionSummary
@@ -71,18 +71,16 @@ fun PinExplainSheet() {
     val container = appContainer()
     val pending by pinExplain.collectAsStateWithLifecycle()
     AppBottomSheet(show = pending != null, title = stringResource(R.string.pin_sheet_title), onDismissRequest = { pinExplain.value = null }) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.pin_sheet_body), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
-            Button(
-                onClick = { runCatching { context.startActivity(promotionSettingsIntent(context)) } },
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                minHeight = 48.dp,
-                modifier = Modifier.fillMaxWidth().testTag("pin-open-settings"),
-            ) { Text(stringResource(R.string.pin_open_settings), color = COUITheme.colorScheme.onPrimary) }
-            fluidCloudSettingsIntent(context)?.let { intent ->
-                TextButton(text = stringResource(R.string.pin_open_fluid_cloud), onClick = { runCatching { context.startActivity(intent) } }, modifier = Modifier.fillMaxWidth())
-            }
-            TextButton(
+        Column(Modifier.fillMaxWidth()) {
+            Text(
+                stringResource(R.string.pin_sheet_body),
+                style = COUITheme.textStyles.body2,
+                color = COUITheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 12.dp),
+            )
+            val fluidCloud = fluidCloudSettingsIntent(context)
+            val openSettings = DialogButtonBarAction(text = stringResource(R.string.pin_open_settings), onClick = { runCatching { context.startActivity(promotionSettingsIntent(context)) } })
+            val pinAnyway = DialogButtonBarAction(
                 text = stringResource(R.string.pin_anyway),
                 onClick = {
                     pending?.let { s ->
@@ -90,8 +88,17 @@ fun PinExplainSheet() {
                     }
                     pinExplain.value = null
                 },
-                modifier = Modifier.fillMaxWidth(),
             )
+            if (fluidCloud != null) {
+                SheetButtons(
+                    primary = openSettings,
+                    secondary = DialogButtonBarAction(text = stringResource(R.string.pin_open_fluid_cloud), onClick = { runCatching { context.startActivity(fluidCloud) } }),
+                    tertiary = pinAnyway,
+                    modifier = Modifier.testTag("pin-open-settings"),
+                )
+            } else {
+                SheetButtons(primary = openSettings, secondary = pinAnyway, modifier = Modifier.testTag("pin-open-settings"))
+            }
         }
     }
 }

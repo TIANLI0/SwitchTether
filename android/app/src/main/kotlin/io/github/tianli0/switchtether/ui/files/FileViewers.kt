@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.files
 
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import android.content.ActivityNotFoundException
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -80,7 +82,6 @@ import io.github.suqi8.coui.kmp.basic.IntentSlider
 import io.github.suqi8.coui.kmp.basic.IntentSliderPlaybackState
 import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.ConnectionManager
@@ -195,7 +196,7 @@ fun RemoteFileViewer(
                         if (p.tooLarge) stringResource(R.string.viewer_too_large, p.message) else stringResource(R.string.viewer_failed, p.message),
                         style = COUITheme.textStyles.body2, color = LocalDevColors.current.danger, textAlign = TextAlign.Center,
                     )
-                    if (!p.tooLarge) TextButton(text = stringResource(R.string.action_retry), onClick = { reload++ })
+                    if (!p.tooLarge) SmallButton(stringResource(R.string.action_retry), { reload++ }, modifier = Modifier.padding(top = 12.dp))
                 }
                 is Phase.Ready -> LocalFileBody(p.file, ref.kind, Modifier.fillMaxSize())
             }
@@ -248,8 +249,8 @@ private fun SaveRow(save: SaveState, onManage: (() -> Unit)?, onOpen: (DownloadR
             save.error != null -> Text(save.error, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger)
             save.record != null -> Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.viewer_saved_to, io.github.tianli0.switchtether.files.FileStore.DOWNLOAD_FOLDER), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.ok, modifier = Modifier.weight(1f))
-                TextButton(text = stringResource(R.string.downloads_open), onClick = { onOpen(save.record) })
-                if (onManage != null) TextButton(text = stringResource(R.string.viewer_manage), onClick = onManage)
+                LinkButton(stringResource(R.string.downloads_open), { onOpen(save.record) })
+                if (onManage != null) LinkButton(stringResource(R.string.viewer_manage), onManage)
             }
         }
     }
@@ -555,7 +556,7 @@ private fun MediaPlayerBody(file: LocalFile, video: Boolean, modifier: Modifier)
         }
         MediaProgress(position, duration, buffered, playback) { player.seekTo(it) }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(
+            SmallButton(
                 text = stringResource(if (playing) R.string.viewer_pause else R.string.viewer_play),
                 onClick = {
                     if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)

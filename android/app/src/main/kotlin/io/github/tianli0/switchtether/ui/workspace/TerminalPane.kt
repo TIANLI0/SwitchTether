@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -72,15 +74,12 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.suqi8.coui.kmp.basic.Button
-import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.ChipTabData
 import io.github.suqi8.coui.kmp.basic.ChipTabGroup
 import io.github.suqi8.coui.kmp.basic.DropdownImpl
 import io.github.suqi8.coui.kmp.basic.EmptyState
 import io.github.suqi8.coui.kmp.basic.ListPopupColumn
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.window.WindowListPopup
@@ -243,9 +242,7 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: Term
                 GroupCard {
                     Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(stringResource(R.string.term_needs_stepup), style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
-                        Button(onClick = { vm.connect() }, colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.padding(top = 12.dp)) {
-                            Text(stringResource(R.string.term_confirm), color = COUITheme.colorScheme.onPrimary)
-                        }
+                        SmallButton(stringResource(R.string.term_confirm), { vm.connect() }, tone = ActionTone.Primary, modifier = Modifier.padding(top = 12.dp))
                     }
                 }
             }
@@ -275,7 +272,7 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: Term
                     // Keys cannot reach the computer now: say so next to the keys, with the way back.
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(stringResource(R.string.term_disconnected), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.weight(1f))
-                        TextButton(text = stringResource(R.string.term_reconnect), onClick = { vm.connect() })
+                        SmallButton(stringResource(R.string.term_reconnect), { vm.connect() })
                     }
                 } else if (state.link == TermLink.CONNECTING) {
                     Text(stringResource(R.string.term_connecting), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))

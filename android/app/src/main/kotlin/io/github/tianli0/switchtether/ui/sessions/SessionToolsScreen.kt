@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,7 +45,6 @@ import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.RotatingProgressIndicator
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUITheme
@@ -377,14 +380,14 @@ private fun shareConversation(context: android.content.Context, ex: ExportedConv
 
 @Composable
 private fun ToolsNote(text: String, color: Color = COUITheme.colorScheme.onSurfaceVariantSummary) {
-    Text(text, style = COUITheme.textStyles.footnote2, color = color, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp))
+    Text(text, style = COUITheme.textStyles.footnote2, color = color, modifier = Modifier.padding(start = TextGutter, end = TextGutter, bottom = 12.dp))
 }
 
 @Composable
 private fun SectionTitle(text: String, onRefresh: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) { SmallTitle(text) }
-        TextButton(text = stringResource(R.string.tools_refresh), onClick = onRefresh)
+        LinkButton(stringResource(R.string.tools_refresh), onRefresh)
     }
 }
 
@@ -397,7 +400,7 @@ private fun <T> ToolLoadable(state: Loadable<T>, onRetry: () -> Unit, content: @
         }
         is Loadable.Failed -> Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(state.error.detail ?: stringResource(R.string.error_network), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger)
-            TextButton(text = stringResource(R.string.action_retry), onClick = onRetry)
+            SmallButton(stringResource(R.string.action_retry), onRetry)
         }
         is Loadable.Ready -> content(state.value)
     }
@@ -558,7 +561,7 @@ private fun McpRow(
         summary = summary,
         startAction = { StatusDot(color, Modifier.padding(end = 12.dp)) },
         endActions = {
-            TextButton(
+            SmallButton(
                 text = stringResource(if (reconnecting) R.string.tools_mcp_reconnecting else R.string.tools_mcp_reconnect),
                 onClick = { if (!reconnecting) onReconnect() },
                 enabled = enabled && !reconnecting,
@@ -591,7 +594,7 @@ private fun SideQuestion(st: SessionToolsState, enabled: Boolean, onAsk: (String
                 modifier = Modifier.testTag("btw-ask"),
             ) {
                 if (st.asking) RotatingProgressIndicator(color = COUITheme.colorScheme.onPrimary, size = 16.dp, ringDiameter = 12.8.dp, strokeWidth = 2.dp)
-                else Text(stringResource(R.string.tools_side_question_ask), color = COUITheme.colorScheme.onPrimary)
+                else Text(stringResource(R.string.tools_side_question_ask), color = COUITheme.colorScheme.onPrimary, style = io.github.tianli0.switchtether.ui.components.compactButtonTextStyle())
             }
         }
         if (st.asking) {
@@ -633,10 +636,11 @@ private fun RenameSession(current: String, st: SessionToolsState, enabled: Boole
                 st.renamed -> Text(stringResource(R.string.tools_renamed), style = COUITheme.textStyles.footnote2, color = LocalDevColors.current.ok, modifier = Modifier.weight(1f))
                 else -> Spacer(Modifier.weight(1f))
             }
-            TextButton(
+            SmallButton(
                 text = stringResource(R.string.tools_rename_save),
                 onClick = { onSave(title) },
                 enabled = enabled && !st.renaming && title.isNotBlank() && title.trim() != current && title.trim().length <= 200,
+                tone = ActionTone.Primary,
                 modifier = Modifier.testTag("rename-save"),
             )
         }

@@ -533,3 +533,12 @@ over-media style: fixed white palette, conic light, thumb while touched/paused, 
 secondary track, loading sweep while buffering; a drag seeks once on release. No `LocalMaterialBackdrop` is provided:
 the only consumer is that slider, which sits over a `SurfaceView` a `LayerBackdrop` cannot record, so it keeps COUI's
 own translucent non-blur fill. Touch motion (press / deform / rubber band) comes with coui buttons and bars as-is.
+
+## Android 0.1.12: button tiers, panels, new-session launcher (2026-11-24)
+
+docs/ANDROID_UI.md §22. In-page actions no longer use COUI's Large (44dp) capsule: `SmallButton` / `LinkButton`
+(`core:ui`), panel actions through `AppBottomSheet(confirm = …)` and `SheetButtons` (coui `DialogButtonBar`).
+Half-screen panels are drawn on the page colour with the page's gutters; the new-session panel starts from its toolbar.
+Filled buttons use the brand accent (`containerTheme`). A second pass on whole rendered pages (§22.6): one 32dp text gutter,
+chat-row copy / time alignment, session-row icon gap, arrows on Workspace rows, the folder picker's confirm in its title bar.
+Rendered with `SheetGalleryScreenshotTest` and `PageGalleryScreenshotTest` (Robolectric, API 32); not run on a device or emulator.

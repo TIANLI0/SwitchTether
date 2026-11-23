@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -45,7 +48,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.SessionRepository
@@ -326,7 +328,7 @@ private fun Dot(c: Color) {
 
 @Composable
 private fun MapNote(text: String) {
-    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp))
+    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 10.dp))
 }
 
 /** The session itself, the root of the tree. */
@@ -473,11 +475,13 @@ private fun AgentCard(
             if (promptOpen) SelectionContainer { Text(p, style = DevType.code, color = COUITheme.colorScheme.onSurfaceSecondary) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(text = stringResource(R.string.agent_map_open_transcript), onClick = onOpenTranscript)
+            SmallButton(stringResource(R.string.agent_map_open_transcript), onOpenTranscript)
             if (canStop) {
-                TextButton(
+                SmallButton(
                     text = stringResource(if (stopping) R.string.agent_map_stopping else R.string.agent_map_stop_agent),
                     onClick = { if (!stopping) onStop() },
+                    enabled = !stopping,
+                    tone = ActionTone.Danger,
                     modifier = Modifier.testTag("agent-map-stop"),
                 )
             }
@@ -535,14 +539,14 @@ private fun TaskCard(
         task.summary?.let { CardText(it) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (output != null) {
-                TextButton(
+                SmallButton(
                     text = stringResource(if (showOutput) R.string.tools_task_output_hide else R.string.tools_task_output),
                     onClick = { showOutput = !showOutput },
                     modifier = Modifier.testTag("task-output"),
                 )
             }
             if (canStop) {
-                TextButton(text = stringResource(if (stopping) R.string.agent_map_stopping else R.string.agent_map_stop_task), onClick = { if (!stopping) onStop() })
+                SmallButton(stringResource(if (stopping) R.string.agent_map_stopping else R.string.agent_map_stop_task), { if (!stopping) onStop() }, enabled = !stopping, tone = ActionTone.Danger)
             }
         }
         if (stopFailed) CardText(stringResource(R.string.agent_map_stop_failed), LocalDevColors.current.danger)

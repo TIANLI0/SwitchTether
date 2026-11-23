@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.settings
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
@@ -308,7 +309,7 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
                 }
             }
             item {
-                Text(stringResource(R.string.desktop_info_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp))
+                Text(stringResource(R.string.desktop_info_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp))
             }
         }
     }
@@ -463,7 +464,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     )
                 }
             }
-            item { Text(stringResource(R.string.notif_privacy), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp)) }
+            item { Text(stringResource(R.string.notif_privacy), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter)) }
         }
     }
 }
@@ -497,7 +498,7 @@ val LICENSES = listOf(
 fun LicensesScreen(onBack: () -> Unit) {
     Page(title = stringResource(R.string.settings_licenses), onBack = onBack, immersive = true) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-            item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp)) }
+            item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) }
             items(LICENSES) { l ->
                 PageCard {
                     Column(Modifier.padding(14.dp)) {

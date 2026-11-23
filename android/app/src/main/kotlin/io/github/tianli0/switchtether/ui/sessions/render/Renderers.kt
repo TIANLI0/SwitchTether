@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether.ui.sessions.render
 
+import androidx.compose.foundation.layout.offset
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
@@ -55,7 +59,6 @@ import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.RadioButton
 import io.github.suqi8.coui.kmp.basic.RotatingProgressIndicator
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
@@ -145,11 +148,11 @@ private fun OutputBlock(eventId: String, text: String, truncated: Boolean, isErr
         }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
             if (!showAll && shown.length > PREVIEW_CHARS) {
-                TextButton(text = stringResource(R.string.render_show_all), onClick = { showAll = true })
+                LinkButton(stringResource(R.string.render_show_all), { showAll = true })
             }
             val serverTruncated = truncated && payload?.complete != true
             if (serverTruncated) {
-                TextButton(
+                LinkButton(
                     text = when {
                         payload?.loading == true -> stringResource(R.string.state_loading)
                         else -> stringResource(R.string.render_load_full, bytes?.let(Formatters::bytes) ?: "")
@@ -204,20 +207,23 @@ fun UserMessage(item: RenderItem, ctx: RenderContext) {
                 if (text.isNotBlank()) MarkdownView(text, onLinkClick = ctx.onLink)
             }
         }
-        // Re-using an earlier prompt is common: one tap copies it (replies have the same button).
+        // Under the bubble, one line: the time, then the message's actions. Re-using an earlier
+        // prompt is common, so one tap copies it (replies have the same button).
         val rewind = ctx.onRewindFiles?.takeIf { io.github.tianli0.switchtether.remote.session.ClaudeTools.canRewindTo(item.event) }
-        if (text.isNotBlank() || rewind != null) {
-            Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (rewind != null) RewindFilesButton(enabled = ctx.online) { rewind(item.event.id) }
-                if (text.isNotBlank()) io.github.tianli0.switchtether.ui.code.CopyButton(text, stringResource(R.string.message_copy_mine))
-            }
-        }
         val images = d.long("images")?.toInt() ?: imageItems.size
         val meta = listOfNotNull(
             if (images > 0 && imageItems.isEmpty()) stringResource(R.string.render_images, images) else null,
             shortClock(item.event.ts).ifEmpty { null },
         ).joinToString(" · ")
-        if (meta.isNotEmpty()) SubtleMeta(meta, Modifier.padding(top = 3.dp, end = 4.dp))
+        val actions = text.isNotBlank() || rewind != null
+        if (actions || meta.isNotEmpty()) {
+            Row(Modifier.padding(top = if (actions) 0.dp else 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (meta.isNotEmpty()) SubtleMeta(meta, Modifier.padding(end = 4.dp))
+                if (rewind != null) RewindFilesButton(enabled = ctx.online) { rewind(item.event.id) }
+                // The copy glyph (not its 36dp touch area) ends at the bubble's edge.
+                if (text.isNotBlank()) io.github.tianli0.switchtether.ui.code.CopyButton(text, stringResource(R.string.message_copy_mine), Modifier.offset(x = 10.dp))
+            }
+        }
     }
 }
 
@@ -244,7 +250,7 @@ private fun RunInBackgroundAction(item: RenderItem, ctx: RenderContext, modifier
     val onRun = ctx.onRunInBackground ?: return
     val callId = io.github.tianli0.switchtether.remote.session.ClaudeTools.backgroundableCallId(item.event) ?: return
     val busy = ctx.isBackgrounding(callId)
-    TextButton(
+    SmallButton(
         text = stringResource(if (busy) R.string.tools_run_background_busy else R.string.tools_run_background),
         onClick = { if (!busy) onRun(callId) },
         enabled = ctx.online && !busy,
@@ -283,15 +289,16 @@ fun AssistantMessage(item: RenderItem, ctx: RenderContext) {
             Text(ctx.agentLabel, style = COUITheme.textStyles.footnote1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface)
             Spacer(Modifier.size(6.dp))
             // Time first: on a narrow row the model id is what gets cut, not the time.
-            SubtleMeta(listOfNotNull(shortClock(item.event.ts).ifEmpty { null }, d.str("model")).joinToString(" · "), Modifier.weight(1f, fill = false))
+            val copyable = !item.event.streaming && !d.str("text").isNullOrBlank()
+            SubtleMeta(listOfNotNull(shortClock(item.event.ts).ifEmpty { null }, d.str("model")).joinToString(" · "), Modifier.weight(1f, fill = copyable))
             if (item.event.streaming) {
                 val streamingLabel = stringResource(R.string.render_streaming)
                 Spacer(Modifier.size(6.dp))
                 RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 14.dp, ringDiameter = 11.2.dp, strokeWidth = 2.dp, modifier = Modifier.semantics { contentDescription = streamingLabel })
-            } else if (!d.str("text").isNullOrBlank()) {
+            } else if (copyable) {
                 // Selecting text inside a scrolling list is fiddly on a phone: one tap copies the whole reply.
-                Spacer(Modifier.weight(1f))
-                io.github.tianli0.switchtether.ui.code.CopyButton(d.str("text").orEmpty(), stringResource(R.string.message_copy))
+                // The glyph (not the 36dp touch area) ends at the page's content edge.
+                io.github.tianli0.switchtether.ui.code.CopyButton(d.str("text").orEmpty(), stringResource(R.string.message_copy), Modifier.offset(x = 10.dp))
             }
         }
         Column(Modifier.padding(start = 32.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -739,22 +746,16 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
                     val id = o.str("id") ?: return@forEach
                     val label = decisionOptionLabel(id, o.str("label"))
                     val primary = id == "allow"
-                    Button(
+                    SmallButton(
+                        text = label,
                         onClick = { ctx.onApprove(d.str("requestId").orEmpty(), id, label) },
                         enabled = enabled,
-                        colors = if (primary) ButtonDefaults.buttonColorsPrimary() else ButtonDefaults.buttonColors(),
-                        size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
-                    ) {
-                        Text(
-                            label,
-                            color = when {
-                                primary -> COUITheme.colorScheme.onPrimary
-                                id == "deny" || id == "abort" -> LocalDevColors.current.danger
-                                else -> COUITheme.colorScheme.onSurface
-                            },
-                            style = COUITheme.textStyles.button,
-                        )
-                    }
+                        tone = when {
+                            primary -> ActionTone.Primary
+                            id == "deny" || id == "abort" -> ActionTone.Danger
+                            else -> ActionTone.Default
+                        },
+                    )
                 }
             }
             if (!ctx.approve.usable) BlockedNote(ctx.approve, ctx.capabilityReason)
@@ -891,12 +892,12 @@ fun Question(item: RenderItem, ctx: RenderContext) {
             }
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                 if (cancellable) {
-                    Button(
+                    SmallButton(
+                        text = stringResource(R.string.action_cancel),
                         onClick = { ctx.onAnswerAction(d.str("requestId").orEmpty(), null, "cancel") },
                         enabled = enabled,
-                        colors = ButtonDefaults.buttonColors(),
-                        size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
-                    ) { Text(stringResource(R.string.action_cancel), color = LocalDevColors.current.danger) }
+                        tone = ActionTone.Danger,
+                    )
                 }
                 Button(
                     onClick = {
@@ -923,7 +924,7 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                     enabled = enabled && complete,
                     colors = ButtonDefaults.buttonColorsPrimary(),
                     size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
-                ) { Text(stringResource(R.string.render_submit_answer), color = COUITheme.colorScheme.onPrimary) }
+                ) { Text(stringResource(R.string.render_submit_answer), color = COUITheme.colorScheme.onPrimary, style = io.github.tianli0.switchtether.ui.components.compactButtonTextStyle()) }
             }
             if (!ctx.answer.usable) BlockedNote(ctx.answer, ctx.capabilityReason)
         }

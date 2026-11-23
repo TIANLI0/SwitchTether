@@ -1,5 +1,12 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
+import io.github.tianli0.switchtether.ui.common.SheetButtons
+import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.switchtether.ui.components.LinkButton
 import androidx.compose.ui.graphics.compositeOver
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
@@ -243,12 +250,7 @@ fun SessionDetailScreen(
             // Claude Code's permission mode belongs with the run settings (one sheet, one chip).
             val claude = state.detail.valueOrNull?.summary?.agent == "claude_code"
             if (claude && (state.claudeTools || state.resumable)) {
-                Text(
-                    stringResource(R.string.tools_permission),
-                    style = COUITheme.textStyles.footnote1,
-                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                SmallTitle(stringResource(R.string.tools_permission))
                 PermissionModeOptions(
                     current = state.detail.valueOrNull?.permissionMode,
                     pending = state.permissionPending,
@@ -256,7 +258,7 @@ fun SessionDetailScreen(
                     onSelect = vm::setPermissionMode,
                 )
                 state.permissionError?.let {
-                    Text(stringResource(R.string.tools_permission_failed, it), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger)
+                    Text(stringResource(R.string.tools_permission_failed, it), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 8.dp))
                 }
             }
         },
@@ -655,7 +657,7 @@ private fun EventList(
                 Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
                     when {
                         state.loadingOlder -> RotatingProgressIndicator(size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
-                        state.hasMoreBefore -> TextButton(text = stringResource(R.string.session_load_older), onClick = onLoadOlder)
+                        state.hasMoreBefore -> LinkButton(stringResource(R.string.session_load_older), onLoadOlder)
                         else -> Text(stringResource(R.string.session_start), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                     }
                 }
@@ -684,9 +686,10 @@ private fun EventList(
 private fun TimelineEventRow(item: RenderItem, segment: SegmentPosition, ctx: RenderContext) {
     val outer = when (segment) {
         SegmentPosition.None -> PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-        SegmentPosition.Single -> PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-        SegmentPosition.First, SegmentPosition.Middle -> PaddingValues(horizontal = 12.dp)
-        SegmentPosition.Last -> PaddingValues(start = 12.dp, end = 12.dp, bottom = 6.dp)
+        // Step cards share the 16dp margin of the approval / diff cards and the bubbles around them.
+        SegmentPosition.Single -> PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+        SegmentPosition.First, SegmentPosition.Middle -> PaddingValues(horizontal = 16.dp)
+        SegmentPosition.Last -> PaddingValues(start = 16.dp, end = 16.dp, bottom = 6.dp)
     }
     val indent = 12.dp * item.depth.coerceAtMost(4)
     Box(Modifier.fillMaxWidth().padding(outer).segment(segment)) {
@@ -701,7 +704,7 @@ private fun StepsHeader(row: TimelineRow.Steps, onToggle: (String) -> Unit) {
     val dev = LocalDevColors.current
     Box(
         Modifier.fillMaxWidth()
-            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = if (row.expanded) 0.dp else 4.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = if (row.expanded) 0.dp else 4.dp)
             .segment(if (row.expanded) SegmentPosition.First else SegmentPosition.Single)
             .testTag("steps-${row.groupId}"),
     ) {
@@ -766,15 +769,11 @@ private fun Composer(
                 if (state.canOfferContinue) {
                     // COUI tinted text button (theme-coloured label on a light theme wash): an action
                     // inside the bar, not a second primary button competing with the page.
-                    io.github.suqi8.coui.kmp.basic.TextButton(
+                    SmallButton(
                         text = stringResource(R.string.continue_action),
                         onClick = onContinue,
-                        minHeight = 36.dp,
-                        colors = io.github.suqi8.coui.kmp.basic.ButtonDefaults.textButtonColors(
-                            color = COUITheme.colorScheme.tertiaryContainer,
-                            textColor = COUITheme.colorScheme.onTertiaryContainer,
-                        ),
-                        modifier = Modifier.testTag("continue"),
+                        tone = ActionTone.Primary,
+                        modifier = Modifier.padding(end = 6.dp).testTag("continue"),
                     )
                 }
             }
@@ -945,7 +944,7 @@ private fun AttachSheet(show: Boolean, onImages: () -> Unit, onFiles: () -> Unit
                 stringResource(R.string.attach_where),
                 style = COUITheme.textStyles.footnote2,
                 color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = 24.dp),
+                modifier = Modifier.padding(horizontal = TextGutter),
             )
         }
     }
@@ -1116,7 +1115,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
                 }
             }
             d.capabilities.reason?.let {
-                Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 8.dp))
             }
         }
     }
@@ -1126,42 +1125,33 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
 @Composable
 private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boolean, canFork: Boolean, enabled: Boolean, busy: Boolean, onConfirm: (fork: Boolean) -> Unit, onDismiss: () -> Unit) {
     AppBottomSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf(
-                stringResource(R.string.continue_point_context, agentLabel),
-                stringResource(R.string.continue_point_window),
-            ).forEach { line ->
-                Row(verticalAlignment = Alignment.Top) {
-                    StatusDot(COUITheme.colorScheme.primary, Modifier.padding(top = 7.dp), size = 6.dp)
-                    Spacer(Modifier.size(10.dp))
-                    Text(line, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+        Column(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = SheetTextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf(
+                    stringResource(R.string.continue_point_context, agentLabel),
+                    stringResource(R.string.continue_point_window),
+                ).forEach { line ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        StatusDot(COUITheme.colorScheme.primary, Modifier.padding(top = 7.dp), size = 6.dp)
+                        Spacer(Modifier.size(10.dp))
+                        Text(line, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                    }
+                }
+                if (originalBusy) {
+                    Text(stringResource(R.string.continue_busy), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, fontWeight = FontWeight.Medium)
                 }
             }
-            if (originalBusy) {
-                Text(stringResource(R.string.continue_busy), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, fontWeight = FontWeight.Medium)
-            }
-            Button(
-                onClick = { onConfirm(false) },
-                enabled = enabled && !originalBusy && !busy,
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                minHeight = 48.dp,
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).testTag("continue-confirm"),
-            ) {
-                if (busy) {
-                    RotatingProgressIndicator(color = COUITheme.colorScheme.onPrimary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
-                } else {
-                    Text(stringResource(R.string.continue_confirm), color = COUITheme.colorScheme.onPrimary)
-                }
-            }
-            if (canFork) {
-                // Resuming the same conversation is the normal path; a copy is the exception.
-                TextButton(
-                    text = stringResource(R.string.continue_fork),
-                    onClick = { onConfirm(true) },
-                    enabled = enabled && !originalBusy && !busy,
-                    modifier = Modifier.fillMaxWidth().testTag("continue-fork"),
-                )
-            }
+            // Resuming the same conversation is the normal path (filled); a copy is the exception.
+            val usable = enabled && !originalBusy && !busy
+            SheetButtons(
+                primary = DialogButtonBarAction(
+                    text = stringResource(if (busy) R.string.state_loading else R.string.continue_confirm),
+                    enabled = usable,
+                    onClick = { onConfirm(false) },
+                ),
+                secondary = if (canFork) DialogButtonBarAction(text = stringResource(R.string.continue_fork), enabled = usable, onClick = { onConfirm(true) }) else null,
+                modifier = Modifier.testTag("continue-actions"),
+            )
         }
     }
 }
@@ -1284,8 +1274,9 @@ private fun ImageViewerDialog(
                             }
                         },
                     )
-                    TextButton(
+                    SmallButton(
                         text = stringResource(R.string.viewer_open_with),
+                        modifier = Modifier.align(Alignment.CenterVertically),
                         onClick = {
                             viewerScope.launch {
                                 runCatching { fileStore.resolve(remotePath) }.onSuccess {

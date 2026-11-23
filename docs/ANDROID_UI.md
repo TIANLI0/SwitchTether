@@ -1034,5 +1034,91 @@ over, not at the turn's end.
 A filled full-width button belongs at the bottom of a sheet or an onboarding step, not in a page.
 Inside a settings-style page an action is a row of the group card (导出对话, 扫描附近的电脑); in a
 form or a chat card it is a small (`ButtonSize.Small`) button aligned to the end (提问, approval
-options, 取消 / 提交回答; long desktop labels wrap onto the next line).
+options, 取消 / 提交回答; long desktop labels wrap onto the next line). §22 turns this into the
+app's button tiers and applies it everywhere.
+
+## 22. Button tiers, half-screen panels, "new …" flows (2026-11-24)
+
+A coui `Button` / `TextButton` with default arguments is COUI's **Large** tier: a 44dp filled
+capsule (`TextButton` is filled too, grey). Used for every "retry", "load more" and row action it
+made pages read as stacks of slabs. Call sites no longer pick metrics; they pick a tier.
+
+### 22.1 Tiers
+
+| Tier | Component | Looks like | Where |
+| :--- | :--- | :--- | :--- |
+| Large | coui `Button` / `TextButton`, `SheetButtons`, `StepButtons` | 44dp capsule | The end of a decision panel or of an onboarding step. One filled button per screen; none inside a page. |
+| Panel confirm | `AppBottomSheet(confirm = SheetConfirm(…))` | 40dp accent capsule in the panel's toolbar | The action that completes a form panel (新建会话 → 启动). |
+| Small | `SmallButton(text, onClick, tone)` (`core:ui` `components/Buttons.kt`) | COUI Small: 28dp capsule, 14sp | An action of a row, a card or a toolbar. Never full width; several sit 8dp apart. |
+| Link | `LinkButton(text, onClick)` | borderless accent label, 36dp touch height | A list's footer (加载更多, 查看全部 N 个活动会话), an action next to a line of text (刷新, 管理, 所有位置), a title-bar text action (选择 / 完成). |
+
+`ActionTone`: `Default` (grey capsule, accent label), `Primary` (accent capsule: the one action a
+card is about — 允许, 提交回答, 保存, 打开, 切换), `Danger` (grey capsule, red label: 停止, 删除, 解除绑定).
+A full-width grey button is not used anywhere.
+
+The filled-button colour (`containerTheme`) is now the brand accent in both themes; it had been left
+at COUI's stock `#0080FF` / `#1A8CFF`, a different blue from the switches, radios and links next to it.
+
+What moved (all in `ui/`): session list and request log "load more", Home's "see all" → centred
+links; Home's empty row, cache clear, MCP reconnect, Bluetooth bind / unbind, folder-picker retry →
+Small; provider card (测试连接 · 切换, end-aligned), agent map (查看过程 · 停止), background task, port
+forward row (打开 · 复制 · 延长 · 停止, a wrapping row instead of four equal slabs), file transfer row,
+binary-file notice, viewer retry, terminal confirm / reconnect → Small or Link; the file editor's
+保存 and "new session" as a page → Small `Primary` in the top bar; tool output "show all / load
+full", diff "show more" → links; approval and question buttons → `SmallButton` (14sp label).
+
+### 22.2 Half-screen panels (`AppBottomSheet`)
+- The panel is drawn on the **page colour**, with the page's own gutters (the sheet's 16dp inside
+  margin is off): a `GroupCard` is a card 16dp from the edge exactly as on a page. Before, cards
+  were white on a white panel (invisible) and inset 32–48dp. Text uses `SheetTextGutter`, the
+  page's `TextGutter` (§22.6).
+- Toolbar: `SheetCloseCapsule`, centred title, and `confirm` for a form.
+- A panel that asks for a decision ends with `SheetButtons(primary, secondary, tertiary)`: coui's
+  `DialogButtonBar` — two 44dp capsules side by side (the primary filled, on the right), stacked
+  when there are three or the labels do not fit. Used by 在手机上继续 (接续 | 以副本继续), the local
+  network rationale, the Live Updates explanation and the update sheet. A busy action shows
+  "正在加载…" and is disabled (the bar has no spinner).
+- Bluetooth binding: its rows are group cards now (they were bare rows), bind / unbind are Small.
+- Model / effort: laid out like a settings page (`SmallTitle`, model card, effort slider in its own
+  card, "更多版本" as a link); the chooser pads itself, callers add no side padding.
+
+### 22.3 New session
+Agent tabs → 工作目录 (one `ArrowPreference` row; recent folders as chips under it) → first message
+→ 选项 (summary row whose chevron turns; expands to permission mode and model / effort) → why it
+cannot start, when it cannot. **启动** is the toolbar's confirm capsule (`start-session`), so it
+stays visible above the keyboard instead of sitting under the fold as a full-width button; the page
+variant shows it as a Small `Primary` top-bar action.
+
+### 22.4 Pairing
+One filled button per step. Intro: 扫描配对二维码 stays the only Large button; 手动输入电脑地址 is a
+link, 从剪贴板粘贴 / 使用此链接 are Small buttons under the link field. Confirm, code, camera
+permission and failure steps end with `StepButtons` (取消 | 配对 side by side); the verification
+step keeps 数字一致 full width with "数字不一致，取消配对" as a red link under it.
+
+### 22.5 Evidence and limits
+`SheetGalleryScreenshotTest` (Robolectric, API 32, zh-CN) draws real panel windows (the test draws
+every root view, the dialog included) and asserts that the confirm capsule and the button bar act
+and disable: `build/outputs/screenshots/ui-new-session-{light,dark}`, `ui-decision-panel-*`,
+`ui-button-tiers-*`, `ui-onboarding-{intro,confirm}`. `PageGalleryScreenshotTest` draws whole pages
+(`page-*.png`): Home, Sessions and the session page with synthetic sessions; Settings, Workspace,
+notifications, downloads, port forwards, the folder picker, providers and the paired-computer page
+in their unpaired state (the test process has no desktop). Not checked on a device or emulator:
+glass blur, press motion, and the rows that only exist with a paired desktop (an active port
+forward, a provider card, the agent map). A Small button is 28dp high as in COUI; Compose widens
+the touch area of a clickable to the 48dp minimum on its own, the layout bounds stay 28dp.
+
+### 22.6 Page details found on the rendered pages
+- **One text gutter.** Loose text (a note under a group, an intro, an empty hint, Home's section
+  headings) sits at `TextGutter` = 32dp: the 16dp card margin plus the 16dp inside it, in line with
+  `SmallTitle` and the row titles. It had been 16, 24, 28 or 32dp depending on the page.
+- **Chat rows.** A reply's copy button ends its header row (two equal weights had left it in the
+  middle); under the user's bubble the time and the copy / rewind actions share one line (they were
+  two). Both copy glyphs end at the content edge; their 36dp touch area reaches into the margin.
+  Step cards use the 16dp margin of the approval / diff cards (was 12dp).
+- **Session rows** use the list row's own icon gap (16dp) like every other row (was 28dp).
+- **Workspace.** Rows that open a page (a terminal, a folder, port forwarding, Git) are
+  `ArrowPreference`s; 新建终端 opens a menu and stays without the arrow.
+- **Folder picker.** Inside a folder the page is titled with its name and the title bar carries
+  使用此文件夹 (Small `Primary`, `use-folder`). The full-width button under the list is gone, and
+  with it the disabled slab shown while browsing the locations.
 

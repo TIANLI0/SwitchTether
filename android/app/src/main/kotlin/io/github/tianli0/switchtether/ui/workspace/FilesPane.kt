@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.common.resolve
@@ -56,8 +60,6 @@ import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.BasicComponentDefaults
 import io.github.suqi8.coui.kmp.basic.BreadcrumbBar
 import io.github.suqi8.coui.kmp.basic.BreadcrumbItem
-import io.github.suqi8.coui.kmp.basic.Button
-import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.ChipTabData
 import io.github.suqi8.coui.kmp.basic.ChipTabGroup
 import io.github.suqi8.coui.kmp.basic.DropdownImpl
@@ -67,7 +69,6 @@ import io.github.suqi8.coui.kmp.basic.ListPopupColumn
 import io.github.suqi8.coui.kmp.basic.SearchBar
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.layout.DialogButtonBar
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
@@ -333,7 +334,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                                 } else {
                                     Column {
                                         EmptyNote(stringResource(R.string.files_filter_none))
-                                        TextButton(text = stringResource(R.string.files_search_subfolders, query), onClick = vm::search, modifier = Modifier.padding(horizontal = 16.dp))
+                                        LinkButton(stringResource(R.string.files_search_subfolders, query), vm::search, modifier = Modifier.padding(horizontal = 14.dp))
                                     }
                                 }
                             }
@@ -357,7 +358,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                         }
                         if (query.isNotEmpty() && visible.isNotEmpty()) {
                             item(key = "deep") {
-                                TextButton(text = stringResource(R.string.files_search_subfolders, query), onClick = vm::search, modifier = Modifier.padding(horizontal = 16.dp))
+                                LinkButton(stringResource(R.string.files_search_subfolders, query), vm::search, modifier = Modifier.padding(horizontal = 14.dp))
                             }
                         }
                         item(key = "count") {
@@ -480,7 +481,7 @@ private fun CardRow(position: CardListPosition, content: @Composable () -> Unit)
 
 @Composable
 private fun EmptyNote(text: String) {
-    Text(text, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
+    Text(text, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 16.dp))
 }
 @Composable
 private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
@@ -488,17 +489,17 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
     val store = io.github.tianli0.switchtether.ui.appContainer().fileStore
     val noApp = stringResource(R.string.viewer_no_app)
     GroupCard {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 6.dp, top = 14.dp, bottom = 6.dp)) {
             Text(t.label + " · " + Formatters.bytes(t.done) + (t.total?.let { " / " + Formatters.bytes(it) } ?: ""), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
-            if (t.error == null && !t.finished) LinearProgressIndicator(progress = t.total?.let { if (it > 0) t.done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (t.error == null && !t.finished) LinearProgressIndicator(progress = t.total?.let { if (it > 0) t.done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, end = 10.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
                 t.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.weight(1f)) }
                 if (t.finished) Text(stringResource(R.string.files_done), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.ok, modifier = Modifier.weight(1f))
                 t.downloaded?.let { r ->
-                    TextButton(text = stringResource(R.string.files_transfer_open), onClick = { io.github.tianli0.switchtether.ui.files.startSafely(context, store.viewIntent(store.asLocal(r)), noApp) })
-                    TextButton(text = stringResource(R.string.viewer_manage), onClick = onOpenDownloads)
+                    LinkButton(stringResource(R.string.files_transfer_open), { io.github.tianli0.switchtether.ui.files.startSafely(context, store.viewIntent(store.asLocal(r)), noApp) })
+                    LinkButton(stringResource(R.string.viewer_manage), onOpenDownloads)
                 }
-                if (t.error == null && !t.finished) TextButton(text = stringResource(R.string.action_cancel), onClick = vm::cancelTransfer) else TextButton(text = stringResource(R.string.action_close), onClick = vm::dismissTransfer)
+                if (t.error == null && !t.finished) LinkButton(stringResource(R.string.action_cancel), vm::cancelTransfer) else LinkButton(stringResource(R.string.action_close), vm::dismissTransfer)
             }
         }
     }
@@ -524,9 +525,13 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(name, f.path, "file", f.size)) })
             if (state.editing) {
-                Button(onClick = vm::save, enabled = !state.saving, colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.padding(end = 8.dp).testTag("save")) {
-                    Text(if (state.saving) "…" else stringResource(R.string.files_save), color = COUITheme.colorScheme.onPrimary)
-                }
+                SmallButton(
+                    text = if (state.saving) "…" else stringResource(R.string.files_save),
+                    onClick = vm::save,
+                    enabled = !state.saving,
+                    tone = ActionTone.Primary,
+                    modifier = Modifier.padding(end = 12.dp).testTag("save"),
+                )
             }
         }
         state.transfer?.let { TransferRow(it, vm, {}) }

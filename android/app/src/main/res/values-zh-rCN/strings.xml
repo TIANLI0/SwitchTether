@@ -288,7 +288,7 @@
     <string name="new_session_explainer">用官方方式在电脑上新建会话：它就是一个普通的 Claude Code / Codex 会话，claude --resume 和 VS Code 的历史里都能找到。可以从手机发消息、审批、中断、切换模型；电脑或 SwitchTether 重启后，直接发消息即可继续。不会接管你在终端或 VS Code 里开着的会话。</string>
     <string name="new_session_agent">智能体</string>
     <string name="new_session_cwd">工作目录</string>
-    <string name="new_session_cwd_none">请在下方选择文件夹</string>
+    <string name="new_session_cwd_none">选择文件夹</string>
     <string name="new_session_use_folder">使用此文件夹</string>
     <string name="new_session_no_subdirs">没有子文件夹。</string>
     <string name="new_session_listing_note">部分条目未显示（%1$d 项被电脑端文件策略屏蔽）。</string>
@@ -302,6 +302,7 @@
     <string name="perm_accept_edits">自动接受文件修改，其余仍询问</string>
     <string name="perm_plan">只做计划，不做修改</string>
     <string name="new_session_start">启动会话</string>
+    <string name="new_session_start_short">启动</string>
     <string name="new_session_confirm_title">启动新会话？</string>
     <string name="new_session_confirm_body">在电脑上于 %2$s 启动 %1$s。</string>
     <string name="provider_credential">更新凭据</string>
@@ -414,8 +415,6 @@
     <string name="new_session_recent_folders">最近使用</string>
     <string name="new_session_all_locations">所有位置</string>
     <string name="new_session_filter">筛选文件夹</string>
-    <string name="new_session_use_named_folder">使用“%1$s”</string>
-    <string name="new_session_pick_hint">进入一个文件夹后可选用</string>
     <string name="onboarding_paste">从剪贴板粘贴</string>
     <string name="pair_enter_address">手动输入电脑地址</string>
     <string name="pair_code_title">输入配对码</string>

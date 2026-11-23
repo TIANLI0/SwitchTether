@@ -1,5 +1,12 @@
 package io.github.tianli0.switchtether.ui.settings
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import android.Manifest
 import android.app.Activity
 import android.content.IntentSender
@@ -26,7 +33,6 @@ import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
 import io.github.suqi8.coui.kmp.preference.SwitchPreference
@@ -102,24 +108,21 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
     }
 
     AppBottomSheet(show = show, title = stringResource(R.string.companion_title), onDismissRequest = onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
             Text(
                 stringResource(R.string.companion_intro),
                 style = COUITheme.textStyles.footnote1,
                 color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 12.dp),
             )
             if (associations.isNotEmpty()) {
-                Column {
+                GroupCard {
                     associations.forEachIndexed { i, a ->
                         BasicComponent(
                             title = a.name,
                             summary = a.address,
                             cardListPosition = cardListPositionOf(i, associations.size + 1),
-                            endActions = { TextButton(text = stringResource(R.string.companion_unbind), onClick = { link.disassociate(a); reload() }) },
+                            endActions = { SmallButton(stringResource(R.string.companion_unbind), { link.disassociate(a); reload() }, tone = ActionTone.Danger) },
                         )
                     }
                     SwitchPreference(
@@ -138,33 +141,36 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
                     )
                 }
             }
-            if (!btGranted && Build.VERSION.SDK_INT >= 31) {
-                ArrowPreference(
-                    title = stringResource(R.string.companion_bt_permission),
-                    cardListPosition = CardListPosition.Full,
-                    onClick = { btLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) },
-                )
-            }
             if (bonded.isNotEmpty()) {
-                Column {
+                GroupCard {
                     bonded.forEachIndexed { i, pc ->
                         BasicComponent(
                             title = pc.name,
                             summary = pc.address,
                             cardListPosition = cardListPositionOf(i, bonded.size),
-                            endActions = { TextButton(text = stringResource(R.string.companion_bind), onClick = { link.associate(callback, pc.address) }) },
+                            endActions = { SmallButton(stringResource(R.string.companion_bind), { link.associate(callback, pc.address) }) },
                         )
                     }
                 }
             }
-            // A settings row like the others on this page, not a full-width button.
-            ArrowPreference(
-                title = stringResource(R.string.companion_scan),
-                cardListPosition = CardListPosition.Full,
-                onClick = { link.associate(callback) },
-            )
+            // Settings rows like the others on this page, not full-width buttons.
+            val needsBt = !btGranted && Build.VERSION.SDK_INT >= 31
+            GroupCard {
+                if (needsBt) {
+                    ArrowPreference(
+                        title = stringResource(R.string.companion_bt_permission),
+                        cardListPosition = CardListPosition.Head,
+                        onClick = { btLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) },
+                    )
+                }
+                ArrowPreference(
+                    title = stringResource(R.string.companion_scan),
+                    cardListPosition = if (needsBt) CardListPosition.Tail else CardListPosition.Full,
+                    onClick = { link.associate(callback) },
+                )
+            }
             message?.let {
-                Text(it, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
+                Text(it, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.error, modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 8.dp))
             }
         }
     }

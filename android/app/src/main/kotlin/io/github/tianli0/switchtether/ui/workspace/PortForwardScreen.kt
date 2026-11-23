@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.workspace
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -34,7 +37,6 @@ import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.layout.DialogButtonBar
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
@@ -338,7 +340,7 @@ fun PortForwardScreen(onBack: () -> Unit) {
                     stringResource(R.string.forward_hint),
                     style = COUITheme.textStyles.footnote1,
                     color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp),
+                    modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp),
                 )
             }
         }
@@ -375,11 +377,16 @@ private fun ActiveForwardRow(
         startAction = { RowIcon(AppIcons.PortForward) },
         endActions = { StatusPill(statusText, statusColor) },
         bottomAction = {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(Modifier.weight(1f)) { TextButton(text = stringResource(R.string.forward_open), onClick = onOpen, modifier = Modifier.fillMaxWidth()) }
-                Box(Modifier.weight(1f)) { TextButton(text = stringResource(R.string.forward_copy), onClick = onCopy, modifier = Modifier.fillMaxWidth()) }
-                Box(Modifier.weight(1f)) { TextButton(text = stringResource(R.string.forward_extend), onClick = onExtend, modifier = Modifier.fillMaxWidth()) }
-                Box(Modifier.weight(1f)) { TextButton(text = stringResource(R.string.forward_stop), onClick = onStop, modifier = Modifier.fillMaxWidth()) }
+            // The row's own actions: compact capsules that wrap, not four slabs across the card.
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SmallButton(stringResource(R.string.forward_open), onOpen, tone = ActionTone.Primary)
+                SmallButton(stringResource(R.string.forward_copy), onCopy)
+                SmallButton(stringResource(R.string.forward_extend), onExtend)
+                SmallButton(stringResource(R.string.forward_stop), onStop, tone = ActionTone.Danger)
             }
         },
         onClick = onOpen,

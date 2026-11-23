@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -255,7 +256,7 @@ private fun Breadcrumb(sessionId: String, agent: String, trail: List<SubagentNod
 
 @Composable
 private fun Note(text: String) {
-    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp))
+    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 10.dp))
 }
 
 /** A row of the branch tree: connector glyphs, status dot, description, type and time. */

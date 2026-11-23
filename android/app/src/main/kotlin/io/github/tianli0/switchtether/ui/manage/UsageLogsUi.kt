@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.manage
 
+import io.github.tianli0.switchtether.ui.common.TextGutter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -99,7 +100,7 @@ fun RequestLogSheet(log: RequestLog?, zone: ZoneId, onDismiss: () -> Unit) {
 @Composable
 fun SyncNote(lastSyncMs: Long?, zone: ZoneId) {
     lastSyncMs ?: return
-    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), horizontalArrangement = Arrangement.Start) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = TextGutter, vertical = 4.dp), horizontalArrangement = Arrangement.Start) {
         Text(
             stringResource(R.string.usage_last_sync, requestTime(lastSyncMs, zone).dropLast(3)),
             style = COUITheme.textStyles.footnote2,

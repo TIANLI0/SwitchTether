@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.onboarding
 
+import io.github.tianli0.switchtether.ui.components.ActionTone
+import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.switchtether.ui.components.SmallButton
 import android.Manifest
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import android.content.pm.PackageManager
@@ -236,13 +239,12 @@ private fun IntroContent(
         colors = ButtonDefaults.buttonColorsPrimary(),
     ) { Text(stringResource(R.string.onboarding_scan), color = COUITheme.colorScheme.onPrimary) }
     NearbyDesktops(onPickNearby, nearbyOverride)
-    Spacer(Modifier.height(8.dp))
-    TextButton(
-        text = stringResource(R.string.pair_enter_address),
-        onClick = onEnterAddress,
-        modifier = Modifier.fillMaxWidth().testTag("enter-address"),
-    )
-    Spacer(Modifier.height(20.dp))
+    Spacer(Modifier.height(4.dp))
+    // One filled button per step; the other ways in are quiet links.
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        LinkButton(stringResource(R.string.pair_enter_address), onEnterAddress, modifier = Modifier.testTag("enter-address"))
+    }
+    Spacer(Modifier.height(16.dp))
     Text(stringResource(R.string.onboarding_paste_label), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
     Spacer(Modifier.height(6.dp))
     TextInput(
@@ -255,25 +257,60 @@ private fun IntroContent(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done, autoCorrectEnabled = false),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (linkText.isNotBlank()) onSubmitLink() }),
     )
-    Spacer(Modifier.height(10.dp))
-    if (linkText.isBlank()) {
-        // The link usually arrives through the clipboard (copied on the computer, synced or sent to the phone).
-        val context = androidx.compose.ui.platform.LocalContext.current
-        TextButton(
-            text = stringResource(R.string.onboarding_paste),
-            onClick = {
-                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
-                val clip = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.trim()
-                if (!clip.isNullOrEmpty()) onLinkTextChange(clip)
-            },
-            modifier = Modifier.fillMaxWidth().testTag("paste-link"),
-        )
-    } else {
-        TextButton(
-            text = stringResource(R.string.onboarding_use_link),
-            onClick = onSubmitLink,
-            modifier = Modifier.fillMaxWidth().testTag("use-link"),
-        )
+    Spacer(Modifier.height(8.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        if (linkText.isBlank()) {
+            // The link usually arrives through the clipboard (copied on the computer, synced or sent to the phone).
+            val context = androidx.compose.ui.platform.LocalContext.current
+            SmallButton(
+                text = stringResource(R.string.onboarding_paste),
+                onClick = {
+                    val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                    val clip = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.trim()
+                    if (!clip.isNullOrEmpty()) onLinkTextChange(clip)
+                },
+                modifier = Modifier.testTag("paste-link"),
+            )
+        } else {
+            SmallButton(stringResource(R.string.onboarding_use_link), onSubmitLink, tone = ActionTone.Primary, modifier = Modifier.testTag("use-link"))
+        }
+    }
+}
+
+/**
+ * The actions that end an onboarding step, as the COUI17 button bar draws them: two 44dp capsules
+ * side by side, the step's own action filled and on the right. A long or destructive way out is a
+ * link under the filled button instead ([secondaryAsLink]).
+ */
+@Composable
+private fun StepButtons(
+    primary: String,
+    onPrimary: () -> Unit,
+    primaryEnabled: Boolean = true,
+    primaryTag: String? = null,
+    secondary: String? = null,
+    onSecondary: () -> Unit = {},
+    secondaryAsLink: Boolean = false,
+) {
+    val tag = if (primaryTag != null) Modifier.testTag(primaryTag) else Modifier
+    val colors = ButtonDefaults.buttonColorsPrimary()
+    if (secondary == null || secondaryAsLink) {
+        Button(onClick = onPrimary, enabled = primaryEnabled, modifier = Modifier.fillMaxWidth().then(tag), colors = colors) {
+            Text(primary, color = if (primaryEnabled) colors.contentColor else colors.disabledContentColor)
+        }
+        if (secondary != null) {
+            Spacer(Modifier.height(4.dp))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                LinkButton(secondary, onSecondary, color = LocalDevColors.current.danger)
+            }
+        }
+        return
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(text = secondary, onClick = onSecondary, modifier = Modifier.weight(1f))
+        Button(onClick = onPrimary, enabled = primaryEnabled, modifier = Modifier.weight(1f).then(tag), colors = colors) {
+            Text(primary, color = if (primaryEnabled) colors.contentColor else colors.disabledContentColor, maxLines = 1)
+        }
     }
 }
 
@@ -308,13 +345,19 @@ private fun ScanContent(onScanned: (String) -> Unit, onBack: () -> Unit) {
             style = COUITheme.textStyles.body2,
             color = COUITheme.colorScheme.onSurface,
         )
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) {
-            Text(stringResource(R.string.scan_grant), color = COUITheme.colorScheme.onPrimary)
-        }
+        Spacer(Modifier.height(20.dp))
+        StepButtons(
+            primary = stringResource(R.string.scan_grant),
+            onPrimary = { launcher.launch(Manifest.permission.CAMERA) },
+            secondary = stringResource(R.string.action_cancel),
+            onSecondary = onBack,
+        )
+        return
     }
-    Spacer(Modifier.height(16.dp))
-    TextButton(text = stringResource(R.string.action_cancel), onClick = onBack, modifier = Modifier.fillMaxWidth())
+    Spacer(Modifier.height(12.dp))
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        LinkButton(stringResource(R.string.action_cancel), onBack)
+    }
 }
 
 @Composable
@@ -334,11 +377,13 @@ private fun ConfirmContent(link: PairingLink, deviceSecure: Boolean, onPair: () 
         Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
-    Button(onClick = onPair, modifier = Modifier.fillMaxWidth().testTag("pair"), colors = ButtonDefaults.buttonColorsPrimary()) {
-        Text(stringResource(R.string.confirm_pair), color = COUITheme.colorScheme.onPrimary)
-    }
-    Spacer(Modifier.height(8.dp))
-    TextButton(text = stringResource(R.string.action_cancel), onClick = onBack, modifier = Modifier.fillMaxWidth())
+    StepButtons(
+        primary = stringResource(R.string.confirm_pair),
+        onPrimary = onPair,
+        primaryTag = "pair",
+        secondary = stringResource(R.string.action_cancel),
+        onSecondary = onBack,
+    )
 }
 
 @Composable
@@ -412,16 +457,14 @@ private fun CodeContent(
         Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
-    Button(
-        onClick = { onSubmit(address, code) },
-        enabled = code.length == 6 && (!state.manual || address.isNotBlank()),
-        modifier = Modifier.fillMaxWidth().testTag("pair-code-submit"),
-        colors = ButtonDefaults.buttonColorsPrimary(),
-    ) {
-        Text(stringResource(R.string.confirm_pair), color = COUITheme.colorScheme.onPrimary)
-    }
-    Spacer(Modifier.height(8.dp))
-    TextButton(text = stringResource(R.string.action_cancel), onClick = onBack, modifier = Modifier.fillMaxWidth())
+    StepButtons(
+        primary = stringResource(R.string.confirm_pair),
+        onPrimary = { onSubmit(address, code) },
+        primaryEnabled = code.length == 6 && (!state.manual || address.isNotBlank()),
+        primaryTag = "pair-code-submit",
+        secondary = stringResource(R.string.action_cancel),
+        onSecondary = onBack,
+    )
 }
 
 @Composable
@@ -442,13 +485,7 @@ private fun MessageContent(title: String, message: String, primary: Pair<String,
     Title(title)
     Text(message, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
     Spacer(Modifier.height(20.dp))
-    Button(onClick = primary.second, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) {
-        Text(primary.first, color = COUITheme.colorScheme.onPrimary)
-    }
-    if (secondary != null) {
-        Spacer(Modifier.height(8.dp))
-        TextButton(text = secondary.first, onClick = secondary.second, modifier = Modifier.fillMaxWidth())
-    }
+    StepButtons(primary = primary.first, onPrimary = primary.second, secondary = secondary?.first, onSecondary = secondary?.second ?: {})
 }
 
 @Composable
@@ -476,11 +513,15 @@ private fun VerificationContent(result: PairingResult, onDone: () -> Unit, onRej
         Spacer(Modifier.height(12.dp))
     }
     Spacer(Modifier.height(8.dp))
-    Button(onClick = onDone, enabled = result.codesMatch, modifier = Modifier.fillMaxWidth().testTag("verify-done"), colors = ButtonDefaults.buttonColorsPrimary()) {
-        Text(stringResource(R.string.verify_match), color = COUITheme.colorScheme.onPrimary)
-    }
-    Spacer(Modifier.height(8.dp))
-    TextButton(text = stringResource(R.string.verify_no_match), onClick = onReject, modifier = Modifier.fillMaxWidth())
+    StepButtons(
+        primary = stringResource(R.string.verify_match),
+        onPrimary = onDone,
+        primaryEnabled = result.codesMatch,
+        primaryTag = "verify-done",
+        secondary = stringResource(R.string.verify_no_match),
+        onSecondary = onReject,
+        secondaryAsLink = true,
+    )
 }
 
 @Composable

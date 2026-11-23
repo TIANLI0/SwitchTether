@@ -44,6 +44,13 @@ import io.github.suqi8.coui.kmp.utils.overScrollVertical
 import io.github.suqi8.coui.kmp.utils.scrollEndHaptic
 import io.github.tianli0.switchtether.R
 
+/**
+ * Side gutter of loose text on a page or in a panel (a note under a group, an intro, an empty hint):
+ * the 16dp card margin plus the 16dp inside it, so the text lines up with `SmallTitle` and with the
+ * titles of the rows in the cards around it.
+ */
+val TextGutter = 32.dp
+
 /** Space the floating bottom navigation bar occupies over page content (set by the shell). */
 val LocalBottomBarSpace = compositionLocalOf { 0.dp }
 
@@ -199,13 +206,13 @@ fun ToolbarIcon(icon: ImageVector, contentDescription: String, onClick: () -> Un
     }
 }
 
-/** A ColorOS preference group: one rounded card holding a column of rows. */
+/** A ColorOS preference group: one rounded card holding a column of rows ([bottom]: the gap under it). */
 @Composable
-fun GroupCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun GroupCard(modifier: Modifier = Modifier, bottom: Dp = 16.dp, content: @Composable ColumnScope.() -> Unit) {
     Card(
         cornerRadius = CardDefaults.GroupCornerRadius,
         weight = CardDefaults.GroupWeight,
-        modifier = modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp),
+        modifier = modifier.padding(horizontal = 16.dp).padding(bottom = bottom),
         content = content,
     )
 }

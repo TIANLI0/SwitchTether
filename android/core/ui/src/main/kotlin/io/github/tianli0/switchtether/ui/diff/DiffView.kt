@@ -23,7 +23,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.Text
-import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
@@ -62,7 +61,7 @@ fun DiffView(
         }
         }
         if (total > limit) {
-            TextButton(text = showMoreLabel(total - limit), onClick = { limit += 400 }, modifier = Modifier.padding(4.dp))
+            io.github.tianli0.switchtether.ui.components.LinkButton(showMoreLabel(total - limit), { limit += 400 }, modifier = Modifier.padding(horizontal = 2.dp))
         }
     }
 }
