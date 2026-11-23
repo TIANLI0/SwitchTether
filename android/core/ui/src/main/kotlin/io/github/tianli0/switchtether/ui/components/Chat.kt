@@ -4,11 +4,13 @@ import io.github.suqi8.coui.kmp.blur.progressiveTextureBlur
 import io.github.suqi8.coui.kmp.blur.isBlurEnabled
 import io.github.suqi8.coui.kmp.blur.ProgressiveBlur
 import io.github.suqi8.coui.kmp.blur.BlurDefaults
+import androidx.compose.ui.graphics.RectangleShape
+import io.github.suqi8.coui.kmp.basic.HighlightedIconButton
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.foundation.layout.BoxScope
 import io.github.suqi8.coui.kmp.blur.BlendColorEntry
 import io.github.suqi8.coui.kmp.basic.BottomFloatingToolbarDefaults
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.remember
 import io.github.suqi8.coui.kmp.blur.Backdrop
 import io.github.suqi8.coui.kmp.basic.couiGlassSurface
@@ -25,7 +27,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedVisibility
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
@@ -323,26 +324,40 @@ fun Modifier.glassSurface(shape: Shape, tint: Color? = null): Modifier {
 }
 
 /**
- * The band behind a bar floating at the bottom of the conversation: the mirror image of the
- * ColorOS 17 glass header at the top. The content blurs progressively toward the bottom edge and
- * [containerColor] fades in with it, as ONE material, so the last lines dissolve under the bar
- * (no opaque scrim laid over the glass). Without blur it is a plain fade to [containerColor].
+ * The material behind a title bar and the capsules under it when dense text scrolls beneath
+ * (a conversation): a progressive blur that holds full strength down to [holdFraction] of the
+ * node's height (the title bar's bottom edge) and tapers to nothing at the node's bottom (below
+ * the capsules), under [containerColor] at the strength coui's plain bar uses (80 % light, 60 %
+ * dark), fading out over the same stretch.
+ *
+ * coui's own gradient bar material is much weaker (dark: 40 % colour at the very top, a ~6dp blur,
+ * both gone by the bar's bottom edge): fine over list cards, but running text stayed sharp under
+ * the title and the capsules and nothing could be read. Without blur this is the opaque
+ * [containerColor] down to [holdFraction], then a fade.
  */
 @Composable
-fun Modifier.glassBottomEdge(containerColor: Color): Modifier {
+fun Modifier.glassHeader(containerColor: Color, holdFraction: Float): Modifier {
+    val hold = holdFraction.coerceIn(0.05f, 0.9f)
     val backdrop = LocalGlassBackdrop.current
     if (backdrop == null || !isBlurEnabled()) {
-        return background(Brush.verticalGradient(0f to containerColor.copy(alpha = 0f), 0.4f to containerColor.copy(alpha = 0.86f), 1f to containerColor))
+        return background(Brush.verticalGradient(0f to containerColor, hold to containerColor, 1f to containerColor.copy(alpha = 0f)))
     }
+    val tint = if (containerColor.luminance() < 0.5f) 0.6f else 0.8f
+    val tail = 1f - hold
     return progressiveTextureBlur(
         backdrop = backdrop,
         shape = RectangleShape,
-        blurRadius = 25f,
-        gradient = ProgressiveBlur.Bottom.copy(curve = 3f),
+        blurRadius = 26f,
+        gradient = ProgressiveBlur.Top.copy(startFraction = hold, endFraction = 1f, curve = 1.4f),
         colors = BlurDefaults.blurColors(),
-    ).drawBehind {
-        drawRect(Brush.verticalGradient(0f to containerColor.copy(alpha = 0f), 0.5f to containerColor.copy(alpha = 0.45f), 1f to containerColor.copy(alpha = 0.8f)))
-    }
+    ).background(
+        Brush.verticalGradient(
+            0f to containerColor.copy(alpha = (tint + 0.25f).coerceAtMost(1f)),
+            hold to containerColor.copy(alpha = tint),
+            hold + tail * 0.5f to containerColor.copy(alpha = tint * 0.6f),
+            1f to containerColor.copy(alpha = 0f),
+        ),
+    )
 }
 
 /**
@@ -364,9 +379,11 @@ fun ExpandBody(expanded: Boolean, modifier: Modifier = Modifier, content: @Compo
 }
 
 /**
- * The composer: a full-radius input pill with a round accent send button inside it. When
- * [InputPillState.enabled] is false the field still accepts a local draft (callers decide), but the
- * send button is greyed out.
+ * The composer's field and its send key, in ColorOS 17's toolbar vocabulary: a 40dp glass capsule
+ * that grows with the text, and next to it the toolbar's own glass key ([HighlightedIconButton],
+ * the same disc as the title bar's back button) which fills with the accent when there is
+ * something to send. When [InputPillState.enabled] is false the field still accepts a local draft
+ * (callers decide) and the key stays idle.
  */
 @Composable
 fun InputPill(
@@ -382,15 +399,15 @@ fun InputPill(
     maxLines: Int = 5,
 ) {
     val scheme = COUITheme.colorScheme
-    Row(
-        modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .glassSurface(RoundedCornerShape(24.dp))
-            .padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        Box(
+            Modifier
+                .weight(1f)
+                .heightIn(min = ComposerKeySize)
+                .glassSurface(RoundedCornerShape(ComposerKeySize / 2))
+                .padding(horizontal = 16.dp, vertical = 9.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
             if (value.isEmpty()) {
                 Text(placeholder, style = COUITheme.textStyles.body1, color = scheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -403,28 +420,52 @@ fun InputPill(
                 modifier = fieldModifier.fillMaxWidth().semantics { contentDescription = placeholder },
             )
         }
-        Spacer(Modifier.size(6.dp))
+        Spacer(Modifier.size(ComposerKeyGap))
         val canSend = state.sendEnabled && !state.busy
-        // The button wakes up when there is something to send: colour and a small spring.
-        val sendFill by animateColorAsState(if (canSend) scheme.primary else scheme.onSurface.copy(alpha = 0.10f), label = "send-fill")
-        val sendScale by animateFloatAsState(if (canSend) 1f else 0.9f, animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f), label = "send-scale")
-        Box(
-            sendModifier
-                .size(36.dp)
-                .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
-                .clip(CircleShape)
-                .background(sendFill)
-                .clickable(enabled = canSend, role = Role.Button, onClickLabel = sendLabel, onClick = onSend)
-                .semantics { contentDescription = sendLabel },
-            contentAlignment = Alignment.Center,
+        // Ready: the disc fills with the accent and the arrow turns white.
+        val ready by animateFloatAsState(if (canSend) 1f else 0f, animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f), label = "send-ready")
+        ComposerKey(
+            label = sendLabel,
+            onClick = onSend,
+            enabled = canSend,
+            modifier = sendModifier,
         ) {
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = ready }.clip(CircleShape).background(scheme.primary))
             if (state.busy) {
                 RotatingProgressIndicator(color = scheme.onSurfaceSecondary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
             } else {
-                Icon(AppIcons.Send, contentDescription = null, tint = if (canSend) scheme.onPrimary else scheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
+                Icon(AppIcons.Send, contentDescription = null, tint = lerp(scheme.onSurfaceVariantSummary, scheme.onPrimary, ready), modifier = Modifier.size(20.dp))
             }
         }
     }
+}
+
+/** The diameter of a composer key and the height of its one-line field: coui's toolbar key. */
+val ComposerKeySize = 40.dp
+
+/** The gap between toolbar keys (coui `TopAppBarDefaults.ActionMenuItemSpacing`). */
+val ComposerKeyGap = 10.dp
+
+/**
+ * A round key of the composer row: ColorOS 17's glass toolbar key over the conversation, with its
+ * halo, press light and touch motion. [content] is drawn inside the 40dp disc.
+ */
+@Composable
+fun ComposerKey(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    HighlightedIconButton(
+        onClick = onClick,
+        modifier = modifier.semantics { contentDescription = label },
+        size = ComposerKeySize,
+        enabled = enabled,
+        backdrop = LocalGlassBackdrop.current,
+        content = content,
+    )
 }
 
 /** Small round icon button in the same family as the send button (e.g. interrupt). */
@@ -456,6 +497,8 @@ fun InfoChip(
     onClick: (() -> Unit)? = null,
     /** Non-null for a chip floating over content (the colour itself is no longer used: the chip is glass). */
     backdrop: Color? = null,
+    /** Colour of an action capsule's icon. */
+    accent: Color = COUITheme.colorScheme.primary,
 ) {
     val scheme = COUITheme.colorScheme
     val tint = dot?.copy(alpha = 0.16f)
@@ -475,7 +518,7 @@ fun InfoChip(
             Spacer(Modifier.size(6.dp))
         }
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = if (onClick != null) scheme.primary else label, modifier = Modifier.size(15.dp))
+            Icon(icon, contentDescription = null, tint = if (onClick != null) accent else label, modifier = Modifier.size(15.dp))
             Spacer(Modifier.size(5.dp))
         }
         Text(text, style = COUITheme.textStyles.footnote1, fontWeight = FontWeight.Medium, color = label, maxLines = 1, overflow = TextOverflow.Ellipsis)

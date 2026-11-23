@@ -9,8 +9,8 @@
 
     <string name="tools_permission">权限模式</string>
     <string name="tools_permission_hint">立即作用于正在运行的会话，相当于 Claude Code 里的 Shift+Tab。</string>
-    <string name="perm_bypass_short">跳过权限</string>
-    <string name="perm_bypass">跳过所有权限确认（仅当会话以此模式启动时可用）</string>
+    <string name="perm_bypass_short">Bypass</string>
+    <string name="perm_bypass">Bypass permissions：跳过所有权限确认（仅当会话以此模式启动时可用）</string>
     <string name="perm_unknown">模式：%1$s</string>
     <string name="tools_permission_failed">无法切换模式：%1$s</string>
 

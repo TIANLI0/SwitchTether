@@ -1,5 +1,14 @@
 package io.github.tianli0.switchtether.ui.common
 
+import io.github.tianli0.switchtether.ui.components.glassHeader
+import io.github.tianli0.switchtether.ui.components.LocalGlassBackdrop
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import io.github.suqi8.coui.kmp.blur.rememberLayerBackdrop
+import io.github.suqi8.coui.kmp.blur.layerBackdrop
+import io.github.suqi8.coui.kmp.blur.isRuntimeShaderSupported
+import io.github.suqi8.coui.kmp.blur.LocalBackdrop
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.ScrollState
@@ -124,6 +133,9 @@ private fun navigationBarHeight(): Dp = with(androidx.compose.ui.platform.LocalD
  * back arrow), and the content below the bar. Lists inside should use [pageScroll] and
  * [pageListPadding].
  *
+ * The title bar is ColorOS 17's gradient glass (a progressive blur of the list under it) on immersive
+ * pages; elsewhere there is nothing under the bar to blur and it is the plain page colour.
+ *
  * [immersive]: the body is one scrolling list (anything fixed above it, like the connection banner,
  * belongs inside it as its first item). It then starts at the top of the screen and scrolls under the
  * status bar and the frosted title bar, as ColorOS pages do; [pageListPadding] keeps its first item
@@ -139,14 +151,38 @@ fun Page(
     large: Boolean = onBack == null,
     floatingActionButton: @Composable () -> Unit = {},
     immersive: Boolean = false,
+    /**
+     * The page paints the material behind the title bar itself (see `glassHeader`); the bar is then
+     * transparent. For a page whose content is dense text right under the bar, where coui's own
+     * gradient material is too thin to read a title over.
+     */
+    ownBarMaterial: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val behavior = COUIScrollBehavior()
     val color = pageContainerColor()
+    // What the title bar's glass blurs: this page's content, recorded as a layer. The bar is the
+    // content's sibling in the scaffold, so it never samples itself. coui's bar takes it from
+    // `LocalBackdrop`; with none it only paints its translucent colour ramp and the list shows
+    // through sharp (the shell publishes a backdrop to the navigation capsule alone).
+    // A small bar over an immersive list gets the app's own header material (`glassHeader`): coui's
+    // gradient material is too thin to read a title over text in the dark theme. A large collapsing
+    // bar keeps coui's material, which follows the collapse.
+    val strongHeader = immersive && !large && !ownBarMaterial
+    val transparentBar = ownBarMaterial || strongHeader
+    val barBackdrop = if (immersive && !ownBarMaterial && isRuntimeShaderSupported()) {
+        rememberLayerBackdrop {
+            drawRect(color)
+            drawContent()
+        }
+    } else {
+        null
+    }
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = color,
         topBar = {
+          CompositionLocalProvider(LocalBackdrop provides barBackdrop) {
             val nav: @Composable () -> Unit = {
                 if (onBack != null) BackArrow(onBack)
             }
@@ -165,26 +201,48 @@ fun Page(
                 SmallTopAppBar(
                     title = title,
                     subtitle = subtitle,
-                    color = color,
-                    scrollBehavior = behavior,
+                    color = if (transparentBar) Color.Transparent else color,
+                    scrollBehavior = if (transparentBar) null else behavior,
                     showDivider = false,
-                    gradientGlass = true,
+                    gradientGlass = !transparentBar,
                     navigationIcon = nav,
                     actions = actions,
                 )
             }
+          }
         },
         floatingActionButton = floatingActionButton,
+        // coui paints the bar's progressive-blur material only when it is told that the content
+        // really runs under the bar; without this an immersive page had an opaque bar over its list.
+        edgeToEdge = immersive,
     ) { inner ->
         val top = inner.calculateTopPadding()
         CompositionLocalProvider(
             LocalPageScrollBehavior provides behavior,
             LocalPageTopInset provides if (immersive) top else 0.dp,
         ) {
-            Column(Modifier.fillMaxSize().padding(top = if (immersive) 0.dp else top), content = content)
+            Box(Modifier.fillMaxSize()) {
+                Column(
+                    Modifier.fillMaxSize()
+                        .then(if (barBackdrop != null) Modifier.layerBackdrop(barBackdrop) else Modifier)
+                        .padding(top = if (immersive) 0.dp else top),
+                    content = content,
+                )
+                if (strongHeader) {
+                    // Behind the (transparent) title bar, over the list: full strength under the
+                    // bar, gone a little below it. It takes no touches.
+                    CompositionLocalProvider(LocalGlassBackdrop provides barBackdrop) {
+                        val band = top + HeaderFade
+                        Box(Modifier.fillMaxWidth().height(band).glassHeader(color, top / band))
+                    }
+                }
+            }
         }
     }
 }
+
+/** How far the header material reaches below a small title bar while it fades out. */
+private val HeaderFade = 16.dp
 
 /** The back button of a detail page: the COUI17 glass round button of the top bar. */
 @Composable

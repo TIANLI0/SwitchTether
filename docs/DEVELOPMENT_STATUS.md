@@ -549,3 +549,11 @@ docs/ANDROID_UI.md §23. The conversation scrolls under floating glass controls 
 keyboard with its bottom edge, collapsible rows and timeline rows animate; one `AppMenu` (no divider bars, frosted from a
 window snapshot); the terminal can keep 80 / 120 columns and scroll sideways. Robolectric only (opaque fallback): the blur
 and the animations have not been seen on a device.
+
+## Android 0.1.14: composer as a ColorOS toolbar, header glass, mode label (2026-11-24)
+
+docs/ANDROID_UI.md §23.1, §23.2, §23.9. `Page` turns on coui's edge-to-edge flag and records a backdrop for immersive pages (the title
+bar's glass was never painted); small title bars and the session page use the app's stronger `glassHeader`; the composer is attach key / field / send key built from coui's toolbar key, with
+"stop" as a capsule above it and no blur band behind it; "Bypass" keeps Claude Code's name. Desktop: a managed Claude
+session records the permission mode Claude Code reports (not released). Robolectric and `cargo test -p switchtether-core`
+only; not seen on a device.

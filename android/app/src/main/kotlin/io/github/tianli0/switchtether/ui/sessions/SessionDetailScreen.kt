@@ -1,6 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.switchtether.ui.components.glassBottomEdge
+import io.github.tianli0.switchtether.ui.components.glassHeader
 import io.github.tianli0.switchtether.ui.components.glassSurface
 import io.github.tianli0.switchtether.ui.components.LocalGlassBackdrop
 import io.github.suqi8.coui.kmp.blur.rememberLayerBackdrop
@@ -493,6 +493,7 @@ fun SessionDetailContent(
         // progressive blur is then the only fade up there (a second, page-coloured fade under the
         // capsules used to sit on top of it).
         immersive = true,
+        ownBarMaterial = true,
     ) {
         val topInset = io.github.tianli0.switchtether.ui.common.LocalPageTopInset.current
         // Notices that used to take rows above the list now float over its top, under the title bar.
@@ -560,7 +561,14 @@ fun SessionDetailContent(
             }
             CompositionLocalProvider(LocalGlassBackdrop provides chatBackdrop) {
                 // Notices and capsules float over the top of the conversation, below the title bar.
-                Column(Modifier.align(Alignment.TopStart).fillMaxWidth().onSizeChanged { topOverlayPx = it.height }.padding(top = topInset)) {
+                // One material lies behind the bar and them: full blur and tint behind the title,
+                // tapering to nothing just below the capsules, so both stay readable over text.
+                val barFraction = with(density) { topInset.toPx() } / topOverlayPx.coerceAtLeast(1)
+                Column(
+                    Modifier.align(Alignment.TopStart).fillMaxWidth().onSizeChanged { topOverlayPx = it.height }
+                        .glassHeader(pageColor, barFraction)
+                        .padding(top = topInset, bottom = 10.dp),
+                ) {
                     topNotices()
                     StatusChipRow(
                         state,
@@ -572,13 +580,10 @@ fun SessionDetailContent(
                         onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
                     )
                 }
-                // The composer floats too, over the bottom edge's own glass (the title bar's
-                // counterpart): the last lines blur away under it instead of ending at a line.
-                Box(
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                        .onSizeChanged { composerHeightPx = it.height }
-                        .glassBottomEdge(pageColor),
-                ) {
+                // The composer floats too. Nothing is laid behind it: only its own keys and field
+                // are glass, the conversation stays sharp around them (the title bar is the page's
+                // one progressive blur).
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { composerHeightPx = it.height }) {
                     Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) })
                 }
             }
@@ -609,7 +614,7 @@ private fun StatusChipRow(
     val terminalLabel = stringResource(R.string.open_terminal)
     val toolsLabel = stringResource(R.string.tools_open)
     val bg = io.github.tianli0.switchtether.ui.common.pageContainerColor().compositeOver(COUITheme.colorScheme.background)
-    // No fade of their own: the title bar's progressive blur above them is the page's only one.
+    // No fade of their own: the header's material behind them (glassHeader) is the page's only one.
     Column(
         modifier.padding(horizontal = 8.dp, vertical = 2.dp).clip(SquircleShape(18.dp))
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 4.dp),
@@ -799,7 +804,7 @@ private fun Composer(
 ) {
     val s = state.detail.valueOrNull?.summary
     Column(
-        Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
+        Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
     ) {
         // Full control (managed, or the user's own process attached via the wrapper) keeps the normal
         // composer; only observe/history sessions get the read-only bar.
@@ -808,7 +813,7 @@ private fun Composer(
         if (blocked) {
             // Read-only: say so plainly instead of showing a dead input field.
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 48.dp).glassSurface(RoundedCornerShape(24.dp)).padding(start = 18.dp, end = 6.dp),
+                Modifier.fillMaxWidth().heightIn(min = 44.dp).glassSurface(RoundedCornerShape(22.dp)).padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(AppIcons.Lock, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(18.dp))
@@ -890,13 +895,17 @@ private fun Composer(
             }
         }
         val showPermission = state.claudeTools && onPermissionClick != null
-        if ((state.canChangeModel && s != null) || showPermission) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if ((state.canChangeModel || showPermission) && s != null) {
+        val showModel = (state.canChangeModel || showPermission) && s != null
+        val showInterrupt = state.canInterrupt && s != null && s.isLive && s.status != "idle"
+        if (showModel || showInterrupt) {
+            // Above the field: the run settings on the left, "stop" on the right while a turn runs.
+            // Stop is a labelled capsule here, not a fourth key squeezed into the input row.
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (showModel && s != null) {
                     // Model and effort of the running session, one tap away (like the IDE's model picker).
                     Row(
                         Modifier
-                            .padding(bottom = 8.dp)
+                            .weight(1f, fill = false)
                             .heightIn(min = 30.dp)
                             .glassSurface(RoundedCornerShape(50))
                             .clickable(role = Role.Button, onClick = onModelClick)
@@ -904,40 +913,52 @@ private fun Composer(
                             .testTag("model-chip"),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(AppIcons.Settings, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.size(4.dp))
+                        Icon(AppIcons.Settings, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.size(5.dp))
                         val mode = state.detail.valueOrNull?.permissionMode?.takeIf { it != "default" }
                         Text(
                             listOfNotNull(modelEffortSummary(s.model, s.effort).ifBlank { null }, mode?.let { permissionModeLabel(it) })
                                 .joinToString(" · "),
                             style = COUITheme.textStyles.footnote1,
-                            color = COUITheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                            color = COUITheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
+                Spacer(Modifier.weight(1f))
+                if (showInterrupt) {
+                    val stopLabel = stringResource(R.string.session_interrupt)
+                    Spacer(Modifier.size(8.dp))
+                    InfoChip(
+                        stopLabel,
+                        icon = AppIcons.Interrupt,
+                        onClick = onInterrupt,
+                        backdrop = COUITheme.colorScheme.background,
+                        accent = LocalDevColors.current.danger,
+                        modifier = Modifier.semantics { contentDescription = stopLabel }.testTag("interrupt"),
+                    )
+                }
             }
         } else if (state.resumesOnSend) {
             ComposerNote(stringResource(R.string.composer_resume_hint), COUITheme.colorScheme.onSurfaceSecondary)
         }
+        // The input row, as a ColorOS toolbar: attach key, field, send key.
         Row(verticalAlignment = Alignment.Bottom) {
-            val showInterrupt = state.canInterrupt && s != null && s.isLive && s.status != "idle"
-            if (showInterrupt) {
-                RoundIconButton(AppIcons.Interrupt, stringResource(R.string.session_interrupt), onInterrupt, tint = LocalDevColors.current.danger, modifier = Modifier.testTag("interrupt"))
-                Spacer(Modifier.size(8.dp))
-            }
             // Files are uploaded right away, so attaching needs the connection (sending can still queue).
             val supportsAttachments = (state.canSend || state.canQueue) && s?.terminalId == null
             if (supportsAttachments) {
-                RoundIconButton(
-                    icon = AppIcons.Add,
+                val canAttach = state.online && state.draftAttachments.size < MAX_ATTACHMENTS
+                io.github.tianli0.switchtether.ui.components.ComposerKey(
                     label = stringResource(R.string.composer_attach),
                     onClick = onPickImage,
-                    enabled = state.online && state.draftAttachments.size < MAX_ATTACHMENTS,
+                    enabled = canAttach,
                     modifier = Modifier.testTag("attach"),
-                )
-                Spacer(Modifier.size(8.dp))
+                ) {
+                    Icon(AppIcons.Add, contentDescription = null, tint = COUITheme.colorScheme.onSurface.copy(alpha = if (canAttach) 1f else 0.4f), modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.size(io.github.tianli0.switchtether.ui.components.ComposerKeyGap))
             }
             InputPill(
                 value = state.draft,

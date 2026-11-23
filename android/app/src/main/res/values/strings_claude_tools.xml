@@ -10,7 +10,7 @@
     <string name="tools_permission">Permission mode</string>
     <string name="tools_permission_hint">Applies to the running session at once, like Shift+Tab in Claude Code.</string>
     <string name="perm_bypass_short">Bypass</string>
-    <string name="perm_bypass">Skip all permission prompts (only if the session was started with it)</string>
+    <string name="perm_bypass">Bypass permissions: skip all permission prompts (only if the session was started with it)</string>
     <string name="perm_unknown">Mode: %1$s</string>
     <string name="tools_permission_failed">Could not change the mode: %1$s</string>
 

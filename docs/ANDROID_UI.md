@@ -1126,16 +1126,38 @@ the touch area of a clickable to the 48dp minimum on its own, the layout bounds 
 
 ### 23.1 The conversation runs under its controls
 The page is immersive (§21.2): the list starts at the top of the screen and fills it. It scrolls
-under the title bar, whose own progressive blur is the only fade up there; the notices and capsules
-float below the bar and the composer floats at the bottom (Telegram's layout). The bottom edge has
-the title bar's counterpart, `glassBottomEdge`: one material in which the content blurs
-progressively toward the edge while the page colour fades in, so the last lines dissolve under the
-composer. The list's content padding is the measured height of the top overlay (title bar, notices,
+under the title bar, whose progressive blur is the page's only fade; the notices and capsules
+float below the bar and the composer floats at the bottom (Telegram's layout). Nothing is laid
+behind the composer: only its keys and field are glass, the conversation stays sharp around them.
+The list's content padding is the measured height of the top overlay (title bar, notices,
 capsules) and of the composer; the "new messages" pill sits above the composer.
 
+**The title bar's material.** coui paints the bar's gradient glass only when two things hold, and
+`Page` provided neither, so every immersive page had an opaque bar over its list:
+1. the scaffold is told the content runs under the bar (`Scaffold(edgeToEdge = immersive)`,
+   `LocalEdgeToEdge`);
+2. the bar finds something to blur in `LocalBackdrop`. The shell publishes its backdrop to the
+   navigation capsule only, so `Page` records its own content as a `LayerBackdrop` and provides it
+   to the title bar (the bar is the content's sibling, never inside the recording). With the flag
+   but without the backdrop the bar draws only its translucent colour ramp and the list shows
+   through sharp — the state of the first 0.1.14 build, reported from the device. **The session page paints its own header material** (`Page(ownBarMaterial = true)`, the bar is
+transparent). coui's gradient material is thin by design: in the dark theme 40 % colour at the very
+top and a ~6dp blur, both gone by the bar's bottom edge. Over list cards that reads as glass; over
+a conversation the running text stayed sharp under the title, the subtitle and the capsules and
+nothing could be read (seen on the device). `glassHeader(pageColor, holdFraction)` lies behind the
+title bar, the notices and the capsules as one band: a 26dp progressive blur at full strength down
+to the title bar's bottom edge, tapering to nothing just below the capsules, under the page colour
+at the plain bar's strength (60 % dark / 80 % light) fading over the same stretch.
+
+Every other immersive page with a small title bar (Home, the settings sub-pages, port forwarding,
+downloads, session tools, the agent map) gets the same material from `Page` itself: a band of the
+bar's height plus 16dp behind the transparent bar. A large collapsing bar (Manage, Workspace)
+keeps coui's material, which follows the collapse.
+
 A first version laid a page-coloured gradient under the capsules, on top of the title bar's blur:
-an opaque fade over a translucent one, visible as a band on the device. A floating control never
-gets a scrim of its own; each edge has exactly one fade.
+an opaque fade over a translucent one, visible as a band on the device. A second version put a
+progressive blur behind the composer as well; that was removed too. A floating control never gets
+a scrim or a blur band of its own.
 
 ### 23.2 Frosted glass
 `glassSurface(shape, tint)` (`core:ui` `components/Chat.kt`) is the surface of everything that
@@ -1149,6 +1171,15 @@ version tinted with the card colour at 62–72 % alpha: over white message text 
 that let the brightness through and the composer read as a light-grey slab (seen on the device).
 The floating controls are siblings of the recorded layer, never inside it. Without runtime shaders (below Android 13), with system blur off,
 on the wide (rail) layout and in tests the surface is the opaque card colour.
+
+**The composer is a ColorOS toolbar.** One row: the attach key, the field, the send key. The keys
+are `ComposerKey` = coui's `HighlightedIconButton`, the same 40dp glass disc as the title bar's
+back button (halo, press light, touch motion), 10dp apart as toolbar keys are; the field is a 40dp
+capsule that grows with the text. The send key fills with the accent when there is something to
+send. "Stop" is no longer a fourth key: while a turn runs it is a labelled capsule (red icon) at
+the end of the row above the field, opposite the model capsule. The row keeps the page's 16dp
+gutters. Before, the field was a 48dp pill with its own send disc inside, between two 48dp discs
+of a different make: three styles in one row.
 
 ### 23.3 Header capsules
 30dp high, 13sp medium, 8dp apart, glass. A state capsule keeps its colour as a soft tint with a
@@ -1195,7 +1226,18 @@ resized to it, lines stay whole and the grid scrolls sideways at a stable width.
   bars, the bar icons keep the page's colours, and there is no dim or window animation. A plain
   `Dialog` stopped at the bars and showed a strip of its own colour.
 
-### 23.9 Evidence and limits
+### 23.9 Run settings follow the agent
+- The permission mode Claude Code calls *bypass permissions* is labelled **Bypass** in both
+  languages (it was 跳过权限); its description starts with the agent's own term.
+- Desktop (`agents/claude/managed.rs`): Claude Code reports its permission mode in `system`
+  messages (`init`, and `status` when it changes by itself, e.g. on leaving plan mode). The managed
+  session now records it, so the panel shows the agent's mode, not just the last one set from the
+  phone. **Needs a desktop release to take effect.**
+- Not solved: a session that runs in VS Code or a terminal does not report its mode or effort to
+  the desktop, so the panel cannot show them; and an unset effort is shown as 默认 (the agent's own
+  default), not as the level Claude Code resolves it to.
+
+### 23.10 Evidence and limits
 Robolectric (API 32): `PageGalleryScreenshotTest` `page-session-*` for the layout in its opaque
 fallback, `ChatListTest` for the keyboard behaviour, the existing chat / approval / question tests
 for the collapsible rows. On the user's device (dark theme, one screenshot of the first version):
