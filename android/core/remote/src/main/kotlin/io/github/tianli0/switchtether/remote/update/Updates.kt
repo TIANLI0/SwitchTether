@@ -31,10 +31,11 @@ data class SemVer(val major: Int, val minor: Int, val patch: Int, val pre: List<
         for (i in 0 until minOf(pre.size, other.pre.size)) {
             val a = pre[i]
             val b = other.pre[i]
-            val an = a.toLongOrNull()
-            val bn = b.toLongOrNull()
+            // Numeric identifiers of any length: without leading zeros, the longer one is larger.
+            val an = a.takeIf { it.isNotEmpty() && it.all { ch -> ch in '0'..'9' } }?.trimStart('0')
+            val bn = b.takeIf { it.isNotEmpty() && it.all { ch -> ch in '0'..'9' } }?.trimStart('0')
             val c = when {
-                an != null && bn != null -> an.compareTo(bn)
+                an != null && bn != null -> if (an.length != bn.length) an.length.compareTo(bn.length) else an.compareTo(bn)
                 an != null -> -1 // numeric identifiers sort before alphanumeric ones
                 bn != null -> 1
                 else -> a.compareTo(b)
@@ -51,10 +52,11 @@ data class SemVer(val major: Int, val minor: Int, val patch: Int, val pre: List<
 
         fun parse(text: String?): SemVer? {
             val m = RE.matchEntire(text?.trim() ?: return null) ?: return null
+            // A number that does not fit is not a version (and must not throw out of a release list).
             return SemVer(
-                m.groupValues[1].toInt(),
-                m.groupValues[2].ifEmpty { "0" }.toInt(),
-                m.groupValues[3].ifEmpty { "0" }.toInt(),
+                m.groupValues[1].toIntOrNull() ?: return null,
+                m.groupValues[2].ifEmpty { "0" }.toIntOrNull() ?: return null,
+                m.groupValues[3].ifEmpty { "0" }.toIntOrNull() ?: return null,
                 m.groupValues[4].takeIf { it.isNotEmpty() }?.split('.') ?: emptyList(),
             )
         }
@@ -111,15 +113,32 @@ data class ReleaseInfo(
 }
 
 object Sha256Sums {
-    /** `SHA256SUMS.txt` lines `<64 hex>  <file>` (sha256sum format; `*` binary marker allowed). */
-    fun parse(text: String): Map<String, String> = text.lineSequence()
-        .map { it.trim() }
-        .filter { it.isNotEmpty() && !it.startsWith("#") }
-        .mapNotNull { line ->
-            val m = Regex("""^([0-9a-fA-F]{64})\s+\*?(.+)$""").matchEntire(line) ?: return@mapNotNull null
-            m.groupValues[2].trim() to m.groupValues[1].lowercase()
+    /**
+     * `SHA256SUMS.txt` lines `<64 hex>  <file>` (sha256sum format; `*` binary marker allowed), by
+     * file name. `./name` is the file `name` (sha256sum run on a `./` glob); any other path stays a
+     * different key, so it never matches an asset name. A file listed with two different checksums
+     * has none: the caller fails closed instead of trusting whichever line came last.
+     */
+    fun parse(text: String): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        val conflicting = HashSet<String>()
+        for (raw in text.lineSequence()) {
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith("#")) continue
+            val m = LINE.matchEntire(line) ?: continue
+            val path = m.groupValues[2].trim()
+            val bare = path.removePrefix("./")
+            val name = if (path.startsWith("./") && bare.isNotEmpty() && bare.none { it == '/' || it == BACKSLASH }) bare else path
+            val sum = m.groupValues[1].lowercase()
+            val old = out.put(name, sum)
+            if (old != null && old != sum) conflicting += name
         }
-        .toMap()
+        out.keys.removeAll(conflicting)
+        return out
+    }
+
+    private const val BACKSLASH = 92.toChar()
+    private val LINE = Regex("""^([0-9a-fA-F]{64})\s+\*?(.+)$""")
 
     fun of(input: InputStream): String {
         val md = MessageDigest.getInstance("SHA-256")

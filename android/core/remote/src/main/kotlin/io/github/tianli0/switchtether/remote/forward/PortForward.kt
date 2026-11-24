@@ -300,6 +300,12 @@ class LocalForwarder(
         when (f.type) {
             ForwardFrames.OPENED -> Unit
             ForwardFrames.DATA -> {
+                // The peer may have one window unacknowledged; more is a violation, not something to buffer.
+                if (s.queued.addAndGet(f.payload.size) > ForwardFrames.INITIAL_WINDOW) {
+                    if (streams.remove(f.stream) != null) send(ForwardFrames.encode(ForwardFrames.RESET, f.stream, "window".toByteArray()))
+                    s.abort()
+                    return
+                }
                 down.addAndGet(f.payload.size.toLong())
                 s.incoming.put(f.payload)
             }
@@ -309,13 +315,20 @@ class LocalForwarder(
                 val reason = String(f.payload, Charsets.US_ASCII)
                 if (reason == "refused") s.failWithPage(ErrorKind.REFUSED) else s.abort()
             }
-            ForwardFrames.WINDOW -> ForwardFrames.u32(f.payload)?.let { s.credit.release(it.toInt().coerceAtLeast(0)) }
+            // Never more outstanding credit than the initial window (a larger grant would also
+            // overflow the semaphore, which throws an Error).
+            ForwardFrames.WINDOW -> ForwardFrames.u32(f.payload)?.let {
+                val room = (ForwardFrames.INITIAL_WINDOW - s.credit.availablePermits()).coerceAtLeast(0)
+                s.credit.release(minOf(it, room.toLong()).toInt())
+            }
         }
     }
 
     private inner class Stream(val id: Int, val socket: Socket) {
         val credit = Semaphore(ForwardFrames.INITIAL_WINDOW)
         val incoming = LinkedBlockingQueue<ByteArray>()
+        /** DATA bytes received and not yet written to the local socket (acknowledged with WINDOW once written). */
+        val queued = AtomicInteger(0)
         @Volatile var sentAny = false
         @Volatile var receivedAny = false
         @Volatile private var head: ByteArray = ByteArray(0)
@@ -377,6 +390,7 @@ class LocalForwarder(
                     receivedAny = true
                     output.write(chunk)
                     output.flush()
+                    queued.addAndGet(-chunk.size)
                     send(ForwardFrames.window(id, chunk.size))
                 }
             } catch (_: InterruptedException) {

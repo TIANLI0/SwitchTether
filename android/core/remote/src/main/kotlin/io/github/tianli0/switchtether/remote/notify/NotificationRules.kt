@@ -302,8 +302,10 @@ class NotificationEngine(
             EventKinds.STATUS -> {
                 val state = e.data.str("state") ?: return null
                 val prev = lastStatus.put("evt:$sid", state)
-                if (prev == state) return null
-                if (prev == "waiting_input") waitEnded(sid)
+                // The same state again says nothing new, unless a turn was opened since by the other
+                // source (`session.upserted` busy): then it is that turn's outcome.
+                if (prev == state && !(state in OUTCOME_STATES && sid in openTurn)) return null
+                if (prev == "waiting_input" && state != prev) waitEnded(sid)
                 when (state) {
                     "running" -> {
                         val fresh = !openTurn.contains(sid)
@@ -391,7 +393,9 @@ class NotificationEngine(
         val waiting = s.status == "waiting" || s.waitingFor != null
         // The "needs you" moment is over: the next one is announced afresh.
         if (!waiting) attentionBy.remove(s.id)
-        if (prev == sig) return null
+        // Unchanged, unless it is a wait nobody was told about (muted or switched off when it began):
+        // its key is still free, so it is announced once the user lets it through.
+        if (prev == sig && !(waiting && !attentionBy.containsKey(s.id))) return null
         val prevStatus = prev?.substringBefore('|')
         if (!waiting && prev != null && (prevStatus == "waiting" || prev.substringAfter('|') != "null")) waitEnded(s.id)
         return when {
@@ -437,8 +441,9 @@ class NotificationEngine(
         val limit = prefs().longRunningMinutes * 60_000L
         return sessions.mapNotNull { s ->
             val since = busySince[s.id] ?: return@mapNotNull null
-            if (s.status != "busy" || nowMs() - since < limit || !longRunningNotified.add(s.id)) return@mapNotNull null
+            if (s.status != "busy" || nowMs() - since < limit || s.id in longRunningNotified) return@mapNotNull null
             build(NotifyType.LONG_RUNNING, "long:${s.id}:$since", s, s.id, t.stillRunning(sessionName(s, s.id)), t.runningFor((nowMs() - since) / 60_000))
+                ?.also { longRunningNotified.add(s.id) }
         }
     }
 
@@ -446,11 +451,14 @@ class NotificationEngine(
         build(NotifyType.CONNECTION, "conn:$lost:${nowMs() / 60_000}", null, null, if (lost) t.connectionLost(desktop) else t.reconnected(desktop), "")
 
     private fun build(type: NotifyType, key: String, s: SessionSummary?, sessionId: String?, title: String, body: String): NotifyIntent? {
-        if (!seen.add(key)) return null
-        if (seen.size > 2000) seen.remove(seen.first())
+        if (key in seen) return null
         val p = prefs()
         if (type !in p.enabled) return null
         if (s != null && (s.agent in p.mutedAgents || (s.project != null && s.project in p.mutedProjects))) return null
+        // Recorded only when really produced: a mute or a disabled type filters, it does not use the
+        // key up (a request still open after unmuting is announced when it is seen again).
+        seen.add(key)
+        if (seen.size > 2000) seen.remove(seen.first())
         val public = when (type) {
             NotifyType.WAITING_APPROVAL -> t.publicApproval()
             NotifyType.WAITING_INPUT -> t.publicWaiting()
@@ -471,5 +479,8 @@ class NotificationEngine(
     companion object {
         /** How long an interrupt/stop/kill done from the phone suppresses the echo notification. */
         const val LOCAL_ACTION_GRACE_MS = 60_000L
+
+        /** `status` states that close a turn. */
+        private val OUTCOME_STATES = setOf("completed", "idle", "error", "interrupted")
     }
 }

@@ -101,7 +101,8 @@ object LiveReducer {
                 else n.enter(if (approval || summary.waitingFor == null) LivePhase.WAITING_APPROVAL else LivePhase.WAITING_INPUT, now)
             }
             summary.status == "busy" -> if (fromRest && n.isStaleBusy(summary, now)) n else n.startTurnIfIdle(now)
-            summary.status == "error" -> n.finish(LivePhase.FAILED, now, summary.lastActiveAtMs)
+            // Like the status event: an outcome already shown (or an ended session) is not replaced.
+            summary.status == "error" -> if (n.phase in IN_FLIGHT) n.finish(LivePhase.FAILED, now, summary.lastActiveAtMs) else n
             summary.status == "idle" || summary.status == "completed" ->
                 if (n.phase in IN_FLIGHT) n.finish(LivePhase.DONE, now, summary.lastActiveAtMs) else n
             else -> n
@@ -175,8 +176,9 @@ object LiveReducer {
                 "interrupted" -> if (s.phase in IN_FLIGHT) s.finish(LivePhase.INTERRUPTED, now, at) else s
                 else -> s
             } }
-            EventKinds.ERROR -> if (s.phase in ACTIVE) s.finish(LivePhase.FAILED, now, at) else s
-            EventKinds.SYSTEM -> if (d.str("subtype") == "turn_stopped" && s.phase in ACTIVE) s.finish(LivePhase.INTERRUPTED, now, at) else s
+            // Also while OFFLINE: a turn that failed or was stopped meanwhile is not restored as running.
+            EventKinds.ERROR -> if (s.phase in IN_FLIGHT) s.finish(LivePhase.FAILED, now, at) else s
+            EventKinds.SYSTEM -> if (d.str("subtype") == "turn_stopped" && s.phase in IN_FLIGHT) s.finish(LivePhase.INTERRUPTED, now, at) else s
             else -> s
         }
         return n.bumpIfChanged(s)

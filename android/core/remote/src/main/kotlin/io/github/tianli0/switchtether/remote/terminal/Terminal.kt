@@ -34,8 +34,8 @@ sealed interface TermFrame {
             return when (val type = o.str("type")) {
                 "snapshot" -> Snapshot(
                     version = o.long("version") ?: 0,
-                    cols = (o.long("cols") ?: 80).toInt(),
-                    rows = (o.long("rows") ?: 24).toInt(),
+                    cols = (o.long("cols") ?: 80).coerceIn(1, TermScreen.MAX_COLS.toLong()).toInt(),
+                    rows = (o.long("rows") ?: 24).coerceIn(1, TermScreen.MAX_ROWS.toLong()).toInt(),
                     cursor = cursor(o["cursor"].obj()) ?: TermCursor(),
                     lines = (o["lines"] as? JsonArray).orEmpty().map { line(it.obj()) },
                     title = o.str("title") ?: "",
@@ -45,8 +45,9 @@ sealed interface TermFrame {
                     version = o.long("version") ?: 0,
                     lines = (o["lines"] as? JsonArray).orEmpty().mapNotNull { e ->
                         val p = e.obj() ?: return@mapNotNull null
-                        val y = p.long("y")?.toInt() ?: return@mapNotNull null
-                        y to line(p["line"].obj())
+                        // A row outside any screen (negative, or far beyond it) is dropped, not applied.
+                        val y = p.long("y")?.takeIf { it in 0 until TermScreen.MAX_ROWS } ?: return@mapNotNull null
+                        y.toInt() to line(p["line"].obj())
                     },
                     cursor = cursor(o["cursor"].obj()),
                     title = o.str("title"),
@@ -107,6 +108,7 @@ data class TermScreen(
             } else {
                 val newLines = lines.toMutableList()
                 for ((y, l) in frame.lines) {
+                    if (y !in 0 until MAX_ROWS) continue
                     while (newLines.size <= y) newLines += TermLine()
                     newLines[y] = l
                 }
@@ -126,6 +128,12 @@ data class TermScreen(
 
     /** Plain text of the visible screen (for "copy screen"). */
     fun plainText(): String = lines.joinToString("\n") { it.text.trimEnd() }.trimEnd()
+
+    companion object {
+        /** Bounds for what a frame may claim; a real terminal is far smaller. */
+        const val MAX_ROWS = 10_000
+        const val MAX_COLS = 10_000
+    }
 }
 
 /** Special keys of the extra-key row. */

@@ -29,17 +29,25 @@ sealed interface StreamFrame {
             val o = runCatching { ProtocolJson.parseToJsonElement(text) }.getOrNull().obj() ?: return Unknown(null)
             return when (val type = o.str("type")) {
                 "event" -> Event(
-                    seq = o.long("seq") ?: return Unknown(type),
+                    seq = seq(o, "seq") ?: return Unknown(type),
                     epoch = o.str("epoch") ?: "",
                     ts = o.str("ts") ?: "",
                     topic = o.str("topic") ?: "",
                     data = o["data"] ?: JsonNull,
                 )
-                "resync" -> Resync(o.str("epoch") ?: "", o.long("headSeq") ?: 0, o.str("reason") ?: "unknown")
+                "resync" -> Resync(o.str("epoch") ?: "", seq(o, "headSeq") ?: 0, o.str("reason") ?: "unknown")
                 "pong" -> Pong(o.str("ts"))
                 else -> Unknown(type)
             }
         }
+
+        /**
+         * A sequence number: a non-negative integer. Anything else (a fraction, `1e30`, a value beyond
+         * the number range) is not one; rounding it would park the cursor at the end of the range and
+         * every later event would be dropped as a duplicate.
+         */
+        private fun seq(o: kotlinx.serialization.json.JsonObject, key: String): Long? =
+            (o[key] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toLongOrNull()?.takeIf { it >= 0 }
     }
 }
 

@@ -44,13 +44,29 @@ class AgentEventLog private constructor(
     /** Builds the flat render list (see [RenderItem]). Cheap enough to run per update. */
     fun renderItems(collapsedParents: Set<String> = emptySet()): List<RenderItem> {
         val callsByCallId = HashMap<String, AgentEvent>()
-        val resultsByCallId = HashMap<String, AgentEvent>()
+        val callCount = HashMap<String, Int>()
         val resolutions = HashMap<String, AgentEvent>()
         for (e in events) {
             when (e.kind) {
-                EventKinds.TOOL_CALL -> e.data.str("callId")?.let { callsByCallId[it] = e }
-                EventKinds.TOOL_RESULT -> e.data.str("callId")?.let { resultsByCallId[it] = e }
+                EventKinds.TOOL_CALL -> e.data.str("callId")?.let {
+                    callsByCallId[it] = e
+                    callCount[it] = (callCount[it] ?: 0) + 1
+                }
                 EventKinds.APPROVAL_RESOLVED -> e.data.str("requestId")?.let { resolutions[it] = e }
+            }
+        }
+        // A callId is unique within one agent, not across sub-agents: when several calls share it, a
+        // result belongs to the call under the same parent (the parent may be named by its event id
+        // or by its callId alias). A callId used once keeps matching whatever the parent says.
+        fun parentOf(e: AgentEvent): String? = e.parentId?.let { p -> (byId[p] ?: callsByCallId[p])?.id ?: p }
+        fun slot(e: AgentEvent, callId: String): Pair<String, String?> = callId to (if ((callCount[callId] ?: 0) > 1) parentOf(e) else null)
+        val callSlots = HashSet<Pair<String, String?>>()
+        val resultsBySlot = HashMap<Pair<String, String?>, AgentEvent>()
+        for (e in events) {
+            val callId = e.data.str("callId") ?: continue
+            when (e.kind) {
+                EventKinds.TOOL_CALL -> callSlots += slot(e, callId)
+                EventKinds.TOOL_RESULT -> resultsBySlot[slot(e, callId)] = e
             }
         }
         val out = ArrayList<RenderItem>(events.size)
@@ -58,7 +74,7 @@ class AgentEventLog private constructor(
             // A tool_result whose call is present is rendered inside the call card.
             if (e.kind == EventKinds.TOOL_RESULT) {
                 val callId = e.data.str("callId")
-                if (callId != null && callsByCallId.containsKey(callId)) continue
+                if (callId != null && slot(e, callId) in callSlots) continue
             }
             // Legacy separate approval_resolved events fold into their request.
             if (e.kind == EventKinds.APPROVAL_RESOLVED) {
@@ -70,7 +86,7 @@ class AgentEventLog private constructor(
             out += RenderItem(
                 event = e,
                 depth = ancestors.size,
-                attachedResult = if (e.kind == EventKinds.TOOL_CALL) e.data.str("callId")?.let(resultsByCallId::get) else null,
+                attachedResult = if (e.kind == EventKinds.TOOL_CALL) e.data.str("callId")?.let { resultsBySlot[slot(e, it)] } else null,
                 resolution = if (e.kind == EventKinds.APPROVAL_REQUEST || e.kind == EventKinds.QUESTION) {
                     e.data.str("requestId")?.let(resolutions::get)
                 } else {

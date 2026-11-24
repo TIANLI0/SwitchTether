@@ -57,6 +57,9 @@ object Commands {
         if (e.code == ErrorCodes.COMMAND_IN_PROGRESS) CommandOutcome.InProgress(commandId) else CommandOutcome.Rejected(commandId, e)
     } catch (e: CommandTransportException) {
         if (e.sent) CommandOutcome.Unknown(commandId, e.cause ?: e) else CommandOutcome.NotSent(commandId, e.cause ?: e)
+    } catch (e: Exception) {
+        // Anything else (an answer that cannot be read, …): the desktop may have executed it.
+        CommandOutcome.Unknown(commandId, e)
     }
 
     /** Queries the command record; used before offering the user a retry. */

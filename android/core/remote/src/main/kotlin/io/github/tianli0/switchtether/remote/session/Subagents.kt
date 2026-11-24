@@ -99,6 +99,12 @@ object SubagentTree {
             }
         }
         walk(null, 0, emptyList())
+        // Nodes whose parent chain loops are reachable from no root: they hang off the root too.
+        for (n in nodes.sortedBy { it.updatedAtMs ?: 0L }) {
+            if (!seen.add(n.agentId)) continue
+            out += SubagentBranch(n, 0, false, emptyList())
+            walk(n.agentId, 1, listOf(true))
+        }
         return out
     }
 
@@ -107,7 +113,8 @@ object SubagentTree {
         val byId = nodes.associateBy { it.agentId }
         val out = ArrayList<SubagentNode>()
         var cur = byId[agentId]?.parentAgentId
-        while (cur != null && out.size < 16) {
+        val seen = hashSetOf(agentId)
+        while (cur != null && out.size < 16 && seen.add(cur)) { // a chain that loops ends where it repeats
             val n = byId[cur] ?: break
             out.add(0, n)
             cur = n.parentAgentId
