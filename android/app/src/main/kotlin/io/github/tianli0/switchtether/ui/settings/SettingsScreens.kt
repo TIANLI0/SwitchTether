@@ -364,6 +364,8 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     )
                 }
             }
+            item { SectionHeader(stringResource(R.string.push_section)) }
+            item { PushWakeSettings() }
             item {
                 GroupCard {
                     NotifyType.entries.forEachIndexed { i, type ->
@@ -471,6 +473,82 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
 }
 
 private fun hm(min: Int) = "%02d:%02d".format(min / 60, min % 60)
+
+/** Push wake (UnifiedPush) switch, distributor choice, status and a test button. ANDROID_UI.md §25. */
+@Composable
+private fun PushWakeSettings() {
+    val container = appContainer()
+    val push = container.pushWake
+    val state by push.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var distributors by remember { mutableStateOf(push.distributors()) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        // A distributor may have been installed meanwhile.
+        distributors = push.distributors()
+        onPauseOrDispose { }
+    }
+    val distName = distributors.firstOrNull { it.packageName == state.distributor }?.label ?: state.distributor.orEmpty()
+    val summary = when (state.status) {
+        io.github.tianli0.switchtether.push.PushWake.Status.OFF -> stringResource(R.string.push_status_off)
+        io.github.tianli0.switchtether.push.PushWake.Status.NO_DISTRIBUTOR -> stringResource(R.string.push_status_no_distributor)
+        io.github.tianli0.switchtether.push.PushWake.Status.REGISTERING -> stringResource(R.string.push_status_registering, distName)
+        io.github.tianli0.switchtether.push.PushWake.Status.PENDING_DESKTOP -> stringResource(R.string.push_status_pending)
+        io.github.tianli0.switchtether.push.PushWake.Status.ACTIVE ->
+            if (state.lastWakeMs > 0) stringResource(R.string.push_status_active_last, distName, Formatters.dateTime(state.lastWakeMs))
+            else stringResource(R.string.push_status_active, distName)
+        io.github.tianli0.switchtether.push.PushWake.Status.DESKTOP_UNSUPPORTED -> stringResource(R.string.push_status_unsupported)
+        io.github.tianli0.switchtether.push.PushWake.Status.FAILED -> stringResource(R.string.push_status_failed, distName, state.reason.orEmpty())
+    }
+    val showChoice = state.enabled && distributors.size > 1
+    val showTest = state.enabled && state.status == io.github.tianli0.switchtether.push.PushWake.Status.ACTIVE
+    val rows = 1 + (if (showChoice) distributors.size else 0) + (if (showTest) 1 else 0)
+    var row = 0
+    GroupCard {
+        SwitchPreference(
+            checked = state.enabled,
+            onCheckedChange = { v -> scope.launch { if (v) push.enable() else push.disable() } },
+            title = stringResource(R.string.push_switch),
+            summary = summary,
+            cardListPosition = cardListPositionOf(row++, rows),
+            modifier = Modifier.testTag("push-switch"),
+        )
+        if (showChoice) {
+            distributors.forEach { d ->
+                RadioButtonPreference(
+                    title = d.label,
+                    selected = d.packageName == state.distributor,
+                    onClick = { scope.launch { push.enable(d.packageName) } },
+                    cardListPosition = cardListPositionOf(row++, rows),
+                )
+            }
+        }
+        if (showTest) {
+            val ctx = LocalContext.current
+            ArrowPreference(
+                title = stringResource(R.string.push_test),
+                summary = testResult,
+                onClick = {
+                    scope.launch {
+                        val r = push.test()
+                        testResult = when {
+                            r == null -> ctx.getString(R.string.push_test_error)
+                            r.delivered -> ctx.getString(R.string.push_test_ok, r.status)
+                            else -> ctx.getString(R.string.push_test_failed, r.status)
+                        }
+                    }
+                },
+                cardListPosition = cardListPositionOf(row++, rows),
+            )
+        }
+    }
+    Text(
+        stringResource(R.string.push_privacy),
+        style = COUITheme.textStyles.footnote1,
+        color = COUITheme.colorScheme.onSurfaceVariantSummary,
+        modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp),
+    )
+}
 
 
 data class LicenseEntry(val name: String, val license: String, val note: String)

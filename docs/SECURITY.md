@@ -146,6 +146,33 @@ A forward (PROTOCOL.md §7.11) lets the phone reach one TCP port on the desktop'
   Compared with the remote shell this exposes less (one port, not a shell), which is why it is
   a separate, narrower scope.
 
+### 7b. Push wake
+
+Push wake (PROTOCOL.md §7.12) is opt-in on the phone and uses the user's own UnifiedPush
+distributor and push server.
+
+- **What the push server learns:** that this desktop wanted to wake this phone, and when
+  (timing, frequency, the desktop's IP address). Every message is RFC 8291-encrypted to keys only
+  the phone holds and its plaintext is the constant `{"v":1}`: no session id, title, text, count
+  or agent name. Push servers see the same message length every time.
+- **What a forged message can do:** nothing but make the phone connect early. The phone drops
+  any message that does not decrypt with its receiver keys and never acts on message content;
+  everything it shows afterwards comes over the pinned mTLS connection.
+- The endpoint is a capability URL: it is stored in `remote.db`, never returned to anyone, and
+  only its host is written to the audit log. It is removed when the device is revoked or the
+  push server answers 404 / 410.
+- The desktop posts only to the endpoint the paired phone registered (http/https, no
+  credentials in the URL, ≤ 1000 bytes), with a fixed body, and nothing it reads back is used
+  except the status code. A paired phone could point it at a LAN address; that address then
+  receives an encrypted ~130-byte POST at most every 10 s — no amplification and no data.
+- The receiver private key lives in the app's private storage (not the Keystore): it only
+  decrypts wake messages, which carry no information.
+- The VAPID key (RFC 8292) only authenticates the desktop to push servers that ask for it; it
+  protects no data and sits in `remote.db`.
+
+The Android receiver for UnifiedPush intents is exported (the distributor is another app). It
+acts only on intents with the random connection token of the current registration.
+
 ## 8. Replay and duplicate operations
 
 TLS prevents network replay. Application-level duplicates (client retries) are handled by
@@ -178,8 +205,9 @@ retries.
 Audit records (90-day retention): pairing (incl. failures), revocation, step-up grants and
 denials, provider switches, credential updates (field name only), MCP/skill/prompt toggles,
 session create/message (length only)/approve/interrupt/stop, terminal create/kill/session,
-file write/rename/delete/upload/download and sensitive reads. Targets/details pass through
-the redactor.
+file write/rename/delete/upload/download and sensitive reads, push subscription changes
+(`push.register` with the endpoint host only, `push.unregister`, `push.expired`). Targets/details
+pass through the redactor. Session content searches are not logged (they are reads).
 
 ## 11. Security test inventory
 

@@ -50,6 +50,7 @@ fun SessionsScreen(onOpen: (Route) -> Unit) {
     val container = appContainer()
     val vm = containerViewModel { SessionsViewModel(it.connection, it.sessions) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val content by vm.content.state.collectAsStateWithLifecycle()
     SessionsContent(
         state = state,
         onScope = vm::setScope,
@@ -60,6 +61,8 @@ fun SessionsScreen(onOpen: (Route) -> Unit) {
         onLoadMore = vm::loadMore,
         onRetryConnection = { container.connection.retryNow() },
         onOpen = onOpen,
+        contentSearch = content,
+        onContentSearch = vm.content::setEnabled,
     )
 }
 
@@ -74,6 +77,8 @@ fun SessionsContent(
     onLoadMore: () -> Unit,
     onRetryConnection: () -> Unit,
     onOpen: (Route) -> Unit,
+    contentSearch: ContentSearchUi = ContentSearchUi(),
+    onContentSearch: (Boolean) -> Unit = {},
 ) {
     val refreshing = state.items is Loadable.Ready && state.items.refreshing
     val pins by appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
@@ -135,6 +140,25 @@ fun SessionsContent(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     modifier = Modifier.padding(bottom = 4.dp).testTag("project-filter"),
                 )
+            }
+            // While searching: titles (the list below) or what was said in the sessions (§25.2).
+            val searching = searchExpanded || state.query.isNotEmpty()
+            io.github.tianli0.switchtether.ui.common.NoticeVisibility(searching) {
+                io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+                    tabs = listOf(ChipTabData(stringResource(R.string.tab_sessions)), ChipTabData(stringResource(R.string.search_content_mode))),
+                    selectedIndex = if (contentSearch.enabled) 1 else 0,
+                    onSelectedChange = { onContentSearch(it == 1) },
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.padding(bottom = 4.dp).testTag("search-mode"),
+                )
+            }
+            if (searching && contentSearch.enabled) {
+                LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 8.dp)) {
+                    item(key = "content") {
+                        ContentSearchResults(contentSearch, onOpen = { r -> onOpen(Route.SessionDetail(r.sessionId, r.title)) })
+                    }
+                }
+                return@Column
             }
             LoadableContent(state.items, onRetry = onReload) { _ ->
                 val visible = state.visible

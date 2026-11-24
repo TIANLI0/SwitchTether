@@ -65,6 +65,11 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     /** Live changes that arrive while [reload] waits for the list (re-applied over the answer). */
     private var changedDuringReload: MutableMap<String, SessionSummary?>? = null
 
+    /** "Search conversation content": full-text search on the computer (ANDROID_UI.md §25.2). */
+    val content = ContentSearch(viewModelScope, { q, a ->
+        (conn.apiOrNull() ?: throw io.github.tianli0.switchtether.connection.NotConnectedException()).searchSessions(q, a)
+    })
+
     init {
         // Last list seen from this desktop, at once (replaced by the first successful load).
         viewModelScope.launch {
@@ -106,6 +111,7 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
 
     fun setAgent(agent: String?) {
         _state.update { it.copy(agent = agent) }
+        content.setQuery(_state.value.query, agent)
         reload()
     }
 
@@ -117,6 +123,7 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     fun setQuery(q: String) {
         _state.update { it.copy(query = q) }
         queryFlow.value = q
+        content.setQuery(q, _state.value.agent)
     }
 
     /**

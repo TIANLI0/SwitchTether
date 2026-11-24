@@ -34,6 +34,7 @@ pub mod identity;
 pub mod net;
 pub mod pairing;
 pub mod protocol;
+pub mod push;
 pub mod redact;
 pub mod registry;
 pub mod relay;

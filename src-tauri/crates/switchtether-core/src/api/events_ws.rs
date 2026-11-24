@@ -58,6 +58,8 @@ async fn close(socket: &mut WebSocket, code: u16, reason: &'static str) {
 
 async fn run(ctx: Arc<ApiContext>, dev: AuthDevice, q: EventsQuery, mut socket: WebSocket) {
     let device_id = dev.id().to_string();
+    // While this socket lives the phone gets events directly: no push wakes for it.
+    let _live = ctx.push.connected(&device_id);
     // Subscribe before reading the backlog so nothing published in between is lost;
     // duplicates are filtered by `last_sent`.
     let mut rx = ctx.events.subscribe();

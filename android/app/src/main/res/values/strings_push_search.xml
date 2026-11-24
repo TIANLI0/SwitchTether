@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Push wake (UnifiedPush) and session content search. docs/ANDROID_UI.md §25. -->
+<resources>
+    <string name="push_section">Push wake</string>
+    <string name="push_switch">Push wake (UnifiedPush)</string>
+    <string name="push_status_off">Off. Without it, alerts while the app is closed depend on the background connection.</string>
+    <string name="push_status_no_distributor">No UnifiedPush distributor installed. Install one (for example ntfy), then turn this on again.</string>
+    <string name="push_status_registering">Waiting for %1$s…</string>
+    <string name="push_status_pending">Ready. The computer gets the address the next time the phone connects.</string>
+    <string name="push_status_active">On via %1$s. The computer wakes this phone when a task needs you or finishes.</string>
+    <string name="push_status_active_last">On via %1$s · last wake %2$s</string>
+    <string name="push_status_unsupported">The computer\'s SwitchTether is too old for push wake. Update it on the computer.</string>
+    <string name="push_status_failed">%1$s refused the registration (%2$s). Turn it off and on to try again.</string>
+    <string name="push_distributor">Distributor</string>
+    <string name="push_test">Send a test wake</string>
+    <string name="push_test_ok">Delivered to the push server (HTTP %1$d)</string>
+    <string name="push_test_failed">Not delivered (HTTP %1$d)</string>
+    <string name="push_test_error">Could not send: connect to the computer first.</string>
+    <string name="push_privacy">Wake messages are end-to-end encrypted and carry no content — no session, title or text. Your push server only learns when something happened; the phone then fetches the details directly from the computer.</string>
+    <string name="search_content_mode">Search conversation content</string>
+    <string name="search_content_hint">Searches what you and the agents wrote, newest sessions first.</string>
+    <string name="search_content_searching">Searching…</string>
+    <string name="search_content_none">No conversation contains “%1$s”.</string>
+    <string name="search_content_partial">Showing what was found in time; older sessions were not searched.</string>
+    <string name="search_content_unsupported">The computer\'s SwitchTether is too old for content search.</string>
+    <string name="search_content_failed">Search failed: %1$s</string>
+    <string name="search_content_matches">%1$d matches</string>
+</resources>

@@ -34,6 +34,7 @@ class ReconnectWorker(context: Context, params: WorkerParameters) : CoroutineWor
             cancel(applicationContext)
             return Result.success()
         }
+        if (inputData.getBoolean(KEY_PUSH, false)) return pushWake(container)
         val bg = container.settingsStore.backgroundConnection.first()
         val hasPins = container.liveUpdates.pins.value.isNotEmpty()
         if (!bg && !hasPins) return Result.success()
@@ -55,7 +56,40 @@ class ReconnectWorker(context: Context, params: WorkerParameters) : CoroutineWor
         return Result.success()
     }
 
+    /**
+     * A push wake (docs/PROTOCOL.md §7.12): the computer has news while nothing keeps the
+     * connection up. Connect, let the event replay and the current state post the usual
+     * notifications, then let the connection go again unless the app or the monitor service needs it.
+     */
+    private suspend fun pushWake(container: io.github.tianli0.switchtether.AppContainer): Result {
+        if (container.connection.state.value is ConnectionState.Online) {
+            container.catchUpAfterWake()
+            return Result.success()
+        }
+        if (!container.connection.probeOnce(timeoutMs = 20_000L)) return Result.success()
+        container.catchUpAfterWake()
+        kotlinx.coroutines.delay(PUSH_HOLD_MS)
+        container.releaseBackgroundConnection()
+        return Result.success()
+    }
+
     companion object {
+        private const val KEY_PUSH = "push"
+        private const val WORK_PUSH = "switchtether_push_wake"
+        /** How long a push-woken connection stays up for replayed events and their notifications. */
+        private const val PUSH_HOLD_MS = 20_000L
+
+        /** A push message arrived: connect now (expedited; the distributor raised the app to the foreground). */
+        fun schedulePushWake(context: Context) {
+            val req = OneTimeWorkRequestBuilder<ReconnectWorker>()
+                .setConstraints(constraints())
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .setInputData(androidx.work.workDataOf(KEY_PUSH to true))
+                .build()
+            // A wake while one is running is the same news: keep the running one.
+            WorkManager.getInstance(context).enqueueUniqueWork(WORK_PUSH, ExistingWorkPolicy.KEEP, req)
+        }
+
         private const val WORK_IMMEDIATE = "switchtether_reconnect_now"
         private const val WORK_PERIODIC = "switchtether_reconnect_periodic"
 
@@ -83,6 +117,7 @@ class ReconnectWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val wm = WorkManager.getInstance(context)
             wm.cancelUniqueWork(WORK_IMMEDIATE)
             wm.cancelUniqueWork(WORK_PERIODIC)
+            wm.cancelUniqueWork(WORK_PUSH)
         }
     }
 }

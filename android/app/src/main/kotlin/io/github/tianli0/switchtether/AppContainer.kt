@@ -127,6 +127,38 @@ class AppContainer(private val context: Context) {
         appScope.launch { pairingStore.desktop.collect { pairedServerIdCache = it?.serverId } }
     }
 
+    /** Push wake through UnifiedPush (opt-in; docs/PROTOCOL.md §7.12, ANDROID_UI.md §25). */
+    val pushWake: io.github.tianli0.switchtether.push.PushWake by lazy {
+        io.github.tianli0.switchtether.push.PushWake(
+            context = context,
+            scope = appScope,
+            prefs = context.getSharedPreferences(io.github.tianli0.switchtether.push.PushWake.PREFS, Context.MODE_PRIVATE),
+            api = { connection.apiOrNull() },
+            desktopKey = { pairingStore.current()?.let { "${it.serverId}/${it.deviceId}" } },
+            desktopName = { pairingStore.current()?.name },
+            onWake = { io.github.tianli0.switchtether.connection.ReconnectWorker.schedulePushWake(context) },
+        )
+    }
+
+    init {
+        // Every connection: hand the push endpoint to the computer when it does not have it yet.
+        appScope.launch {
+            connection.state.collect { s ->
+                if (s is io.github.tianli0.switchtether.connection.ConnectionState.Online) runCatching { pushWake.sync() }
+            }
+        }
+    }
+
+    /**
+     * After a push wake: announce waits that began while the phone was away. Live sessions are read
+     * once; turns that finished meanwhile come from the event replay when the process kept its place.
+     */
+    suspend fun catchUpAfterWake() {
+        val api = connection.apiOrNull() ?: return
+        val live = runCatching { api.sessions(limit = 100).items }.getOrNull() ?: return
+        notifier.catchUp(live)
+    }
+
     /** Pinned tasks → Android 16 Live Updates (ColorOS 16 Fluid Cloud / 流体云). */
     val liveUpdates: io.github.tianli0.switchtether.notify.LiveUpdates by lazy {
         io.github.tianli0.switchtether.notify.LiveUpdates(
@@ -348,6 +380,8 @@ class AppContainer(private val context: Context) {
     private suspend fun wipeLocal(desktop: PairedDesktop) {
         io.github.tianli0.switchtether.connection.ReconnectWorker.cancel(context)
         io.github.tianli0.switchtether.notify.MonitorService.stop(context)
+        // The desktop drops the subscription with the device; the next computer gets it again.
+        pushWake.forgetDesktop()
         pairingStore.clear()
         keys.delete(desktop.identityAlias)
         keys.delete(desktop.stepUpAlias)
