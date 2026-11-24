@@ -367,7 +367,9 @@ impl CodexConn {
     }
 }
 
-fn elicitation_to_questions(params: &Value) -> Vec<Value> {
+/// Questions for an MCP elicitation (`{mode, message, serverName, url, requestedSchema}`): one
+/// per schema property, or one confirmation. Also used for Claude Code's `elicitation` request.
+pub(crate) fn elicitation_to_questions(params: &Value) -> Vec<Value> {
     let mode = s(params, "mode").unwrap_or_default();
     let msg = s(params, "message").unwrap_or_else(|| "Input requested".into());
     let server = s(params, "serverName").unwrap_or_default();
@@ -463,7 +465,8 @@ fn elicitation_to_questions(params: &Value) -> Vec<Value> {
         .collect()
 }
 
-fn build_elicitation_content(params: &Value, answers: Option<&Value>) -> Value {
+/// The `content` of an accepted elicitation: the phone's answers typed after the schema.
+pub(crate) fn build_elicitation_content(params: &Value, answers: Option<&Value>) -> Value {
     let Some(ans_map) = answers.and_then(|a| a.as_object()) else {
         return json!({});
     };

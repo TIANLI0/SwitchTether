@@ -254,6 +254,18 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   `answers` is keyed by question `id` (fallback: question text). Codex multi-select values are arrays of strings;
   single-select / free text are strings, with commas preserved. Claude keeps its string answer format.
   Option `value`, when present, is submitted instead of its display label. See `agent_question.json`.
+  **MCP elicitations** (an MCP server asks the user something; Codex `mcpServer/elicitation/request`, Claude Code's
+  `elicitation` control request in a session SwitchTether started) arrive as the same `question` event with
+  `cancellable: true`, `elicitationMode` (`form` | `url` | null), `serverName`, `message` (Claude Code) and, for a URL
+  elicitation, `url`. A form has one question per property of the requested schema (`id` = property name; `enum` /
+  `oneOf` → options, boolean → `true` / `false`, array of enum → multi-select, anything else free text; `required`
+  from the schema); for Claude Code the server's message is the text of a single question, or leads the first of
+  several. Without a schema, and for a URL elicitation, there is one question with `id: "__confirm__"` (URL: one
+  option `Accept`, the phone shows / opens `url`). The answer goes back to the agent as an MCP `ElicitResult`:
+  `action: "submit"` (default) → `{action: "accept", content}` with `content` = `answers` typed after the schema
+  (`"true"` → `true`, numbers parsed; no `content` for a URL elicitation), `"decline"` → `{action: "decline"}`,
+  `"cancel"` → `{action: "cancel"}`. Hook callbacks are never forwarded (declined with an error). In a session
+  attached through a takeover hook the IDE answers Claude Code's elicitations; the phone does not see them.
 - `POST /v1/sessions/{id}/stop` `{commandId}` — stops a managed session's process (history stays readable).
 
 Control endpoints return `422 capability_unavailable` with `details.status` =

@@ -11,8 +11,9 @@
 //! Control protocol (stdin/stdout JSON lines):
 //! - host → CLI: `{type:"user", message}`; `{type:"control_request", request:{subtype:"initialize"|"interrupt"|…}}`
 //! - CLI → host: `control_request` with `subtype:"can_use_tool"` (permission
-//!   prompts and AskUserQuestion), answered with `control_response`;
-//!   `control_cancel_request`; regular transcript-shaped messages.
+//!   prompts and AskUserQuestion) and `subtype:"elicitation"` (an MCP server asks the user
+//!   something), answered with `control_response`; `control_cancel_request`; regular
+//!   transcript-shaped messages.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -61,6 +62,9 @@ struct Pending {
     input: Value,
     suggestions: Value,
     event_id: String,
+    /// An MCP elicitation instead of a tool permission: its parameters in the shape of
+    /// `codex::managed::elicitation_to_questions`; answered with an MCP `ElicitResult`.
+    elicitation: Option<Value>,
 }
 
 pub struct ManagedClaude {
@@ -94,6 +98,9 @@ pub struct ManagedClaude {
     /// `uuid` of the last message sent from the phone (`cancel_async_message` while queued).
     last_uuid: Mutex<Option<String>>,
     pub origin: &'static str,
+    /// Tests: lines for the agent's stdin go here instead of a process.
+    #[cfg(test)]
+    test_out: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -388,6 +395,8 @@ impl ManagedClaude {
             permission_mode: Mutex::new(initial_mode),
             last_uuid: Mutex::new(None),
             origin: "managed",
+            #[cfg(test)]
+            test_out: None,
         });
 
         let reader = me.clone();
@@ -490,6 +499,8 @@ impl ManagedClaude {
             permission_mode: Mutex::new(None),
             last_uuid: Mutex::new(None),
             origin,
+            #[cfg(test)]
+            test_out: None,
         })
     }
 
@@ -607,6 +618,11 @@ impl ManagedClaude {
     }
 
     async fn write_line(&self, v: &Value) -> ApiResult<()> {
+        #[cfg(test)]
+        if let Some(tx) = &self.test_out {
+            let _ = tx.send(v.to_string());
+            return Ok(());
+        }
         if let Some(tx) = &self.remote {
             return tx
                 .send(json!({ "t": "inject", "line": v.to_string() }).to_string())
@@ -797,8 +813,22 @@ impl ManagedClaude {
         let shown_answers = answers
             .clone()
             .filter(|_| matches!(decision, "allow" | "answer"));
-        let response = match decision {
-            "allow" | "allow_session" | "answer" => {
+        let response = match (decision, &pending.elicitation) {
+            // MCP `ElicitResult`, used as the response payload as it is.
+            ("allow" | "answer", Some(params)) => {
+                let mut r = json!({ "action": "accept" });
+                // A URL elicitation only confirms; a form returns the fields.
+                if params.get("mode").and_then(Value::as_str) != Some("url") {
+                    r["content"] = crate::agents::codex::managed::build_elicitation_content(
+                        params,
+                        answers.as_ref(),
+                    );
+                }
+                r
+            }
+            ("deny", Some(_)) => json!({ "action": "decline" }),
+            ("cancel" | "abort", Some(_)) => json!({ "action": "cancel" }),
+            ("allow" | "allow_session" | "answer", None) => {
                 let mut input = updated_input.unwrap_or_else(|| pending.input.clone());
                 if let Some(a) = answers {
                     input["answers"] = a;
@@ -809,7 +839,7 @@ impl ManagedClaude {
                 }
                 r
             }
-            "deny" | "abort" | "cancel" => json!({
+            ("deny" | "abort" | "cancel", None) => json!({
                 "behavior": "deny",
                 "message": message.unwrap_or_else(|| if decision == "cancel" {
                     "Cancelled from SwitchTether on the phone".into()
@@ -818,7 +848,7 @@ impl ManagedClaude {
                 }),
                 "interrupt": decision == "abort",
             }),
-            other => {
+            (other, _) => {
                 // Put it back: invalid decision must not consume the request.
                 self.resolved.lock().remove(request_id);
                 self.pending.lock().insert(request_id.to_string(), pending);
@@ -1084,6 +1114,7 @@ impl ManagedClaude {
                         input,
                         suggestions,
                         event_id,
+                        elicitation: None,
                     },
                 );
                 self.log.lock().upsert(draft, true);
@@ -1093,13 +1124,73 @@ impl ManagedClaude {
             _ if self.remote.is_some() => {
                 // Hooks / SDK MCP / elicitation belong to the IDE that owns the process.
             }
+            Some("elicitation") => {
+                // An MCP server asks the user something. Fields as the VS Code extension
+                // (2.1.331) reads them: `mcp_server_name`, `message`, `mode`, `url`,
+                // `elicitation_id`, `requested_schema`, `title`, `display_name`, `description`.
+                let text = |k: &str| {
+                    req.get(k)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|t| !t.is_empty())
+                };
+                let message = text("message")
+                    .or(text("description"))
+                    .or(text("title"))
+                    .unwrap_or("Input requested")
+                    .to_string();
+                let server = text("display_name").or(text("mcp_server_name"));
+                let params = json!({
+                    "mode": req.get("mode"), "message": message, "serverName": server,
+                    "url": req.get("url"), "requestedSchema": req.get("requested_schema"),
+                });
+                let mut questions =
+                    crate::agents::codex::managed::elicitation_to_questions(&params);
+                // Form fields are titled after their property; the server's message is what
+                // the user is asked: alone for a single field, above the first one otherwise.
+                if params
+                    .pointer("/requestedSchema/properties")
+                    .is_some_and(Value::is_object)
+                    && params["mode"] != "url"
+                {
+                    let single = questions.len() == 1;
+                    if let Some(q) = questions.first_mut() {
+                        let field = q["question"].as_str().unwrap_or("").to_string();
+                        q["question"] = json!(if single {
+                            message.clone()
+                        } else {
+                            format!("{message}\n{field}")
+                        });
+                    }
+                }
+                let event_id = format!("req:{rid}");
+                let mut data = json!({
+                    "requestId": rid, "questions": questions, "cancellable": true,
+                    "elicitationMode": req.get("mode"), "serverName": server,
+                    "message": message, "resolved": false,
+                });
+                if let Some(u) = text("url") {
+                    data["url"] = json!(u);
+                }
+                let draft =
+                    EventDraft::new(&event_id, "question", crate::util::now_rfc3339(), data);
+                self.pending.lock().insert(
+                    rid,
+                    Pending {
+                        tool_name: "elicitation".into(),
+                        input: Value::Null,
+                        suggestions: Value::Null,
+                        event_id,
+                        elicitation: Some(params),
+                    },
+                );
+                self.log.lock().upsert(draft, true);
+                self.set_status("waiting");
+                self.publish_status("waiting_input", None);
+            }
             _ => {
-                // Unsupported host callbacks (hooks/SDK MCP/elicitation) — we
-                // registered none, so decline explicitly instead of hanging.
-                // `elicitation` could become a `question` event like Codex's, but only its
-                // subtype name is known here (docs/research/CLAUDE_CODE_RUNTIME.md §B.4): the
-                // request's fields and the answer's shape have not been captured, and a guessed
-                // wire format is worse than a clear decline.
+                // Other host callbacks (hooks, SDK MCP) — we registered none and the phone
+                // cannot run them, so decline explicitly instead of hanging.
                 let _ = self
                     .write_line(&json!({
                         "type": "control_response",
@@ -1270,5 +1361,183 @@ mod tests {
         // Gone with the process.
         m.on_remote_frame(json!({ "t": "exit" })).await;
         assert!(m.commands().is_empty());
+    }
+
+    /// A session SwitchTether "started" whose stdin is a channel: the test plays the agent.
+    fn fake() -> (
+        Arc<ManagedClaude>,
+        tokio::sync::mpsc::UnboundedReceiver<String>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (unused, _) = tokio::sync::mpsc::unbounded_channel();
+        let log = Arc::new(Mutex::new(SessionLog::new("claude:t", None)));
+        let mut me = ManagedClaude::attached(
+            "claude:t".into(),
+            PathBuf::from("."),
+            log,
+            unused,
+            "managed",
+        );
+        let m = Arc::get_mut(&mut me).unwrap();
+        m.remote = None;
+        m.test_out = Some(tx);
+        (me, rx)
+    }
+
+    fn sent(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> Value {
+        serde_json::from_str(&rx.try_recv().expect("a line for the agent")).unwrap()
+    }
+
+    async fn elicit(m: &ManagedClaude, rid: &str, request: Value) -> Value {
+        let mut request = request;
+        request["subtype"] = json!("elicitation");
+        m.on_message(json!({ "type": "control_request", "request_id": rid, "request": request }))
+            .await;
+        let ev = m.log.lock().get(&format!("req:{rid}")).cloned().unwrap();
+        assert_eq!(ev.kind, "question");
+        assert_eq!(ev.data["resolved"], false);
+        ev.data
+    }
+
+    #[tokio::test]
+    async fn elicitation_form_is_a_question_answered_with_typed_content() {
+        let (m, mut rx) = fake();
+        let data = elicit(
+            &m,
+            "e1",
+            json!({
+                "mcp_server_name": "deploy", "message": "Deploy to which target?", "mode": "form",
+                "elicitation_id": "x",
+                "requested_schema": { "type": "object", "required": ["target"], "properties": {
+                    "target": { "type": "string", "enum": ["staging", "production"] },
+                    "dryRun": { "type": "boolean", "title": "Dry run" },
+                    "note": { "type": "string", "title": "Note" },
+                } },
+            }),
+        )
+        .await;
+        assert_eq!(m.status(), "waiting");
+        assert_eq!(data["cancellable"], true);
+        assert_eq!(data["serverName"], "deploy");
+        let qs = data["questions"].as_array().unwrap();
+        assert_eq!(qs.len(), 3);
+        let q = |id: &str| qs.iter().find(|q| q["id"] == id).unwrap();
+        assert_eq!(q("target")["options"][1]["label"], "production");
+        assert_eq!(q("target")["allowOther"], false);
+        assert_eq!(q("target")["required"], true);
+        assert_eq!(q("dryRun")["options"].as_array().unwrap().len(), 2);
+        assert_eq!(q("note")["allowOther"], true, "free text");
+        assert!(
+            qs[0]["question"]
+                .as_str()
+                .unwrap()
+                .starts_with("Deploy to which target?\n"),
+            "the server's message leads: {}",
+            qs[0]["question"]
+        );
+
+        // An unknown decision does not consume the request.
+        assert!(m
+            .respond("e1", "allow_session", None, None, None, "phone")
+            .await
+            .is_err());
+        let answers = json!({ "target": "staging", "dryRun": "true", "note": "a, b" });
+        m.respond("e1", "answer", None, None, Some(answers), "phone")
+            .await
+            .unwrap();
+        let line = sent(&mut rx);
+        assert_eq!(line["type"], "control_response");
+        assert_eq!(line["response"]["subtype"], "success");
+        assert_eq!(line["response"]["request_id"], "e1");
+        assert_eq!(
+            line["response"]["response"],
+            json!({ "action": "accept",
+                "content": { "target": "staging", "dryRun": true, "note": "a, b" } })
+        );
+        let ev = m.log.lock().get("req:e1").cloned().unwrap();
+        assert_eq!(ev.data["resolved"], true);
+        assert_eq!(ev.data["answers"]["target"], "staging");
+        // First answer wins.
+        let again = m.respond("e1", "cancel", None, None, None, "other").await;
+        assert_eq!(again.unwrap_err().code, crate::error::ErrorCode::Conflict);
+    }
+
+    #[tokio::test]
+    async fn elicitation_single_field_url_cancel_and_decline() {
+        let (m, mut rx) = fake();
+        // One field: the message is the question.
+        let data = elicit(
+            &m,
+            "e1",
+            json!({ "mcp_server_name": "s", "message": "Proceed?",
+                "requested_schema": { "type": "object",
+                    "properties": { "ok": { "type": "boolean" } } } }),
+        )
+        .await;
+        assert_eq!(data["questions"][0]["question"], "Proceed?");
+        m.respond("e1", "deny", None, None, None, "phone")
+            .await
+            .unwrap();
+        assert_eq!(
+            sent(&mut rx)["response"]["response"],
+            json!({ "action": "decline" })
+        );
+
+        // A URL to open: shown, confirmed without content.
+        let data = elicit(
+            &m,
+            "e2",
+            json!({ "mcp_server_name": "s", "display_name": "Sign-in",
+                "message": "Open to sign in", "mode": "url", "url": "https://example.com/auth" }),
+        )
+        .await;
+        assert_eq!(data["url"], "https://example.com/auth");
+        assert_eq!(data["elicitationMode"], "url");
+        assert_eq!(data["serverName"], "Sign-in");
+        assert!(data["questions"][0]["question"]
+            .as_str()
+            .unwrap()
+            .contains("https://example.com/auth"));
+        let confirm = json!({ "__confirm__": "Accept" });
+        m.respond("e2", "answer", None, None, Some(confirm), "phone")
+            .await
+            .unwrap();
+        assert_eq!(
+            sent(&mut rx)["response"]["response"],
+            json!({ "action": "accept" })
+        );
+
+        // No schema: free text, nothing to fill in; cancel from the phone.
+        let data = elicit(&m, "e3", json!({ "message": "Anything else?" })).await;
+        assert_eq!(data["questions"][0]["allowOther"], true);
+        m.respond("e3", "cancel", None, None, None, "phone")
+            .await
+            .unwrap();
+        assert_eq!(
+            sent(&mut rx)["response"]["response"],
+            json!({ "action": "cancel" })
+        );
+
+        // The agent withdraws one itself: resolved, nothing is sent, a late answer gets 409.
+        elicit(&m, "e4", json!({ "message": "Still there?" })).await;
+        m.on_message(json!({ "type": "control_cancel_request", "request_id": "e4" }))
+            .await;
+        let ev = m.log.lock().get("req:e4").cloned().unwrap();
+        assert_eq!(ev.data["decision"], "cancelled");
+        let late = m.respond("e4", "answer", None, None, None, "phone").await;
+        assert_eq!(late.unwrap_err().code, crate::error::ErrorCode::Conflict);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn hook_callbacks_are_still_declined() {
+        let (m, mut rx) = fake();
+        m.on_message(json!({ "type": "control_request", "request_id": "h1",
+            "request": { "subtype": "hook_callback", "callback_id": "c" } }))
+            .await;
+        let line = sent(&mut rx);
+        assert_eq!(line["response"]["subtype"], "error");
+        assert_eq!(line["response"]["request_id"], "h1");
+        assert!(m.pending_request_ids().is_empty());
     }
 }
