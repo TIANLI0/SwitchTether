@@ -107,6 +107,9 @@ interface SessionRepository {
         throw UnsupportedOperationException("attachments")
     suspend fun cancelAttachment(id: String, attachmentId: String) {}
     suspend fun interrupt(id: String, commandId: String = newCommandId()): CommandOutcome
+
+    /** Ends the agent process of a session SwitchTether started; sending again resumes the conversation. */
+    suspend fun stop(id: String, commandId: String = newCommandId()): CommandOutcome
     suspend fun resolveApproval(id: String, requestId: String, decision: String, commandId: String = newCommandId()): CommandOutcome
     suspend fun answer(
         id: String,
@@ -278,6 +281,9 @@ class RemoteSessionRepository(
 
     override suspend fun interrupt(id: String, commandId: String) =
         conn.command(commandId) { api, c -> api.interrupt(id, c) }
+
+    override suspend fun stop(id: String, commandId: String) =
+        conn.command(commandId) { api, c -> api.stop(id, c) }
 
     override suspend fun resolveApproval(id: String, requestId: String, decision: String, commandId: String) =
         conn.command(commandId) { api, c -> api.resolveApproval(id, requestId, c, decision) }

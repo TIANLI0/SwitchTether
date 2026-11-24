@@ -134,6 +134,18 @@ class TlsAndCommandsTest {
     }
 
     @Test
+    fun stopPostsToTheSessionWithAnIdempotencyKey() = runBlocking {
+        server.enqueue(json("""{"ok":true}""", 200))
+        val out = Commands.run("cmd-stop") { id -> api().stop("managed:1", id) }
+        assertTrue(out is CommandOutcome.Succeeded)
+        val rec = server.takeRequest()
+        assertEquals("POST", rec.method)
+        assertEquals("/v1/sessions/managed:1/stop", rec.url.encodedPath)
+        assertEquals("cmd-stop", rec.headers["Idempotency-Key"])
+        assertTrue(rec.body!!.utf8().contains("\"commandId\":\"cmd-stop\""))
+    }
+
+    @Test
     fun capabilityUnavailableIsDefinitiveRejection() = runBlocking {
         server.enqueue(json("""{"error":{"code":"capability_unavailable","message":"blocked","details":{"status":"BLOCKED","reason":"external session"}}}""", 422))
         val out = Commands.run { id -> api().resolveApproval("s", "r", id, "allow") }

@@ -121,6 +121,10 @@
     <string name="session_send">发送</string>
     <string name="session_interrupt">中断</string>
     <string name="session_interrupt_confirm">要让智能体停止当前回合吗？</string>
+    <string name="session_end">结束会话</string>
+    <string name="session_end_summary">停止电脑上的智能体进程；之后发送消息会继续这段对话</string>
+    <string name="session_end_confirm">要停止这个会话在电脑上的智能体进程吗？</string>
+    <string name="model_attached_note">此会话由 VS Code 启动，请在 VS Code 中切换模型</string>
     <string name="session_load_older">加载更早的事件</string>
     <string name="session_start">会话开始</string>
     <string name="session_no_events">暂无事件。</string>

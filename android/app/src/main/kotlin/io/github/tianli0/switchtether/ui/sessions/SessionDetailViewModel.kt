@@ -122,6 +122,10 @@ data class SessionDetailState(
         detail.valueOrNull?.summary?.isLive == true
     val canInterrupt: Boolean get() = online && cap(Capability.INTERRUPT).usable
 
+    /** The agent process can be ended from the phone: only a live session SwitchTether started.
+     *  Never an attached / taken-over one: that process belongs to the user's IDE or terminal. */
+    val canStop: Boolean get() = online && detail.valueOrNull?.summary?.let { it.isLive && (it.managed || it.origin == "managed") } == true
+
     /** Model and effort can be changed from the phone: a session it controls (also one taken over
      *  with the opt-in hook), or a conversation that is not running, for the resume that the next
      *  message starts. The desktop's capability decides. */
@@ -838,6 +842,13 @@ class SessionDetailViewModel(
     fun interrupt(label: String) {
         onLocalAction(sessionId, io.github.tianli0.switchtether.remote.notify.LocalAction.INTERRUPT)
         commands.run(label) { id -> repo.interrupt(sessionId, id) }
+    }
+
+    /** Ends the managed agent process on the computer (not just the turn). */
+    fun stopSession(label: String) {
+        if (!_state.value.canStop) return
+        onLocalAction(sessionId, io.github.tianli0.switchtether.remote.notify.LocalAction.STOP)
+        commands.run(label) { id -> repo.stop(sessionId, id) }
     }
 
     fun resolveApproval(label: String, requestId: String, decision: String) {

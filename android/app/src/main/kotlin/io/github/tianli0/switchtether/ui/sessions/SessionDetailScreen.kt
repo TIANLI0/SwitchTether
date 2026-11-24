@@ -249,6 +249,8 @@ fun SessionDetailScreen(
     var showAttach by remember { mutableStateOf(false) }
     var showModels by rememberSaveable { mutableStateOf(false) }
     val switchLabel = stringResource(R.string.model_switch_label)
+    // A session taken over from VS Code: the desktop refuses a model change (422); permission mode still works.
+    val modelChangeable = state.canChangeModel && state.detail.valueOrNull?.summary?.isAttached != true
     ModelEffortSheet(
         show = showModels,
         agent = state.detail.valueOrNull?.summary?.agent.orEmpty(),
@@ -258,6 +260,7 @@ fun SessionDetailScreen(
         busy = busy != null,
         onModel = { vm.setModel(it, switchLabel) },
         onEffort = { vm.setEffort(it, switchLabel) },
+        modelNote = if (modelChangeable) null else stringResource(R.string.model_attached_note),
         onDismiss = {
             showModels = false
             vm.clearPermissionError()
@@ -333,7 +336,7 @@ fun SessionDetailScreen(
         onEditOutgoing = vm::editOutgoing,
         onInterrupt = { confirmInterrupt = true },
         onModelClick = {
-            vm.loadModelOptions()
+            if (modelChangeable) vm.loadModelOptions()
             showModels = true
         },
         // An ended session has no window on the computer that could disagree: resume at once.

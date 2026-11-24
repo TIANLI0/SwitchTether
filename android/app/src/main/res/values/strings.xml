@@ -130,6 +130,10 @@
     <string name="session_send">Send</string>
     <string name="session_interrupt">Interrupt</string>
     <string name="session_interrupt_confirm">Ask the agent to stop the current turn?</string>
+    <string name="session_end">End session</string>
+    <string name="session_end_summary">Stops the agent process on the computer; sending a message later continues this conversation</string>
+    <string name="session_end_confirm">Stop the agent process of this session on the computer?</string>
+    <string name="model_attached_note">This session was started in VS Code; change the model there</string>
     <string name="session_load_older">Load older events</string>
     <string name="session_start">Start of session</string>
     <string name="session_no_events">No events yet.</string>

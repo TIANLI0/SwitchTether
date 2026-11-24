@@ -273,6 +273,10 @@ class RemoteApi(
     suspend fun interrupt(sessionId: String, commandId: String): CommandResponse =
         command(commandId, url("v1/sessions", sessionId, "interrupt"), CommandBody(commandId))
 
+    /** `POST /v1/sessions/{id}/stop`: ends the agent process of a session SwitchTether started (the conversation can be resumed). */
+    suspend fun stop(sessionId: String, commandId: String): CommandResponse =
+        command(commandId, url("v1/sessions", sessionId, "stop"), CommandBody(commandId))
+
     /**
      * `POST /v1/sessions/{id}/claude/{action}`: one Claude Code session tool ([io.github.tianli0.switchtether.remote.session.ClaudeTools]).
      * [params] are the action's fields; the commandId is added. A side question can take minutes,

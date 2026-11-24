@@ -258,6 +258,19 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
     LaunchedEffect(vm) {
         vm.exports.collect { ex -> shareConversation(context, ex, shareTitle, empty, tooLarge) }
     }
+    var confirmStop by rememberSaveable { mutableStateOf(false) }
+    val stopLabel = stringResource(R.string.session_end)
+    ConfirmDialog(
+        show = confirmStop,
+        title = stopLabel,
+        message = stringResource(R.string.session_end_confirm),
+        confirmText = stopLabel,
+        onConfirm = {
+            confirmStop = false
+            detailVm.stopSession(stopLabel)
+        },
+        onDismiss = { confirmStop = false },
+    )
     val summary = detail.detail.valueOrNull?.summary
     Page(
         title = stringResource(R.string.tools_title),
@@ -356,6 +369,17 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
                 }
                 st.exportError?.let { ToolsNote(it, LocalDevColors.current.danger) }
                 ToolsNote(stringResource(R.string.tools_export_hint))
+            }
+            // Only for a session SwitchTether started: its process is ours to end.
+            if (detail.canStop) item {
+                GroupCard {
+                    BasicComponent(
+                        title = stopLabel,
+                        summary = stringResource(R.string.session_end_summary),
+                        endActions = { SmallButton(stopLabel, { confirmStop = true }, tone = ActionTone.Danger, modifier = Modifier.testTag("tools-end-session")) },
+                        cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Full,
+                    )
+                }
             }
         }
     }

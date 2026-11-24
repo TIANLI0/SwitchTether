@@ -65,6 +65,33 @@ class ViewModelTest {
         SessionDetailViewModel("s1", conn, repo, drafts)
 
     @Test
+    fun onlyALiveManagedSessionCanBeEnded() = runTest(dispatcher) {
+        // Taken over from the IDE (full control, not ours): its process is never ended from the phone.
+        val attachedRepo = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED", interrupt = "VERIFIED"), emptyList()) }
+        val attached = detailVm(attachedRepo)
+        advanceUntilIdle()
+        assertTrue(attached.state.value.detail.valueOrNull!!.summary.isAttached)
+        assertFalse(attached.state.value.canStop)
+        attached.stopSession("End session")
+        advanceUntilIdle()
+        assertTrue(attachedRepo.stopped.isEmpty())
+
+        val managed = summary(control = "full").copy(origin = "managed", managed = true)
+        val endedRepo = FakeSessionRepository().apply { detail = SessionDetail(managed.copy(liveness = "ended"), caps(send = "VERIFIED"), emptyList()) }
+        val ended = detailVm(endedRepo)
+        advanceUntilIdle()
+        assertFalse(ended.state.value.canStop)
+
+        val repo = FakeSessionRepository().apply { detail = SessionDetail(managed, caps(send = "VERIFIED", interrupt = "VERIFIED"), emptyList()) }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.canStop)
+        vm.stopSession("End session")
+        advanceUntilIdle()
+        assertEquals(listOf("s1"), repo.stopped)
+    }
+
+    @Test
     fun sessionDetailLoadsAndReplacesEventsById() = runTest(dispatcher) {
         val repo = FakeSessionRepository().apply {
             detail = SessionDetail(summary(), caps(), emptyList())

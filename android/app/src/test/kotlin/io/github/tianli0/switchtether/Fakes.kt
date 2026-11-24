@@ -141,6 +141,11 @@ class FakeSessionRepository : SessionRepository {
     }
 
     override suspend fun interrupt(id: String, commandId: String) = nextOutcome(commandId)
+    val stopped = mutableListOf<String>()
+    override suspend fun stop(id: String, commandId: String): CommandOutcome {
+        stopped += id
+        return nextOutcome(commandId)
+    }
     override suspend fun resolveApproval(id: String, requestId: String, decision: String, commandId: String) = nextOutcome(commandId)
     override suspend fun answer(id: String, requestId: String, answers: JsonObject?, commandId: String, action: String?) = nextOutcome(commandId)
     override suspend fun commandStatus(commandId: String): CommandStatus {

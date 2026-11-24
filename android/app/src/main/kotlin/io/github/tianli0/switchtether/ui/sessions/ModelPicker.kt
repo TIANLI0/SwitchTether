@@ -215,10 +215,14 @@ fun ModelEffortSheet(
     onDismiss: () -> Unit,
     /** Further run settings shown under model and effort (Claude Code's permission mode). */
     extra: @Composable () -> Unit = {},
+    /** Set when the model cannot be changed from here (a session taken over from VS Code): shown instead of the chooser. */
+    modelNote: String? = null,
 ) {
     PanelSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-            ModelEffortChooser(
+            if (modelNote != null) {
+                Text(modelNote, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp))
+            } else ModelEffortChooser(
                 agent = agent,
                 options = options,
                 // The running model is reported by its full name; the chips use the agent's ids.
