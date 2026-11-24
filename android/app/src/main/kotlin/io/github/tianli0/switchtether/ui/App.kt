@@ -169,6 +169,7 @@ fun MainShell() {
     // Back (incl. the predictive gesture) is handled by AnimatedNavHost.
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
+        val twoPanes = io.github.tianli0.switchtether.ui.nav.usesTwoPanes(maxWidth)
         val top = nav.top
         val newSessionLabel = stringResource(R.string.new_session_title)
         var showNewSession by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
@@ -213,7 +214,11 @@ fun MainShell() {
                         )
                     }
                 }
-                Box(Modifier.weight(1f).fillMaxSize()) { AnimatedNavHost(nav) { Destination(nav, it) } }
+                Box(Modifier.weight(1f).fillMaxSize()) {
+                    // Tablets / unfolded foldables: the tab's list stays beside what it opened (§26).
+                    if (twoPanes) TwoPaneHost(nav)
+                    else AnimatedNavHost(nav) { Destination(nav, it) }
+                }
             }
         } else {
             // ColorOS 17 floating glass capsule (coui17 BottomFloatingNavigationBar), wired exactly like
@@ -288,11 +293,38 @@ fun MainShell() {
     }
 }
 
+/**
+ * List | detail: the current tab's root on the left (cross-fading between tabs, each keeping its
+ * scroll position), its stack on the right with the usual push / pop / predictive-back motion; with
+ * nothing open the right pane shows a hint. Rows opened from the list replace the detail.
+ */
+@Composable
+private fun TwoPaneHost(nav: NavViewModel) {
+    val listStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val selected = nav.stack.firstNotNullOfOrNull { (it as? Route.SessionDetail)?.sessionId }
+    CompositionLocalProvider(io.github.tianli0.switchtether.ui.nav.LocalSelectedSessionId provides selected) {
+        io.github.tianli0.switchtether.ui.nav.ListDetailPanes(
+            list = {
+                androidx.compose.animation.Crossfade(nav.tab, label = "pane-list") { t ->
+                    listStates.SaveableStateProvider("list/${t.name}") {
+                        Destination(nav, io.github.tianli0.switchtether.ui.nav.NavEntry(t, null, 0), onOpenRoot = nav::openFromList)
+                    }
+                }
+            },
+            detail = {
+                AnimatedNavHost(nav) { entry ->
+                    if (entry.route == null) io.github.tianli0.switchtether.ui.nav.PaneEmptyState(entry.tab) else Destination(nav, entry)
+                }
+            },
+        )
+    }
+}
+
 /** Outlined icon when unselected, filled icon when selected (Material Icons pairs). */
 private class NavItem(val tab: Tab, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
 @Composable
-private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether.ui.nav.NavEntry) {
+private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether.ui.nav.NavEntry, onOpenRoot: (Route) -> Unit = nav::push) {
     val onBack: () -> Unit = { nav.back() }
     when (val top = entry.route) {
         is Route.SessionDetail -> {
@@ -333,10 +365,10 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         Route.Licenses -> LicensesScreen(onBack)
         Route.DesktopInfo -> DesktopInfoScreen(onBack)
         null -> when (entry.tab) {
-            Tab.HOME -> HomeScreen(onOpen = nav::push, onSelectTab = nav::select)
-            Tab.SESSIONS -> SessionsScreen(onOpen = nav::push)
-            Tab.WORKSPACE -> WorkspaceScreen(onOpen = nav::push)
-            Tab.MANAGE -> ManageScreen(onOpen = nav::push)
+            Tab.HOME -> HomeScreen(onOpen = onOpenRoot, onSelectTab = nav::select)
+            Tab.SESSIONS -> SessionsScreen(onOpen = onOpenRoot)
+            Tab.WORKSPACE -> WorkspaceScreen(onOpen = onOpenRoot)
+            Tab.MANAGE -> ManageScreen(onOpen = onOpenRoot)
         }
     }
 }

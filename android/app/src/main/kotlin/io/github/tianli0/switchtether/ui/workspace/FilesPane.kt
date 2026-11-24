@@ -104,18 +104,33 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit = {}) {
     val file = state.file
     val viewer = state.viewer
-    when {
+    val opened: (@Composable () -> Unit)? = when {
         viewer != null -> {
-            BackHandler(onBack = vm::closeViewer)
-            RemoteFileViewer(
-                ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
-                onBack = vm::closeViewer,
-                onManageDownloads = onOpenDownloads,
-            )
+            {
+                BackHandler(onBack = vm::closeViewer)
+                RemoteFileViewer(
+                    ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
+                    onBack = vm::closeViewer,
+                    onManageDownloads = onOpenDownloads,
+                )
+            }
         }
-        state.conflict != null -> ConflictScreen(state, vm)
-        file != null -> FileScreen(state, vm)
-        else -> Browser(state, vm, onOpenDownloads)
+        state.conflict != null -> { { ConflictScreen(state, vm) } }
+        file != null -> { { FileScreen(state, vm) } }
+        else -> null
+    }
+    // Wide enough (a tablet's detail pane, §26): the folder stays on the left while a file is open.
+    // The opened file's back handler is composed after the browser's, so back closes the file first.
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        when {
+            opened == null -> Browser(state, vm, onOpenDownloads)
+            maxWidth >= FILES_SPLIT_MIN_WIDTH -> io.github.tianli0.switchtether.ui.nav.ListDetailPanes(
+                list = { Browser(state, vm, onOpenDownloads) },
+                detail = { opened() },
+                listWidth = (maxWidth * 0.38f).coerceIn(280.dp, 380.dp),
+            )
+            else -> opened()
+        }
     }
     state.message?.let { msg ->
         if (msg.res in QUIET_MESSAGES) {
@@ -576,3 +591,6 @@ private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
 
 /** Outcome messages that only report success: shown as a toast instead of a dialog. */
 private val QUIET_MESSAGES = setOf(R.string.files_msg_saved, R.string.files_msg_saved_as, R.string.files_msg_ok, R.string.files_msg_cancelled)
+
+/** Width from which an open file shows beside its folder instead of replacing it (§26). */
+private val FILES_SPLIT_MIN_WIDTH = 720.dp

@@ -78,6 +78,18 @@ class NavViewModel : ViewModel() {
         if (s.lastOrNull() != r) s.add(r)
     }
 
+    /**
+     * Opens [r] from the tab's list beside the detail pane (two-pane layout): it takes the place of
+     * whatever the detail pane showed, so back clears the selection instead of walking through every
+     * row tapped before.
+     */
+    fun openFromList(r: Route) {
+        val s = stacks.getValue(tab)
+        if (s.size == 1 && s[0] == r) return
+        s.clear()
+        s.add(r)
+    }
+
     /** Replaces the current page (e.g. a session that was resumed opens in its place). */
     fun replace(r: Route) {
         val s = stacks.getValue(tab)
