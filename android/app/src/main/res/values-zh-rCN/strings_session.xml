@@ -115,6 +115,7 @@
     <string name="session_unnamed">未命名会话</string>
     <string name="session_info_id">会话 ID</string>
     <string name="render_system_turn_stopped">本轮在完成前已停止。</string>
+    <string name="render_status_user_interrupted">你中断了这一轮</string>
     <string name="outgoing_sending">发送中…</string>
     <string name="outgoing_delivered">已送达</string>
     <string name="outgoing_waiting">等待连接</string>
@@ -161,6 +162,12 @@
     <string name="subagent_tree_note">只读：子 agent 不接受外部输入。分支表示由哪个 agent 启动。</string>
     <plurals name="subagent_more_steps">
         <item quantity="other">… 之前还有 %1$d 步</item>
+    </plurals>
+    <plurals name="background_task_chip">
+        <item quantity="other">%1$d 个后台任务</item>
+    </plurals>
+    <plurals name="background_task_chip_running">
+        <item quantity="other">后台运行 %1$d 个</item>
     </plurals>
     <plurals name="subagent_chip">
         <item quantity="other">%1$d 个子 agent</item>

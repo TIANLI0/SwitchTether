@@ -146,7 +146,7 @@ fun SessionDetailScreen(
     onOpenRoute: (io.github.tianli0.switchtether.ui.nav.Route) -> Unit = {},
 ) {
     val container = appContainer()
-    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction) }
+    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default) }
     val state by vm.state.collectAsStateWithLifecycle()
     val pins by container.liveUpdates.pins.collectAsStateWithLifecycle()
     val pinned = sessionId in pins
@@ -532,10 +532,16 @@ fun SessionDetailContent(
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
-    val hasAgents = summary?.agent in SUBAGENT_AGENTS && state.log.events.any {
-        it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT ||
-            (it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true)
+    // Scans of the whole log, redone only when the log changes (not on every recomposition).
+    val hasAgents = summary?.agent in SUBAGENT_AGENTS && remember(state.log) {
+        state.log.events.any {
+            it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT ||
+                (it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true)
+        }
     }
+    val agentsDot = remember(state.log, summary?.waitingFor) { agentsPillState(state) }
+    val backgroundTasks = remember(state.log) { backgroundTaskCounts(state) }
+    val subagentCount = remember(state.log) { state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT } }
     // The read-only tip explains once; the read-only composer bar keeps saying it afterwards.
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val hints = remember(appCtx) { (appCtx as? io.github.tianli0.switchtether.SwitchTetherApp)?.container?.hintPrefs }
@@ -654,8 +660,9 @@ fun SessionDetailContent(
                         state,
                         onInfo = { showInfo = true },
                         onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
-                        subagentCount = state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT },
-                        agentsDot = agentsPillState(state),
+                        subagentCount = subagentCount,
+                        agentsDot = agentsDot,
+                        backgroundTasks = backgroundTasks,
                         onOpenTools = onOpenTools,
                         onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
                     )
@@ -695,6 +702,8 @@ private fun StatusChipRow(
     agentsDot: AgentMapState? = null,
     onOpenTools: (() -> Unit)? = null,
     onOpenTerminal: (() -> Unit)? = null,
+    /** Background shells of the session: (all, still running). */
+    backgroundTasks: Pair<Int, Int> = 0 to 0,
 ) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
@@ -713,7 +722,15 @@ private fun StatusChipRow(
             s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn, backdrop = bg) }
             if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary, backdrop = bg)
             // Full control is the normal case and needs no capsule; limits do.
-            if (s.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL) InfoChip(controlLabel(s.controlLevel), dot = controlColor(s.controlLevel), backdrop = bg)
+            // How far the phone may act is not a state: an icon, not a second coloured dot beside "busy".
+            if (s.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL) {
+                InfoChip(
+                    controlLabel(s.controlLevel),
+                    icon = if (s.controlLevel == io.github.tianli0.switchtether.remote.protocol.ControlLevel.OBSERVE) AppIcons.Watch else AppIcons.Clock,
+                    color = COUITheme.colorScheme.onSurfaceSecondary,
+                    backdrop = bg,
+                )
+            }
             s.gitBranch?.let { InfoChip(it, icon = AppIcons.Git, color = COUITheme.colorScheme.onSurfaceSecondary, backdrop = bg) }
             if (onOpenTerminal != null) {
                 InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel }, backdrop = bg)
@@ -734,6 +751,19 @@ private fun StatusChipRow(
                     InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("subagent-tree"), backdrop = bg)
                 }
             }
+            // Commands left running in the background (`run_in_background`): their own capsule, so a
+            // long build or dev server is visible without opening the agent map. Opens the map,
+            // whose "background tasks" section lists them with their output.
+            val (bgAll, bgRunning) = backgroundTasks
+            if (bgAll > 0 && onOpenSubagents != null) {
+                val label = if (bgRunning > 0) pluralStringResource(R.plurals.background_task_chip_running, bgRunning, bgRunning)
+                else pluralStringResource(R.plurals.background_task_chip, bgAll, bgAll)
+                if (bgRunning > 0) {
+                    InfoChip(label, dot = dev.info, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("chip-background"), backdrop = bg)
+                } else {
+                    InfoChip(label, icon = AppIcons.BackgroundTask, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("chip-background"), backdrop = bg)
+                }
+            }
             // Extra functions sit in the same row as the sub-agents.
             if (onOpenTools != null) {
                 InfoChip(toolsLabel, icon = AppIcons.SessionTools, onClick = onOpenTools, modifier = Modifier.semantics { contentDescription = toolsLabel }.testTag("chip-tools"), backdrop = bg)
@@ -749,8 +779,8 @@ private fun StatusChipRow(
 private fun agentsPillState(state: SessionDetailState): AgentMapState? {
     val kinds = io.github.tianli0.switchtether.remote.protocol.EventKinds
     val rows = state.log.events.filter { it.kind == kinds.SUBAGENT }
-    val shells = state.log.events.filter { it.kind == kinds.TOOL_CALL && it.data.bool("background") == true }
-    val working = rows.any { it.data.str("status") == "running" } || shells.any { it.data.str("status") == "running" }
+    // Background shells have a capsule of their own (backgroundTaskCounts).
+    val working = rows.any { it.data.str("status") == "running" }
     return when {
         working && state.detail.valueOrNull?.summary?.waitingFor != null -> AgentMapState.Waiting
         working -> AgentMapState.Working
@@ -759,6 +789,14 @@ private fun agentsPillState(state: SessionDetailState): AgentMapState? {
     }
 }
 
+
+/** Background shells in the loaded log: (all, still running). */
+private fun backgroundTaskCounts(state: SessionDetailState): Pair<Int, Int> {
+    val shells = state.log.events.filter {
+        it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true
+    }
+    return shells.size to shells.count { it.data.str("status") == "running" }
+}
 
 @Composable
 private fun EventList(

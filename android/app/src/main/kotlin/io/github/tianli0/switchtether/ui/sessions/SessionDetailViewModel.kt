@@ -207,7 +207,15 @@ class SessionDetailViewModel(
     private val onLocalAction: (String, io.github.tianli0.switchtether.remote.notify.LocalAction) -> Unit = { _, _ -> },
     /** Reads picked files for upload (tests run it on their own dispatcher). */
     private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+    /**
+     * Where streamed events are folded into the timeline. The app passes `Dispatchers.Default`: a long
+     * session rebuilds thousands of rows per update, which on the main thread dropped frames on every
+     * streamed event and made opening a busy session an ANR. Null (tests) applies each event at once.
+     */
+    private val liveDispatcher: kotlinx.coroutines.CoroutineDispatcher? = null,
 ) : ViewModel() {
+    /** Streamed events waiting for the next batch (see [liveDispatcher]). */
+    private val liveInbox = kotlinx.coroutines.channels.Channel<AgentEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
     private val _state = MutableStateFlow(SessionDetailState(sessionId, connection = conn.state.value))
     val state: StateFlow<SessionDetailState> = _state.asStateFlow()
 
@@ -341,6 +349,18 @@ class SessionDetailViewModel(
                 n
             }
         }
+        if (liveDispatcher != null) {
+            viewModelScope.launch(liveDispatcher) {
+                // The first event of a burst is shown at once; what streams in meanwhile is folded in
+                // one rebuild, at most every LIVE_BATCH_MS.
+                while (true) {
+                    val batch = arrayListOf(liveInbox.receive())
+                    while (true) batch += liveInbox.tryReceive().getOrNull() ?: break
+                    applyEvents(batch)
+                    kotlinx.coroutines.delay(LIVE_BATCH_MS)
+                }
+            }
+        }
         viewModelScope.launch {
             val saved = drafts.draft(sessionId).first()
             _state.update { if (it.draft.isEmpty()) it.copy(draft = saved) else it }
@@ -361,7 +381,7 @@ class SessionDetailViewModel(
                 when (ch) {
                     is SessionChange.Event -> if (ch.event.sessionId == sessionId) {
                         liveDuringLoad?.add(ch.event)
-                        applyEvents(listOf(ch.event))
+                        if (liveDispatcher == null) applyEvents(listOf(ch.event)) else liveInbox.trySend(ch.event)
                     }
                     is SessionChange.Upserted -> if (ch.session.id == sessionId) {
                         val before = _state.value.detail.valueOrNull?.summary
@@ -423,7 +443,14 @@ class SessionDetailViewModel(
                 // The page was read before these live events: they go on top of it instead of being lost.
                 val log = AgentEventLog.of(page.events).upsert(live)
                 logGeneration++
-                _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
+                // Folding a 300-event page is real work: off the main thread when the app gave us a pool.
+                if (liveDispatcher != null) {
+                    kotlinx.coroutines.withContext(liveDispatcher) {
+                        _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
+                    }
+                } else {
+                    _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
+                }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
                 endStaleWait(d)
                 flushWaiting()
@@ -1035,6 +1062,8 @@ class SessionDetailViewModel(
         /** Bubble error: the computer restarted while sending (command status `unknown`). */
         const val OUTCOME_UNKNOWN = "outcome_unknown"
         const val PAGE = 300
+        /** Minimum time between two timeline rebuilds while events stream in. */
+        const val LIVE_BATCH_MS = 120L
         const val CATCH_UP_MAX_PAGES = 20
     }
 }

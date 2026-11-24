@@ -931,6 +931,11 @@ impl ClaudeParser {
                     }
                 }
             }
+            // `SendMessage` to a finished (or failed, stopped) agent resumes it: its row runs again
+            // until its next task notification. Without this a resumed agent stayed "failed".
+            if let Some(agent) = s(st, "resumedAgentId").or_else(|| s(st, "revivedAgentId")) {
+                out.extend(self.subagent_resumed(&agent));
+            }
             // Sub-agent result → subagent event (linked under the Task/Agent tool_call).
             if (name == "Task" || name == "Agent") && st.get("agentId").is_some() {
                 out.push(self.subagent_started(call_id, is_error, text, st, turn, ts));
@@ -1036,6 +1041,29 @@ impl ClaudeParser {
         sa.turn_id = turn;
         sa.parent_id = Some(call_id.to_string());
         sa
+    }
+
+    /// An agent that had finished was resumed (`SendMessage` → `resumedAgentId`): its row is
+    /// running again; the old result and end time no longer describe it.
+    fn subagent_resumed(&mut self, agent_id: &str) -> Option<EventDraft> {
+        let call_id = self.agent_calls.get(agent_id)?.clone();
+        let row = self.subagents.get_mut(&call_id)?;
+        if row.data["status"] == "running" {
+            return None;
+        }
+        row.data["status"] = json!("running");
+        if let Some(obj) = row.data.as_object_mut() {
+            for k in [
+                "result",
+                "resultTruncated",
+                "finishedAt",
+                "summary",
+                "activity",
+            ] {
+                obj.remove(k);
+            }
+        }
+        Some(Self::subagent_draft(&call_id, row))
     }
 
     /// A sub-agent that is running but has no result yet (foreground agents report only when
@@ -1385,7 +1413,18 @@ impl ClaudeParser {
                         };
                         let input_str = input.to_string();
                         let input_v = if input_str.len() > PREVIEW_LIMIT * 4 {
-                            json!({ "truncated": true, "preview": preview(&input_str, PREVIEW_LIMIT).0 })
+                            // Too big to carry whole (a long script, a large Write): keep the short
+                            // fields the phone titles the step with (Bash's one-line description,
+                            // the file a file tool works on).
+                            let mut v = json!({ "truncated": true, "preview": preview(&input_str, PREVIEW_LIMIT).0 });
+                            for key in ["description", "file_path", "notebook_path", "path"] {
+                                if let Some(text) = input.get(key).and_then(Value::as_str) {
+                                    if text.len() <= 1024 {
+                                        v[key] = json!(text);
+                                    }
+                                }
+                            }
+                            v
                         } else {
                             input.clone()
                         };
@@ -1654,6 +1693,26 @@ mod tests {
         assert_eq!(p.model.as_deref(), Some("claude-x"));
         assert_eq!(p.session_id.as_deref(), Some("s1"));
         assert!(p.open_tool_calls.is_empty());
+    }
+
+    #[test]
+    fn a_truncated_tool_input_keeps_its_description_and_path() {
+        let mut p = ClaudeParser::new();
+        let long = "echo x; ".repeat(PREVIEW_LIMIT);
+        let ev = feed_all(
+            &mut p,
+            &[
+                json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-14T00:00:01Z","message":{"id":"m1","content":[
+                    {"type":"tool_use","id":"t1","name":"Bash","input":{"command": long, "description":"Build the APK"}},
+                    {"type":"tool_use","id":"t2","name":"Write","input":{"file_path":"/p/big.txt","content": long}}
+                ]}}),
+            ],
+        );
+        let input = &ev[0].data["input"];
+        assert_eq!(input["truncated"], true);
+        assert_eq!(input["description"], "Build the APK");
+        assert!(input.get("command").is_none());
+        assert_eq!(ev[1].data["input"]["file_path"], "/p/big.txt");
     }
 
     #[test]
@@ -1975,6 +2034,36 @@ mod tests {
         assert_eq!(sa.data["durationMs"], 65000);
         assert_eq!(sa.turn_id.as_deref(), Some("u1"));
         assert_eq!(p.title.as_deref(), Some("Do it"));
+    }
+
+    #[test]
+    fn a_resumed_agent_runs_again_until_its_next_notification() {
+        let mut p = ClaudeParser::new();
+        p.feed(&json!({"type":"user","uuid":"u1","message":{"content":"Do it"}}));
+        p.feed(&agent_call("toolu_1", true));
+        p.feed(&json!({"type":"user","uuid":"u2",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Async agent launched"}]},
+            "toolUseResult":{"agentId":"a77","status":"async_launched","isAsync":true}}));
+        let note = |status: &str| {
+            json!({"type":"user","uuid":format!("n-{status}"),"origin":{"kind":"task-notification"},
+            "message":{"content":format!("<task-notification><task-id>a77</task-id><tool-use-id>toolu_1</tool-use-id><status>{status}</status><summary>s</summary><result>r</result></task-notification>")}})
+        };
+        let failed = p.feed(&note("failed"));
+        assert_eq!(failed[0].data["status"], "failed");
+        // SendMessage to the agent: Claude Code resumes it.
+        p.feed(&json!({"type":"assistant","message":{"id":"m9","content":[{"type":"tool_use","id":"toolu_9","name":"SendMessage","input":{"to":"a77","message":"go on"}}]}}));
+        let resumed = p.feed(&json!({"type":"user","uuid":"u9",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"{\"success\":true}"}]},
+            "toolUseResult":{"success":true,"message":"Resuming agent a77","resumedAgentId":"a77"}}));
+        let sa = resumed
+            .iter()
+            .find(|d| d.kind == "subagent")
+            .expect("the row is republished");
+        assert_eq!(sa.id, "sa:toolu_1");
+        assert_eq!(sa.data["status"], "running");
+        assert!(sa.data.get("result").is_none());
+        let done = p.feed(&note("completed"));
+        assert_eq!(done[0].data["status"], "completed");
     }
 
     fn bash_call(id: &str) -> Value {

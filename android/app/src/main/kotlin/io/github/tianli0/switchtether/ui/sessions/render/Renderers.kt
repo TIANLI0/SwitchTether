@@ -446,6 +446,8 @@ fun toolStatus(item: RenderItem): StepStatus {
     val st = StepStatus.parse(item.event.data.str("status"))
     val res = item.attachedResult?.data ?: return st
     return when {
+        // The desktop already told a refusal or an interrupt apart from a failure: keep that.
+        st == StepStatus.Denied || st == StepStatus.Interrupted -> st
         res.bool("isError") == true -> StepStatus.Failed
         // Background shell (`run_in_background`): the result only says it started; the call's own
         // status follows the task until its notification.
@@ -532,7 +534,7 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
             }
         }
         // Collapsed, a failed step still says why in one line.
-        if (!open && result?.data?.bool("isError") == true) {
+        if (!open && result?.data?.bool("isError") == true && status == StepStatus.Failed) {
             Text(
                 result.data.str("text").orEmpty().lineSequence().firstOrNull().orEmpty(),
                 style = DevType.codeSmall,
@@ -1193,9 +1195,15 @@ fun statusStateLabel(state: String?): String = when (state) {
 fun StatusRow(item: RenderItem) {
     val d = item.event.data
     Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-        SubtleMeta(listOfNotNull(statusStateLabel(d.str("state")).ifEmpty { null }, d.str("detail"), shortClock(item.event.ts).ifEmpty { null }).joinToString(" · "), align = TextAlign.Center)
+        // Claude Code's "[Request interrupted by user…]" marker is a sentence of its own, not a detail to quote.
+        val byUser = d.str("state") == "interrupted" && d.str("detail")?.startsWith("[Request interrupted by user") == true
+        val head = if (byUser) stringResource(R.string.render_status_user_interrupted) else statusStateLabel(d.str("state"))
+        SubtleMeta(listOfNotNull(head.ifEmpty { null }, d.str("detail").takeUnless { byUser }, shortClock(item.event.ts).ifEmpty { null }).joinToString(" · "), align = TextAlign.Center)
     }
 }
+
+/** Stack-trace frames, Python tracebacks, exception names or a JSON body: shown in the code face. */
+private val ERROR_CODE_HINT = Regex("""(?m)^\s+at |Traceback|Exception:|^\s*\{""")
 
 @Composable
 fun ErrorRow(item: RenderItem) {
@@ -1207,7 +1215,17 @@ fun ErrorRow(item: RenderItem) {
             Text(stringResource(R.string.render_error), style = COUITheme.textStyles.footnote1, fontWeight = FontWeight.Medium, color = dev.danger, modifier = Modifier.weight(1f))
             SubtleMeta(shortClock(item.event.ts))
         }
-        SelectionContainer { Text(item.event.data.str("message", "text").orEmpty(), style = DevType.code, color = dev.danger, modifier = Modifier.padding(top = 6.dp)) }
+        val message = item.event.data.str("message", "text").orEmpty()
+        // A sentence reads as text; only output that looks like a log or a trace keeps the code face.
+        val looksLikeCode = message.lines().size > 2 || ERROR_CODE_HINT.containsMatchIn(message)
+        SelectionContainer {
+            Text(
+                message,
+                style = if (looksLikeCode) DevType.code else COUITheme.textStyles.body2,
+                color = if (looksLikeCode) dev.danger else COUITheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
     }
 }
 

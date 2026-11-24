@@ -82,6 +82,10 @@ class FollowState {
     var baseMessages by mutableIntStateOf(0)
 }
 
+/** Whether a row with [key] is still laid out (a row that scrolled out of view is not). */
+private fun listContains(listState: LazyListState, key: Any): Boolean =
+    listState.layoutInfo.visibleItemsInfo.any { it.key == key }
+
 /** Scrolls to the very end of the list (the last row's bottom edge), clamped by the list itself. */
 suspend fun LazyListState.scrollToEnd() {
     val last = layoutInfo.totalItemsCount - 1
@@ -107,10 +111,16 @@ fun FollowBottomEffects(listState: LazyListState, follow: FollowState, rows: Lis
     // reaching the end resumes it. Content growing below does not move the first visible item,
     // and prepended pages only raise its index, so neither counts as "the user left".
     LaunchedEffect(listState) {
-        var last = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-        snapshotFlow { Triple(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, atEnd) }.collect { (i, o, end) ->
-            val movedUp = i < last.first || (i == last.first && o < last.second)
-            last = i to o
+        data class Top(val key: Any?, val index: Int, val offset: Int)
+        fun top() = Top(listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        var last = top()
+        snapshotFlow { top() to atEnd }.collect { (now, end) ->
+            // The same row moved down, or an earlier row came to the top. A reloaded page keeps the
+            // same row at the top under a smaller index (rows above it went away): that is the
+            // content changing, not the user scrolling, and must not stop following.
+            val movedUp = if (now.key != null && now.key == last.key) now.offset < last.offset
+            else now.key != last.key && now.index < last.index && last.key.let { k -> k == null || listContains(listState, k) }
+            last = now
             if (end) {
                 follow.following = true
             } else if (movedUp && !follow.autoScrolling && follow.following) {
@@ -130,7 +140,8 @@ fun FollowBottomEffects(listState: LazyListState, follow: FollowState, rows: Lis
             val lastItem = info.visibleItemsInfo.lastOrNull()?.takeIf { it.index == info.totalItemsCount - 1 }
             info.totalItemsCount to (lastItem?.size ?: -1)
         }.collect { (total, lastSize) ->
-            val grew = total > prevTotal || (lastSize > 0 && prevLastSize > 0 && lastSize > prevLastSize)
+            // Any change of the row count is content changing (a reloaded page can have fewer rows).
+            val grew = total != prevTotal || (lastSize > 0 && prevLastSize > 0 && lastSize > prevLastSize)
             prevTotal = total
             if (lastSize > 0) prevLastSize = lastSize
             if (grew && follow.following && total > 0 && !atEnd) {
