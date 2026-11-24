@@ -146,7 +146,7 @@ fun SessionDetailScreen(
     onOpenRoute: (io.github.tianli0.switchtether.ui.nav.Route) -> Unit = {},
 ) {
     val container = appContainer()
-    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction) }
+    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default) }
     val state by vm.state.collectAsStateWithLifecycle()
     val pins by container.liveUpdates.pins.collectAsStateWithLifecycle()
     val pinned = sessionId in pins
@@ -365,6 +365,7 @@ fun SessionDetailScreen(
         onOpenSession(created.id, created.title)
     }
 
+    val turnEdited = remember(state.log) { io.github.tianli0.switchtether.remote.session.TurnFiles.latestTurn(state.log.events).isNotEmpty() }
     SessionDetailContent(
         state = state,
         initialTitle = initialTitle,
@@ -402,8 +403,18 @@ fun SessionDetailScreen(
         onOpenTools = if (state.claudeTools || state.claudeReadTools) {
             { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId)) }
         } else null,
+        // "本轮改动": the session folder's Git review with the latest turn's files first. For a folder
+        // the desktop reported a branch for, or once the latest turn edited files (observed sessions
+        // often carry no branch; the review says so itself when the folder is not a repository).
+        onOpenChanges = summary?.cwd?.takeIf { summary.gitBranch != null || turnEdited }?.let { cwd ->
+            {
+                val files = io.github.tianli0.switchtether.remote.session.TurnFiles.latestTurn(state.log.events)
+                onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.GitReview(cwd, files))
+            }
+        },
         onPermissionClick = { showPermission = true },
         onSlashCommand = onSlashCommand,
+        onOpenProjectUsage = { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.ProjectUsage(it)) },
         // Also here, not only on the Claude Code tools page: a Codex session SwitchTether started
         // has no tools page, and its process is just as much ours to end.
         onEndSession = if (state.canStop) {
@@ -486,7 +497,7 @@ fun SessionDetailScreen(
         ImageViewerDialog(preview = img, onLoadBytes = vm::loadImageBytes, onDismiss = { viewingImage = null })
     }
     viewingFile?.let { ref ->
-        io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
+        io.github.tianli0.switchtether.ui.common.AppFullScreenDialog(onDismissRequest = { viewingFile = null }) {
             // The page colour runs under the status and gesture bars; the viewer sits between them.
             Box(Modifier.fillMaxSize().background(pageContainerColor()).statusBarsPadding().navigationBarsPadding()) {
                 io.github.tianli0.switchtether.ui.files.RemoteFileViewer(ref, onBack = { viewingFile = null }, onManageDownloads = null)
@@ -524,23 +535,38 @@ fun SessionDetailContent(
     onWithdrawOutgoing: ((String) -> Unit)? = null,
     /** Claude Code session tools page (null = not offered for this session). */
     onOpenTools: (() -> Unit)? = null,
+    /** Git review of the session's folder ("本轮改动"; null = not a repository). */
+    onOpenChanges: (() -> Unit)? = null,
     onPermissionClick: (() -> Unit)? = null,
     /** A command picked from the "/" panel (null = no panel). */
     onSlashCommand: ((SlashEntry) -> Unit)? = null,
     /** "End session" in the info sheet (null = not offered: only a live session SwitchTether started). */
     onEndSession: (() -> Unit)? = null,
+    /** "Usage of project …" in the cost sheet (null = not offered). */
+    onOpenProjectUsage: ((String) -> Unit)? = null,
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
-    val hasAgents = summary?.agent in SUBAGENT_AGENTS && state.log.events.any {
-        it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT ||
-            (it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true)
+    // Cost and tokens of the loaded turns (§26); the capsule only shows when a turn reported usage.
+    var showCost by rememberSaveable { mutableStateOf(false) }
+    val usageBreakdown = remember(state.log, summary?.agent) { sessionUsageBreakdown(state.log.events, summary?.agent) }
+    // Scans of the whole log, redone only when the log changes (not on every recomposition).
+    val hasAgents = summary?.agent in SUBAGENT_AGENTS && remember(state.log) {
+        state.log.events.any {
+            it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT ||
+                (it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true)
+        }
     }
+    val agentsDot = remember(state.log, summary?.waitingFor) { agentsPillState(state) }
+    val backgroundTasks = remember(state.log) { backgroundTaskCounts(state) }
+    val subagentCount = remember(state.log) { state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT } }
     // The read-only tip explains once; the read-only composer bar keeps saying it afterwards.
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val hints = remember(appCtx) { (appCtx as? io.github.tianli0.switchtether.SwitchTetherApp)?.container?.hintPrefs }
     var tipDismissed by rememberSaveable { mutableStateOf(hints?.getBoolean("readonly_tip_dismissed", false) == true) }
     val listState = rememberLazyListState()
+    // Shared by the list (follows the newest message) and the floating "back to latest" pill.
+    val follow = rememberFollowState()
     val scope = rememberCoroutineScope()
     val displayTitle = summary?.let { io.github.tianli0.switchtether.ui.common.sessionDisplayTitle(it) } ?: initialTitle ?: stringResource(R.string.session_unnamed)
     Page(
@@ -549,7 +575,7 @@ fun SessionDetailContent(
             listOfNotNull(
                 Formatters.agentLabel(s.agent),
                 io.github.tianli0.switchtether.ui.common.sessionProjectName(s)?.takeIf { it != displayTitle },
-                s.model,
+                s.model?.let(::shortModelName),
             ).joinToString(" · ")
         } ?: "",
         onBack = onBack,
@@ -636,7 +662,7 @@ fun SessionDetailContent(
                 when (val ev = state.events) {
                     Loadable.Loading -> LoadingState(stringResource(R.string.state_loading), Modifier.padding(top = topOverlay))
                     is Loadable.Failed -> ErrorState(ev.error.title(), Modifier.padding(top = topOverlay), ev.error.detail, stringResource(R.string.action_retry), onReload)
-                    is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing, bottomInset = composerHeight, topInset = topOverlay)
+                    is Loadable.Ready -> EventList(state, ctx, listState, follow, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing, bottomInset = composerHeight, topInset = topOverlay)
                 }
             }
             CompositionLocalProvider(LocalGlassBackdrop provides chatBackdrop) {
@@ -654,11 +680,22 @@ fun SessionDetailContent(
                         state,
                         onInfo = { showInfo = true },
                         onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
-                        subagentCount = state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT },
-                        agentsDot = agentsPillState(state),
+                        subagentCount = subagentCount,
+                        agentsDot = agentsDot,
+                        backgroundTasks = backgroundTasks,
                         onOpenTools = onOpenTools,
                         onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
+                        onOpenChanges = onOpenChanges,
+                        costLabel = usageBreakdown?.let { costChipLabel(it) },
+                        onOpenCost = { showCost = true },
                     )
+                }
+                // "Back to latest" floats with the other controls, outside the recorded list, so its
+                // glass has the conversation to blur (inside the list it could only paint a flat fill).
+                if (state.events is Loadable.Ready) {
+                    Box(Modifier.fillMaxSize()) {
+                        NewMessagesPill(listState, follow, chatRows(state), composerHeight)
+                    }
                 }
                 // The composer floats too. Nothing is laid behind it: only its own keys and field
                 // are glass, the conversation stays sharp around them (the title bar is the page's
@@ -676,6 +713,15 @@ fun SessionDetailContent(
         onDismiss = { showInfo = false },
         // The sheet closes first: the confirmation is a dialog of the page, not of the sheet.
         onEndSession = onEndSession?.let { end -> { showInfo = false; end() } },
+    )
+    SessionCostSheet(
+        show = showCost && usageBreakdown != null,
+        breakdown = usageBreakdown,
+        partial = state.hasMoreBefore,
+        project = summary?.let { io.github.tianli0.switchtether.ui.common.sessionProjectName(it) },
+        // The sheet closes first, so back from the project page returns to the conversation.
+        onOpenProjectUsage = onOpenProjectUsage?.let { open -> { p: String -> showCost = false; open(p) } },
+        onDismiss = { showCost = false },
     )
 }
 
@@ -695,6 +741,12 @@ private fun StatusChipRow(
     agentsDot: AgentMapState? = null,
     onOpenTools: (() -> Unit)? = null,
     onOpenTerminal: (() -> Unit)? = null,
+    /** Background shells of the session: (all, still running). */
+    backgroundTasks: Pair<Int, Int> = 0 to 0,
+    onOpenChanges: (() -> Unit)? = null,
+    /** Cost capsule label (money, or tokens without a cost); null = no usage reported yet. */
+    costLabel: String? = null,
+    onOpenCost: () -> Unit = {},
 ) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
@@ -713,8 +765,20 @@ private fun StatusChipRow(
             s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn, backdrop = bg) }
             if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary, backdrop = bg)
             // Full control is the normal case and needs no capsule; limits do.
-            if (s.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL) InfoChip(controlLabel(s.controlLevel), dot = controlColor(s.controlLevel), backdrop = bg)
+            // How far the phone may act is not a state: an icon, not a second coloured dot beside "busy".
+            if (s.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL) {
+                InfoChip(
+                    controlLabel(s.controlLevel),
+                    icon = if (s.controlLevel == io.github.tianli0.switchtether.remote.protocol.ControlLevel.OBSERVE) AppIcons.Watch else AppIcons.Clock,
+                    color = COUITheme.colorScheme.onSurfaceSecondary,
+                    backdrop = bg,
+                )
+            }
             s.gitBranch?.let { InfoChip(it, icon = AppIcons.Git, color = COUITheme.colorScheme.onSurfaceSecondary, backdrop = bg) }
+            if (onOpenChanges != null) {
+                val changesLabel = stringResource(R.string.git_turn_chip)
+                InfoChip(changesLabel, icon = AppIcons.Edit, onClick = onOpenChanges, modifier = Modifier.semantics { contentDescription = changesLabel }.testTag("chip-changes"), backdrop = bg)
+            }
             if (onOpenTerminal != null) {
                 InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel }, backdrop = bg)
             }
@@ -734,6 +798,23 @@ private fun StatusChipRow(
                     InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("subagent-tree"), backdrop = bg)
                 }
             }
+            // Commands left running in the background (`run_in_background`): their own capsule, so a
+            // long build or dev server is visible without opening the agent map. Opens the map,
+            // whose "background tasks" section lists them with their output.
+            val (bgAll, bgRunning) = backgroundTasks
+            if (bgAll > 0 && onOpenSubagents != null) {
+                val label = if (bgRunning > 0) pluralStringResource(R.plurals.background_task_chip_running, bgRunning, bgRunning)
+                else pluralStringResource(R.plurals.background_task_chip, bgAll, bgAll)
+                if (bgRunning > 0) {
+                    InfoChip(label, dot = dev.info, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("chip-background"), backdrop = bg)
+                } else {
+                    InfoChip(label, icon = AppIcons.BackgroundTask, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("chip-background"), backdrop = bg)
+                }
+            }
+            costLabel?.let { label ->
+                val described = stringResource(R.string.cost_chip_a11y, label)
+                InfoChip(label, icon = AppIcons.Usage, onClick = onOpenCost, modifier = Modifier.semantics { contentDescription = described }.testTag("chip-cost"), backdrop = bg)
+            }
             // Extra functions sit in the same row as the sub-agents.
             if (onOpenTools != null) {
                 InfoChip(toolsLabel, icon = AppIcons.SessionTools, onClick = onOpenTools, modifier = Modifier.semantics { contentDescription = toolsLabel }.testTag("chip-tools"), backdrop = bg)
@@ -749,8 +830,8 @@ private fun StatusChipRow(
 private fun agentsPillState(state: SessionDetailState): AgentMapState? {
     val kinds = io.github.tianli0.switchtether.remote.protocol.EventKinds
     val rows = state.log.events.filter { it.kind == kinds.SUBAGENT }
-    val shells = state.log.events.filter { it.kind == kinds.TOOL_CALL && it.data.bool("background") == true }
-    val working = rows.any { it.data.str("status") == "running" } || shells.any { it.data.str("status") == "running" }
+    // Background shells have a capsule of their own (backgroundTaskCounts).
+    val working = rows.any { it.data.str("status") == "running" }
     return when {
         working && state.detail.valueOrNull?.summary?.waitingFor != null -> AgentMapState.Waiting
         working -> AgentMapState.Working
@@ -760,11 +841,20 @@ private fun agentsPillState(state: SessionDetailState): AgentMapState? {
 }
 
 
+/** Background shells in the loaded log: (all, still running). */
+private fun backgroundTaskCounts(state: SessionDetailState): Pair<Int, Int> {
+    val shells = state.log.events.filter {
+        it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true
+    }
+    return shells.size to shells.count { it.data.str("status") == "running" }
+}
+
 @Composable
 private fun EventList(
     state: SessionDetailState,
     ctx: RenderContext,
     listState: androidx.compose.foundation.lazy.LazyListState,
+    follow: FollowState,
     onLoadOlder: () -> Unit,
     onToggleSteps: (String) -> Unit,
     onRetryOutgoing: (String) -> Unit,
@@ -777,7 +867,6 @@ private fun EventList(
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val rows = chatRows(state)
-    val follow = rememberFollowState()
     // Opening a session lands at the bottom; only then may scrolling to the top load older pages.
     // Saveable: coming back from a sub-agent page keeps the reading position instead of jumping down.
     var initialScrollDone by androidx.compose.runtime.saveable.rememberSaveable(state.sessionId) { mutableStateOf(false) }
@@ -826,7 +915,6 @@ private fun EventList(
                 }
             }
         }
-        NewMessagesPill(listState, follow, rows, bottomInset)
     }
 }
 
@@ -990,7 +1078,9 @@ private fun Composer(
         if (showModel || showInterrupt) {
             // Above the field: the run settings on the left, "stop" on the right while a turn runs.
             // Stop is a labelled capsule here, not a fourth key squeezed into the input row.
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // SpaceBetween, not a weighted spacer: the spacer took half the row, so the settings capsule
+            // was cut at half the width with room to spare.
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 if (showModel && s != null) {
                     // Model and effort of the running session, one tap away (like the IDE's model picker).
                     Row(
@@ -1017,7 +1107,7 @@ private fun Composer(
                         )
                     }
                 }
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.size(8.dp))
                 if (showInterrupt) {
                     val stopLabel = stringResource(R.string.session_interrupt)
                     Spacer(Modifier.size(8.dp))
@@ -1384,90 +1474,18 @@ private fun ImageViewerDialog(
     onLoadBytes: suspend (String) -> ByteArray?,
     onDismiss: () -> Unit,
 ) {
-    var bytes by remember(preview) { mutableStateOf(preview.bytes) }
-    LaunchedEffect(preview) {
-        if (bytes == null && preview.path != null) {
-            bytes = onLoadBytes(preview.path)
-        }
-    }
-    val bmp = remember(bytes) {
-        bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
-    }
-    val fileStore = appContainer().fileStore
-    val viewerContext = androidx.compose.ui.platform.LocalContext.current
-    val viewerScope = rememberCoroutineScope()
-    var scale by remember(preview) { mutableStateOf(1f) }
-    var offset by remember(preview) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    val transformState = androidx.compose.foundation.gestures.rememberTransformableState { zoomChange, panChange, _ ->
-        scale = (scale * zoomChange).coerceIn(1f, 5f)
-        offset = if (scale > 1f) offset + panChange else androidx.compose.ui.geometry.Offset.Zero
-    }
-    io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = onDismiss) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.94f))
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (bmp != null) {
-                androidx.compose.foundation.Image(
-                    bitmap = bmp,
-                    contentDescription = preview.alt ?: stringResource(R.string.render_image_preview),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .transformable(transformState)
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offset.x,
-                            translationY = offset.y,
-                        ),
-                )
-            } else {
-                Text(
-                    preview.alt ?: preview.url ?: stringResource(R.string.state_loading),
-                    style = COUITheme.textStyles.body2,
-                    color = androidx.compose.ui.graphics.Color.White,
-                    modifier = Modifier.padding(24.dp),
-                )
-            }
-            RoundIconButton(
-                icon = AppIcons.Close,
-                label = stringResource(R.string.action_close),
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(20.dp),
+    // The lightbox (ui/files/ImageLightbox.kt): zoom, swipe through the message's pictures, pull down to close.
+    val all = preview.gallery.ifEmpty { listOf(preview) }
+    val images = remember(preview) {
+        all.map { p ->
+            io.github.tianli0.switchtether.ui.files.LightboxImage(
+                name = p.path?.let(io.github.tianli0.switchtether.files.FileTypes::fileName)?.takeIf { it.isNotBlank() }
+                    ?: p.alt?.takeIf { it.isNotBlank() && !it.contains('/') && !it.contains('\\') && it.contains('.') }
+                    ?: io.github.tianli0.switchtether.ui.files.imageNameFor(p.bytes),
+                bytes = p.bytes,
+                path = p.path,
             )
-            val remotePath = preview.path
-            if (remotePath != null) {
-                // Viewing is already cached in memory; keeping the file or handing it to another app is explicit.
-                val saved = stringResource(R.string.viewer_saved_to, io.github.tianli0.switchtether.files.FileStore.DOWNLOAD_FOLDER)
-                val noApp = stringResource(R.string.viewer_no_app)
-                Row(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    RoundIconButton(
-                        icon = AppIcons.Download,
-                        label = stringResource(R.string.files_download),
-                        onClick = {
-                            viewerScope.launch {
-                                val msg = runCatching { fileStore.download(remotePath) }.fold({ saved }, { it.message ?: "" })
-                                android.widget.Toast.makeText(viewerContext, msg, android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                    )
-                    SmallButton(
-                        text = stringResource(R.string.viewer_open_with),
-                        modifier = Modifier.align(Alignment.CenterVertically),
-                        onClick = {
-                            viewerScope.launch {
-                                runCatching { fileStore.resolve(remotePath) }.onSuccess {
-                                    io.github.tianli0.switchtether.ui.files.startSafely(viewerContext, fileStore.viewIntent(it), noApp)
-                                }.onFailure { android.widget.Toast.makeText(viewerContext, it.message ?: noApp, android.widget.Toast.LENGTH_SHORT).show() }
-                            }
-                        },
-                    )
-                }
-            }
         }
     }
+    io.github.tianli0.switchtether.ui.files.ImageLightbox(images, startIndex = if (preview.gallery.isEmpty()) 0 else preview.index, onDismiss = onDismiss, loadBytes = onLoadBytes)
 }

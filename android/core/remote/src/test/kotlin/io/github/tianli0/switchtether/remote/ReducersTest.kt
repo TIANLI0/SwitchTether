@@ -138,6 +138,28 @@ class AgentEventLogTest {
     }
 
     @Test
+    fun aCallWithoutResultIsInterruptedOnceTheTurnMovedOn() {
+        fun status(items: List<io.github.tianli0.switchtether.remote.session.RenderItem>, id: String) =
+            items.first { it.key == id }.event.data["status"].toString().trim('"')
+        val running = listOf(
+            e("c1", 1, "tool_call", """{"callId":"k1","name":"Bash","status":"running"}"""),
+            e("bg", 2, "tool_call", """{"callId":"k2","name":"Bash","status":"running","background":true}"""),
+            e("sub", 3, "assistant_message", """{"text":"inside an agent"}""", parent = "x"),
+        )
+        // Nothing at the call's level after it: still running.
+        assertEquals("running", status(AgentEventLog.of(running).renderItems(), "c1"))
+        // The turn ended with an error: the orphaned call is over; a background shell keeps running.
+        val ended = AgentEventLog.of(running + e("err", 4, "error", """{"message":"rate limit"}""")).renderItems()
+        assertEquals("interrupted", status(ended, "c1"))
+        assertEquals("running", status(ended, "bg"))
+        // A call that got its result is untouched.
+        val done = AgentEventLog.of(
+            running + e("r1", 4, "tool_result", """{"callId":"k1","text":"ok"}""") + e("m", 5, "assistant_message", """{"text":"done"}"""),
+        ).renderItems()
+        assertEquals("running", status(done, "c1"))
+    }
+
+    @Test
     fun inPlaceResolvedRequestsAreNotPending() {
         val open = e("ap", 1, "approval_request", """{"requestId":"q1","options":[{"id":"allow","label":"Allow"}],"resolved":false}""")
         val q = e("qq", 2, "question", """{"requestId":"q2","questions":[]}""")

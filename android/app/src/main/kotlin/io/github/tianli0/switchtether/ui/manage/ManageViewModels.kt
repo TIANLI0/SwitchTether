@@ -137,6 +137,8 @@ data class UsageState(
     val hiddenApps: Set<String> = emptySet(),
     /** Zone the ranges and labels use: the desktop's (falls back to the phone's). */
     val zone: ZoneId = ZoneId.systemDefault(),
+    /** Usage per project; null = the desktop has no project API (section hidden). */
+    val projects: Loadable<io.github.tianli0.switchtether.remote.protocol.ProjectUsageView>? = Loadable.Loading,
 ) {
     val hourly: Boolean get() = isHourlyRange(fromSec, toSec)
     val logsHaveMore: Boolean get() = logs != null && logs.size < logsTotal
@@ -206,6 +208,10 @@ class UsageViewModel(
         // The desktop sorts both tables by request count (descending) by default.
         viewModelScope.launch { val r = loadable { repo.usageModels(from, to, app).sortedByDescending { it.requests } }; _state.update { if (gen == rangeGen) it.copy(models = r) else it } }
         viewModelScope.launch { val r = loadable { repo.usageProviders(from, to, app).sortedByDescending { it.requests } }; _state.update { if (gen == rangeGen) it.copy(providers = r) else it } }
+        viewModelScope.launch {
+            val r = loadProjects { repo.usageProjects(from, to, app) }
+            _state.update { if (gen == rangeGen) it.copy(projects = r) else it }
+        }
         viewModelScope.launch {
             val tools = listOf("claude", "codex")
             val quotas = tools.map { t -> t to loadable { repo.quota(t) } }
@@ -301,6 +307,70 @@ class ToggleListViewModel(
                 ToggleListKind.SKILLS -> repo.toggleSkill(id, app, enabled, cmd)
                 ToggleListKind.PROMPTS -> repo.enablePrompt(app, id, cmd)
             }
+        }
+    }
+}
+
+/** Loads usage per project; null when the desktop does not have the API (404 / not implemented). */
+internal suspend fun loadProjects(
+    block: suspend () -> io.github.tianli0.switchtether.remote.protocol.ProjectUsageView,
+): Loadable<io.github.tianli0.switchtether.remote.protocol.ProjectUsageView>? {
+    val r = runCatching { block() }
+    r.exceptionOrNull()?.let { e ->
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        val missing = generateSequence(e) { it.cause }.any { (it as? io.github.tianli0.switchtether.remote.api.ApiException)?.httpStatus == 404 } || e is UnsupportedOperationException
+        if (missing) return null
+    }
+    return loadable { r.getOrThrow() }
+}
+
+// ---- One project's usage ------------------------------------------------------------------------
+
+data class ProjectUsageState(
+    val project: String,
+    val preset: UsageRangePreset = UsageRangePreset.DAYS_30,
+    /** null = the desktop has no project API. */
+    val usage: Loadable<io.github.tianli0.switchtether.remote.protocol.ProjectUsage?>? = Loadable.Loading,
+)
+
+/** `Route.ProjectUsage`: one project's cost and its sessions, most expensive first. */
+class ProjectUsageViewModel(
+    project: String,
+    private val conn: ConnectionController,
+    private val repo: ManagementRepository,
+    private val zone: ZoneId = ZoneId.systemDefault(),
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+) : ViewModel() {
+    private val _state = MutableStateFlow(ProjectUsageState(project))
+    val state: StateFlow<ProjectUsageState> = _state.asStateFlow()
+    private var gen = 0
+
+    init {
+        onOnline(conn) { load() }
+    }
+
+    fun setPreset(p: UsageRangePreset) {
+        _state.update { it.copy(preset = p) }
+        load()
+    }
+
+    fun load() {
+        val g = ++gen
+        val st = _state.value
+        _state.update { it.copy(usage = if (it.usage == null) null else Loadable.Loading) }
+        viewModelScope.launch {
+            val status = (conn.state.value as? io.github.tianli0.switchtether.connection.ConnectionState.Online)?.status
+            val z = io.github.tianli0.switchtether.remote.protocol.desktopZone(status?.timeZone, status?.utcOffsetMinutes, zone)
+            val first = if (st.preset == UsageRangePreset.ALL) runCatching { repo.usageFirstDateMs(null) }.getOrNull() else null
+            val (from, to) = resolveUsageRange(st.preset, nowMs(), z, first)
+            val r = loadProjects { repo.usageProjects(from, to, null, st.project) }
+            val one = when (r) {
+                null -> null
+                is Loadable.Ready -> Loadable.Ready(r.value.projects.firstOrNull())
+                is Loadable.Failed -> r
+                Loadable.Loading -> Loadable.Loading
+            }
+            _state.update { if (g == gen) it.copy(usage = one) else it }
         }
     }
 }

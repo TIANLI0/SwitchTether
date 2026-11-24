@@ -472,7 +472,6 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
 
 private fun hm(min: Int) = "%02d:%02d".format(min / 60, min % 60)
 
-
 data class LicenseEntry(val name: String, val license: String, val note: String)
 
 /** Mirrors android/THIRD_PARTY_LICENSES.md. */
@@ -485,7 +484,7 @@ val LICENSES = listOf(
     LicenseEntry("Kotlin stdlib, kotlinx.coroutines, kotlinx.serialization", "Apache-2.0", "JetBrains s.r.o."),
     LicenseEntry("OkHttp / Okio", "Apache-2.0", "Square, Inc."),
     LicenseEntry("ZXing core", "Apache-2.0", "ZXing authors"),
-    LicenseEntry("Telephoto (zoomable, sub-sampling-image)", "Apache-2.0", "Saket Narayan"),
+    LicenseEntry("Telephoto (zoomable, sub-sampling-image, flick)", "Apache-2.0", "Saket Narayan"),
     LicenseEntry("multiplatform-markdown-renderer, JetBrains Markdown", "Apache-2.0", "Mike Penz; JetBrains s.r.o."),
     LicenseEntry("Highlights (dev.snipme)", "Apache-2.0", "SnipMe"),
     LicenseEntry("AndroidX Media3 ExoPlayer (video / audio preview)", "Apache-2.0", "The Android Open Source Project"),

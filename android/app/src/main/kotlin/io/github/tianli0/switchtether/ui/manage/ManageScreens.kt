@@ -238,7 +238,7 @@ private fun ProviderCard(
 // ---- Usage --------------------------------------------------------------------------------------
 
 @Composable
-fun UsageScreen(onBack: () -> Unit) {
+fun UsageScreen(onBack: () -> Unit, onOpen: (io.github.tianli0.switchtether.ui.nav.Route) -> Unit = {}) {
     val container = appContainer()
     val vm = containerViewModel { UsageViewModel(it.connection, it.management) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -266,7 +266,7 @@ fun UsageScreen(onBack: () -> Unit) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
             modifier = Modifier.padding(vertical = 2.dp),
         )
-        UsageContent(state, vm::load, vm::setMetric, onMoreLogs = vm::loadMoreLogs, onOpenLog = vm::openLog)
+        UsageContent(state, vm::load, vm::setMetric, onMoreLogs = vm::loadMoreLogs, onOpenLog = vm::openLog, onOpenProject = { onOpen(io.github.tianli0.switchtether.ui.nav.Route.ProjectUsage(it)) })
     }
     RequestLogSheet(state.selectedLog, state.zone, onDismiss = { vm.openLog(null) })
 }
@@ -290,6 +290,7 @@ fun UsageContent(
     onMetric: (UsageMetric) -> Unit = {},
     onMoreLogs: () -> Unit = {},
     onOpenLog: (io.github.tianli0.switchtether.remote.protocol.RequestLog) -> Unit = {},
+    onOpenProject: (String) -> Unit = {},
 ) {
     // One honest page-level error instead of repeating it on every card (e.g. 503 from CC Switch).
     (state.summary as? Loadable.Failed)?.let { failed ->
@@ -309,6 +310,7 @@ fun UsageContent(
         item { GroupCard { SmallLoadable(state.providers, onRetry) { BreakdownTable(it, showAvgCost = false) } } }
         item { SectionHeader(stringResource(R.string.usage_by_model)) }
         item { GroupCard { SmallLoadable(state.models, onRetry) { BreakdownTable(it, showAvgCost = true) } } }
+        projectUsageSection(state.projects, onRetry, onOpenProject)
         item { SectionHeader(stringResource(R.string.usage_quota)) }
         items(state.quotas, key = { it.first }) { (_, q) ->
             Box(Modifier.animateItem()) { GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } } }
@@ -375,7 +377,7 @@ fun UsageContent(
 
 /** Compact in-card loadable (cards keep their place; errors explain themselves). */
 @Composable
-private fun <T> SmallLoadable(state: Loadable<T>, onRetry: () -> Unit, content: @Composable (T) -> Unit) {
+internal fun <T> SmallLoadable(state: Loadable<T>, onRetry: () -> Unit, content: @Composable (T) -> Unit) {
     when (state) {
         Loadable.Loading -> Text(stringResource(R.string.state_loading), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp))
         is Loadable.Failed -> Column(Modifier.padding(16.dp)) {

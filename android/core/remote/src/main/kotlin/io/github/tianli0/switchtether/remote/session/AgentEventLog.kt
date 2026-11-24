@@ -4,6 +4,8 @@ import io.github.tianli0.switchtether.remote.protocol.AgentEvent
 import io.github.tianli0.switchtether.remote.protocol.EventKinds
 import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.str
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * In-memory, immutable log of one session's [AgentEvent]s (§10.2).
@@ -96,7 +98,27 @@ class AgentEventLog private constructor(
             )
         }
         val parents = events.mapNotNullTo(HashSet()) { it.parentId }
+        // A foreground call that never got its result but was followed by the turn ending at the same
+        // level (an error such as a rate limit, an interrupt, "turn stopped") is over. Without this its
+        // spinner kept turning after the session went idle. Agent text alone is not an end: some
+        // agents speak while a command still runs.
+        val settledAfter = HashMap<String?, Int>()
+        events.forEachIndexed { i, e ->
+            val ends = e.kind == EventKinds.ERROR ||
+                (e.kind == EventKinds.STATUS && e.data.str("state") == "interrupted") ||
+                (e.kind == EventKinds.SYSTEM && e.data.str("subtype") == "turn_stopped")
+            if (ends) settledAfter[e.parentId] = i
+        }
+        val indexOf = HashMap<String, Int>(events.size).also { m -> events.forEachIndexed { i, e -> m[e.id] = i } }
         return out.map { item ->
+            val e = item.event
+            val st = e.data.str("status")
+            val stale = e.kind == EventKinds.TOOL_CALL && (st == "running" || st == "pending") &&
+                item.attachedResult == null && e.data.bool("background") != true &&
+                (settledAfter[e.parentId] ?: -1) > (indexOf[e.id] ?: Int.MAX_VALUE)
+            if (stale) item.copy(event = e.copy(data = JsonObject(e.data + ("status" to JsonPrimitive("interrupted")))))
+            else item
+        }.map { item ->
             // The callId alias addresses the tool call itself; a subagent row also carries the
             // callId of the Agent call it hangs under, which must not make it its own parent.
             val callId = item.event.data.str("callId").takeIf { item.event.kind == EventKinds.TOOL_CALL }

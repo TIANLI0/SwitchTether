@@ -837,3 +837,232 @@ async fn port_forward_tunnel_carries_http_over_mtls() {
     assert_eq!(v["forwards"].as_array().unwrap().len(), 0);
     f.handle.shutdown().await;
 }
+
+#[tokio::test]
+async fn git_writes_need_step_up_and_replay_by_command_id() {
+    let git = |d: &std::path::Path, args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(d)
+            .args(args)
+            .output()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let canon = std::fs::canonicalize(dir.path()).unwrap();
+    let canon = canon
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .to_string();
+    let d = std::path::Path::new(&canon);
+    if git(d, &["init", "-q", "-b", "main"]).is_err() {
+        return; // git not installed here
+    }
+    git(d, &["config", "user.email", "t@example.com"]).unwrap();
+    git(d, &["config", "user.name", "T"]).unwrap();
+    git(d, &["config", "commit.gpgsign", "false"]).unwrap();
+    std::fs::write(d.join("a.txt"), "one\n").unwrap();
+
+    let f = start().await;
+    let c = Client::new(&f);
+    let (kp, spki) = step_up_key();
+    let device_id = pair(&f, &c, Some(&spki)).await;
+    let (s, v) = c.get("/v1/capabilities").await;
+    assert_eq!(s, 200);
+    assert!(v["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x == "git_write"));
+
+    let (s, v) = c
+        .post(
+            "/v1/git/stage",
+            json!({"commandId":"g0","repo":canon,"paths":["a.txt"]}),
+        )
+        .await;
+    assert_eq!(s, 403, "{v}");
+    assert_eq!(v["error"]["details"]["scope"], "git_write");
+    grant(&c, &device_id, &kp, "git_write").await;
+
+    let (s, v) = c
+        .post(
+            "/v1/git/stage",
+            json!({"commandId":"g1","repo":canon,"paths":["a.txt"]}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["status"]["entries"][0]["index"], "A");
+    // Path escaping the repository is refused before git runs.
+    let (s, _) = c
+        .post(
+            "/v1/git/stage",
+            json!({"commandId":"g2","repo":canon,"paths":["../x"]}),
+        )
+        .await;
+    assert_eq!(s, 400);
+    let (s, v) = c
+        .post(
+            "/v1/git/commit",
+            json!({"commandId":"g3","repo":canon,"message":"from the phone"}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    let head = v["head"].as_str().unwrap().to_string();
+    assert_eq!(head.len(), 40);
+    // Same commandId: the stored outcome is replayed, no second commit.
+    std::fs::write(d.join("a.txt"), "two\n").unwrap();
+    git(d, &["add", "-A"]).unwrap();
+    let (s, v) = c
+        .post(
+            "/v1/git/commit",
+            json!({"commandId":"g3","repo":canon,"message":"from the phone"}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["head"], head);
+    let (s, v) = c
+        .get(&format!("/v1/git/log?repo={}&limit=5", url_encode(&canon)))
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(v["commits"].as_array().unwrap().len(), 1);
+    let (s, v) = c
+        .post(
+            "/v1/git/checkout",
+            json!({"commandId":"g4","repo":canon,"branch":"feat/phone","create":true}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["status"]["branch"], "feat/phone");
+    let (s, v) = c
+        .get(&format!("/v1/git/branches?repo={}", url_encode(&canon)))
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(v["current"], "feat/phone");
+    f.handle.shutdown().await;
+}
+
+/// A phone with a push subscription and no event stream is woken by an encrypted, content-free
+/// POST to its push endpoint when a session starts waiting (docs/PROTOCOL.md §7.12).
+#[tokio::test]
+async fn push_wake_reaches_the_endpoint_while_the_phone_is_away() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let f = start().await;
+    let c = Client::new(&f);
+    pair(&f, &c, None).await;
+
+    // A stand-in push server on loopback: records each request and answers 201.
+    let push = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let push_port = push.local_addr().unwrap().port();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = push.accept().await else {
+                return;
+            };
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = s.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    if let Some(h) = text.find("\r\n\r\n") {
+                        let len = text[..h]
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if buf.len() >= h + 4 + len {
+                            let _ = tx.send(text[..h].to_string());
+                            let _ = s
+                                .write_all(b"HTTP/1.1 201 Created\r\ncontent-length: 0\r\n\r\n")
+                                .await;
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    let rng = ring::rand::SystemRandom::new();
+    let key =
+        ring::agreement::EphemeralPrivateKey::generate(&ring::agreement::ECDH_P256, &rng).unwrap();
+    let p256dh = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(key.compute_public_key().unwrap().as_ref());
+    let auth = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([7u8; 16]);
+    let endpoint = format!("http://127.0.0.1:{push_port}/up/AbCdEfGhIjKlMnOpQrStUv");
+
+    let (s, v) = c.get("/v1/push").await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["registered"], false);
+    assert_eq!(v["vapidPublicKey"].as_str().unwrap().len(), 87);
+    let (s, _, _) = c
+        .req(
+            "PUT",
+            "/v1/push",
+            Some(json!({ "endpoint": "file:///etc/passwd", "p256dh": p256dh, "auth": auth })),
+        )
+        .await
+        .unwrap();
+    assert_ne!(s, 200);
+    let (s, v, _) = c
+        .req(
+            "PUT",
+            "/v1/push",
+            Some(json!({ "endpoint": endpoint, "p256dh": p256dh, "auth": auth })),
+        )
+        .await
+        .unwrap();
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(c.get("/v1/push").await.1["registered"], true);
+
+    // Capability advertised.
+    let (_, caps) = c.get("/v1/capabilities").await;
+    let features = caps["features"].as_array().unwrap();
+    assert!(features.contains(&json!("push_wake")) && features.contains(&json!("session_search")));
+
+    // No event stream open: a session that starts waiting wakes the phone.
+    f.handle.ctx.events.publish(
+        "session.upserted",
+        json!({ "id": "claude:x", "status": "busy" }),
+    );
+    f.handle.ctx.events.publish(
+        "session.upserted",
+        json!({ "id": "claude:x", "status": "waiting" }),
+    );
+    let head = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+        .await
+        .expect("push request")
+        .unwrap()
+        .to_ascii_lowercase();
+    assert!(
+        head.starts_with("post /up/abcdefghijklmnopqrstuv http/1.1"),
+        "{head}"
+    );
+    assert!(head.contains("content-encoding: aes128gcm"), "{head}");
+    assert!(head.contains("authorization: vapid t="), "{head}");
+    assert!(head.contains("ttl: "), "{head}");
+
+    // Explicit test push (settings button).
+    let (s, v) = c.post("/v1/push/test", json!({})).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["delivered"], true);
+
+    // Search query validation.
+    let (s, _) = c.get("/v1/sessions/search?q=").await;
+    assert_ne!(s, 200);
+
+    let (s, v, _) = c.req("DELETE", "/v1/push", None).await.unwrap();
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["removed"], true);
+    assert!(!f.handle.ctx.push.has_subscribers());
+    f.handle.shutdown().await;
+}

@@ -263,12 +263,17 @@ impl RemoteServer {
             ctx.clone(),
             shutdown.clone(),
         )));
-        // Push live-session status changes only while a phone is connected.
+        // Push live-session status changes only while a phone is connected, or while a phone
+        // that is away asked to be woken by push (docs/PROTOCOL.md §7.12).
         let weak = Arc::downgrade(&ctx);
         ctx.agents.start_live_watcher(
             shutdown.child_token(),
-            Arc::new(move || weak.upgrade().is_some_and(|c| !c.connections.is_empty())),
+            Arc::new(move || {
+                weak.upgrade()
+                    .is_some_and(|c| !c.connections.is_empty() || c.push.has_subscribers())
+            }),
         );
+        ctx.push.start(ctx.events.clone(), shutdown.child_token());
 
         Ok(RemoteServerHandle {
             ctx,

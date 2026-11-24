@@ -80,7 +80,7 @@ fun buildTimeline(items: List<RenderItem>, expandedGroups: Set<String>): List<Ti
                 groupId = id,
                 steps = counted,
                 running = run.any { isRunning(it) },
-                failed = run.count { it.event.kind == EventKinds.TOOL_CALL && (it.event.data.str("status") == "failed" || it.attachedResult?.data?.bool("isError") == true) },
+                failed = run.count { it.event.kind == EventKinds.TOOL_CALL && it.event.data.str("status") !in setOf("denied", "interrupted") && (it.event.data.str("status") == "failed" || it.attachedResult?.data?.bool("isError") == true) },
                 expanded = expanded,
                 latestTitle = run.lastOrNull(::isCountedStep)?.let(::stepTitle),
             )
@@ -105,6 +105,11 @@ private fun isRunning(item: RenderItem): Boolean {
 
 fun stepTitle(item: RenderItem): String {
     val d = item.event.data
+    // Claude Code asks the model for a one-line description of every shell command ("Show working
+    // tree status"): that reads better than the command, which the expanded row still shows in full.
+    if (d.str("category") == "shell") {
+        (d["input"] as? kotlinx.serialization.json.JsonObject)?.str("description")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    }
     if (d.str("category") == "shell") io.github.tianli0.switchtether.remote.session.ToolCommands.raw(d)?.let {
         val preview = io.github.tianli0.switchtether.remote.session.ToolCommands.preview(it)
         val title = d.str("title")

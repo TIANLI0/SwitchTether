@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Session cost sheet (docs/ANDROID_UI.md §26) -->
+    <string name="cost_sheet_title">Cost and tokens</string>
+    <string name="cost_chip_a11y">Cost and tokens of this session: %1$s</string>
+    <string name="cost_total">Cost of this session</string>
+    <string name="cost_total_tokens">Tokens of this session</string>
+    <plurals name="cost_turns">
+        <item quantity="one">%d turn</item>
+        <item quantity="other">%d turns</item>
+    </plurals>
+    <string name="cost_turns_label">Turns</string>
+    <string name="cost_avg_turn">Average per turn %1$s</string>
+    <string name="cost_per_turn">Per turn</string>
+    <string name="cost_metric_cost">Cost</string>
+    <string name="cost_metric_tokens">Tokens</string>
+    <string name="cost_turn_title">Turn %1$d</string>
+    <string name="cost_turn_no_prompt">No message loaded for this turn</string>
+    <string name="cost_duration">Duration</string>
+    <string name="cost_chart_a11y">Per-turn chart, %1$d turns. %2$s</string>
+    <string name="cost_breakdown">Tokens</string>
+    <string name="cost_cache_hit">Cache hit rate</string>
+    <string name="cost_context">Last request\'s context</string>
+    <string name="cost_context_value">≈ %1$s tokens</string>
+    <string name="cost_partial">Only the part of the conversation loaded on this phone is counted. Scroll up in the conversation to load older turns.</string>
+    <string name="cost_running_total">The cost is the agent\'s own running total for each run, so it can include turns older than the ones loaded.</string>
+    <string name="cost_project_usage">Usage of project “%1$s”</string>
+    <string name="cost_project_usage_summary">Cost of all its sessions on this computer</string>
+
+    <!-- Usage per project -->
+    <string name="usage_by_project">By project</string>
+    <string name="usage_project_sessions">%1$s · %2$d sessions</string>
+    <string name="usage_unattributed">Not linked to a session</string>
+    <string name="usage_other_projects">Other projects</string>
+    <string name="usage_projects_note">Projects come from the session each request belongs to. Only recent request logs keep that link; older days that were compacted count under “Not linked to a session”.</string>
+    <string name="project_usage_title">Project usage</string>
+    <string name="project_usage_sessions">Sessions</string>
+    <string name="project_usage_none">No usage of this project in this period.</string>
+    <string name="project_usage_untitled">Untitled session</string>
+    <string name="project_usage_unsupported">The computer\'s SwitchTether does not report usage per project yet. Update it to see this page.</string>
+
+    <!-- Two-pane layout -->
+    <string name="pane_empty_sessions">Choose a session to see it here</string>
+    <string name="pane_empty_workspace">Choose a tool to open it here</string>
+    <string name="pane_empty_manage">Choose an item to open it here</string>
+</resources>

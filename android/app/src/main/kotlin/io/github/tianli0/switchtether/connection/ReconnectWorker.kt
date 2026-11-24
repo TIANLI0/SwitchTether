@@ -56,6 +56,7 @@ class ReconnectWorker(context: Context, params: WorkerParameters) : CoroutineWor
     }
 
     companion object {
+
         private const val WORK_IMMEDIATE = "switchtether_reconnect_now"
         private const val WORK_PERIODIC = "switchtether_reconnect_periodic"
 

@@ -122,6 +122,8 @@ object StepUpScopes {
     const val FILES_WRITE = "files_write"
     const val CONFIG_WRITE = "config_write"
     const val PORT_FORWARD = "port_forward"
+    /** Stage, discard, commit, push, pull, fetch, checkout (PROTOCOL.md §7.7). */
+    const val GIT_WRITE = "git_write"
 }
 
 // ---------------------------------------------------------------------------------------------

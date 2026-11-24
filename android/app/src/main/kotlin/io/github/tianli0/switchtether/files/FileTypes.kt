@@ -61,6 +61,9 @@ object FileTypes {
         "ppt" to "application/vnd.ms-powerpoint", "pptx" to "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
 
+    /** What [mimeFor] says when it does not know the type. */
+    const val GENERIC_MIME = "application/octet-stream"
+
     private val windowsDrive = Regex("^[A-Za-z]:[\\\\/]")
     private const val BAD_NAME_CHARS = "<>:\"|?*"
 
@@ -74,7 +77,7 @@ object FileTypes {
     fun mimeFor(name: String): String {
         val ext = extension(name)
         if (ext == "pdf") return "application/pdf"
-        return images[ext] ?: videos[ext] ?: audios[ext] ?: texts[ext] ?: others[ext] ?: "application/octet-stream"
+        return images[ext] ?: videos[ext] ?: audios[ext] ?: texts[ext] ?: others[ext] ?: GENERIC_MIME
     }
 
     fun kindOf(name: String): FileKind {
@@ -124,6 +127,25 @@ object FileTypes {
             ext in texts || ext.isEmpty() -> FileIcon.TEXT
             else -> FileIcon.OTHER
         }
+    }
+
+    /**
+     * Folder of a Windows or POSIX path, as the desktop's `fs/list` takes it: `/` for a file at the root,
+     * `C:\` (with its separator) for a file on a drive root; null for a bare name.
+     */
+    fun parentOf(path: String): String? {
+        val p = path.trimEnd('/', '\\')
+        val i = maxOf(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+        if (i < 0) return null
+        if (i == 0) return p.substring(0, 1)
+        val parent = p.substring(0, i)
+        return if (parent.length == 2 && parent[1] == ':') parent + p[i] else parent
+    }
+
+    /** Whether two desktop paths name the same file (separators and a Windows drive letter's case ignored). */
+    fun samePath(a: String, b: String): Boolean {
+        fun norm(x: String) = x.replace('\\', '/').trimEnd('/').let { if (it.length >= 2 && it[1] == ':') it[0].lowercase() + it.substring(1) else it }
+        return norm(a) == norm(b)
     }
 
     /** Last segment of a Windows or POSIX path. */

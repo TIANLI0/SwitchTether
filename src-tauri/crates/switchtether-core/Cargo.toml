@@ -42,6 +42,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 ring = "0.17"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+# Root certificates for push wake requests to the phone's push server (already in the lock file).
+webpki-roots = "1"
 webpki = { package = "rustls-webpki", version = "0.103", default-features = false, features = ["ring", "std"] }
 
 rusqlite = { version = "0.31", features = ["bundled"] }

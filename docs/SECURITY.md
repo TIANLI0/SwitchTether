@@ -67,7 +67,7 @@ certificate, visible in the desktop's device list and revocable.
 - Every endpoint except `GET /v1/hello` and `POST /v1/pair` requires an active paired device.
 - The API is an explicit whitelist (`src-tauri/crates/switchtether-core/src/api/*`); Tauri IPC
   commands are not exposed.
-- **Step-up (biometric) scopes** — `terminal`, `files_write`, `config_write`, `port_forward` — require a grant
+- **Step-up (biometric) scopes** — `terminal`, `files_write`, `config_write`, `port_forward`, `git_write` — require a grant
   obtained by signing a server challenge with a second Keystore key that is usable only after
   BiometricPrompt / device-credential authentication. The server verifies the ECDSA signature
   over `switchtether-stepup-v1\n{deviceId}\n{challengeId}\n{nonce}\n{scope}`; challenges are
@@ -114,6 +114,17 @@ SwitchTether does **not** pretend to filter dangerous commands (string filtering
 restrict a shell). Protections are: biometric step-up, per-device ownership, audit of
 open/close and input volume (never input content), kill on revocation and on quit.
 
+### 7a0. Git writes
+
+Stage, discard, commit, push, pull, fetch and branch switches from the phone need step-up `git_write` and run the
+user's own `git` in the repository they name, with the read path's hardening (no fsmonitor, no external diff /
+textconv) and no way to prompt on the desktop (terminal prompts, Git Credential Manager dialogs and askpass are off).
+They use the credentials and hooks the user already configured, exactly as a terminal would; SwitchTether never
+stores or returns them. Paths are repository-relative and literal; discarding an untracked file moves it to the OS
+trash (the same deny-list as `fs/delete` applies) and never deletes. git's output is redacted before it is returned
+and is not stored beyond the command record; the audit log keeps only the operation, repository, path count or
+branch and the outcome.
+
 ### 7a. Port forwarding
 
 A forward (PROTOCOL.md §7.11) lets the phone reach one TCP port on the desktop's loopback.
@@ -134,6 +145,33 @@ A forward (PROTOCOL.md §7.11) lets the phone reach one TCP port on the desktop'
   screen says so; the ongoing notification names the forwarded ports and has a stop action.
   Compared with the remote shell this exposes less (one port, not a shell), which is why it is
   a separate, narrower scope.
+
+### 7b. Push wake
+
+Push wake (PROTOCOL.md §7.12) is opt-in on the phone and uses the user's own UnifiedPush
+distributor and push server.
+
+- **What the push server learns:** that this desktop wanted to wake this phone, and when
+  (timing, frequency, the desktop's IP address). Every message is RFC 8291-encrypted to keys only
+  the phone holds and its plaintext is the constant `{"v":1}`: no session id, title, text, count
+  or agent name. Push servers see the same message length every time.
+- **What a forged message can do:** nothing but make the phone connect early. The phone drops
+  any message that does not decrypt with its receiver keys and never acts on message content;
+  everything it shows afterwards comes over the pinned mTLS connection.
+- The endpoint is a capability URL: it is stored in `remote.db`, never returned to anyone, and
+  only its host is written to the audit log. It is removed when the device is revoked or the
+  push server answers 404 / 410.
+- The desktop posts only to the endpoint the paired phone registered (http/https, no
+  credentials in the URL, ≤ 1000 bytes), with a fixed body, and nothing it reads back is used
+  except the status code. A paired phone could point it at a LAN address; that address then
+  receives an encrypted ~130-byte POST at most every 10 s — no amplification and no data.
+- The receiver private key lives in the app's private storage (not the Keystore): it only
+  decrypts wake messages, which carry no information.
+- The VAPID key (RFC 8292) only authenticates the desktop to push servers that ask for it; it
+  protects no data and sits in `remote.db`.
+
+The Android receiver for UnifiedPush intents is exported (the distributor is another app). It
+acts only on intents with the random connection token of the current registration.
 
 ## 8. Replay and duplicate operations
 
@@ -167,8 +205,9 @@ retries.
 Audit records (90-day retention): pairing (incl. failures), revocation, step-up grants and
 denials, provider switches, credential updates (field name only), MCP/skill/prompt toggles,
 session create/message (length only)/approve/interrupt/stop, terminal create/kill/session,
-file write/rename/delete/upload/download and sensitive reads. Targets/details pass through
-the redactor.
+file write/rename/delete/upload/download and sensitive reads, push subscription changes
+(`push.register` with the endpoint host only, `push.unregister`, `push.expired`). Targets/details
+pass through the redactor. Session content searches are not logged (they are reads).
 
 ## 11. Security test inventory
 
@@ -178,7 +217,8 @@ the redactor.
 | Wrong certificate / wrong pin | `e2e: wrong_server_pin_is_rejected_by_client`, `client_without_certificate_is_rejected` |
 | Revoked certificate | `e2e: pairing_then_revocation`, `registry::tests::register_lookup_revoke` |
 | Replay / duplicates | `e2e: idempotent_commands_and_unknown_outcome`, `stepup::tests::full_flow` (challenge replay) |
-| Privilege escalation (no step-up) | `e2e: terminal_requires_step_up_and_streams_output`, `file_write_conflict_over_api`, `port_forward_tunnel_carries_http_over_mtls` |
+| Privilege escalation (no step-up) | `e2e: terminal_requires_step_up_and_streams_output`, `file_write_conflict_over_api`, `port_forward_tunnel_carries_http_over_mtls`, `git_writes_need_step_up_and_replay_by_command_id` |
+| Git path escape / option injection | `git::tests::rejects_paths_that_leave_the_repository`, e2e `../x` refused |
 | Port forward isolation (other device, stop, window abuse, refused port) | `e2e: port_forward_tunnel_carries_http_over_mtls`, `forward::tests::*`; Android `PortForwardTest` |
 | Concurrent operations | `e2e: concurrent_pairing_race_only_one_wins`; live managed-session second answer → 409 |
 | Path traversal / symlinks / denied paths | `files::policy::tests::*`, `files::tests::list_hides_denied_and_hidden`, e2e traversal |

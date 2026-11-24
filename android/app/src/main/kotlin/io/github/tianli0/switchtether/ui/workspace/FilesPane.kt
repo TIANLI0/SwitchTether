@@ -104,18 +104,35 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit = {}) {
     val file = state.file
     val viewer = state.viewer
-    when {
+    val opened: (@Composable () -> Unit)? = when {
         viewer != null -> {
-            BackHandler(onBack = vm::closeViewer)
-            RemoteFileViewer(
-                ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
-                onBack = vm::closeViewer,
-                onManageDownloads = onOpenDownloads,
-            )
+            {
+                val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(onBack = vm::closeViewer)
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().then(back)) {
+                    RemoteFileViewer(
+                        ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
+                        onBack = vm::closeViewer,
+                        onManageDownloads = onOpenDownloads,
+                    )
+                }
+            }
         }
-        state.conflict != null -> ConflictScreen(state, vm)
-        file != null -> FileScreen(state, vm)
-        else -> Browser(state, vm, onOpenDownloads)
+        state.conflict != null -> { { ConflictScreen(state, vm) } }
+        file != null -> { { FileScreen(state, vm) } }
+        else -> null
+    }
+    // Wide enough (a tablet's detail pane, §27): the folder stays on the left while a file is open.
+    // The opened file's back handler is composed after the browser's, so back closes the file first.
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        when {
+            opened == null -> Browser(state, vm, onOpenDownloads)
+            maxWidth >= FILES_SPLIT_MIN_WIDTH -> io.github.tianli0.switchtether.ui.nav.ListDetailPanes(
+                list = { Browser(state, vm, onOpenDownloads) },
+                detail = { opened() },
+                listWidth = (maxWidth * 0.38f).coerceIn(280.dp, 380.dp),
+            )
+            else -> opened()
+        }
     }
     state.message?.let { msg ->
         if (msg.res in QUIET_MESSAGES) {
@@ -173,14 +190,14 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     val clipboard = androidx.compose.ui.platform.LocalClipboard.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // Back: leave search results, then clear the quick filter, then go up a folder.
-    BackHandler(enabled = state.results != null || state.query.isNotEmpty() || listing?.parent != null) {
+    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(enabled = state.results != null || state.query.isNotEmpty() || listing?.parent != null) {
         when {
             state.results != null -> vm.clearSearch().also { searchExpanded = false }
             state.query.isNotEmpty() -> vm.setQuery("")
             else -> listing?.parent?.let(vm::browse)
         }
     }
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().then(back)) {
         roots.takeIf { it.size > 1 }?.let { rs ->
             val currentPath = listing?.path.orEmpty()
             val selectedRoot = rs.indexOfFirst { FileListing.isInside(it.path, currentPath) }.coerceAtLeast(0)
@@ -477,21 +494,22 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
 
 @Composable
 private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
-    BackHandler(onBack = vm::requestCloseFile)
-    Column(Modifier.fillMaxSize()) {
+    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(onBack = vm::requestCloseFile)
+    Column(Modifier.fillMaxSize().then(back)) {
         val f = (state.file as? Loadable.Ready)?.value
         val name = f?.path?.let(FileTypes::fileName).orEmpty()
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), vm::requestCloseFile)
-            Column(Modifier.weight(1f)) {
-                Text(name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                if (f != null) {
-                    Text(
-                        f.path, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1, overflow = TextOverflow.StartEllipsis,
-                    )
-                }
-            }
+        // The same title bar as every file preview: back, name over folder · size · modified, keys.
+        io.github.tianli0.switchtether.ui.files.FilePreviewHeader(
+            title = name,
+            subtitle = f?.let { file ->
+                listOfNotNull(
+                    io.github.tianli0.switchtether.ui.files.previewFolder(file.path),
+                    Formatters.bytes(file.size),
+                    file.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) },
+                ).joinToString(" · ")
+            },
+            onBack = vm::requestCloseFile,
+        ) {
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(name, f.path, "file", f.size)) })
             if (state.editing) {
@@ -500,22 +518,17 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
                     onClick = vm::save,
                     enabled = !state.saving,
                     tone = ActionTone.Primary,
-                    modifier = Modifier.padding(end = 12.dp).testTag("save"),
+                    modifier = Modifier.testTag("save"),
                 )
             }
         }
         state.transfer?.let { TransferRow(it, vm, {}) }
         LoadableContent(state.file!!, onRetry = { (state.file as? Loadable.Ready)?.value?.path?.let(vm::openPath) }) { file ->
             val dev = LocalDevColors.current
+            // Size and time are in the title bar now; the encoding stays as a quiet line for editing.
             Text(
-                listOfNotNull(
-                    file.encoding,
-                    file.lineEnding.uppercase(),
-                    Formatters.bytes(file.size),
-                    file.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) },
-                    file.sha256.take(12).takeIf { it.isNotEmpty() },
-                ).joinToString(" · "),
-                style = DevType.label, color = dev.gutter, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                listOf(file.encoding, file.lineEnding.uppercase()).joinToString(" · "),
+                style = DevType.label, color = dev.gutter, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 6.dp),
             )
             if (state.editing) {
                 BasicTextField(
@@ -576,3 +589,6 @@ private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
 
 /** Outcome messages that only report success: shown as a toast instead of a dialog. */
 private val QUIET_MESSAGES = setOf(R.string.files_msg_saved, R.string.files_msg_saved_as, R.string.files_msg_ok, R.string.files_msg_cancelled)
+
+/** Width from which an open file shows beside its folder instead of replacing it (§27). */
+private val FILES_SPLIT_MIN_WIDTH = 720.dp

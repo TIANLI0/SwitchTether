@@ -11,6 +11,9 @@ import com.adamglin.phosphoricons.regular.GitBranch
 import com.adamglin.phosphoricons.regular.ArrowClockwise
 import com.adamglin.phosphoricons.regular.ArrowDown
 import com.adamglin.phosphoricons.regular.Clock
+import com.adamglin.phosphoricons.regular.Eye
+import com.adamglin.phosphoricons.regular.HourglassMedium
+import com.adamglin.phosphoricons.regular.TreeStructure
 import com.adamglin.phosphoricons.regular.ArrowLeft
 import com.adamglin.phosphoricons.regular.ArrowsLeftRight
 import com.adamglin.phosphoricons.regular.Brain
@@ -46,7 +49,6 @@ import com.adamglin.phosphoricons.regular.PuzzlePiece
 import com.adamglin.phosphoricons.regular.Broadcast
 import com.adamglin.phosphoricons.fill.Broadcast as BroadcastFill
 import com.adamglin.phosphoricons.regular.Question
-import com.adamglin.phosphoricons.regular.Robot
 import com.adamglin.phosphoricons.regular.Stack
 import com.adamglin.phosphoricons.regular.StopCircle
 import com.adamglin.phosphoricons.regular.TerminalWindow
@@ -129,6 +131,7 @@ object AppIcons {
     // States.
     val Done: ImageVector get() = PhosphorIcons.Regular.Check
     val Lock: ImageVector get() = PhosphorIcons.Regular.Lock
+    val Watch: ImageVector get() = PhosphorIcons.Regular.Eye
     val Warning: ImageVector get() = PhosphorIcons.Regular.Warning
 
     // Content kinds.
@@ -137,7 +140,9 @@ object AppIcons {
     val Steps: ImageVector get() = PhosphorIcons.Regular.Stack
     val Plan: ImageVector get() = PhosphorIcons.Regular.ListChecks
     val Question: ImageVector get() = PhosphorIcons.Regular.Question
-    val SubAgent: ImageVector get() = PhosphorIcons.Regular.Robot
+    // A branch of the conversation, not a robot face: the capsule opens the agent tree.
+    val SubAgent: ImageVector get() = PhosphorIcons.Regular.TreeStructure
+    val BackgroundTask: ImageVector get() = PhosphorIcons.Regular.HourglassMedium
     val Search: ImageVector get() = PhosphorIcons.Regular.MagnifyingGlass
     val Web: ImageVector get() = PhosphorIcons.Regular.Globe
     val Mcp: ImageVector get() = PhosphorIcons.Regular.Plugs

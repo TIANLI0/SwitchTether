@@ -1394,3 +1394,235 @@ id; the stream's `session_id` changes).
   the plan (as the extension does) and is shown as a notice.
 - **End session** is also in the session info sheet (same confirmation), so a Codex session
   SwitchTether started, which has no Claude Code tools page, can be ended.
+
+## 25. Git writes and "本轮改动" (2026-11-25)
+
+**Git page** (Workspace → Git, `ui/workspace/GitPane.kt`). With a desktop that reports feature `git_write`:
+
+- Branch card: tapping it opens the branch panel (`PanelSheet`): local branches (current marked), remote branches without
+  a local one (tap = `git switch <name>`, which creates the tracking branch), "新建分支" (name + "创建并切换").
+- Under it three `SmallButton`s: 获取 · 拉取 ↓n (needs an upstream) · 推送 ↑n, or "发布分支" for a branch without upstream
+  (`push -u origin <branch>`). The running one shows its spinner; all writes are disabled while one runs.
+- 已暂存（n） with "全部取消暂存" and a per-row unstage key; 未暂存（n） with "全部暂存" and per-row discard (↺) and stage
+  (+) keys. Discard always confirms ("已跟踪的文件恢复为暂存时的版本，未跟踪的文件会移到电脑的回收站"). Rows still open the diff.
+- Commit: a multi-line "提交说明" field and "提交（n）" (accent `SmallButton`), enabled with staged files and a message.
+- Success is a toast ("提交：完成"); a failure is a dialog with git's own message (credentials, hooks, non-fast-forward…).
+- Every write asks for the `git_write` step-up once per grant (re-asked once if the desktop says the grant expired).
+
+An older desktop (no `git_write`) keeps the page read-only with a footnote saying so. The staged / unstaged split now
+reads porcelain v2's `.` as "unchanged" (`GitStatusEntry.staged` / `.unstaged`); before, every changed file was listed
+as staged.
+
+**本轮改动** (session page). A capsule "本轮改动" appears next to the branch capsule when the session's folder is a Git
+repository (the desktop reported a branch). It opens the Git page for that folder (`Route.GitReview`) with the files the
+latest turn edited — Edit / Write / MultiEdit / NotebookEdit / apply_patch calls and `file_change` events after the last
+user message, denied / failed edits excluded (`TurnFiles.latestTurn`, `core:remote`) — marked "本轮", sorted first and,
+with the switch "仅本轮" (on by default), the only ones listed; "全部暂存" then stages just those. Absolute paths and paths
+relative to the session folder are mapped into the repository (`TurnFiles.relativize`; Windows paths case-insensitive);
+an untracked folder counts when it holds a turn file.
+
+Evidence: `TurnFilesAndGitTest` (core:remote: turn extraction, patch headers, relativize, porcelain flags, shared
+fixtures), `GitReviewModelTest`, `GitReviewScreenTest` (Robolectric: turn filter and badge, writes offered, commit
+disabled without a message, read-only desktop), `GitWriteFlowTest` (JVM, TLS MockWebServer: review → stage → commit,
+refused commit keeps the draft and shows git's message). Desktop: `git::tests::*` (temp repositories, bare remote),
+e2e `git_writes_need_step_up_and_replay_by_command_id`. **Not verified:** on a device or emulator (layout of the action
+rows, the step-up prompt for the new scope, toasts), and against remotes that need credentials.
+
+## 26. Session cost and tokens; usage per project (2026-11-25)
+
+### 26.1 Cost capsule and sheet (`SessionCostSheet.kt`)
+- A capsule in the session page's header row (after the branch / terminal / sub-agent capsules,
+  before the tools capsule) shows the session's cost — or its tokens when no turn reported a cost
+  (observed transcripts, Codex) — with the usage icon. It appears once a loaded turn reported usage.
+  Tapping it opens **费用与用量**, a `PanelSheet` (page colour, page gutters, §22.2).
+- Hero card like the usage page's: total cost (4 decimals) or total tokens, "平均每轮", then turns ·
+  total tokens · cache hit rate.
+- **逐轮趋势**: one bar per turn (`sessionUsageBreakdown`, split at user messages). Metric chips
+  费用 / Token when a cost exists. Cost bars are the turn's growth of the agent's running total (a
+  lower total starts a new run, as in §24.6); token bars stack cache read / cache write / input /
+  output (one accent family for the prompt, the warm tone for the reply) with a legend. Bars grow
+  in with the expand spring (`dampingRatio 0.9, stiffness 420`, the same as `ExpandBody`) when the
+  sheet opens or the metric changes; the picked bar is full colour, the rest dimmed; bars are
+  6–22dp wide, spread over the card when few, scroll sideways (starting at the latest turn) when
+  many. Tapping a bar picks its turn; its detail box (the heatmap detail's look) cross-fades:
+  "第 n 轮", time, the first line of the message that started it, cost · tokens · duration, the mix.
+- **Token 构成**: input / output / cache write / cache read rows with an animated share bar, then
+  cache hit rate and "最近一次请求的上下文 ≈ N tokens" (the last request's prompt tokens; for Codex,
+  whose input includes cached tokens, the input alone).
+- Notes under it when only part of the conversation is loaded. Last, an arrow row
+  "项目「X」的用量" opens the project page (§25.2); the sheet closes first so back returns to the
+  conversation.
+
+### 26.2 Usage per project
+- Usage page: **按项目** after 按模型 (`GET /v1/usage/projects`, PROTOCOL §7.3): projects by cost
+  with an animated share-of-period bar and an arrow, then "其他项目" and "未关联到会话" as quiet rows,
+  and a note that only detail logs keep the session link. Hidden on older desktops (404).
+- `Route.ProjectUsage(project)`: the project's cost, directory, requests / tokens / sessions, and its
+  sessions most expensive first (agent · tokens · last activity, share of the project's cost);
+  range chips 今天 / 7 天 / 30 天 / 全部 (default 30 days); a row opens the session.
+
+### 26.3 Evidence and limits
+`SessionUsageBreakdownTest` (running-total deltas and restarts, turn split, dedupe, transcripts,
+Codex cache), `CostScreenshotTest` (sheet light / dark / tokens-only, bar tap picks a turn, project
+link, capsule opens the sheet, usage-per-project row opens the project, project page row opens the
+session, older desktop), fixture `usage_projects.json` (Rust and Kotlin). Robolectric only; nothing
+seen on a device. The per-project numbers were not checked against a real CC Switch database
+(only the SQL compiles and the join / grouping is unit-tested).
+
+## 27. Tablets and unfolded foldables: list | detail (2026-11-25)
+- From a window width of 840dp (`usesTwoPanes`), with the navigation rail that wide windows already
+  had: the tab's root (Home, Sessions, Workspace, Manage) stays on the left (40 %, 320–420dp), and
+  what it opens shows on the right with the usual push / pop / predictive-back motion. Narrower
+  windows — every phone, a folded foldable, split screen — are unchanged (the same code path as
+  before).
+- With nothing open the right pane shows a hint (`PaneEmptyState`). A row opened from the list
+  replaces the detail (`NavViewModel.openFromList`), so back clears the selection instead of
+  walking through earlier rows; deeper pages (tools, sub-agents) push as before. The open session's
+  row is marked with a soft accent fill (`LocalSelectedSessionId`). The navigation state lives in
+  the ViewModel, so rotating or folding keeps the selected session (folded, it shows full screen).
+- Files: from 720dp of available width (the tablet's detail pane), an open file or media viewer
+  shows beside its folder; back closes the file first.
+- Evidence: `TwoPaneTest` (width gate incl. phone and split-screen widths, list replacement and
+  back, w1280dp screenshots light / dark with the marked row). Not run on a tablet or foldable.
+
+## 28. Conversation search; push wake removed (2026-11-25)
+
+### 28.1 Push wake: removed from the phone
+
+A UnifiedPush push wake was built and then taken out of the app at the user's request: on Android a
+push needs a delivery channel, and every channel needs something besides SwitchTether — a
+UnifiedPush distributor app (ntfy and the like), Google's FCM (a developer-run Firebase backend whose
+server key would have to sit on every computer) or a vendor push SDK. The phone therefore has no push
+receiver, no settings entry and no Web Push crypto. Background alerts remain best effort through the
+optional connection service (KNOWN_LIMITATIONS #10). The desktop keeps the `/v1/push` endpoints
+(PROTOCOL.md §7.12); with no phone registering, it never sends anything.
+
+### 28.2 Search conversation content
+
+On the Sessions page, while the search bar is open, a chip row offers **会话 / 搜索对话内容**.
+The second mode replaces the list with `GET /v1/sessions/search` results (PROTOCOL.md §7.13):
+`ContentSearch` debounces 400 ms, cancels the request of an older query, follows the agent filter,
+and maps 404 to "computer too old". Each result is a row with the session title (else the agent),
+"agent · project folder · relative time · N matches", and up to three lines of the snippet with
+every match of the query in bold accent (`highlightMatches`, case-insensitive); tapping opens the
+session. Notes for "searching…", no match, partial scan ("older sessions were not searched") and
+errors. Leaving the search (cancel) returns to the list.
+
+### 28.3 Evidence and limits
+
+- Tests: `core:remote` `SessionSearchModelTest` (fixture `session_search.json`); app
+  `ContentSearchTest` (debounce, only the latest query counts, slow answers cancelled, 404 / 400,
+  highlighting incl. CJK).
+- **Not verified:** the search UI on a device, search over a large real history.
+
+## 29. Files: roomier previews, a lightbox, the cache you can open, no dead ends (2026-11-25)
+
+User report: the file preview was cramped, the picture viewer was rough, opening the cache did not
+work well, files the app cannot show led nowhere, and a file with a name seen before showed the old
+copy. Code in `ui/files/` and `files/`; ANDROID_UI §18 and §23.8 still apply.
+
+### 29.1 Spacing
+- **Preview title bar** (`FilePreviewHeader`, shared by the Files page, chat links, the storage
+  page and the Workspace text editor, which had a bar of its own): 60dp, back key on the 8dp edge,
+  12dp to the title, title 17sp semibold over a 13sp line (folder · size · when), keys 4dp apart
+  and 12dp from the edge. It used to be 6dp margins, a 16sp title and a 12sp line.
+- **Code viewer**: the code is a rounded card (16dp squircle) 12dp from the screen edges instead of
+  a square slab 8dp from them; 12dp above the first line, 12dp between line numbers and code and at
+  the end of a line; the tool row and the find bar line up with the card.
+- **Markdown**: 24dp side margins and 12dp above the first block (16 / 8 before); the Rendered /
+  Source switch and notices have 10dp under them.
+- The Workspace editor's raw "utf-8 · LF · size · time · sha" line is gone: size and time are in the
+  title bar's second line; encoding and line ending stay as a quiet line for editing.
+
+### 29.2 Lightbox (`ImageLightbox`)
+Pictures from chat (attachments, pictures in replies, files the agent looked at) open in one
+full-screen viewer:
+- black behind the picture; pinch, double-tap zoom and pan with Telephoto, as in the Files viewer;
+- the pictures of one message are swiped sideways (`ImagePreview.gallery`), "2 / 3" under the name;
+- pull the picture down (or up) to close: it follows the finger, shrinks a little and the black
+  fades with the pull; let go short of 120dp and it springs back; a fast fling closes too. Not while
+  zoomed in (then a drag pans);
+- a tap shows or hides the controls, which also step aside after 4 s: close, name and position on a
+  dark gradient at the top; Share, Save and Open with… on a dark gradient at the bottom. They use the
+  over-media style of COUI's media bar (white on translucent dark, whatever the theme) and the status
+  and navigation bar icons turn light while it is open;
+- Save keeps a picture from the computer as a download (`FileStore.download`) and a picture that only
+  exists in the message as bytes (`FileStore.saveBytes`); Share / Open with hand over a temporary
+  copy (`FileStore.cacheBytes`, keyed by content).
+The old viewer closed on any tap (also on the picture), zoomed with a hand-made transform and put a
+48dp glass disc and a pill button over the picture.
+
+### 29.3 Files the app cannot show
+- An archive, installer, office document or other unknown type opens as a card (`FileHandOffCard`):
+  icon, name, size and type, "No built-in viewer…", **Download to phone** and **Open with…**. Nothing
+  is fetched until one is chosen; both show their progress in the card; after downloading the card
+  offers Open and Manage downloads. It used to fetch the whole file into the preview cache first and
+  then only say there was no viewer — and a file over the 200 MB preview cap ended in an error.
+- A media file over the preview cap shows the same card with Download (a download has no cap).
+- A text link that turns out to be binary now continues to that card ("Preview or open with another
+  app"), and the text viewer opened from chat has Download in its bar and in the "only the
+  beginning is shown" notice; before, both were missing there.
+- "Open with…" of an unknown type asks with `*/*` and a type from Android's `MimeTypeMap` when the
+  app's own table does not know the extension: `application/octet-stream` matched almost no app, so
+  the chooser came up empty.
+
+### 29.4 The cache can be opened
+Downloads & storage lists **Recently previewed** under the cache card (up to 20, newest first:
+name, folder, size, when). A row opens the copy inside the app; its menu offers Open, Open with…,
+Share, **Keep in Downloads** (copied from the cache, no transfer) and Remove from cache. Every copy
+records the remote path it came from (`.source` beside it in its cache folder). Downloads open inside
+the app too, text and code included (read from the local copy, so this works offline); before, only
+media opened here and everything else went straight to other apps.
+
+### 29.5 Same name, stale copy
+Cause: a link from chat carries no size or modified time. Without them `FileStore.resolve` (1) took
+any earlier **download** of that path as current, however old ("unknown values do not disqualify"),
+and (2) trusted a cache copy made without them for 10 minutes. A file changed on the computer — or
+regenerated under the same name — kept showing the old copy.
+Now, when the caller has neither, `resolve` and `download` first ask the computer (`statRemote`: one
+`fs/list` of the folder, 5 s timeout) and key and validate with the answer; a file that changed is
+fetched again. Copies are keyed by desktop, full path, size and modified time (`FileCache.keyFor`),
+so the same name in another folder is another file; a new copy of a path replaces the older one in
+the cache. Offline, `resolve` shows the newest copy of that path that is on the phone (a download,
+else the cache) instead of an error. Reload in the viewer still forces a fresh fetch.
+
+### 29.6 Evidence and limits
+JVM tests `FileFreshnessTest` (keys per folder and per version, a new copy replacing the old one,
+the source note, listing lookup, parent folders) and the existing `FileCacheTest` /
+`DownloadIndexTest`; Robolectric screenshots `files-code-{light,dark}`, `files-handoff-light`,
+`files-handoff-progress-dark`, `files-lightbox` (API 32, synthetic files). **Not seen on a device:**
+the lightbox gestures (pull to close, swipe between pictures, zoom vs. drag), the light system-bar
+icons, sharing / saving from it, opening cached copies with other apps, the stat request against a
+real desktop and the offline fallback.
+
+## 30. ColorOS SDK alignment: transitions, composer rim, expand, selection, menu blur (2026-11-25)
+
+Values compared against the COUI SDK bundled in OPPO Health 6.7.17 (com.heytap.health, HeyTap-signed),
+read for the numbers only; no SDK code or resources were copied.
+
+- **Page push / pop** (`ui/nav/AnimatedNavHost.kt`) follow `Animation.COUI.Activity` instead of a
+  Material shared X axis. Push: the new page slides in over the whole width, opaque, 350ms on
+  (0.3, 0.1, 0.3, 1); the page underneath moves to −30% on (0.3, 0.15, 0.3, 1) and dims under a black
+  scrim to 0.5 on COUIEase (0.33, 0, 0.67, 1) — it stays visible. Pop runs back: the top page leaves to
+  +100% on (0.25, 0.1, 0.3, 1), the page underneath returns from −30% on (0.3, 0.26, 0.4, 1) and the
+  scrim clears. Every page now paints the page colour, so a full-width slide never shows two pages
+  through each other. The predictive back gesture maps its progress linearly onto the pop (an eased
+  seek made the page jump at the start of the drag); release and cancel finish on the same spec.
+- **Tab switches** are a 150ms cross-fade without the 0.96 scale-in (a Material fade-through mark);
+  the tablet list pane's `Crossfade` uses the same 150ms.
+- **Composer rim** (`coui-patterns` `glassSurface`): the 0.5dp solid hairline (dark on the light
+  theme) is replaced by the material edge with its inward fade: `TYPE_FRAMEWORK_CIRCLE_1` for round
+  keys (light 0.2 / 1.9dp / fade 0.15, dark 0.6 / 1.9dp / 0.1), `TYPE_FRAMEWORK_CAPSULE_1` for the
+  field and capsules; the rim follows the control's own corner radius. Without runtime shaders the
+  hairline stays.
+- **ExpandBody** (`coui-patterns` `States.kt`): 400ms on (0.3, 0, 0.1, 1) both ways for size and fade,
+  so alpha tracks the shown height fraction (`ExpandableRecyclerConnector`) and finishes with the
+  400ms `ExpandArrow` turn (it used to be a ~300ms spring with a short separate fade).
+- **Selected session row** (tablet list | detail): the neutral press layer of a selected COUI card
+  row (`couiColorPress`, #1F000000 / #33FFFFFF) instead of a 10% accent fill.
+- **Menu snapshot blur** (`coui-patterns` `Menu.kt`): three box passes of radius 3 at 1/8 scale,
+  σ ≈ 26px, matching the popup material's 25px (it was ≈ 36px). The snapshot's tint layers live in
+  coui-ui's list popup.
+
+Not seen on a device: the transitions on real hardware, the material rims (they need runtime
+shaders with a GPU), the predictive back feel.

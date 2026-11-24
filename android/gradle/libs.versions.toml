@@ -89,6 +89,7 @@ zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 # File viewer
 telephoto-zoomable = { module = "me.saket.telephoto:zoomable", version.ref = "telephoto" }
 telephoto-sub-sampling-image = { module = "me.saket.telephoto:sub-sampling-image", version.ref = "telephoto" }
+telephoto-flick = { module = "me.saket.telephoto:flick", version.ref = "telephoto" }
 markdown-renderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdown-renderer" }
 markdown-renderer-code = { module = "com.mikepenz:multiplatform-markdown-renderer-code", version.ref = "markdown-renderer" }
 highlights = { module = "dev.snipme:highlights", version.ref = "highlights" }

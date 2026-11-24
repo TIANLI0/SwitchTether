@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Git writes and the "changes of this turn" review (docs/ANDROID_UI.md §25). -->
+<resources>
+    <string name="git_review_title">Changes</string>
+    <string name="git_turn_chip">Changes</string>
+    <string name="git_only_turn">Latest turn only</string>
+    <string name="git_turn_summary">The latest turn edited %1$d files in this repository; %2$d still changed</string>
+    <string name="git_turn_badge">This turn</string>
+    <string name="git_turn_clean">Nothing left from the latest turn: committed or discarded</string>
+    <string name="git_staged_title">Staged (%1$d)</string>
+    <string name="git_unstaged_title">Changes (%1$d)</string>
+    <string name="git_renamed_from">from %1$s</string>
+    <string name="git_stage">Stage</string>
+    <string name="git_stage_all">Stage all</string>
+    <string name="git_unstage">Unstage</string>
+    <string name="git_unstage_all">Unstage all</string>
+    <string name="git_discard">Discard changes</string>
+    <string name="git_discard_confirm">Discard the unstaged changes to %1$s? Tracked files go back to their staged version; untracked files are moved to the computer\'s trash.</string>
+    <string name="git_commit">Commit</string>
+    <string name="git_commit_message">Commit message</string>
+    <string name="git_commit_n">Commit (%1$d)</string>
+    <string name="git_push">Push</string>
+    <string name="git_publish">Publish branch</string>
+    <string name="git_pull">Pull</string>
+    <string name="git_fetch">Fetch</string>
+    <string name="git_checkout">Switch branch</string>
+    <string name="git_branches_local">Branches</string>
+    <string name="git_branches_remote">Remote branches</string>
+    <string name="git_branch_current">Current</string>
+    <string name="git_new_branch">New branch</string>
+    <string name="git_branch_name">Branch name</string>
+    <string name="git_create_branch">Create and switch</string>
+    <string name="git_op_done">%1$s: done</string>
+    <string name="git_op_failed">%1$s failed</string>
+    <string name="git_op_failed_generic">Not completed. Check the connection and try again.</string>
+    <string name="git_read_only">SwitchTether on this computer only shows Git. Update it to stage, commit and push from the phone.</string>
+</resources>

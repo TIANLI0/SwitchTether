@@ -120,6 +120,7 @@
     <string name="session_unnamed">Untitled session</string>
     <string name="session_info_id">Session ID</string>
     <string name="render_system_turn_stopped">The turn stopped before it finished.</string>
+    <string name="render_status_user_interrupted">You stopped this turn</string>
     <string name="outgoing_sending">Sending…</string>
     <string name="outgoing_delivered">Delivered</string>
     <string name="outgoing_waiting">Waiting for connection</string>
@@ -168,6 +169,14 @@
     <plurals name="subagent_more_steps">
         <item quantity="one">… %1$d earlier step</item>
         <item quantity="other">… %1$d earlier steps</item>
+    </plurals>
+    <plurals name="background_task_chip">
+        <item quantity="one">%1$d background task</item>
+        <item quantity="other">%1$d background tasks</item>
+    </plurals>
+    <plurals name="background_task_chip_running">
+        <item quantity="one">%1$d running in background</item>
+        <item quantity="other">%1$d running in background</item>
     </plurals>
     <plurals name="subagent_chip">
         <item quantity="one">%1$d sub-agent</item>

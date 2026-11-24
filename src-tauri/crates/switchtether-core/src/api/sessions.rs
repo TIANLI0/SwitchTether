@@ -17,6 +17,7 @@ use crate::error::ApiResult;
 pub fn routes() -> Router<Arc<ApiContext>> {
     Router::new()
         .route("/v1/sessions", get(list).post(create))
+        .route("/v1/sessions/search", get(search))
         .route("/v1/sessions/:id", get(detail))
         .route("/v1/sessions/:id/events", get(events))
         .route("/v1/sessions/:id/subagents", get(subagent_tree))
@@ -55,6 +56,37 @@ async fn list(
 ) -> Json<Value> {
     let (items, next) = ctx.agents.list(&q).await;
     Json(json!({ "items": items, "nextCursor": next }))
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+    agent: Option<String>,
+    limit: Option<usize>,
+}
+
+/// Full-text search over session contents (docs/PROTOCOL.md §7.13).
+async fn search(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<SearchQuery>,
+) -> ApiResult<Json<Value>> {
+    let query = q.q.trim();
+    if query.is_empty() || query.chars().count() > crate::agents::search::MAX_QUERY_CHARS {
+        return Err(crate::error::ApiError::validation(
+            "q must be 1..200 characters",
+        ));
+    }
+    let (results, partial) = ctx
+        .agents
+        .search(
+            query,
+            q.agent.as_deref().filter(|a| !a.is_empty()),
+            q.limit.unwrap_or(20),
+            std::time::Duration::from_secs(3),
+        )
+        .await;
+    Ok(Json(json!({ "results": results, "partial": partial })))
 }
 
 async fn detail(

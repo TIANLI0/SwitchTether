@@ -62,4 +62,10 @@
     <string name="command_wrap">Wrap lines</string>
     <string name="command_copy">Copy full command</string>
     <string name="command_directory">Working directory</string>
+    <string name="lightbox_save">Save</string>
+    <string name="viewer_no_viewer_local">No built-in viewer for this file type. Open it with another app.</string>
+    <string name="downloads_recent">Recently previewed</string>
+    <string name="downloads_keep">Keep in Downloads</string>
+    <string name="downloads_remove_cached">Remove from cache</string>
+    <string name="lightbox_open_with">Open in…</string>
 </resources>

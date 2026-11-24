@@ -13,6 +13,9 @@ data class ImagePreview(
     val bytes: ByteArray? = null,
     val url: String? = null,
     val path: String? = null,
+    /** The other pictures of the same message (this one included), swiped through in the lightbox. */
+    val gallery: List<ImagePreview> = emptyList(),
+    val index: Int = 0,
 )
 
 /** Callbacks and session-level facts shared by all renderers (stable: does not change per event). */

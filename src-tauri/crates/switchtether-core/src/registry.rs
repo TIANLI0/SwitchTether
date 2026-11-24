@@ -102,6 +102,16 @@ pub struct CommandRecord {
     pub completed_at_ms: Option<i64>,
 }
 
+/// A phone's Web Push subscription (UnifiedPush endpoint + RFC 8291 receiver keys).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushSubscription {
+    pub endpoint: String,
+    /// Receiver public key, uncompressed P-256, base64url.
+    pub p256dh: String,
+    /// 16-byte authentication secret, base64url.
+    pub auth: String,
+}
+
 pub enum CommandBegin {
     /// First time we see this command id: execute it.
     New,
@@ -169,6 +179,13 @@ impl Registry {
                 created_at INTEGER NOT NULL,
                 completed_at INTEGER,
                 PRIMARY KEY(device_id, command_id)
+             );
+             CREATE TABLE IF NOT EXISTS push_subscriptions(
+                device_id TEXT PRIMARY KEY,
+                endpoint TEXT NOT NULL,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
              );",
         )?;
         let version: Option<String> = conn
@@ -382,6 +399,10 @@ impl Registry {
                 "DELETE FROM commands WHERE device_id=?1",
                 params![device_id],
             )?;
+            c.execute(
+                "DELETE FROM push_subscriptions WHERE device_id=?1",
+                params![device_id],
+            )?;
             c.query_row(
                 "SELECT * FROM devices WHERE id=?1",
                 params![device_id],
@@ -405,6 +426,94 @@ impl Registry {
         drop(c);
         self.reload_cache()?;
         Ok(n > 0)
+    }
+
+    // ---------------- push wake (docs/PROTOCOL.md §7.12) ----------------
+
+    /// Store (replace) the Web Push subscription of an active device.
+    pub fn set_push_subscription(
+        &self,
+        device_id: &str,
+        sub: &PushSubscription,
+    ) -> anyhow::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO push_subscriptions(device_id,endpoint,p256dh,auth,updated_at)
+             SELECT ?1,?2,?3,?4,?5 WHERE EXISTS(SELECT 1 FROM devices WHERE id=?1 AND revoked_at IS NULL)
+             ON CONFLICT(device_id) DO UPDATE SET endpoint=excluded.endpoint, p256dh=excluded.p256dh,
+               auth=excluded.auth, updated_at=excluded.updated_at",
+            params![device_id, sub.endpoint, sub.p256dh, sub.auth, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a device's subscription; true when one existed.
+    pub fn remove_push_subscription(&self, device_id: &str) -> anyhow::Result<bool> {
+        Ok(self.conn.lock().execute(
+            "DELETE FROM push_subscriptions WHERE device_id=?1",
+            params![device_id],
+        )? > 0)
+    }
+
+    pub fn push_subscription(&self, device_id: &str) -> Option<PushSubscription> {
+        self.conn
+            .lock()
+            .query_row(
+                "SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE device_id=?1",
+                params![device_id],
+                |r| {
+                    Ok(PushSubscription {
+                        endpoint: r.get(0)?,
+                        p256dh: r.get(1)?,
+                        auth: r.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    /// Subscriptions of active devices.
+    pub fn push_subscriptions(&self) -> Vec<(String, PushSubscription)> {
+        let c = self.conn.lock();
+        let Ok(mut st) = c.prepare(
+            "SELECT p.device_id,p.endpoint,p.p256dh,p.auth FROM push_subscriptions p
+             JOIN devices d ON d.id=p.device_id WHERE d.revoked_at IS NULL",
+        ) else {
+            return Vec::new();
+        };
+        st.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                PushSubscription {
+                    endpoint: r.get(1)?,
+                    p256dh: r.get(2)?,
+                    auth: r.get(3)?,
+                },
+            ))
+        })
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+    }
+
+    /// A value of the `meta` table (internal settings such as the VAPID key).
+    pub fn meta(&self, key: &str) -> Option<String> {
+        self.conn
+            .lock()
+            .query_row("SELECT value FROM meta WHERE key=?1", params![key], |r| {
+                r.get(0)
+            })
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn set_meta(&self, key: &str, value: &str) -> anyhow::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
     }
 
     // ---------------- audit ----------------
@@ -627,6 +736,28 @@ mod tests {
             r.command("d", "c1").unwrap().unwrap().status,
             CommandStatus::Unknown
         );
+    }
+
+    #[test]
+    fn push_subscriptions_follow_the_device() {
+        let r = Registry::open_in_memory().unwrap();
+        let d = r.register_device(dev("fp-push")).unwrap();
+        let sub = PushSubscription {
+            endpoint: "https://push.example/abc".into(),
+            p256dh: "k".into(),
+            auth: "a".into(),
+        };
+        r.set_push_subscription(&d.id, &sub).unwrap();
+        assert_eq!(r.push_subscription(&d.id), Some(sub.clone()));
+        assert_eq!(r.push_subscriptions().len(), 1);
+        // Unknown devices cannot store one.
+        r.set_push_subscription("nope", &sub).unwrap();
+        assert!(r.push_subscription("nope").is_none());
+        r.revoke_device(&d.id).unwrap();
+        assert!(r.push_subscription(&d.id).is_none());
+        assert!(r.push_subscriptions().is_empty());
+        r.set_meta("k", "v").unwrap();
+        assert_eq!(r.meta("k").as_deref(), Some("v"));
     }
 
     #[test]

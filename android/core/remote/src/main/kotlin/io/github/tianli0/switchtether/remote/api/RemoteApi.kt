@@ -405,6 +405,17 @@ class RemoteApi(
     suspend fun usageFirstDate(app: String?): JsonElement =
         getJson(url("v1/usage/first-date").newBuilder().apply { app?.let { addQueryParameter("app", it) } }.build())
 
+    /** `GET /v1/usage/projects?from&to&app&project` — usage per project. 404 on older desktops. */
+    suspend fun usageProjects(fromEpochSec: Long?, toEpochSec: Long?, app: String?, project: String? = null): io.github.tianli0.switchtether.remote.protocol.ProjectUsageView {
+        val u = url("v1/usage/projects").newBuilder().apply {
+            fromEpochSec?.let { addQueryParameter("from", it.toString()) }
+            toEpochSec?.let { addQueryParameter("to", it.toString()) }
+            app?.let { addQueryParameter("app", it) }
+            project?.let { addQueryParameter("project", it) }
+        }.build()
+        return get(u)
+    }
+
     /** `GET /v1/usage/last-sync` → `{ lastSyncMs }`. */
     suspend fun usageLastSync(): JsonElement = getJson(url("v1/usage/last-sync"))
 
@@ -461,6 +472,21 @@ class RemoteApi(
 
     suspend fun stopForward(id: String): JsonElement =
         executeJson(Request.Builder().url(url("v1/forwards", id)).delete().tagged().build())
+
+    // ---- §7.13 session search ------------------------------------------------------------------------
+
+    /** Full-text search over what was said in sessions (newest first, bounded on the desktop). */
+    suspend fun searchSessions(
+        query: String,
+        agent: String? = null,
+        limit: Int = 20,
+    ): io.github.tianli0.switchtether.remote.protocol.SessionSearch = get(
+        url("v1/sessions/search").newBuilder().apply {
+            addQueryParameter("q", query)
+            agent?.let { addQueryParameter("agent", it) }
+            addQueryParameter("limit", limit.toString())
+        }.build(),
+    )
 
     /** Pings keep the relay (10 min idle limit) and NAT mappings alive, and detect dead paths. */
     private val tunnelClient: OkHttpClient by lazy { readClient.newBuilder().pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build() }
@@ -577,6 +603,22 @@ class RemoteApi(
     suspend fun gitShow(repo: String, rev: String, path: String): GitShow = get(
         url("v1/git/show").newBuilder().addQueryParameter("repo", repo).addQueryParameter("rev", rev).addQueryParameter("path", path).build(),
     )
+
+    suspend fun gitBranches(repo: String): io.github.tianli0.switchtether.remote.protocol.GitBranches =
+        get(url("v1/git/branches").newBuilder().addQueryParameter("repo", repo).build())
+
+    /** `POST /v1/git/{op}` ([io.github.tianli0.switchtether.remote.protocol.GitOps]); step-up `git_write`. */
+    suspend fun gitWrite(op: String, body: io.github.tianli0.switchtether.remote.protocol.GitWriteBody): CommandResponse =
+        command(body.commandId, url("v1/git", op), body)
+
+    /** The body of a [gitWrite] answer. */
+    fun gitWriteResult(r: CommandResponse): io.github.tianli0.switchtether.remote.protocol.GitWriteResult =
+        decode(io.github.tianli0.switchtether.remote.protocol.GitWriteResult.serializer(), r.body)
+
+    /** `features` of `GET /v1/capabilities` (e.g. `git_write`); empty when the desktop does not say. */
+    suspend fun features(): Set<String> =
+        ((capabilities() as? kotlinx.serialization.json.JsonObject)?.get("features") as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { p -> p.isString }?.content }?.toSet().orEmpty()
 
     // ---- §6 event stream ---------------------------------------------------------------------------
 

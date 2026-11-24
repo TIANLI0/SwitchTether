@@ -34,6 +34,7 @@ pub mod identity;
 pub mod net;
 pub mod pairing;
 pub mod protocol;
+pub mod push;
 pub mod redact;
 pub mod registry;
 pub mod relay;
@@ -42,6 +43,7 @@ pub mod server;
 pub mod stepup;
 pub mod terminal;
 pub mod tls;
+pub mod usage_projects;
 pub mod util;
 pub mod wake;
 

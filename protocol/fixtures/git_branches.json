@@ -1,0 +1,11 @@
+{
+  "root": "/home/u/project",
+  "current": "main",
+  "local": [
+    { "name": "main", "current": true, "upstream": "origin/main", "timeMs": 1700000100000 },
+    { "name": "feat/a", "current": false, "upstream": null, "timeMs": 1700000200000 }
+  ],
+  "remote": [
+    { "name": "origin/other", "current": false, "upstream": null, "timeMs": 1700000300000 }
+  ]
+}

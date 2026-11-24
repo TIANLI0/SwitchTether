@@ -587,8 +587,9 @@ fun PickFolderScreen(onBack: () -> Unit) {
             else -> done()
         }
     }
-    androidx.activity.compose.BackHandler(onBack = goBack)
+    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(onBack = goBack)
     Page(
+        modifier = back,
         // Inside a folder the page is named after it, and the title bar's action picks that folder:
         // no full-width button under the list (and no disabled one while browsing the locations).
         title = listing?.path?.let(::folderName) ?: stringResource(R.string.new_session_cwd),

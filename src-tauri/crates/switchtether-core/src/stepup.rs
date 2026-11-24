@@ -22,6 +22,8 @@ pub enum Scope {
     ConfigWrite,
     /// Starting a port forward (docs/PROTOCOL.md §7.11).
     PortForward,
+    /// Changing a Git repository: stage, discard, commit, push, pull, checkout (PROTOCOL.md §7.7).
+    GitWrite,
 }
 
 impl Scope {
@@ -31,6 +33,7 @@ impl Scope {
             Scope::FilesWrite => "files_write",
             Scope::ConfigWrite => "config_write",
             Scope::PortForward => "port_forward",
+            Scope::GitWrite => "git_write",
         }
     }
 }

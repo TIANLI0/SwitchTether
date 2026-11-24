@@ -1,0 +1,54 @@
+{
+  "projects": [
+    {
+      "project": "SwitchTether",
+      "cwd": "D:/develop/SwitchTether",
+      "sessionCount": 2,
+      "requests": 41,
+      "costUsd": 3.125,
+      "inputTokens": 52000,
+      "outputTokens": 18000,
+      "cacheReadTokens": 2400000,
+      "cacheCreationTokens": 96000,
+      "lastMs": 1764000000000,
+      "sessions": [
+        {
+          "id": "claude:0f8e5a2c-7d1b-4c3e-9a6f-1b2c3d4e5f60",
+          "app": "claude",
+          "title": "重构设置页的按钮层级",
+          "cwd": "D:/develop/SwitchTether",
+          "requests": 30,
+          "costUsd": 2.5,
+          "inputTokens": 40000,
+          "outputTokens": 15000,
+          "cacheReadTokens": 2000000,
+          "cacheCreationTokens": 80000,
+          "lastMs": 1764000000000
+        },
+        {
+          "id": "codex:019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b",
+          "app": "codex",
+          "title": null,
+          "cwd": "D:/develop/SwitchTether",
+          "requests": 11,
+          "costUsd": 0.625,
+          "inputTokens": 12000,
+          "outputTokens": 3000,
+          "cacheReadTokens": 400000,
+          "cacheCreationTokens": 16000,
+          "lastMs": 1763990000000
+        }
+      ]
+    }
+  ],
+  "otherProjects": null,
+  "unattributed": {
+    "requests": 4,
+    "costUsd": 0.05,
+    "inputTokens": 900,
+    "outputTokens": 120,
+    "cacheReadTokens": 0,
+    "cacheCreationTokens": 0,
+    "lastMs": 1763900000000
+  }
+}
