@@ -55,6 +55,7 @@ class SlashCommandsViewModelTest {
     private fun names(vm: SessionDetailViewModel) = vm.state.value.slashCommands.map { it.name }
     private fun suggested(vm: SessionDetailViewModel) = vm.state.value.slashSuggestions.map { it.name }
     private val builtin = builtinSlashCommands("claude_code").map { it.name }
+    private val phoneSide = listOf("context", "model", "permissions", "plan", "mcp", "rename", "export", "btw", "help")
 
     @Test
     fun anOlderDesktopStillYieldsTheBuiltinList() = runTest(dispatcher) {
@@ -91,7 +92,9 @@ class SlashCommandsViewModelTest {
         val vm = SessionDetailViewModel("s1", conn, repo, FakeDrafts())
         advanceUntilIdle()
         assertEquals(1, repo.loads)
-        assertEquals(builtin + "deploy", names(vm))
+        // The process runs compact and deploy; the phone's own actions stay; clear, cost, review
+        // and init are not offered by this process.
+        assertEquals(listOf("compact") + phoneSide + "deploy", names(vm))
         assertEquals("[instructions]", vm.state.value.slashCommands.first { it.name == "compact" }.argumentHint)
         // More state changes of the same session do not ask again.
         vm.setDraft("/dep")
@@ -108,13 +111,13 @@ class SlashCommandsViewModelTest {
         conn.state.value = ONLINE
         advanceUntilIdle()
         assertEquals(2, repo.loads)
-        assertEquals(builtin + "ship", names(vm))
+        assertEquals(phoneSide + "ship", names(vm))
     }
 
     @Test
     fun pickingSendsInsertsOrHandsThePhoneSideActionBack() = runTest(dispatcher) {
         val base = slashSession()
-        val repo = SlashRepo(base) { listOf(SlashCommand("review", "Review a pull request", "[pr]")) }
+        val repo = SlashRepo(base) { listOf(SlashCommand("compact"), SlashCommand("clear", argumentHint = "[name]"), SlashCommand("review", "Review a pull request", "[pr]")) }
         val vm = SessionDetailViewModel("s1", FakeConnection(), repo, FakeDrafts())
         advanceUntilIdle()
         fun entry(name: String) = vm.state.value.slashCommands.first { it.name == name }
@@ -131,6 +134,12 @@ class SlashCommandsViewModelTest {
         assertEquals(SlashAction.INSERT, vm.pickSlashCommand(entry("review")))
         assertEquals("/review ", vm.state.value.draft)
         assertTrue(suggested(vm).isEmpty())
+        assertEquals(1, base.sent.size)
+
+        // /clear is never sent by one tap.
+        vm.setDraft("/cl")
+        assertEquals(SlashAction.INSERT, vm.pickSlashCommand(entry("clear")))
+        assertEquals("/clear ", vm.state.value.draft)
         assertEquals(1, base.sent.size)
 
         // The phone's own: nothing is sent, the typed text is cleared, the screen opens it.
@@ -173,6 +182,6 @@ class SlashCommandsViewModelTest {
         val vm = SessionDetailViewModel("s1", FakeConnection(), ended, FakeDrafts())
         advanceUntilIdle()
         assertEquals(0, ended.loads)
-        assertEquals(listOf("compact", "clear", "cost", "review", "init", "memory", "help"), names(vm))
+        assertEquals(listOf("compact", "clear", "cost", "review", "init", "help"), names(vm))
     }
 }

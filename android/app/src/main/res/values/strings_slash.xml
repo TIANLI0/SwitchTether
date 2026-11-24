@@ -14,7 +14,6 @@
     <string name="slash_btw">Ask a side question without interrupting the work</string>
     <string name="slash_review">Review the current changes</string>
     <string name="slash_init">Write a CLAUDE.md for this project</string>
-    <string name="slash_memory">Open the memory files</string>
     <string name="slash_help">List all commands</string>
     <string name="slash_help_title">Commands</string>
     <string name="slash_help_note">Type / in the message field to pick a command. Other commands are sent to the agent as a message.</string>

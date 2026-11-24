@@ -1291,8 +1291,8 @@ panel over the input row, and a tap runs one.
 - While the draft is one token that starts with "/" (`slashQuery`): "/", "/co", "/compact". A
   space or a line break ends it ("/compact " is a chosen command with arguments to come), and so
   does any text before the slash. The caret position is not looked at: the draft is a plain string.
-- Matches (`filterSlashCommands`): names that start with what was typed, then names that contain
-  it, case-insensitive, at most 8.
+- Matches (`filterSlashCommands`): names (or the desktop's `aliases`) that start with what was
+  typed, then names that contain it, case-insensitive, at most 8.
 - The send key is unchanged: "/compact" typed by hand and sent is an ordinary message.
 
 ### 24.2 The panel
@@ -1317,12 +1317,23 @@ plain string, so the caret would stay inside the inserted "/name ". This belongs
   reconnect. Names come without the slash; entries without a usable name and repeats are dropped.
 - The phone's own list (`builtinSlashCommands`), with descriptions in both languages
   (`strings_slash.xml`): compact, clear, context, cost, model, permissions, plan, mcp, rename,
-  export, btw, review, init, memory, help.
+  export, btw, review, init, help. Of these only compact, clear, cost, review and init are
+  messages; the rest are the phone's own actions (24.4).
+- What Claude Code runs when a command arrives as a message (stream-json, which is how managed
+  and taken-over sessions run) comes from its command metadata (2.1.331 binary): `prompt` commands
+  and `local` commands with `supportsNonInteractive` (`compact`, `clear`, `context`, `mcp`,
+  `model`, `rename`, `usage` alias `cost`, `init`, skills such as `code-review` alias `review`).
+  `local-jsx` commands draw a terminal UI and do nothing there (`memory`, `plan`, `export`, `btw`,
+  `permissions`, `help`, …), so `memory` is not offered at all. The process's own list (the
+  `initialize` commands) is filtered the same way by Claude Code before it reaches the desktop.
 - **Fallback rule** (`mergeSlashCommands`): any failure of the call (an older desktop answers
   404 / 422, no connection) is an empty list, silently. With an empty list the built-in one is
-  used alone. Otherwise both are shown: built-in names keep their place and take the desktop's
-  entry (its argument hint, and its description unless that is blank, in which case the phone's
-  text stays); the desktop's other commands follow in its order.
+  used alone. Otherwise the process's list decides what is a message: a built-in message stays
+  only when the process lists it by name or alias, and then shows as the process's entry (its
+  name, e.g. `usage` for `cost`; its hint and aliases; its description unless blank, else the
+  phone's text). The phone's own actions always stay, with the phone's text and no argument hint
+  (they open the phone's screen, not the terminal command). The process's other commands follow
+  in its order.
 
 ### 24.4 What a tap does (`slashActionFor`)
 
@@ -1333,14 +1344,21 @@ plain string, so the caret would stay inside the inserted "/name ". This belongs
 | context, mcp, plan, export, btw | the session tools page (it has no anchors, so it opens at its top) |
 | rename | a dialog asking for the new title (the same `rename` tool as on the tools page) |
 | help | a half-screen panel (`PanelSheet`) with every command of this session; a row there does the same as in the "/" panel |
+| clear | the draft becomes "/clear ": it throws the context away, so it is never sent by one tap |
 | anything else with an argument hint | the draft becomes "/name " and the keyboard stays for the argument |
 | anything else | "/name" is sent at once, through the normal send path (optimistic bubble, queueing, retry) |
 
 For the phone's own actions the typed "/…" is cleared and nothing is sent. They need the Claude
 Code session tools (`claudeTools`); a conversation that is not running has none, so its panel
 lists only the commands that are messages (and `model` when the model can be changed). None of the
-built-in commands has an argument hint, so on an older desktop "compact", "clear", "cost",
-"review", "init" and "memory" are sent as they are; arguments can still be typed by hand.
+built-in commands has an argument hint, so on an older desktop "compact", "cost", "review" and
+"init" are sent as they are; arguments can still be typed by hand.
+
+One bubble per command: the desktop sends the message with its own `uuid`, Claude Code's
+`--replay-user-messages` echo carries the same `uuid` (the VS Code extension matches replays by
+`uuid` and only rewrites the bubble's content), and the desktop's `<command-name>` mapping keeps
+that id, so the replayed "/compact" and its command record are one event; the desktop tags it
+with the phone's `clientId` (normalized text "/compact") and the optimistic bubble is replaced.
 
 ### 24.5 Evidence and limits
 JVM / Robolectric (API 32): `SlashCommandsTest` (query, filter order and cap, merge, action
@@ -1352,5 +1370,27 @@ sends "/compact", an inserted command leaves the caret at the end, no panel for 
 **Not verified:** anything on a device (the glass and halo of the panel, the animation, the panel
 together with the IME, the caret with a real keyboard's composing text), and the call against a
 real desktop: the desktop side of `claude/commands` was written at the same time and the two were
-not run together. Whether Claude Code acts on each built-in name when it arrives as a message in
-a managed session (`/cost`, `/review`, `/init`, `/memory` in particular) was not tried either.
+not run together. Which commands run headless is read from Claude Code's metadata, not from a
+live run. Not known without a live run: whether `<command-name>` records the typed alias or the
+canonical name ("/cost" typed by hand might echo as "/usage" and then not replace its bubble), and
+what `/clear` does to the managed session's id on the desktop (Claude Code starts a new session
+id; the stream's `session_id` changes).
+
+### 24.6 Review fixes in the same area (2026-11-24)
+- **Session cost** (`SessionCost.kt`): `costUsd` is Claude Code's `total_cost_usd`, a running
+  total ("cumulative across turns in streaming-input sessions … read the latest result rather than
+  summing across results"; a resume continues from the saved total, `/clear` resets it, crash
+  results carry 0). The cost is the latest total of each run, summed over runs (a lower total
+  starts a run; zeros are skipped); tokens of a result are per turn and are summed. The usage row
+  in the conversation labels the number "session so far", not as the turn's cost.
+- **MCP elicitations** (`Question` in `Renderers.kt`): "MCP server X asks" once (not repeated over
+  every field), the desktop's `message` when no question already says it, the `url` with an
+  "Open" key through the app's link confirmation, Decline (`action: "decline"`) next to Cancel,
+  and a `__confirm__` question shown as a confirmation: no option row, no text field, the submit
+  key reads "Accept".
+- **Plan approval**: the VS Code extension sets the permission mode first (`acceptEdits`, or
+  `default` for "manually approve edits", which it also sends as a `setMode` suggestion) and then
+  allows `ExitPlanMode`; the phone now does the same order. A refused mode change still approves
+  the plan (as the extension does) and is shown as a notice.
+- **End session** is also in the session info sheet (same confirmation), so a Codex session
+  SwitchTether started, which has no Claude Code tools page, can be ended.

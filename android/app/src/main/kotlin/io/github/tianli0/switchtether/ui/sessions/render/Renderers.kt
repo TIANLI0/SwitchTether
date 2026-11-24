@@ -854,6 +854,16 @@ const val EXIT_PLAN_MODE_TOOL = "ExitPlanMode"
 fun isPlanExitApproval(toolName: String?, optionIds: List<String>): Boolean =
     toolName == EXIT_PLAN_MODE_TOOL && "allow" in optionIds
 
+/** Question id of an MCP elicitation that only asks for a confirmation (URL, or no form). */
+const val ELICITATION_CONFIRM_ID = "__confirm__"
+
+/** A `question` that is an MCP elicitation: the desktop adds `elicitationMode` and `serverName` (possibly null). */
+fun isElicitation(data: JsonObject): Boolean = "elicitationMode" in data || "serverName" in data
+
+/** A question's text without the URL the desktop appended to it (the card shows the URL with its own action). */
+fun questionText(text: String, url: String?): String =
+    if (url.isNullOrEmpty()) text else text.replace("\n$url", "").let { if (it.trim() == url) "" else it }.trimEnd()
+
 /** Localized label for the protocol's decision ids; unknown ids keep the desktop's label. */
 @Composable
 fun decisionOptionLabel(id: String, serverLabel: String?): String = when (id) {
@@ -910,16 +920,31 @@ fun Question(item: RenderItem, ctx: RenderContext) {
     val otherChosen = rememberSaveable(item.key, saver = stateMapSaver()) { mutableStateMapOf<String, Boolean>() }
     val enabled = !resolved && ctx.answer.usable && ctx.online && !ctx.requestBusy
     val accent = COUITheme.colorScheme.primary
+    // An MCP server asking through the agent (PROTOCOL.md "MCP elicitations"): who asks, what it
+    // says, the page it wants opened, and decline next to cancel.
+    val elicitation = isElicitation(d)
+    val serverName = d.str("serverName")?.takeIf { it.isNotBlank() }
+    val url = d.str("url")?.trim()?.takeIf { it.isNotEmpty() }
+    // Claude Code's message is already the text of the (first) question; Codex sends it only there.
+    val leadMessage = d.str("message")?.trim()?.takeIf { m -> m.isNotEmpty() && questions.none { it.str("question").orEmpty().contains(m) } }
     AttentionCard(active = !resolved, color = accent) {
         AttentionHeader(AppIcons.Question, stringResource(if (resolved) R.string.render_question else R.string.render_question_needed), item.event.ts, if (resolved) COUITheme.colorScheme.onSurfaceVariantSummary else accent)
+        if (elicitation && serverName != null) SubtleMeta(stringResource(R.string.render_elicitation_server, serverName), Modifier.padding(top = 8.dp))
+        leadMessage?.let { Text(it, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface, modifier = Modifier.padding(top = 6.dp)) }
         questions.forEach { q ->
             val key = q.str("id") ?: q.str("question") ?: ""
             val multi = q.bool("multiSelect") == true
-            val opts = q["options"].arr().orEmpty().mapNotNull { it.obj() }
-            val allowOther = q.bool("allowOther") == true || opts.isEmpty()
+            // A confirmation (URL elicitation, or one without a form): nothing to pick or type,
+            // the desktop ignores its answer. Submit is "Accept".
+            val confirm = key == ELICITATION_CONFIRM_ID
+            val opts = if (confirm) emptyList() else q["options"].arr().orEmpty().mapNotNull { it.obj() }
+            val allowOther = !confirm && (q.bool("allowOther") == true || opts.isEmpty())
             val isSecret = q.bool("isSecret") == true
-            q.str("header")?.let { SubtleMeta(it, Modifier.padding(top = 10.dp)) }
-            Text(q.str("question").orEmpty(), style = COUITheme.textStyles.body1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp))
+            // The server name is said once above, not again over every field.
+            q.str("header")?.takeIf { !(elicitation && it == serverName) }?.let { SubtleMeta(it, Modifier.padding(top = 10.dp)) }
+            questionText(q.str("question").orEmpty(), url).takeIf { it.isNotBlank() || url == null }?.let {
+                Text(it, style = COUITheme.textStyles.body1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp))
+            }
             if (resolved) {
                 // What was answered: from the desktop (`data.answers`), else what this phone just sent.
                 val fromDesktop = (d["answers"].obj() ?: resolution?.get("answers").obj())?.let { a ->
@@ -955,7 +980,7 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                     }
                 }
             }
-            if ((opts.isEmpty() || otherChosen[key] == true) && !resolved) {
+            if (!confirm && (opts.isEmpty() || otherChosen[key] == true) && !resolved) {
                 val ft = freeTexts[key].orEmpty()
                 io.github.suqi8.coui.kmp.basic.TextField(
                     value = ft,
@@ -968,6 +993,22 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                 )
             }
         }
+        // The page the server wants opened (sign-in, consent): through the app's link confirmation.
+        if (url != null) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SelectionContainer(Modifier.weight(1f)) {
+                    Text(url, style = COUITheme.textStyles.footnote1, color = accent, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+                if (!resolved) {
+                    Spacer(Modifier.size(8.dp))
+                    SmallButton(
+                        text = stringResource(R.string.render_elicitation_open),
+                        onClick = { ctx.onLink(url) },
+                        modifier = Modifier.testTag("elicitation-open"),
+                    )
+                }
+            }
+        }
         if (resolved) {
             val dec = d.str("decision") ?: resolution?.str("decision")
             val by = d.str("by") ?: resolution?.str("by")
@@ -976,27 +1017,50 @@ fun Question(item: RenderItem, ctx: RenderContext) {
         } else {
             val complete = questions.all { q ->
                 val key = q.str("id") ?: q.str("question") ?: ""
+                if (key == ELICITATION_CONFIRM_ID) return@all true
                 val opts = q["options"].arr().orEmpty()
                 val selOk = selections[key].orEmpty().isNotEmpty()
                 val freeOk = (opts.isEmpty() || otherChosen[key] == true) && freeTexts[key].orEmpty().isNotBlank()
                 q.bool("required") == false || if (otherChosen[key] == true || opts.isEmpty()) freeOk else selOk
             }
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+            val onlyConfirm = questions.isNotEmpty() && questions.all { it.str("id") == ELICITATION_CONFIRM_ID }
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (cancellable) {
                     SmallButton(
                         text = stringResource(R.string.action_cancel),
                         onClick = { ctx.onAnswerAction(d.str("requestId").orEmpty(), null, "cancel") },
                         enabled = enabled,
+                        tone = if (elicitation) ActionTone.Default else ActionTone.Danger,
+                        modifier = Modifier.testTag("question-cancel"),
+                    )
+                }
+                // MCP's three answers: accept, decline (the user says no), cancel (dismissed).
+                if (elicitation) {
+                    SmallButton(
+                        text = stringResource(R.string.render_elicitation_decline),
+                        onClick = { ctx.onAnswerAction(d.str("requestId").orEmpty(), null, "decline") },
+                        enabled = enabled,
                         tone = ActionTone.Danger,
+                        modifier = Modifier.testTag("question-decline"),
                     )
                 }
                 SmallButton(
-                    text = stringResource(R.string.render_submit_answer),
+                    text = stringResource(if (onlyConfirm) R.string.render_elicitation_accept else R.string.render_submit_answer),
                     tone = ActionTone.Primary,
+                    modifier = Modifier.testTag("question-submit"),
                     onClick = {
                         val answers = buildJsonObject {
                             questions.forEach { q ->
                                 val key = q.str("id") ?: q.str("question") ?: ""
+                                if (key == ELICITATION_CONFIRM_ID) {
+                                    // Ignored by the desktop; the desktop's own option label when it has one.
+                                    put(key, q["options"].arr().orEmpty().firstNotNullOfOrNull { it.obj()?.str("label") } ?: "Accept")
+                                    return@forEach
+                                }
                                 val opts = q["options"].arr().orEmpty()
                                 val picked = selections[key].orEmpty().toMutableList()
                                 if ((opts.isEmpty() || otherChosen[key] == true)) {
@@ -1178,7 +1242,13 @@ fun UsageRow(item: RenderItem) {
         Formatters.tokens(d.long("outputTokens") ?: 0),
         Formatters.tokens(d.long("cacheReadTokens") ?: 0),
         Formatters.tokens(d.long("cacheWriteTokens") ?: 0),
-    ) + (d.double("costUsd")?.let { " · " + Formatters.usd(it, io.github.tianli0.switchtether.domain.LocalMoney.current) } ?: "")
+    ) + (
+        // Claude Code's `total_cost_usd`: the session's running total, not this turn's cost (a zero
+        // is a crash / startup-error result, nothing to show).
+        d.double("costUsd")?.takeIf { it.isFinite() && it > 0 }?.let {
+            " · " + stringResource(R.string.render_usage_cost_total, Formatters.usd(it, io.github.tianli0.switchtether.domain.LocalMoney.current))
+        } ?: ""
+        )
     Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 2.dp), contentAlignment = Alignment.Center) {
         Text(text, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
     }

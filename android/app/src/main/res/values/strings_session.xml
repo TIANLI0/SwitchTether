@@ -39,6 +39,13 @@
     <string name="resolved_line">%1$s %2$s</string>
     <string name="render_usage">Tokens: in %1$s · out %2$s · cache read %3$s · cache write %4$s</string>
     <string name="render_system">System · %1$s</string>
+    <!-- Claude Code reports the running total of the session with each turn, not the turn's own cost. -->
+    <string name="render_usage_cost_total">session so far %1$s</string>
+    <!-- An MCP server asks the user something through the agent (elicitation). -->
+    <string name="render_elicitation_server">MCP server %1$s asks</string>
+    <string name="render_elicitation_accept">Accept</string>
+    <string name="render_elicitation_decline">Decline</string>
+    <string name="render_elicitation_open">Open</string>
     <string name="render_status_running">Working</string>
     <string name="render_status_waiting_approval">Waiting for approval</string>
     <string name="render_status_waiting_input">Waiting for input</string>

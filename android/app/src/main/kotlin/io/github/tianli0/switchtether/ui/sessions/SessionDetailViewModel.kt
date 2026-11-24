@@ -936,29 +936,42 @@ class SessionDetailViewModel(
         commands.run(label) { id -> repo.resolveApproval(sessionId, requestId, decision, id) }
     }
 
-    // ---- Plan approval (ExitPlanMode): approve, then leave plan mode ---------------------------------
+    // ---- Plan approval (ExitPlanMode): set the mode, then approve ------------------------------------
 
     /**
-     * Claude Code's "Yes, and auto-accept edits" / "Yes, and manually approve edits": allows the
-     * `ExitPlanMode` request and, only once that succeeded, switches the session to [mode]
-     * (`acceptEdits` / `default`; it is in `plan`, where the work would stay blocked). A failed
-     * mode change shows the usual command prompt under [modeLabel]; nothing is retried by itself.
+     * Claude Code's "Yes, and auto-accept edits" / "Yes, and manually approve edits", done the way
+     * the VS Code extension (2.1.331) does it: it first switches the session's permission mode
+     * (`acceptEdits`, or `default` for the review choice; the session is still in `plan`) and only
+     * then allows the `ExitPlanMode` request, so the first edit after the plan already runs in the
+     * new mode. Like the extension, the plan is approved even when the mode change is refused; the
+     * refusal is shown as a notice under [modeLabel]. One command for the tracker: the approval
+     * (its prompt, its retry); a retry sets the mode again, which is harmless.
      */
     fun approvePlan(label: String, modeLabel: String, requestId: String, mode: String) {
         if (!_state.value.canUseClaudeTools) return resolveApproval(label, requestId, "allow")
-        commands.run(label, onSuccess = {
-            // After the tracker has finished with the approval (it clears its prompt on success).
-            viewModelScope.launch {
-                kotlinx.coroutines.yield()
-                commands.run(modeLabel, onSuccess = { out ->
-                    val now = ClaudeTools.parseMode(out.response.body, mode)
+        commands.run(label) { id ->
+            val modeOut = try {
+                repo.claudeTool(sessionId, ClaudeTools.PERMISSION_MODE, jsonOf("mode" to mode), newCommandId())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                CommandOutcome.NotSent(newCommandId(), e)
+            }
+            when (modeOut) {
+                is CommandOutcome.Succeeded -> {
+                    val now = ClaudeTools.parseMode(modeOut.response.body, mode)
                     _state.update { st ->
                         val d = st.detail.valueOrNull ?: return@update st
                         st.copy(detail = Loadable.Ready(d.copy(permissionMode = now)))
                     }
-                }) { id -> repo.claudeTool(sessionId, ClaudeTools.PERMISSION_MODE, jsonOf("mode" to mode), id) }
+                }
+                is CommandOutcome.Rejected -> _state.update {
+                    it.copy(notice = ToolNotice.Failed("$modeLabel: ${modeOut.error.body.message.ifBlank { modeOut.error.body.code }}"))
+                }
+                else -> _state.update { it.copy(notice = ToolNotice.Failed(modeLabel)) }
             }
-        }) { id -> repo.resolveApproval(sessionId, requestId, "allow", id) }
+            repo.resolveApproval(sessionId, requestId, "allow", id)
+        }
     }
 
     // ---- end of plan approval ----------------------------------------------------------------------

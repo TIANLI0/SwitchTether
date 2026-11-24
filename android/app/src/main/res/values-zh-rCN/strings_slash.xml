@@ -13,7 +13,6 @@
     <string name="slash_btw">旁问：顺便问一个问题，不打断当前工作</string>
     <string name="slash_review">审查当前改动</string>
     <string name="slash_init">为项目生成 CLAUDE.md</string>
-    <string name="slash_memory">打开记忆文件</string>
     <string name="slash_help">列出全部命令</string>
     <string name="slash_help_title">命令</string>
     <string name="slash_help_note">在输入框里输入 / 即可选择命令。其他命令会作为消息发送给智能体。</string>

@@ -26,7 +26,7 @@
     <string name="tools_context_kind_deferred">deferred</string>
     <string name="tools_session_cost">Session cost</string>
     <string name="tools_session_cost_tokens">Input %1$s · Output %2$s tokens</string>
-    <string name="tools_session_cost_partial">Counts the part of the conversation loaded on this phone; earlier turns are not included.</string>
+    <string name="tools_session_cost_partial">Tokens count only the part of the conversation loaded on this phone. The cost is Claude Code\'s running total, so it includes earlier turns unless the conversation was cleared or restarted before them.</string>
 
     <string name="plan_approve_auto">Approve and auto-accept edits</string>
     <string name="plan_approve_review">Approve, review each edit</string>

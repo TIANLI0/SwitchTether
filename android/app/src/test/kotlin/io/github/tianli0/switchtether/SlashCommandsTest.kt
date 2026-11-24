@@ -56,7 +56,8 @@ class SlashCommandsTest {
 
     @Test
     fun builtinsExistOnlyForClaudeCode() {
-        val expected = listOf("compact", "clear", "context", "cost", "model", "permissions", "plan", "mcp", "rename", "export", "btw", "review", "init", "memory", "help")
+        // No /memory: TUI-only in Claude Code (local-jsx, no headless variant), it does nothing as a message.
+        val expected = listOf("compact", "clear", "context", "cost", "model", "permissions", "plan", "mcp", "rename", "export", "btw", "review", "init", "help")
         assertEquals(expected, names(builtinSlashCommands("claude_code")))
         assertEquals(expected, names(builtinSlashCommands("claude")))
         builtinSlashCommands("claude_code").forEach { assertNotNull("${it.name} has a description", it.descriptionRes) }
@@ -66,21 +67,35 @@ class SlashCommandsTest {
     }
 
     @Test
-    fun mergeUsesBuiltinsAloneOrLetsTheDesktopWin() {
+    fun withoutTheDesktopsListTheBuiltinsAreUsedAlone() {
         val builtin = builtinSlashCommands("claude_code")
         assertEquals(builtin, mergeSlashCommands(builtin, emptyList()))
+    }
 
+    /**
+     * The process's list is what it runs headless: built-ins that are messages stay only when it
+     * lists them (by name or alias); the phone's own actions always stay, with the phone's text.
+     */
+    @Test
+    fun theDesktopsListDecidesWhichMessagesAreOffered() {
+        val builtin = builtinSlashCommands("claude_code")
         val merged = mergeSlashCommands(
             builtin,
             listOf(
                 SlashCommand("deploy", "Ship it", "<env>"),
                 SlashCommand("compact", "Desktop text", "[instructions]"),
-                SlashCommand("Clear", "", ""),
+                SlashCommand("Clear", "", "[name]", listOf("reset", "new")),
+                SlashCommand("usage", "Show session cost", "", listOf("cost", "stats")),
+                SlashCommand("model", "Set the AI model for Claude Code", "<model>"),
+                SlashCommand("rename", "Rename the current conversation", "[name]", listOf("name")),
                 SlashCommand("deploy", "a repeat", ""),
             ),
         )
-        // Built-in names keep their place; the desktop's other commands follow.
-        assertEquals(names(builtin).map { if (it == "clear") "Clear" else it } + "deploy", names(merged))
+        // review and init are not offered by this process: gone. cost is the process's "usage".
+        assertEquals(
+            listOf("compact", "Clear", "context", "usage", "model", "permissions", "plan", "mcp", "rename", "export", "btw", "help", "deploy"),
+            names(merged),
+        )
         val compact = merged.first { it.name == "compact" }
         assertEquals("Desktop text", compact.description)
         assertEquals("[instructions]", compact.argumentHint)
@@ -88,9 +103,24 @@ class SlashCommandsTest {
         val clear = merged.first { it.name == "Clear" }
         assertEquals("", clear.description)
         assertEquals(builtin.first { it.name == "clear" }.descriptionRes, clear.descriptionRes)
+        assertEquals(listOf("reset", "new"), clear.aliases)
+        val usage = merged.first { it.name == "usage" }
+        assertEquals(builtin.first { it.name == "cost" }.descriptionRes, usage.descriptionRes)
+        // A phone-side command keeps the phone's text and no terminal argument hint.
+        val model = merged.first { it.name == "model" }
+        assertEquals(SlashEntry("model", descriptionRes = builtin.first { it.name == "model" }.descriptionRes), model)
+        assertEquals(listOf("name"), merged.first { it.name == "rename" }.aliases)
         assertEquals(SlashEntry("deploy", "Ship it", "<env>"), merged.last())
         // No built-ins (another agent): only what the desktop gave.
         assertEquals(listOf("deploy"), names(mergeSlashCommands(emptyList(), listOf(SlashCommand("deploy")))))
+    }
+
+    @Test
+    fun aliasesFindTheirCommand() {
+        val all = listOf(SlashEntry("usage", aliases = listOf("cost", "stats")), SlashEntry("compact"), SlashEntry("rename", aliases = listOf("name")))
+        assertEquals(listOf("usage", "compact"), names(filterSlashCommands(all, "co")))
+        assertEquals(listOf("usage"), names(filterSlashCommands(all, "stat")))
+        assertEquals(listOf("rename"), names(filterSlashCommands(all, "nam")))
     }
 
     @Test
@@ -110,7 +140,9 @@ class SlashCommandsTest {
         // Everything else is a message: sent at once without arguments, inserted with them.
         assertEquals(SlashAction.SEND, slashActionFor("compact", false))
         assertEquals(SlashAction.INSERT, slashActionFor("compact", true))
-        assertEquals(SlashAction.SEND, slashActionFor("clear", false))
+        // /clear throws the context away: never sent by one tap, it waits in the draft.
+        assertEquals(SlashAction.INSERT, slashActionFor("clear", false))
+        assertEquals(SlashAction.INSERT, slashActionFor("Clear", true))
         assertEquals(SlashAction.SEND, slashActionFor("my-command", false))
         assertEquals(SlashAction.INSERT, slashActionFor("my-command", true))
         assertEquals(SlashAction.INSERT, slashActionFor(SlashEntry("deploy", argumentHint = "<env>")))

@@ -159,6 +159,7 @@ fun SessionDetailScreen(
     var pendingApproval by remember { mutableStateOf<Triple<String, String, String>?>(null) }
     var viewingImage by remember { mutableStateOf<io.github.tianli0.switchtether.ui.sessions.render.ImagePreview?>(null) }
     var confirmInterrupt by remember { mutableStateOf(false) }
+    var confirmStop by rememberSaveable { mutableStateOf(false) }
     var showContinue by rememberSaveable { mutableStateOf(false) }
 
     val sendLabel = stringResource(R.string.session_send)
@@ -172,6 +173,7 @@ fun SessionDetailScreen(
     val agent = summary?.agent ?: "unknown"
     val agentLabel = Formatters.agentLabel(agent)
     val cancelLabel = stringResource(R.string.action_cancel)
+    val declineLabel = stringResource(R.string.render_elicitation_decline)
     val claudeTools = state.claudeTools
     val permissionLabel = stringResource(R.string.tools_permission)
     val backgrounding = state.backgrounding
@@ -196,7 +198,12 @@ fun SessionDetailScreen(
             } else null,
             onAnswer = { rid, answers -> vm.answer(answerLabel, rid, answers) },
             onAnswerAction = { rid, answers, action ->
-                vm.answer(if (action == "cancel") cancelLabel else answerLabel, rid, answers, action)
+                val label = when (action) {
+                    "cancel" -> cancelLabel
+                    "decline" -> declineLabel
+                    else -> answerLabel
+                }
+                vm.answer(label, rid, answers, action)
             },
             onLoadPayload = vm::loadPayload,
             payloadOf = { vm.payloads[it] },
@@ -303,6 +310,8 @@ fun SessionDetailScreen(
     // Slash commands: what the phone does itself opens here; the rest is a message (view model).
     var showSlashHelp by rememberSaveable { mutableStateOf(false) }
     var showSlashRename by rememberSaveable { mutableStateOf(false) }
+    // Hidden while the tools are gone (offline, process ended): it must not pop up again by itself later.
+    LaunchedEffect(state.claudeTools) { if (!state.claudeTools) showSlashRename = false }
     val onSlashCommand: (SlashEntry) -> Unit = { entry ->
         when (vm.pickSlashCommand(entry)) {
             SlashAction.SEND, SlashAction.INSERT -> Unit
@@ -395,6 +404,23 @@ fun SessionDetailScreen(
         } else null,
         onPermissionClick = { showPermission = true },
         onSlashCommand = onSlashCommand,
+        // Also here, not only on the Claude Code tools page: a Codex session SwitchTether started
+        // has no tools page, and its process is just as much ours to end.
+        onEndSession = if (state.canStop) {
+            { confirmStop = true }
+        } else null,
+    )
+    val endLabel = stringResource(R.string.session_end)
+    ConfirmDialog(
+        show = confirmStop && state.canStop,
+        title = endLabel,
+        message = stringResource(R.string.session_end_confirm),
+        confirmText = endLabel,
+        onConfirm = {
+            confirmStop = false
+            vm.stopSession(endLabel)
+        },
+        onDismiss = { confirmStop = false },
     )
 
     AttachSheet(
@@ -501,6 +527,8 @@ fun SessionDetailContent(
     onPermissionClick: (() -> Unit)? = null,
     /** A command picked from the "/" panel (null = no panel). */
     onSlashCommand: ((SlashEntry) -> Unit)? = null,
+    /** "End session" in the info sheet (null = not offered: only a live session SwitchTether started). */
+    onEndSession: (() -> Unit)? = null,
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
@@ -641,7 +669,14 @@ fun SessionDetailContent(
             }
         }
     }
-    SessionInfoSheet(show = showInfo, detail = state.detail.valueOrNull, activity = state.rollingStatus?.data?.takeIf { it.str("state") !in setOf("idle", "completed", null) }?.let { listOfNotNull(statusStateLabel(it.str("state")).ifEmpty { null }, it.str("detail")).joinToString(" · ") }, onDismiss = { showInfo = false })
+    SessionInfoSheet(
+        show = showInfo,
+        detail = state.detail.valueOrNull,
+        activity = state.rollingStatus?.data?.takeIf { it.str("state") !in setOf("idle", "completed", null) }?.let { listOfNotNull(statusStateLabel(it.str("state")).ifEmpty { null }, it.str("detail")).joinToString(" · ") },
+        onDismiss = { showInfo = false },
+        // The sheet closes first: the confirmation is a dialog of the page, not of the sheet.
+        onEndSession = onEndSession?.let { end -> { showInfo = false; end() } },
+    )
 }
 
 /**
@@ -669,7 +704,8 @@ private fun StatusChipRow(
     // No fade of their own: the header's material behind them (glassHeader) is the page's only one.
     Column(
         modifier.padding(horizontal = 8.dp, vertical = 2.dp).clip(SquircleShape(18.dp))
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 4.dp),
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 4.dp)
+            .testTag("session-info-row"),
     ) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status), backdrop = bg)
@@ -1207,7 +1243,7 @@ private fun pickedFileInfo(context: android.content.Context, uri: android.net.Ur
 
 /** Bottom sheet with everything about the session that does not fit the chip row. */
 @Composable
-private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: String?, onDismiss: () -> Unit) {
+private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: String?, onDismiss: () -> Unit, onEndSession: (() -> Unit)? = null) {
     PanelSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss) {
         val d = detail ?: return@PanelSheet
         val s = d.summary
@@ -1251,6 +1287,19 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
             }
             d.capabilities.reason?.let {
                 Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp))
+            }
+            // Only for a live session SwitchTether started: its process is ours to end.
+            if (onEndSession != null) {
+                val endLabel = stringResource(R.string.session_end)
+                Spacer(Modifier.size(8.dp))
+                GroupCard {
+                    BasicComponent(
+                        title = endLabel,
+                        summary = stringResource(R.string.session_end_summary),
+                        endActions = { SmallButton(endLabel, onEndSession, tone = ActionTone.Danger, modifier = Modifier.testTag("info-end-session")) },
+                        cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Full,
+                    )
+                }
             }
         }
     }

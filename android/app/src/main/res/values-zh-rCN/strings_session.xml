@@ -37,6 +37,11 @@
     <string name="resolved_line">%1$s%2$s</string>
     <string name="render_usage">Token：输入 %1$s · 输出 %2$s · 缓存读取 %3$s · 缓存写入 %4$s</string>
     <string name="render_system">系统 · %1$s</string>
+    <string name="render_usage_cost_total">会话累计 %1$s</string>
+    <string name="render_elicitation_server">MCP 服务器 %1$s 请求</string>
+    <string name="render_elicitation_accept">接受</string>
+    <string name="render_elicitation_decline">拒绝</string>
+    <string name="render_elicitation_open">打开</string>
     <string name="render_status_running">工作中</string>
     <string name="render_status_waiting_approval">等待审批</string>
     <string name="render_status_waiting_input">等待输入</string>

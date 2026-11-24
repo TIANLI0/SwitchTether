@@ -105,6 +105,28 @@ class SlashCommandsApiTest {
         }
     }
 
+    /** The shared fixture (also asserted by the Rust test): `aliases` is optional and kept. */
+    @Test
+    fun theFixtureParsesWithItsAliases() {
+        val dir = System.getProperty("switchtether.fixtures") ?: "../../../protocol/fixtures"
+        val body = java.io.File(dir, "claude_commands.json").readText()
+        assertEquals(
+            listOf(
+                SlashCommand("compact", "Clear conversation history but keep a summary in context", "<optional custom summarization instructions>"),
+                SlashCommand("review", "Review a pull request", "", listOf("rv")),
+                SlashCommand("my-plugin:deploy"),
+            ),
+            ClaudeTools.parseCommands(ProtocolJson.parseToJsonElement(body)),
+        )
+        // Junk aliases, the name itself and repeats are dropped; a leading slash is removed.
+        fun parse(s: String) = ClaudeTools.parseCommands(ProtocolJson.parseToJsonElement(s))
+        assertEquals(
+            listOf(SlashCommand("usage", aliases = listOf("cost", "stats"))),
+            parse("""{"commands":[{"name":"usage","aliases":["/cost","stats","COST","usage","two words","",3,null]}]}"""),
+        )
+        assertEquals(listOf(SlashCommand("x")), parse("""{"commands":[{"name":"x","aliases":"cost"}]}"""))
+    }
+
     @Test
     fun bodiesThatAreNotAListParseToNothing() {
         fun parse(s: String) = ClaudeTools.parseCommands(ProtocolJson.parseToJsonElement(s))

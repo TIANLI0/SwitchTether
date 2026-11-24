@@ -9,7 +9,6 @@ import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.remote.protocol.SessionDetail
 import io.github.tianli0.switchtether.remote.protocol.str
 import io.github.tianli0.switchtether.remote.session.ClaudeTools
-import io.github.tianli0.switchtether.ui.common.CommandPrompt
 import io.github.tianli0.switchtether.ui.sessions.SessionDetailViewModel
 import io.github.tianli0.switchtether.ui.sessions.render.isPlanExitApproval
 import io.github.tianli0.switchtether.ui.sessions.sessionCost
@@ -76,57 +75,60 @@ class PlanApprovalAndCostTest {
 
     private fun vm(r: PlanRepo) = SessionDetailViewModel("s1", FakeConnection(), r, FakeDrafts())
 
+    /**
+     * The VS Code extension (2.1.331, plan approval card): `await onPermissionModeChange(mode)`
+     * first, then `accept()`. The first edit after the plan must already run in the new mode.
+     */
     @Test
-    fun approvingWithAutoAcceptApprovesThenSwitchesToAcceptEdits() = runTest(dispatcher) {
+    fun approvingWithAutoAcceptSwitchesToAcceptEditsThenApproves() = runTest(dispatcher) {
         val r = repo()
         r.tool = { PlanRepo.ok(it, """{"mode":"acceptEdits"}""") }
         val vm = vm(r)
         advanceUntilIdle()
         vm.approvePlan("Approve", "Permission mode", "r1", "acceptEdits")
         advanceUntilIdle()
-        assertEquals(listOf("approve:r1:allow", "${ClaudeTools.PERMISSION_MODE}:acceptEdits"), r.calls)
+        assertEquals(listOf("${ClaudeTools.PERMISSION_MODE}:acceptEdits", "approve:r1:allow"), r.calls)
         assertEquals("acceptEdits", vm.state.value.detail.valueOrNull?.permissionMode)
         assertNull(vm.commands.prompt.value)
+        assertNull(vm.state.value.notice)
     }
 
     @Test
-    fun approvingWithReviewLeavesPlanModeForDefault() = runTest(dispatcher) {
+    fun approvingWithReviewSwitchesToDefaultThenApproves() = runTest(dispatcher) {
         val r = repo()
         val vm = vm(r)
         advanceUntilIdle()
         vm.approvePlan("Approve", "Permission mode", "r1", "default")
         advanceUntilIdle()
-        assertEquals(listOf("approve:r1:allow", "${ClaudeTools.PERMISSION_MODE}:default"), r.calls)
+        assertEquals(listOf("${ClaudeTools.PERMISSION_MODE}:default", "approve:r1:allow"), r.calls)
         assertEquals("default", vm.state.value.detail.valueOrNull?.permissionMode)
     }
 
     @Test
-    fun failedApprovalDoesNotChangeTheMode() = runTest(dispatcher) {
+    fun failedApprovalShowsTheApprovalPrompt() = runTest(dispatcher) {
         val r = repo()
         r.approval = { PlanRepo.rejected(it, "not_found", "request is gone") }
         val vm = vm(r)
         advanceUntilIdle()
         vm.approvePlan("Approve", "Permission mode", "r1", "acceptEdits")
         advanceUntilIdle()
-        assertEquals(listOf("approve:r1:allow"), r.calls)
-        assertEquals("plan", vm.state.value.detail.valueOrNull?.permissionMode)
+        assertEquals(listOf("${ClaudeTools.PERMISSION_MODE}:acceptEdits", "approve:r1:allow"), r.calls)
         assertEquals("Approve", vm.commands.prompt.value?.label)
     }
 
     @Test
-    fun failedModeChangeAfterApprovalShowsTheCommandErrorOnce() = runTest(dispatcher) {
+    fun aRefusedModeChangeStillApprovesThePlanAndSaysSo() = runTest(dispatcher) {
         val r = repo()
         r.tool = { PlanRepo.rejected(it, "validation_error", "unknown permission mode") }
         val vm = vm(r)
         advanceUntilIdle()
         vm.approvePlan("Approve", "Permission mode", "r1", "acceptEdits")
         advanceUntilIdle()
-        // Approved once, mode asked once: no second attempt on its own.
-        assertEquals(listOf("approve:r1:allow", "${ClaudeTools.PERMISSION_MODE}:acceptEdits"), r.calls)
-        val prompt = vm.commands.prompt.value
-        assertEquals("Permission mode", prompt?.label)
-        assertEquals(CommandPrompt.Kind.REJECTED, prompt?.kind)
-        assertTrue(prompt?.detail.orEmpty().contains("unknown permission mode"))
+        // Mode asked once, approved once: no second attempt on its own.
+        assertEquals(listOf("${ClaudeTools.PERMISSION_MODE}:acceptEdits", "approve:r1:allow"), r.calls)
+        assertNull(vm.commands.prompt.value)
+        val notice = vm.state.value.notice as io.github.tianli0.switchtether.ui.sessions.ToolNotice.Failed
+        assertTrue(notice.message, notice.message.startsWith("Permission mode") && notice.message.contains("unknown permission mode"))
         assertEquals("plan", vm.state.value.detail.valueOrNull?.permissionMode)
     }
 
@@ -155,8 +157,13 @@ class PlanApprovalAndCostTest {
 
     // ---- session cost ----
 
+    /**
+     * `costUsd` is Claude Code's `total_cost_usd`: the running total of the process, so the
+     * session's cost is the latest value, not the sum (0.25 then 0.5 is 0.5 spent, not 0.75).
+     * The tokens of a result are per turn and are summed.
+     */
     @Test
-    fun sessionCostSumsCostedUsageEventsOnce() {
+    fun sessionCostIsTheLatestRunningTotalAndTokensAreSummed() {
         val events = listOf(
             event("m1:usage", 1, "usage", """{"inputTokens":900,"outputTokens":90}"""), // per message, no cost
             event("result:1", 2, "usage", """{"inputTokens":1000,"outputTokens":100,"costUsd":0.25}"""),
@@ -166,15 +173,44 @@ class PlanApprovalAndCostTest {
             event("result:3", 5, "usage", """{"inputTokens":5,"outputTokens":5,"costUsd":null}"""),
         )
         val c = sessionCost(events)!!
-        assertEquals(0.75, c.costUsd, 1e-9)
+        assertEquals(0.5, c.costUsd, 1e-9)
         assertEquals(3000L, c.inputTokens)
         assertEquals(400L, c.outputTokens)
+    }
+
+    /** A `/clear` or a restart without a saved total starts again from zero: each run's last total counts. */
+    @Test
+    fun aTotalThatDropsStartsANewRunAndRunsAreAdded() {
+        val events = listOf(
+            event("result:1", 1, "usage", """{"costUsd":0.2}"""),
+            event("result:2", 2, "usage", """{"costUsd":0.4}"""),
+            // Crash / startup-error result: zeroed, neither a new run nor a cost.
+            event("result:3", 3, "usage", """{"costUsd":0}"""),
+            event("result:4", 4, "usage", """{"costUsd":0.6}"""),
+            // /clear: the running total restarts.
+            event("result:5", 5, "usage", """{"costUsd":0.1}"""),
+            event("result:6", 6, "usage", """{"costUsd":0.3}"""),
+        )
+        assertEquals(0.9, sessionCost(events)!!.costUsd, 1e-9)
+        // A resume that continues from the saved total is the same run.
+        val resumed = listOf(
+            event("result:1", 1, "usage", """{"costUsd":0.2}"""),
+            event("r2:result:1", 2, "usage", """{"costUsd":0.2}"""),
+            event("r2:result:2", 3, "usage", """{"costUsd":0.35}"""),
+        )
+        assertEquals(0.35, sessionCost(resumed)!!.costUsd, 1e-9)
     }
 
     @Test
     fun sessionCostIsNullWhenNothingCarriesACost() {
         assertNull(sessionCost(emptyList()))
         assertNull(sessionCost(listOf(event("m1:usage", 1, "usage", """{"inputTokens":900,"outputTokens":90}"""))))
+    }
+
+    @Test
+    fun negativeOrNonFiniteCostsAreIgnored() {
+        assertNull(sessionCost(listOf(event("result:1", 1, "usage", """{"costUsd":-1}"""))))
+        assertEquals(0.3, sessionCost(listOf(event("result:1", 1, "usage", """{"costUsd":0.3}"""), event("result:2", 2, "usage", """{"costUsd":-5}""")))!!.costUsd, 1e-9)
     }
 
     @Test

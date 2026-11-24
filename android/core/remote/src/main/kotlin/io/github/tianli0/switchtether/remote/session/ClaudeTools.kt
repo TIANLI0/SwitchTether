@@ -134,13 +134,18 @@ object ClaudeTools {
     fun parseFlag(e: JsonElement?, key: String): Boolean = e.obj()?.bool(key) == true
 
     /**
-     * `{commands: [...]}` of the `commands` tool: names without the leading slash, blank and repeated
-     * names dropped, missing texts as `""`. Anything else (an older desktop's error body) is no list.
+     * `{commands: [...]}` of the `commands` tool: names (and `aliases`) without the leading slash,
+     * blank and repeated names dropped, missing texts as `""`. Anything else (an older desktop's
+     * error body) is no list.
      */
     fun parseCommands(e: JsonElement?): List<SlashCommand> =
         e.obj()?.get("commands").arr().orEmpty().mapNotNull { it.obj() }.mapNotNull { c ->
             val name = c.str("name")?.trim()?.trimStart('/')?.takeIf { it.isNotEmpty() && it.none(Char::isWhitespace) } ?: return@mapNotNull null
-            SlashCommand(name, c.str("description")?.trim().orEmpty(), c.str("argumentHint")?.trim().orEmpty())
+            val aliases = c["aliases"].arr().orEmpty()
+                .mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { p -> p.isString }?.content?.trim()?.trimStart('/') }
+                .filter { it.isNotEmpty() && it.none(Char::isWhitespace) && !it.equals(name, ignoreCase = true) }
+                .distinctBy { it.lowercase() }
+            SlashCommand(name, c.str("description")?.trim().orEmpty(), c.str("argumentHint")?.trim().orEmpty(), aliases)
         }.distinctBy { it.name.lowercase() }
 
     /** `messageUuid` of a `POST …/messages` response (Claude Code sessions SwitchTether started), else null. */
@@ -195,4 +200,6 @@ data class SlashCommand(
     val description: String = "",
     /** What follows the name (`[instructions]`, `<pr-number>`), `""` when it takes nothing. */
     val argumentHint: String = "",
+    /** Other names of the same command (`/cost` for `/usage`), without the slash; usually none. */
+    val aliases: List<String> = emptyList(),
 )

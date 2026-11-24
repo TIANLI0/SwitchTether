@@ -26,7 +26,7 @@
     <string name="tools_context_kind_deferred">延迟加载</string>
     <string name="tools_session_cost">本会话费用</string>
     <string name="tools_session_cost_tokens">输入 %1$s · 输出 %2$s tokens</string>
-    <string name="tools_session_cost_partial">只统计本机已加载的对话部分，更早的轮次未计入。</string>
+    <string name="tools_session_cost_partial">Token 只统计本机已加载的对话部分。费用是 Claude Code 的累计值，包含更早的轮次，除非之前对话被清空或重新启动过。</string>
 
     <string name="plan_approve_auto">批准并自动接受编辑</string>
     <string name="plan_approve_review">批准，逐项确认编辑</string>
