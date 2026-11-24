@@ -1,0 +1,23 @@
+{
+  "results": [
+    {
+      "sessionId": "claude:2b1c9f8e-0d1a-4c55-9a77-5e6f7a8b9c0d",
+      "agent": "claude_code",
+      "title": "修复登录页面",
+      "cwd": "D:\\proj\\app",
+      "timeMs": 1763452800000,
+      "snippet": "…好的，我来看看 login 的代码。",
+      "matchCount": 2
+    },
+    {
+      "sessionId": "codex:019a7c1e-5f00-7d2b-9c1e-2a3b4c5d6e7f",
+      "agent": "codex",
+      "title": null,
+      "cwd": null,
+      "timeMs": null,
+      "snippet": "The parser is split in two.",
+      "matchCount": 1
+    }
+  ],
+  "partial": false
+}

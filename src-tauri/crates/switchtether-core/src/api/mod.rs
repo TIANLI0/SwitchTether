@@ -6,6 +6,7 @@ mod core_routes;
 mod events_ws;
 mod files;
 mod forward;
+mod push;
 mod sessions;
 mod terminals;
 
@@ -58,6 +59,8 @@ pub struct ApiContext {
     pub files: FileService,
     /// Port forwarding leases (docs/PROTOCOL.md §7.11).
     pub forwards: crate::forward::ForwardManager,
+    /// Push wake subscriptions and sending (docs/PROTOCOL.md §7.12).
+    pub push: Arc<crate::push::PushWaker>,
     limiter: RateLimiter,
 }
 
@@ -75,6 +78,10 @@ impl ApiContext {
     ) -> Arc<Self> {
         // Files attached from the phone live in SwitchTether's own data directory.
         agents.set_attachment_root(config.data_dir.join("attachments"));
+        let push = crate::push::PushWaker::new(
+            registry.clone(),
+            Arc::new(crate::push::HttpSender::default()),
+        );
         Arc::new(Self {
             config: RwLock::new(config),
             server_id,
@@ -93,6 +100,7 @@ impl ApiContext {
             agents,
             files: FileService::new(),
             forwards: Default::default(),
+            push,
             limiter: RateLimiter::default(),
         })
     }
@@ -106,6 +114,7 @@ impl ApiContext {
         self.stepup.clear_device(device_id);
         self.terminals.release_device(device_id);
         self.forwards.release_device(device_id);
+        self.push.refresh_subscribers();
         let closed = self
             .connections
             .disconnect_fingerprint(&rec.cert_fingerprint);
@@ -360,6 +369,7 @@ pub fn router(ctx: Arc<ApiContext>) -> Router {
         .merge(terminals::routes())
         .merge(files::routes())
         .merge(forward::routes())
+        .merge(push::routes())
         .layer(axum::extract::DefaultBodyLimit::max(MAX_JSON_BODY))
         .layer(axum::middleware::from_fn(request_id_layer))
         .fallback(|| async { ApiError::not_found("no such endpoint") })

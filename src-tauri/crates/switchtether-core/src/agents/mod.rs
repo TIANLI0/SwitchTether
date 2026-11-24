@@ -17,6 +17,7 @@ pub mod dsh;
 pub mod managed;
 pub mod model;
 pub mod model_probe;
+pub mod search;
 pub mod store;
 
 use std::collections::HashMap;
@@ -850,6 +851,101 @@ impl AgentHub {
         let next = (offset + limit < out.len()).then(|| (offset + limit).to_string());
         let page = out.into_iter().skip(offset).take(limit).collect();
         (page, next)
+    }
+
+    /// Full-text search over what was said in sessions (docs/PROTOCOL.md §7.13): newest sessions
+    /// first, bounded by `budget`. Returns the hits and whether the scan stopped early.
+    pub async fn search(
+        &self,
+        query: &str,
+        agent: Option<&str>,
+        limit: usize,
+        budget: Duration,
+    ) -> (Vec<search::SearchResult>, bool) {
+        let folded = search::fold(query.trim());
+        if folded.is_empty() {
+            return (Vec::new(), false);
+        }
+        let mut all = Vec::new();
+        let mut cursor = None;
+        loop {
+            let (page, next) = self
+                .list(&SessionQuery {
+                    agent: agent.map(str::to_string),
+                    cursor: cursor.clone(),
+                    limit: Some(200),
+                    ..Default::default()
+                })
+                .await;
+            all.extend(page);
+            match next {
+                Some(n) if all.len() < 20_000 => cursor = Some(n),
+                _ => break,
+            }
+        }
+        all.sort_by_key(|s| std::cmp::Reverse(s.last_active_at_ms.unwrap_or(0)));
+        let mut seen = std::collections::HashSet::new();
+        let targets: Vec<(SessionSummary, PathBuf)> = all
+            .into_iter()
+            .filter_map(|s| {
+                let path = match s.agent.as_str() {
+                    "claude_code" => s
+                        .source_path
+                        .clone()
+                        .map(PathBuf::from)
+                        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+                        .or_else(|| self.claude.transcript_path(s.cwd.as_deref(), &s.native_id)),
+                    "codex" => s
+                        .source_path
+                        .clone()
+                        .map(PathBuf::from)
+                        .filter(|p| p.extension().is_some_and(|e| e == "jsonl")),
+                    "dsh" => dsh_log_path(&s),
+                    _ => None,
+                }?;
+                seen.insert(path.clone()).then_some((s, path))
+            })
+            .collect();
+        let limit = limit.clamp(1, 50);
+        tokio::task::spawn_blocking(move || {
+            let deadline = Instant::now() + budget;
+            let mut out = Vec::new();
+            let mut partial = false;
+            for (s, path) in targets {
+                if Instant::now() > deadline {
+                    partial = true;
+                    break;
+                }
+                let parser: Box<dyn LineParser> = match s.agent.as_str() {
+                    "claude_code" => Box::new(ClaudeParser::new()),
+                    "codex" => Box::new(CodexParser::new()),
+                    _ => Box::new(DshParser::new()),
+                };
+                let Ok(lines) = search::file_lines(&path) else {
+                    continue;
+                };
+                let mut timed_out = false;
+                let hit = search::search_lines(lines, parser, &folded, deadline, &mut timed_out);
+                partial |= timed_out;
+                if let Some(h) = hit {
+                    out.push(search::SearchResult {
+                        session_id: s.id,
+                        agent: s.agent,
+                        title: s.title,
+                        cwd: s.cwd,
+                        time_ms: s.last_active_at_ms,
+                        snippet: h.snippet,
+                        match_count: h.count,
+                    });
+                    if out.len() >= limit {
+                        break;
+                    }
+                }
+            }
+            (out, partial)
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// Fallback for Claude sessions that are not (yet) in CC Switch's index:

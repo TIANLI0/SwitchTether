@@ -1,0 +1,16 @@
+{
+  "info": {
+    "registered": true,
+    "vapidPublicKey": "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"
+  },
+  "register": {
+    "endpoint": "https://ntfy.example/upAbCdEfGhIjKlMnOpQr?up=1",
+    "p256dh": "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+    "auth": "BTBZMqHH6r4Tts7J_aSIgg"
+  },
+  "test": { "status": 201, "delivered": true },
+  "_comment": "Keys are the receiver keys of RFC 8291 Appendix A (public test vectors). 'message' was produced by the Rust encrypt() for 'register' and decrypts to 'plaintext' with 'receiverPrivateKey'.",
+  "receiverPrivateKey": "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94",
+  "message": "n4dm4L-tcHQbtEpnW6Sr5QAAEABBBNOhvUVtZkARYEXCd52931rujejwx7AgPsNhBRnMLoUTT-vdhRqnJT1aC2ZFjVd0OKOT7Yg8TwHupl4KAkZ5oe2UQlEYsfdhl3SZywOzpxzN4lXi3Uj0AC4",
+  "plaintext": "{\"v\":1}"
+}
