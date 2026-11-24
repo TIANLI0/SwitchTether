@@ -46,6 +46,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -113,9 +116,35 @@ private sealed interface Phase {
 private data class SaveState(val done: Long = 0, val total: Long? = null, val error: String? = null, val record: DownloadRecord? = null, val running: Boolean = false)
 
 /**
- * Full-pane viewer for a remote pdf / image / video / audio (or any other file, offered to other apps).
- * Opening makes a TEMPORARY cache copy (or reuses a download the user already saved) and never creates a
- * download; "Download" is the explicit way to keep the file. Self-contained so the Files page and chat share it.
+ * "Download to phone" for one remote file, shared by every viewer state (a preview, a file the app
+ * cannot show, a text file): progress, the saved record, or the error.
+ */
+@Stable
+private class SaveController(private val ref: RemoteFileRef, private val store: io.github.tianli0.switchtether.files.FileStore, private val scope: kotlinx.coroutines.CoroutineScope) {
+    var state by mutableStateOf(SaveState())
+        private set
+
+    fun start() {
+        if (state.running) return
+        state = SaveState(running = true)
+        scope.launch {
+            state = try {
+                val r = store.download(ref.path, ref.name, ref.size, ref.modifiedMs) { n, total -> state = SaveState(n, total, running = true) }
+                SaveState(record = r)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                SaveState(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))
+            }
+        }
+    }
+}
+
+/**
+ * Full-pane viewer for a remote pdf / image / video / audio / text file, or any other file, which is
+ * offered to keep or to hand to another app. Opening makes a TEMPORARY cache copy (or reuses a
+ * download the user already saved) and never creates a download; "Download" is the explicit way to
+ * keep the file. Self-contained so the Files page and chat share it.
  */
 @Composable
 fun RemoteFileViewer(
@@ -126,15 +155,24 @@ fun RemoteFileViewer(
     /** A file link inside a rendered Markdown file; null leaves such links inert. */
     onOpenPath: ((String) -> Unit)? = null,
 ) {
-    if (ref.kind == FileKind.TEXT || (ref.kind == FileKind.OTHER && io.github.tianli0.switchtether.files.FileTypes.extension(ref.name).isEmpty())) {
-        RemoteTextFileViewer(ref, onBack, modifier, onOpenPath)
-        return
+    val store = appContainer().fileStore
+    val scope = rememberCoroutineScope()
+    val save = remember(ref) { SaveController(ref, store, scope) }
+    // A text file that turned out to be binary continues as a file to keep or hand off.
+    var asBinary by remember(ref.path) { mutableStateOf(false) }
+    val textLike = ref.kind == FileKind.TEXT || (ref.kind == FileKind.OTHER && io.github.tianli0.switchtether.files.FileTypes.extension(ref.name).isEmpty())
+    when {
+        textLike && !asBinary -> RemoteTextFileViewer(ref, onBack, modifier, onOpenPath, save, onManageDownloads, onBinary = { asBinary = true })
+        ref.kind == FileKind.OTHER || asBinary -> HandOffViewer(ref, onBack, onManageDownloads, modifier, save)
+        else -> MediaFileViewer(ref, onBack, onManageDownloads, modifier, save)
     }
+}
+
+@Composable
+private fun MediaFileViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDownloads: (() -> Unit)?, modifier: Modifier, save: SaveController) {
     val store = appContainer().fileStore
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var reload by remember(ref.path) { mutableIntStateOf(0) }
-    var save by remember(ref.path) { mutableStateOf(SaveState()) }
     val phase by produceState<Phase>(Phase.Loading(), ref.path, reload) {
         value = Phase.Loading()
         value = try {
@@ -149,6 +187,8 @@ fun RemoteFileViewer(
     }
     val ready = (phase as? Phase.Ready)?.file
     val noApp = stringResource(R.string.viewer_no_app)
+    // Pictures, PDF pages and video sit on black: the page around them goes dark too.
+    val dark = ref.kind == FileKind.IMAGE || ref.kind == FileKind.VIDEO
 
     Column(modifier.fillMaxSize()) {
         val where = ready?.let { stringResource(if (it.fromDownload) R.string.viewer_saved_copy else R.string.viewer_temp_copy) }
@@ -162,44 +202,35 @@ fun RemoteFileViewer(
                 ToolbarIcon(AppIcons.OpenWith, stringResource(R.string.viewer_open_with), { startSafely(context, store.viewIntent(ready), noApp) })
                 if (!ready.fromDownload) ToolbarIcon(AppIcons.Refresh, stringResource(R.string.viewer_refresh), { reload++ })
             }
-            ToolbarIcon(
-                AppIcons.Download, stringResource(R.string.files_download),
-                onClick = {
-                    if (save.running) return@ToolbarIcon
-                    save = SaveState(running = true)
-                    scope.launch {
-                        save = try {
-                            val r = store.download(ref.path, ref.name, ref.size, ref.modifiedMs) { n, total -> save = SaveState(n, total, running = true) }
-                            SaveState(record = r)
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            SaveState(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))
-                        }
-                    }
-                },
-                enabled = !save.running && ready?.fromDownload != true,
-            )
+            ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), save::start, enabled = !save.state.running && ready?.fromDownload != true)
         }
         // The save line grows in under the header instead of pushing the preview down at once.
-        io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.running || save.error != null || save.record != null) {
-            SaveRow(save, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
+        io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.state.running || save.state.error != null || save.state.record != null) {
+            SaveRow(save.state, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().then(if (dark && phase is Phase.Ready) Modifier.background(Color.Black) else Modifier)) {
             when (val p = phase) {
-                is Phase.Loading -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        stringResource(R.string.viewer_loading, Formatters.bytes(p.done) + (p.total?.let { " / " + Formatters.bytes(it) } ?: "")),
-                        style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                is Phase.Loading -> LoadingBody(p.done, p.total)
+                is Phase.Failed -> if (p.tooLarge) {
+                    // Too big for a temporary copy, but nothing stops keeping it.
+                    FileHandOffCard(
+                        name = ref.name,
+                        detail = listOfNotNull(ref.size?.let(Formatters::bytes), previewFolder(ref.path)).joinToString(" · "),
+                        message = stringResource(R.string.viewer_too_large, p.message),
+                        progress = save.state.takeIf { it.running }?.let { it.done to it.total },
+                        progressLabel = save.state.takeIf { it.running }?.let { stringResource(R.string.viewer_saving, progressText(it.done, it.total)) },
+                        primary = if (save.state.record == null) stringResource(R.string.files_download) to save::start else null,
+                        secondary = save.state.record?.let { r -> stringResource(R.string.viewer_open_with) to { startSafely(context, store.viewIntent(store.asLocal(r)), noApp) } },
+                        modifier = Modifier.align(Alignment.Center),
                     )
-                    LinearProgressIndicator(progress = p.total?.let { if (it > 0) p.done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
-                }
-                is Phase.Failed -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        if (p.tooLarge) stringResource(R.string.viewer_too_large, p.message) else stringResource(R.string.viewer_failed, p.message),
-                        style = COUITheme.textStyles.body2, color = LocalDevColors.current.danger, textAlign = TextAlign.Center,
-                    )
-                    if (!p.tooLarge) SmallButton(stringResource(R.string.action_retry), { reload++ }, modifier = Modifier.padding(top = 12.dp))
+                } else {
+                    Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            stringResource(R.string.viewer_failed, p.message),
+                            style = COUITheme.textStyles.body2, color = LocalDevColors.current.danger, textAlign = TextAlign.Center,
+                        )
+                        SmallButton(stringResource(R.string.action_retry), { reload++ }, modifier = Modifier.padding(top = 16.dp))
+                    }
                 }
                 is Phase.Ready -> LocalFileBody(p.file, ref.kind, Modifier.fillMaxSize())
             }
@@ -207,10 +238,112 @@ fun RemoteFileViewer(
     }
 }
 
+/**
+ * A file the app has no viewer for (an archive, an installer, an office document, a binary). Nothing
+ * is fetched until asked: "Download" keeps it in Downloads, "Open with…" fetches a temporary copy and
+ * hands it to another app. It used to fetch the whole file first and then only say there was no viewer.
+ */
+@Composable
+private fun HandOffViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDownloads: (() -> Unit)?, modifier: Modifier, save: SaveController) {
+    val store = appContainer().fileStore
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val noApp = stringResource(R.string.viewer_no_app)
+    var opening by remember(ref.path) { mutableStateOf<Phase?>(null) }
+    val openWith: () -> Unit = {
+        if (opening !is Phase.Loading) {
+            opening = Phase.Loading()
+            scope.launch {
+                opening = try {
+                    val f = store.resolve(ref.path, ref.name, ref.size, ref.modifiedMs) { n, total -> opening = Phase.Loading(n, total) }
+                    startSafely(context, store.viewIntent(f), noApp)
+                    Phase.Ready(f)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: FileTooLargeException) {
+                    Phase.Failed(Formatters.bytes(e.limitBytes), tooLarge = true)
+                } catch (e: Exception) {
+                    Phase.Failed((e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))
+                }
+            }
+        }
+    }
+    val local = (opening as? Phase.Ready)?.file
+    Column(modifier.fillMaxSize()) {
+        FilePreviewHeader(
+            title = ref.name,
+            subtitle = listOfNotNull(previewFolder(ref.path), ref.size?.let(Formatters::bytes)).joinToString(" · "),
+            onBack = onBack,
+        ) {
+            if (local != null) ToolbarIcon(AppIcons.Share, stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(local), noApp) })
+        }
+        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            val saving = save.state.running
+            val fetching = opening as? Phase.Loading
+            val saved = save.state.record
+            FileHandOffCard(
+                name = ref.name,
+                detail = listOfNotNull(ref.size?.let(Formatters::bytes), kindLabel(ref.name)).joinToString(" · "),
+                message = when {
+                    save.state.error != null -> save.state.error
+                    (opening as? Phase.Failed)?.tooLarge == true -> stringResource(R.string.viewer_too_large, (opening as Phase.Failed).message)
+                    opening is Phase.Failed -> stringResource(R.string.viewer_failed, (opening as Phase.Failed).message)
+                    saved != null -> stringResource(R.string.viewer_saved_to, io.github.tianli0.switchtether.files.FileStore.DOWNLOAD_FOLDER)
+                    else -> stringResource(R.string.viewer_no_viewer)
+                },
+                progress = when {
+                    saving -> save.state.done to save.state.total
+                    fetching != null -> fetching.done to fetching.total
+                    else -> null
+                },
+                progressLabel = when {
+                    saving -> stringResource(R.string.viewer_saving, progressText(save.state.done, save.state.total))
+                    fetching != null -> stringResource(R.string.viewer_loading, progressText(fetching.done, fetching.total))
+                    else -> null
+                },
+                primary = if (saved != null) {
+                    stringResource(R.string.downloads_open) to { startSafely(context, store.viewIntent(store.asLocal(saved)), noApp) }
+                } else {
+                    stringResource(R.string.files_download) to save::start
+                },
+                secondary = if (saved == null) stringResource(R.string.viewer_open_with) to openWith else null,
+                tertiary = if (saved != null && onManageDownloads != null) stringResource(R.string.viewer_manage) to onManageDownloads else null,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingBody(done: Long, total: Long?) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            stringResource(R.string.viewer_loading, progressText(done, total)),
+            style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center,
+        )
+        LinearProgressIndicator(progress = total?.let { if (it > 0) done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp))
+    }
+}
+
+private fun progressText(done: Long, total: Long?): String = Formatters.bytes(done) + (total?.let { " / " + Formatters.bytes(it) } ?: "")
+
+/** "ZIP archive"-style second line: the extension in capitals is enough and needs no translation table. */
+private fun kindLabel(name: String): String? = io.github.tianli0.switchtether.files.FileTypes.extension(name).takeIf { it.isNotEmpty() }?.uppercase()
+
 /** Source and text links use fs/read and remain in memory, just like the workspace editor. */
 @Composable
-private fun RemoteTextFileViewer(ref: RemoteFileRef, onBack: () -> Unit, modifier: Modifier, onOpenPath: ((String) -> Unit)?) {
+private fun RemoteTextFileViewer(
+    ref: RemoteFileRef,
+    onBack: () -> Unit,
+    modifier: Modifier,
+    onOpenPath: ((String) -> Unit)?,
+    save: SaveController,
+    onManageDownloads: (() -> Unit)?,
+    onBinary: () -> Unit,
+) {
     val connection = appContainer().connection
+    val store = appContainer().fileStore
+    val context = LocalContext.current
+    val noApp = stringResource(R.string.viewer_no_app)
     var reload by remember(ref.path) { mutableIntStateOf(0) }
     val content by produceState<io.github.tianli0.switchtether.ui.common.Loadable<io.github.tianli0.switchtether.remote.protocol.FileContent>>(
         io.github.tianli0.switchtether.ui.common.Loadable.Loading, ref.path, reload,
@@ -233,9 +366,14 @@ private fun RemoteTextFileViewer(ref: RemoteFileRef, onBack: () -> Unit, modifie
             onBack = onBack,
         ) {
             ToolbarIcon(AppIcons.Refresh, stringResource(R.string.viewer_refresh), { reload++ })
+            ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), save::start, enabled = !save.state.running)
+        }
+        io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.state.running || save.state.error != null || save.state.record != null) {
+            SaveRow(save.state, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
         }
         io.github.tianli0.switchtether.ui.common.LoadableContent(content, onRetry = { reload++ }) { file ->
-            TextFileBody(file, Modifier.weight(1f), onOpenPath = onOpenPath)
+            // A large file's notice and a binary file both offer Download; a binary also "Open with…".
+            TextFileBody(file, Modifier.weight(1f), onOpenPath = onOpenPath, onDownload = save::start, onOpenBinary = onBinary)
         }
     }
 }
@@ -243,14 +381,14 @@ private fun RemoteTextFileViewer(ref: RemoteFileRef, onBack: () -> Unit, modifie
 @Composable
 private fun SaveRow(save: SaveState, onManage: (() -> Unit)?, onOpen: (DownloadRecord) -> Unit) {
     if (!save.running && save.error == null && save.record == null) return
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         when {
             save.running -> {
-                Text(stringResource(R.string.viewer_saving, Formatters.bytes(save.done) + (save.total?.let { " / " + Formatters.bytes(it) } ?: "")), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurface)
-                LinearProgressIndicator(progress = save.total?.let { if (it > 0) save.done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                Text(stringResource(R.string.viewer_saving, progressText(save.done, save.total)), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceSecondary)
+                LinearProgressIndicator(progress = save.total?.let { if (it > 0) save.done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
             }
             save.error != null -> Text(save.error, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger)
-            save.record != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+            save.record != null -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(R.string.viewer_saved_to, io.github.tianli0.switchtether.files.FileStore.DOWNLOAD_FOLDER), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.ok, modifier = Modifier.weight(1f))
                 LinkButton(stringResource(R.string.downloads_open), { onOpen(save.record) })
                 if (onManage != null) LinkButton(stringResource(R.string.viewer_manage), onManage)

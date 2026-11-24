@@ -126,7 +126,7 @@ fun MarkdownDocView(text: String, path: String, onOpenPath: ((String) -> Unit)?,
                 modifier = Modifier.fillMaxSize(),
                 loading = { m -> Box(m.padding(16.dp)) { Text(stringResource(R.string.state_loading), color = scheme.onSurfaceVariantSummary) } },
                 success = { state, comps, m ->
-                    LazyMarkdownSuccess(state, comps, m, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottom))
+                    LazyMarkdownSuccess(state, comps, m, contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 12.dp, bottom = bottom))
                 },
             )
         }

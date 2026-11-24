@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,16 +57,18 @@ fun FilePreviewHeader(
     onBack: () -> Unit,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
+    // The small title bar's measures: 56dp of bar, the back key on the 8dp edge, 12dp to the title,
+    // keys 4dp apart and 12dp from the edge. The first version packed it into 6dp margins.
     Row(
-        Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         io.github.tianli0.coui17.patterns.BackArrow(onBack)
-        Spacer(Modifier.width(4.dp))
-        Column(Modifier.weight(1f)) {
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 title,
-                style = COUITheme.textStyles.body1.copy(fontWeight = FontWeight.SemiBold),
+                style = COUITheme.textStyles.main.copy(fontWeight = FontWeight.SemiBold),
                 color = COUITheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis,
@@ -70,14 +76,70 @@ fun FilePreviewHeader(
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     subtitle,
-                    style = COUITheme.textStyles.footnote2,
+                    style = COUITheme.textStyles.footnote1,
                     color = COUITheme.colorScheme.onSurfaceVariantSummary,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis,
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
+        Spacer(Modifier.width(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
+    }
+}
+
+/**
+ * A file the app cannot show itself (an archive, an installer, an office document, a binary): what it
+ * is, and the ways forward — keep it (Download), or hand it to another app. Never a dead end.
+ */
+@Composable
+fun FileHandOffCard(
+    name: String,
+    detail: String,
+    modifier: Modifier = Modifier,
+    message: String? = null,
+    progress: Pair<Long, Long?>? = null,
+    progressLabel: String? = null,
+    primary: Pair<String, () -> Unit>? = null,
+    secondary: Pair<String, () -> Unit>? = null,
+    tertiary: Pair<String, () -> Unit>? = null,
+) {
+    Column(
+        modifier.fillMaxWidth().padding(horizontal = io.github.tianli0.coui17.patterns.PageDefaults.CardGutter, vertical = 24.dp)
+            .clip(SquircleShape(24.dp)).background(COUITheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            Modifier.size(72.dp).clip(SquircleShape(20.dp)).background(COUITheme.colorScheme.primary.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(fileIconVector(io.github.tianli0.switchtether.files.FileTypes.iconOf(name, isDir = false)), contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(name, style = COUITheme.textStyles.main.copy(fontWeight = FontWeight.SemiBold), color = COUITheme.colorScheme.onSurface, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.MiddleEllipsis)
+        Text(detail, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
+        if (message != null) {
+            Text(message, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceSecondary, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+        }
+        if (progress != null) {
+            val (done, total) = progress
+            Column(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                io.github.suqi8.coui.kmp.basic.LinearProgressIndicator(progress = total?.let { if (it > 0) done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth())
+                if (progressLabel != null) {
+                    Text(progressLabel, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        } else if (primary != null || secondary != null || tertiary != null) {
+            Column(Modifier.padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    primary?.let { (label, act) -> SmallButton(label, act, tone = io.github.tianli0.coui17.patterns.ActionTone.Primary) }
+                    secondary?.let { (label, act) -> SmallButton(label, act) }
+                }
+                tertiary?.let { (label, act) -> io.github.tianli0.coui17.patterns.LinkButton(label, act) }
+            }
+        }
     }
 }
 
@@ -103,9 +165,9 @@ fun PreviewNotice(text: String, tone: NoticeTone, modifier: Modifier = Modifier,
         NoticeTone.Danger -> dev.danger
     }
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-            .clip(SquircleShape(14.dp)).background(accent.copy(alpha = 0.10f))
-            .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 10.dp)
+            .clip(SquircleShape(16.dp)).background(accent.copy(alpha = 0.10f))
+            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
@@ -126,7 +188,7 @@ fun MarkdownModeSwitch(rendered: Boolean, onChange: (Boolean) -> Unit, modifier:
         tabs = listOf(stringResource(R.string.files_md_rendered), stringResource(R.string.files_md_source)),
         selectedTabIndex = if (rendered) 0 else 1,
         onTabSelected = { onChange(it == 0) },
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier = modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 10.dp),
     )
 }
 

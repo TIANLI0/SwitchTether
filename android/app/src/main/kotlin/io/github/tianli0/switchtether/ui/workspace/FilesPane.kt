@@ -481,17 +481,18 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
     Column(Modifier.fillMaxSize()) {
         val f = (state.file as? Loadable.Ready)?.value
         val name = f?.path?.let(FileTypes::fileName).orEmpty()
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), vm::requestCloseFile)
-            Column(Modifier.weight(1f)) {
-                Text(name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                if (f != null) {
-                    Text(
-                        f.path, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1, overflow = TextOverflow.StartEllipsis,
-                    )
-                }
-            }
+        // The same title bar as every file preview: back, name over folder · size · modified, keys.
+        io.github.tianli0.switchtether.ui.files.FilePreviewHeader(
+            title = name,
+            subtitle = f?.let { file ->
+                listOfNotNull(
+                    io.github.tianli0.switchtether.ui.files.previewFolder(file.path),
+                    Formatters.bytes(file.size),
+                    file.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) },
+                ).joinToString(" · ")
+            },
+            onBack = vm::requestCloseFile,
+        ) {
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
             if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(name, f.path, "file", f.size)) })
             if (state.editing) {
@@ -500,22 +501,17 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
                     onClick = vm::save,
                     enabled = !state.saving,
                     tone = ActionTone.Primary,
-                    modifier = Modifier.padding(end = 12.dp).testTag("save"),
+                    modifier = Modifier.testTag("save"),
                 )
             }
         }
         state.transfer?.let { TransferRow(it, vm, {}) }
         LoadableContent(state.file!!, onRetry = { (state.file as? Loadable.Ready)?.value?.path?.let(vm::openPath) }) { file ->
             val dev = LocalDevColors.current
+            // Size and time are in the title bar now; the encoding stays as a quiet line for editing.
             Text(
-                listOfNotNull(
-                    file.encoding,
-                    file.lineEnding.uppercase(),
-                    Formatters.bytes(file.size),
-                    file.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) },
-                    file.sha256.take(12).takeIf { it.isNotEmpty() },
-                ).joinToString(" · "),
-                style = DevType.label, color = dev.gutter, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                listOf(file.encoding, file.lineEnding.uppercase()).joinToString(" · "),
+                style = DevType.label, color = dev.gutter, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 6.dp),
             )
             if (state.editing) {
                 BasicTextField(

@@ -1394,3 +1394,83 @@ id; the stream's `session_id` changes).
   the plan (as the extension does) and is shown as a notice.
 - **End session** is also in the session info sheet (same confirmation), so a Codex session
   SwitchTether started, which has no Claude Code tools page, can be ended.
+
+## 25. Files: roomier previews, a lightbox, the cache you can open, no dead ends (2026-11-25)
+
+User report: the file preview was cramped, the picture viewer was rough, opening the cache did not
+work well, files the app cannot show led nowhere, and a file with a name seen before showed the old
+copy. Code in `ui/files/` and `files/`; ANDROID_UI §18 and §23.8 still apply.
+
+### 25.1 Spacing
+- **Preview title bar** (`FilePreviewHeader`, shared by the Files page, chat links, the storage
+  page and the Workspace text editor, which had a bar of its own): 60dp, back key on the 8dp edge,
+  12dp to the title, title 17sp semibold over a 13sp line (folder · size · when), keys 4dp apart
+  and 12dp from the edge. It used to be 6dp margins, a 16sp title and a 12sp line.
+- **Code viewer**: the code is a rounded card (16dp squircle) 12dp from the screen edges instead of
+  a square slab 8dp from them; 12dp above the first line, 12dp between line numbers and code and at
+  the end of a line; the tool row and the find bar line up with the card.
+- **Markdown**: 24dp side margins and 12dp above the first block (16 / 8 before); the Rendered /
+  Source switch and notices have 10dp under them.
+- The Workspace editor's raw "utf-8 · LF · size · time · sha" line is gone: size and time are in the
+  title bar's second line; encoding and line ending stay as a quiet line for editing.
+
+### 25.2 Lightbox (`ImageLightbox`)
+Pictures from chat (attachments, pictures in replies, files the agent looked at) open in one
+full-screen viewer:
+- black behind the picture; pinch, double-tap zoom and pan with Telephoto, as in the Files viewer;
+- the pictures of one message are swiped sideways (`ImagePreview.gallery`), "2 / 3" under the name;
+- pull the picture down (or up) to close: it follows the finger, shrinks a little and the black
+  fades with the pull; let go short of 120dp and it springs back; a fast fling closes too. Not while
+  zoomed in (then a drag pans);
+- a tap shows or hides the controls, which also step aside after 4 s: close, name and position on a
+  dark gradient at the top; Share, Save and Open with… on a dark gradient at the bottom. They use the
+  over-media style of COUI's media bar (white on translucent dark, whatever the theme) and the status
+  and navigation bar icons turn light while it is open;
+- Save keeps a picture from the computer as a download (`FileStore.download`) and a picture that only
+  exists in the message as bytes (`FileStore.saveBytes`); Share / Open with hand over a temporary
+  copy (`FileStore.cacheBytes`, keyed by content).
+The old viewer closed on any tap (also on the picture), zoomed with a hand-made transform and put a
+48dp glass disc and a pill button over the picture.
+
+### 25.3 Files the app cannot show
+- An archive, installer, office document or other unknown type opens as a card (`FileHandOffCard`):
+  icon, name, size and type, "No built-in viewer…", **Download to phone** and **Open with…**. Nothing
+  is fetched until one is chosen; both show their progress in the card; after downloading the card
+  offers Open and Manage downloads. It used to fetch the whole file into the preview cache first and
+  then only say there was no viewer — and a file over the 200 MB preview cap ended in an error.
+- A media file over the preview cap shows the same card with Download (a download has no cap).
+- A text link that turns out to be binary now continues to that card ("Preview or open with another
+  app"), and the text viewer opened from chat has Download in its bar and in the "only the
+  beginning is shown" notice; before, both were missing there.
+- "Open with…" of an unknown type asks with `*/*` and a type from Android's `MimeTypeMap` when the
+  app's own table does not know the extension: `application/octet-stream` matched almost no app, so
+  the chooser came up empty.
+
+### 25.4 The cache can be opened
+Downloads & storage lists **Recently previewed** under the cache card (up to 20, newest first:
+name, folder, size, when). A row opens the copy inside the app; its menu offers Open, Open with…,
+Share, **Keep in Downloads** (copied from the cache, no transfer) and Remove from cache. Every copy
+records the remote path it came from (`.source` beside it in its cache folder). Downloads open inside
+the app too, text and code included (read from the local copy, so this works offline); before, only
+media opened here and everything else went straight to other apps.
+
+### 25.5 Same name, stale copy
+Cause: a link from chat carries no size or modified time. Without them `FileStore.resolve` (1) took
+any earlier **download** of that path as current, however old ("unknown values do not disqualify"),
+and (2) trusted a cache copy made without them for 10 minutes. A file changed on the computer — or
+regenerated under the same name — kept showing the old copy.
+Now, when the caller has neither, `resolve` and `download` first ask the computer (`statRemote`: one
+`fs/list` of the folder, 5 s timeout) and key and validate with the answer; a file that changed is
+fetched again. Copies are keyed by desktop, full path, size and modified time (`FileCache.keyFor`),
+so the same name in another folder is another file; a new copy of a path replaces the older one in
+the cache. Offline, `resolve` shows the newest copy of that path that is on the phone (a download,
+else the cache) instead of an error. Reload in the viewer still forces a fresh fetch.
+
+### 25.6 Evidence and limits
+JVM tests `FileFreshnessTest` (keys per folder and per version, a new copy replacing the old one,
+the source note, listing lookup, parent folders) and the existing `FileCacheTest` /
+`DownloadIndexTest`; Robolectric screenshots `files-code-{light,dark}`, `files-handoff-light`,
+`files-handoff-progress-dark`, `files-lightbox` (API 32, synthetic files). **Not seen on a device:**
+the lightbox gestures (pull to close, swipe between pictures, zoom vs. drag), the light system-bar
+icons, sharing / saving from it, opening cached copies with other apps, the stat request against a
+real desktop and the offline fallback.
