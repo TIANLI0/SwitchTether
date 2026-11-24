@@ -214,6 +214,13 @@ fun SessionDetailScreen(
                     pendingLink = link
                 }
             },
+            // The file a Read / Edit / Write step is about opens in the same viewer.
+            onOpenFile = { file ->
+                io.github.tianli0.switchtether.files.FileTypes.resolveChatPath(file, summary?.cwd)?.let { path ->
+                    val name = io.github.tianli0.switchtether.files.FileTypes.fileName(path)
+                    viewingFile = io.github.tianli0.switchtether.ui.files.RemoteFileRef(path, name, io.github.tianli0.switchtether.files.FileTypes.kindOf(name))
+                }
+            },
             onLoadImageBytes = vm::loadImageBytes,
             onViewImage = { viewingImage = it },
             // Claude Code session tools (a Claude process SwitchTether started).

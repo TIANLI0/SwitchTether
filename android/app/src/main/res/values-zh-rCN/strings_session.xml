@@ -14,6 +14,9 @@
     <string name="render_thinking">思考过程</string>
     <string name="render_input">输入</string>
     <string name="render_output">输出</string>
+    <string name="render_file">文件</string>
+    <string name="render_file_content">读取的内容</string>
+    <string name="render_open_file">查看</string>
     <string name="render_exit_code">退出码 %1$d</string>
     <string name="render_empty_output">（无输出）</string>
     <string name="render_file_add">新增</string>

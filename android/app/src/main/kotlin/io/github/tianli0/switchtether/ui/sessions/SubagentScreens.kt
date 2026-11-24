@@ -3,6 +3,8 @@ package io.github.tianli0.switchtether.ui.sessions
 import io.github.tianli0.coui17.patterns.PageDefaults
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -174,6 +177,14 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
         me?.agentType?.takeIf { it.isNotBlank() },
         if (running) stringResource(R.string.render_status_running) else if (me?.finished == true) stringResource(R.string.step_completed) else null,
     ).joinToString(" · ")
+    // Files the sub-agent read or changed open in the viewer (its paths are absolute).
+    var viewingFile by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.ui.files.RemoteFileRef?>(null) }
+    val openFile: (String) -> Unit = { file ->
+        io.github.tianli0.switchtether.files.FileTypes.resolveChatPath(file, null)?.let { path ->
+            val name = io.github.tianli0.switchtether.files.FileTypes.fileName(path)
+            viewingFile = io.github.tianli0.switchtether.ui.files.RemoteFileRef(path, name, io.github.tianli0.switchtether.files.FileTypes.kindOf(name))
+        }
+    }
     val ctx = RenderContext(
         agent = agent,
         agentLabel = Formatters.agentLabel(agent),
@@ -188,7 +199,8 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
         payloadOf = { null },
         onToggleCollapse = vm::toggleCollapse,
         isCollapsed = { it in vm.state.value.collapsed },
-        onLink = {},
+        onLink = openFile,
+        onOpenFile = openFile,
         onOpenSubagent = { aid, t -> onOpen(Route.Subagent(sessionId, aid, t, agent)) },
         subagentPreview = { vm.previews[it] },
         onWantSubagentPreview = vm::loadPreview,
@@ -224,6 +236,18 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
                     }
                 }
                 if (running) item(key = "live") { Note(stringResource(R.string.subagent_following)) }
+            }
+        }
+    }
+    viewingFile?.let { ref ->
+        io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
+            Box(
+                Modifier.fillMaxSize()
+                    .background(io.github.tianli0.coui17.patterns.pageContainerColor())
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+            ) {
+                io.github.tianli0.switchtether.ui.files.RemoteFileViewer(ref, onBack = { viewingFile = null }, onManageDownloads = null)
             }
         }
     }

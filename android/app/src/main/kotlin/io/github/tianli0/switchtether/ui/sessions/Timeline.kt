@@ -110,6 +110,13 @@ fun stepTitle(item: RenderItem): String {
         val title = d.str("title")
         if (preview != it.trim() || title.isNullOrBlank() || it.startsWith(title.trimEnd('…'))) return preview
     }
+    // A file tool's title is the whole path: the name says which file, the row opens the rest.
+    io.github.tianli0.switchtether.remote.session.ToolFiles.path(d)?.let { path ->
+        val title = d.str("title")
+        if (title.isNullOrBlank() || path.startsWith(title.trimEnd('…'))) {
+            return io.github.tianli0.switchtether.remote.session.ToolFiles.name(path)
+        }
+    }
     return d.str("title")?.takeIf { it.isNotBlank() } ?: d.str("description")?.takeIf { it.isNotBlank() } ?: d.str("name").orEmpty()
 }
 

@@ -463,6 +463,9 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
     val status = toolStatus(item)
     val result = item.attachedResult
     val command = io.github.tianli0.switchtether.remote.session.ToolCommands.raw(d)
+    // Read / Edit / Write: the step is about one file, shown by name and opened from the card.
+    val filePath = remember(item.event) { io.github.tianli0.switchtether.remote.session.ToolFiles.path(d) }
+    val fileRange = remember(item.event) { if (filePath != null) io.github.tianli0.switchtether.remote.session.ToolFiles.range(d) else null }
     Column(Modifier.fillMaxWidth()) {
         CollapsibleRow(
             icon = categoryIcon(d.str("category")),
@@ -470,6 +473,7 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
             title = io.github.tianli0.switchtether.ui.sessions.stepTitle(item),
             subtitle = listOfNotNull(
                 d.str("name"),
+                fileRange,
                 d.str("server")?.let { "@$it" },
                 if (d.bool("background") == true) stringResource(R.string.subagent_background) else null,
                 shortClock(item.event.ts).ifEmpty { null },
@@ -490,7 +494,13 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
         ExpandBody(open) {
             Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
                 val input = d["input"]
-                if (input != null && input.toString() != "{}") {
+                val isRead = d.str("category") == "read"
+                if (filePath != null) {
+                    SectionLabel(stringResource(R.string.render_file))
+                    FileTarget(filePath, fileRange, ctx)
+                }
+                // A read's input is only the path (and the range) the row above already shows.
+                if (input != null && input.toString() != "{}" && !(filePath != null && isRead)) {
                     SectionLabel(stringResource(R.string.render_input))
                     if (command != null) {
                         // Wrap / copy are small icons in the block's own header, not buttons above it.
@@ -505,8 +515,14 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                     SectionLabel(stringResource(R.string.render_background_task))
                     Text(summary, style = COUITheme.textStyles.body2, color = if (status == StepStatus.Failed) dev.danger else COUITheme.colorScheme.onSurface)
                 }
-                if (result != null) {
-                    SectionLabel(stringResource(R.string.render_output))
+                val readImage = filePath != null && isRead && result?.data?.bool("isError") != true &&
+                    io.github.tianli0.switchtether.files.FileTypes.kindOf(filePath) == io.github.tianli0.switchtether.files.FileKind.IMAGE
+                if (readImage && ctx.onLoadImageBytes != null) {
+                    // The agent looked at a picture: show the picture, not the "[image]" placeholder.
+                    Spacer(Modifier.size(8.dp))
+                    ReadImage(filePath!!, ctx)
+                } else if (result != null) {
+                    SectionLabel(stringResource(if (filePath != null && isRead) R.string.render_file_content else R.string.render_output))
                     ResultBody(result.id, result.data, ctx)
                 } else if (status == StepStatus.Running || status == StepStatus.Pending) {
                     Spacer(Modifier.size(8.dp))
@@ -527,6 +543,59 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
             )
         }
     }
+}
+
+/** The file a step read or changed: name, folder and the part read. A tap opens it in the file viewer. */
+@Composable
+private fun FileTarget(path: String, range: String?, ctx: RenderContext) {
+    val name = io.github.tianli0.switchtether.remote.session.ToolFiles.name(path)
+    val folder = io.github.tianli0.switchtether.remote.session.ToolFiles.folder(path)
+    val open = ctx.onOpenFile
+    val openLabel = stringResource(R.string.render_open_file)
+    val image = io.github.tianli0.switchtether.files.FileTypes.kindOf(name) == io.github.tianli0.switchtether.files.FileKind.IMAGE
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(SquircleShape(10.dp))
+            .background(LocalDevColors.current.codeBackground)
+            .then(if (open != null) Modifier.clickable(role = Role.Button, onClickLabel = openLabel) { open(path) } else Modifier)
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .testTag("tool-file"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(if (image) AppIcons.Image else AppIcons.File, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                name.ifEmpty { path } + (range?.let { "  ·  $it" } ?: ""),
+                style = COUITheme.textStyles.body2,
+                fontWeight = FontWeight.Medium,
+                color = COUITheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // The end of a long folder says more than its start.
+            if (folder.isNotEmpty()) Text(folder, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.StartEllipsis)
+        }
+        if (open != null) {
+            Spacer(Modifier.size(8.dp))
+            Text(openLabel, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary)
+            Icon(AppIcons.ChevronRight, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+/** A picture the agent read, loaded from the computer; a tap opens it full screen. */
+@Composable
+private fun ReadImage(path: String, ctx: RenderContext) {
+    var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
+    androidx.compose.runtime.LaunchedEffect(path, ctx.online) {
+        if (bytes == null) bytes = ctx.onLoadImageBytes?.invoke(path)
+    }
+    ImageThumb(bytes = bytes, label = io.github.tianli0.switchtether.remote.session.ToolFiles.name(path), onClick = {
+        ctx.onViewImage?.invoke(ImagePreview(alt = path, bytes = bytes, path = path))
+    })
 }
 
 @Composable

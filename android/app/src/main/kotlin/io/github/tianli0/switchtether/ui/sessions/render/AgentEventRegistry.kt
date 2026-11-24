@@ -33,6 +33,8 @@ data class RenderContext(
     val onToggleCollapse: (eventId: String) -> Unit,
     val isCollapsed: (eventId: String) -> Boolean,
     val onLink: (String) -> Unit,
+    /** Opens a file on the computer (the one a Read / Edit / Write step is about) in the viewer; null = not offered. */
+    val onOpenFile: ((path: String) -> Unit)? = null,
     val onLoadImageBytes: (suspend (path: String) -> ByteArray?)? = null,
     val onViewImage: ((ImagePreview) -> Unit)? = null,
     val requestBusy: Boolean = false,

@@ -71,4 +71,11 @@ class TimelineTest {
         val steps = buildTimeline(items, emptySet()).filterIsInstance<TimelineRow.Steps>().single()
         assertTrue("a running background shell keeps the step block running", steps.running)
     }
+
+    @Test fun aFileStepIsTitledByItsFileName() {
+        val items = AgentEventLog.of(
+            listOf(event("f1", 1, "tool_call", """{"callId":"cf1","name":"Read","title":"/repo/src/main.rs","category":"read","status":"completed","input":{"file_path":"/repo/src/main.rs"}}""")),
+        ).renderItems(emptySet())
+        assertEquals("main.rs", io.github.tianli0.switchtether.ui.sessions.stepTitle(items.single()))
+    }
 }

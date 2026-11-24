@@ -16,6 +16,9 @@
     <string name="render_thinking">Thinking</string>
     <string name="render_input">Input</string>
     <string name="render_output">Output</string>
+    <string name="render_file">File</string>
+    <string name="render_file_content">Content read</string>
+    <string name="render_open_file">Open</string>
     <string name="render_exit_code">Exit code %1$d</string>
     <string name="render_empty_output">(no output)</string>
     <string name="render_file_add">Added</string>
