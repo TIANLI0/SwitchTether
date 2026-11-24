@@ -129,19 +129,21 @@ fun AnimatedNavHost(nav: NavViewModel, content: @Composable (NavEntry) -> Unit) 
         // as the card shrinks.
         val popping = gesture && entry.key == transition.currentState.key && entry.key != transition.targetState.key
         val revealed = gesture && entry.key == transition.targetState.key && entry.key != transition.currentState.key
-        val scrim = if (revealed) BACK_SCRIM * (1f - backProgress.value) * (1f - backExit.value) else animatedScrim
+        val scrim = if (revealed) BACK_SCRIM * (1f - backEase(backProgress.value)) * (1f - backExit.value) else animatedScrim
         Box(
             Modifier
                 .fillMaxSize()
                 .then(
                     if (popping) {
                         Modifier.graphicsLayer {
-                            val p = backProgress.value
+                            val p = backEase(backProgress.value)
                             val x = backExit.value
                             val scale = 1f - BACK_SHRINK * p - BACK_EXIT_SHRINK * x
                             scaleX = scale
                             scaleY = scale
-                            val shift = size.width * BACK_SHIFT_FRACTION * p
+                            // While dragging the card leans toward the swipe edge; after release it
+                            // keeps travelling that way as it fades (Android's closing animation).
+                            val shift = size.width * (BACK_SHIFT_FRACTION * p + BACK_EXIT_SHIFT_FRACTION * x)
                             translationX = if (backEdge == BackEventCompat.EDGE_RIGHT) -shift else shift
                             alpha = 1f - x
                             shape = RoundedCornerShape(BACK_CORNER * maxOf(p, x))
@@ -174,15 +176,25 @@ private const val SCRIM_ALPHA = 0.5f
 
 /** Android's predictive back card: 90 % at the end of the drag, leaning toward the swipe edge. */
 private const val BACK_SHRINK = 0.1f
-private const val BACK_SHIFT_FRACTION = 0.04f
+private const val BACK_SHIFT_FRACTION = 0.06f
 private val BACK_CORNER = 32.dp
 
 /** The page revealed behind the card starts dimmed and lightens with the drag. */
 private const val BACK_SCRIM = 0.25f
 
-/** After release the card shrinks a little further and fades out. */
-private const val BACK_EXIT_SHRINK = 0.06f
-private const val BACK_EXIT_MS = 180
+/** After release the card shrinks further, travels toward the swipe edge and fades out. */
+private const val BACK_EXIT_SHRINK = 0.1f
+private const val BACK_EXIT_SHIFT_FRACTION = 0.25f
+private const val BACK_EXIT_MS = 250
+
+/**
+ * The gesture's progress grows slowly over the first part of the drag, so a linear card barely
+ * moved and the gesture read as "no preview": ease it out, the card answers as soon as the finger moves.
+ */
+internal fun backEase(progress: Float): Float {
+    val p = progress.coerceIn(0f, 1f)
+    return 1f - (1f - p) * (1f - p)
+}
 
 private val OpenEnter = CubicBezierEasing(0.3f, 0.1f, 0.3f, 1f)
 private val OpenExit = CubicBezierEasing(0.3f, 0.15f, 0.3f, 1f)
