@@ -320,30 +320,50 @@ private fun ImageStrip(items: List<JsonObject>, ctx: RenderContext) {
         Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // Every picture of the message, so the lightbox swipes through them (pictures from the computer
+        // are loaded by the lightbox itself when they were not loaded here yet).
+        val gallery = remember(items) {
+            items.mapNotNull { img ->
+                when (img.str("kind")) {
+                    "base64" -> runCatching { android.util.Base64.decode(img.str("data").orEmpty(), android.util.Base64.DEFAULT) }.getOrNull()?.let { ImagePreview(bytes = it) }
+                    "local" -> img.str("path")?.takeIf { it.isNotBlank() }?.let { ImagePreview(alt = it, path = it) }
+                    "url" -> img.str("url")?.takeIf { it.startsWith("data:image/") }?.let { url ->
+                        runCatching { android.util.Base64.decode(url.substringAfter("base64,", ""), android.util.Base64.DEFAULT) }.getOrNull()?.let { ImagePreview(bytes = it) }
+                    }
+                    else -> null
+                }
+            }
+        }
+        var galleryIndex = 0
+        fun open(p: ImagePreview, at: Int) = ctx.onViewImage?.invoke(p.copy(gallery = gallery, index = at))
         items.forEach { img ->
             val kind = img.str("kind")
+            val at = galleryIndex
             when (kind) {
                 "base64" -> {
+                    galleryIndex++
                     val b64 = img.str("data").orEmpty()
                     val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
-                    ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) ctx.onViewImage?.invoke(ImagePreview(bytes = bytes)) })
+                    ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) open(ImagePreview(bytes = bytes), at) })
                 }
                 "local" -> {
+                    if (!img.str("path").isNullOrBlank()) galleryIndex++
                     val path = img.str("path").orEmpty()
                     var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
                     androidx.compose.runtime.LaunchedEffect(path, ctx.online) {
                         if (path.isNotBlank() && bytes == null) bytes = ctx.onLoadImageBytes?.invoke(path)
                     }
                     ImageThumb(bytes = bytes, label = path.substringAfterLast('/').substringAfterLast('\\'), onClick = {
-                        ctx.onViewImage?.invoke(ImagePreview(alt = path, bytes = bytes, path = path))
+                        open(ImagePreview(alt = path, bytes = bytes, path = path), at)
                     })
                 }
                 "url" -> {
                     val url = img.str("url").orEmpty()
                     if (url.startsWith("data:image/")) {
+                        galleryIndex++
                         val b64 = url.substringAfter("base64,", "")
                         val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
-                        ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) ctx.onViewImage?.invoke(ImagePreview(bytes = bytes)) })
+                        ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) open(ImagePreview(bytes = bytes), at) })
                     } else {
                         SubtleMeta("[image: $url]")
                     }

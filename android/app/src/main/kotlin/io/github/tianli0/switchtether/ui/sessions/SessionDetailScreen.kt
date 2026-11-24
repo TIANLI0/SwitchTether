@@ -1462,90 +1462,18 @@ private fun ImageViewerDialog(
     onLoadBytes: suspend (String) -> ByteArray?,
     onDismiss: () -> Unit,
 ) {
-    var bytes by remember(preview) { mutableStateOf(preview.bytes) }
-    LaunchedEffect(preview) {
-        if (bytes == null && preview.path != null) {
-            bytes = onLoadBytes(preview.path)
-        }
-    }
-    val bmp = remember(bytes) {
-        bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
-    }
-    val fileStore = appContainer().fileStore
-    val viewerContext = androidx.compose.ui.platform.LocalContext.current
-    val viewerScope = rememberCoroutineScope()
-    var scale by remember(preview) { mutableStateOf(1f) }
-    var offset by remember(preview) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    val transformState = androidx.compose.foundation.gestures.rememberTransformableState { zoomChange, panChange, _ ->
-        scale = (scale * zoomChange).coerceIn(1f, 5f)
-        offset = if (scale > 1f) offset + panChange else androidx.compose.ui.geometry.Offset.Zero
-    }
-    io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = onDismiss) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.94f))
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (bmp != null) {
-                androidx.compose.foundation.Image(
-                    bitmap = bmp,
-                    contentDescription = preview.alt ?: stringResource(R.string.render_image_preview),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .transformable(transformState)
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offset.x,
-                            translationY = offset.y,
-                        ),
-                )
-            } else {
-                Text(
-                    preview.alt ?: preview.url ?: stringResource(R.string.state_loading),
-                    style = COUITheme.textStyles.body2,
-                    color = androidx.compose.ui.graphics.Color.White,
-                    modifier = Modifier.padding(24.dp),
-                )
-            }
-            RoundIconButton(
-                icon = AppIcons.Close,
-                label = stringResource(R.string.action_close),
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(20.dp),
+    // The lightbox (ui/files/ImageLightbox.kt): zoom, swipe through the message's pictures, pull down to close.
+    val all = preview.gallery.ifEmpty { listOf(preview) }
+    val images = remember(preview) {
+        all.map { p ->
+            io.github.tianli0.switchtether.ui.files.LightboxImage(
+                name = p.path?.let(io.github.tianli0.switchtether.files.FileTypes::fileName)?.takeIf { it.isNotBlank() }
+                    ?: p.alt?.takeIf { it.isNotBlank() && !it.contains('/') && !it.contains('\\') && it.contains('.') }
+                    ?: io.github.tianli0.switchtether.ui.files.imageNameFor(p.bytes),
+                bytes = p.bytes,
+                path = p.path,
             )
-            val remotePath = preview.path
-            if (remotePath != null) {
-                // Viewing is already cached in memory; keeping the file or handing it to another app is explicit.
-                val saved = stringResource(R.string.viewer_saved_to, io.github.tianli0.switchtether.files.FileStore.DOWNLOAD_FOLDER)
-                val noApp = stringResource(R.string.viewer_no_app)
-                Row(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    RoundIconButton(
-                        icon = AppIcons.Download,
-                        label = stringResource(R.string.files_download),
-                        onClick = {
-                            viewerScope.launch {
-                                val msg = runCatching { fileStore.download(remotePath) }.fold({ saved }, { it.message ?: "" })
-                                android.widget.Toast.makeText(viewerContext, msg, android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                    )
-                    SmallButton(
-                        text = stringResource(R.string.viewer_open_with),
-                        modifier = Modifier.align(Alignment.CenterVertically),
-                        onClick = {
-                            viewerScope.launch {
-                                runCatching { fileStore.resolve(remotePath) }.onSuccess {
-                                    io.github.tianli0.switchtether.ui.files.startSafely(viewerContext, fileStore.viewIntent(it), noApp)
-                                }.onFailure { android.widget.Toast.makeText(viewerContext, it.message ?: noApp, android.widget.Toast.LENGTH_SHORT).show() }
-                            }
-                        },
-                    )
-                }
-            }
         }
     }
+    io.github.tianli0.switchtether.ui.files.ImageLightbox(images, startIndex = if (preview.gallery.isEmpty()) 0 else preview.index, onDismiss = onDismiss, loadBytes = onLoadBytes)
 }

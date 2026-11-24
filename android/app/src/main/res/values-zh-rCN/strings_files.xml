@@ -59,4 +59,10 @@
     <string name="command_wrap">自动换行</string>
     <string name="command_copy">复制完整命令</string>
     <string name="command_directory">工作目录</string>
+    <string name="lightbox_save">保存</string>
+    <string name="viewer_no_viewer_local">没有内置的查看器能打开这种文件，可以用其他应用打开。</string>
+    <string name="downloads_recent">最近预览</string>
+    <string name="downloads_keep">保存到下载</string>
+    <string name="downloads_remove_cached">从缓存中移除</string>
+    <string name="lightbox_open_with">其他应用</string>
 </resources>

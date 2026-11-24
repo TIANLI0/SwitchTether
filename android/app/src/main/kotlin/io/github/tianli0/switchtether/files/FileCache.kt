@@ -18,7 +18,16 @@ class FileCache(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     /** A copy under construction; not visible to [get] until [commit]. */
-    class Pending internal constructor(val key: String, val name: String, val file: File)
+    class Pending internal constructor(val key: String, val name: String, val file: File, val source: String?)
+
+    /**
+     * One committed copy, for the "recently previewed" list: [source] is the remote path it was made
+     * from (null for copies made before sources were recorded, or for in-memory bytes such as a chat image).
+     */
+    data class Cached(val key: String, val file: File, val source: String?, val lastUsedMs: Long) {
+        val name: String get() = file.name
+        val size: Long get() = file.length()
+    }
 
     /**
      * Returns the cached file for [key], or null. With [maxAgeMs] set, an older copy counts as a miss
@@ -27,7 +36,7 @@ class FileCache(
     @Synchronized
     fun get(key: String, maxAgeMs: Long? = null): File? {
         val entryDir = File(dir, key)
-        val file = entryDir.listFiles()?.firstOrNull { it.isFile } ?: return null
+        val file = contentOf(entryDir) ?: return null
         if (maxAgeMs != null && clock() - file.lastModified() > maxAgeMs) {
             entryDir.deleteRecursively()
             return null
@@ -37,7 +46,7 @@ class FileCache(
     }
 
     @Synchronized
-    fun begin(key: String, displayName: String): Pending {
+    fun begin(key: String, displayName: String, source: String? = null): Pending {
         dir.mkdirs()
         // Leftovers of this key from a crashed run (no live download owns them) are swept here; the temp
         // files of downloads still in flight are never touched.
@@ -48,7 +57,7 @@ class FileCache(
         val tmp = File(dir, "$TMP_PREFIX$key-${seq.incrementAndGet()}-${java.util.UUID.randomUUID()}")
         tmp.delete()
         live += tmp.name
-        return Pending(key, FileTypes.safeFileName(displayName), tmp)
+        return Pending(key, FileTypes.safeFileName(displayName), tmp, source)
     }
 
     /** Moves the finished temp file into place, then evicts above the cap (never the file just added). */
@@ -65,9 +74,30 @@ class FileCache(
             error("cannot move into cache")
         }
         dest.setLastModified(clock())
+        if (p.source != null) {
+            File(entryDir, SOURCE_FILE).writeText(p.source)
+            // An older copy of the same remote file (it changed on the computer since) is dead weight:
+            // nothing looks it up again, and "recently previewed" must not list the file twice.
+            entries().filter { it.key != p.key && sourceOf(File(dir, it.key)) == p.source }.forEach { File(dir, it.key).deleteRecursively() }
+        }
         entryDir.setLastModified(clock())
         evict(keep = p.key)
         return dest
+    }
+
+    /** Committed copies, most recently used first. */
+    @Synchronized
+    fun list(): List<Cached> = dir.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { d ->
+        contentOf(d)?.let { Cached(d.name, it, sourceOf(d), d.lastModified()) }
+    }.sortedByDescending { it.lastUsedMs }
+
+    /** The newest copy made from [source], whatever its size / time: the offline fallback. */
+    @Synchronized
+    fun latestFor(source: String): Cached? = list().firstOrNull { it.source == source }
+
+    @Synchronized
+    fun remove(key: String) {
+        File(dir, key).deleteRecursively()
     }
 
     @Synchronized
@@ -107,11 +137,19 @@ class FileCache(
         Entry(d.name, d.walkTopDown().filter { it.isFile }.sumOf { it.length() }, d.lastModified())
     }
 
+    /** The cached file of an entry directory (the source note beside it is hidden). */
+    private fun contentOf(entryDir: File): File? = entryDir.listFiles()?.firstOrNull { it.isFile && it.name != SOURCE_FILE }
+
+    private fun sourceOf(entryDir: File): String? = File(entryDir, SOURCE_FILE).takeIf { it.isFile }?.let { runCatching { it.readText() }.getOrNull() }
+
     private fun tmpFiles(): List<File> = dir.listFiles().orEmpty().filter { it.isFile && it.name.startsWith(TMP_PREFIX) }
 
     companion object {
         const val DEFAULT_MAX_BYTES = 200L * 1024 * 1024
         private const val TMP_PREFIX = ".part-"
+
+        /** Beside each copy: the remote path it came from (a cached name is only the file name). */
+        private const val SOURCE_FILE = ".source"
 
         /**
          * Cache identity of a remote file: same server + path + size + modified time ⇒ same bytes.

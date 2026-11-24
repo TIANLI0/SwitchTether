@@ -208,6 +208,86 @@ class FileCacheTest {
     }
 }
 
+/** Which local copy may stand in for a file on the computer (the "same name, stale copy" report). */
+class FileFreshnessTest {
+    @get:Rule val tmp = TemporaryFolder()
+
+    private fun commit(cache: FileCache, key: String, name: String, source: String?, bytes: Int = 4): File {
+        val p = cache.begin(key, name, source)
+        p.file.writeBytes(ByteArray(bytes))
+        return cache.commit(p)
+    }
+
+    @Test
+    fun sameNameInAnotherFolderIsAnotherFile() {
+        assertNotEquals(
+            FileCache.keyFor("s", "D:\\a\\notes.md", 10, 1_000),
+            FileCache.keyFor("s", "D:\\b\\notes.md", 10, 1_000),
+        )
+        // The same file changed on the computer (new time, same size) is a different copy too.
+        assertNotEquals(FileCache.keyFor("s", "/p/notes.md", 10, 1_000), FileCache.keyFor("s", "/p/notes.md", 10, 2_000))
+    }
+
+    @Test
+    fun aNewCopyReplacesTheOldCopyOfTheSameRemoteFile() {
+        val cache = FileCache(tmp.newFolder("c"))
+        commit(cache, "old", "notes.md", "/p/notes.md")
+        commit(cache, "other", "notes.md", "/q/notes.md")
+        val fresh = commit(cache, "new", "notes.md", "/p/notes.md", bytes = 9)
+        assertNull(cache.get("old"))
+        assertNotNull(cache.get("other"))
+        assertEquals(fresh, cache.latestFor("/p/notes.md")?.file)
+        assertEquals(setOf("new", "other"), cache.list().map { it.key }.toSet())
+    }
+
+    @Test
+    fun theSourceNoteIsNeverTakenForTheCopy() {
+        val cache = FileCache(tmp.newFolder("c"))
+        val f = commit(cache, "k", "a.pdf", "/p/a.pdf", bytes = 7)
+        assertEquals(f, cache.get("k"))
+        val listed = cache.list().single()
+        assertEquals("a.pdf", listed.name)
+        assertEquals("/p/a.pdf", listed.source)
+        assertEquals(7, listed.size)
+        cache.remove("k")
+        assertNull(cache.get("k"))
+        assertTrue(cache.list().isEmpty())
+    }
+
+    @Test
+    fun copiesWithoutASourceStayListedButAreNoFallback() {
+        val cache = FileCache(tmp.newFolder("c"))
+        commit(cache, "bytes-1", "image.png", null)
+        assertEquals(null, cache.list().single().source)
+        assertNull(cache.latestFor("/p/image.png"))
+    }
+
+    @Test
+    fun theFolderListingSaysWhatTheFileIsNow() {
+        val listing = io.github.tianli0.switchtether.remote.protocol.FsListing(
+            path = "C:\\proj",
+            entries = listOf(
+                io.github.tianli0.switchtether.remote.protocol.FsEntry(name = "docs", path = "C:\\proj\\docs", kind = "dir"),
+                io.github.tianli0.switchtether.remote.protocol.FsEntry(name = "a.md", path = "C:\\proj\\a.md", size = 42, modifiedMs = 9_000),
+            ),
+        )
+        assertEquals(FileStore.RemoteMeta(42, 9_000), FileStore.metaIn(listing, "c:/proj/a.md"))
+        assertNull(FileStore.metaIn(listing, "C:\\proj\\docs"))
+        assertNull(FileStore.metaIn(listing, "C:\\proj\\gone.md"))
+    }
+
+    @Test
+    fun parentFoldersForTheListing() {
+        assertEquals("C:\\proj", FileTypes.parentOf("C:\\proj\\a.md"))
+        assertEquals("C:\\", FileTypes.parentOf("C:\\a.md"))
+        assertEquals("/", FileTypes.parentOf("/a.md"))
+        assertEquals("/home/me", FileTypes.parentOf("/home/me/a.md"))
+        assertNull(FileTypes.parentOf("a.md"))
+        assertTrue(FileTypes.samePath("D:\\x\\y.txt", "d:/x/y.txt"))
+        assertFalse(FileTypes.samePath("/x/y.txt", "/x/z.txt"))
+    }
+}
+
 class DownloadIndexTest {
     @get:Rule val tmp = TemporaryFolder()
 

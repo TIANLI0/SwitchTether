@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -71,6 +73,7 @@ private sealed interface PendingDelete {
 fun DownloadsScreen(onBack: () -> Unit) {
     val store = appContainer().fileStore
     val context = androidx.compose.ui.platform.LocalContext.current
+    val noApp = stringResource(R.string.viewer_no_app)
     val scope = rememberCoroutineScope()
     val items by store.downloads.collectAsStateWithLifecycle()
     val cacheBytes by store.cacheBytes.collectAsStateWithLifecycle()
@@ -79,27 +82,49 @@ fun DownloadsScreen(onBack: () -> Unit) {
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var viewing by remember { mutableStateOf<DownloadRecord?>(null) }
+    // A recently previewed copy opened from the cache list, and the one whose actions are shown.
+    var viewingCached by remember { mutableStateOf<FileCache.Cached?>(null) }
+    var cachedActions by remember { mutableStateOf<FileCache.Cached?>(null) }
+    var cached by remember { mutableStateOf<List<FileCache.Cached>>(emptyList()) }
+    LaunchedEffect(cacheBytes) { cached = store.cachedFiles() }
+    val savedTo = stringResource(R.string.viewer_saved_to, FileStore.DOWNLOAD_FOLDER)
+    val keepCached: (FileCache.Cached) -> Unit = { c ->
+        scope.launch {
+            val msg = runCatching { store.saveCached(c) }.fold({ savedTo }, { it.message ?: noApp })
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
     var actionsFor by remember { mutableStateOf<DownloadRecord?>(null) }
     var pending by remember { mutableStateOf<PendingDelete?>(null) }
     var confirmClearCache by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    val noApp = stringResource(R.string.viewer_no_app)
 
-    BackHandler(enabled = viewing != null || selecting) {
-        if (viewing != null) viewing = null else { selecting = false; selected = emptySet() }
+    BackHandler(enabled = viewing != null || viewingCached != null || selecting) {
+        when {
+            viewing != null -> viewing = null
+            viewingCached != null -> viewingCached = null
+            else -> { selecting = false; selected = emptySet() }
+        }
     }
     // A record that vanished (deleted here or elsewhere) closes its viewer.
     LaunchedEffect(items) { if (viewing != null && items.none { it.id == viewing?.id }) viewing = null }
 
     viewing?.let { r ->
-        Page(title = r.name, onBack = { viewing = null }, large = false) {
-            val local = remember(r) { store.asLocal(r) }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SmallButton(stringResource(R.string.viewer_open_with), { startSafely(context, store.viewIntent(local), noApp) })
-                SmallButton(stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(local), noApp) })
-            }
-            Text(Formatters.bytes(r.size) + " · " + stringResource(R.string.viewer_saved_copy), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.gutter, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
-            LocalFileBody(local, FileTypes.kindOf(r.name), Modifier.weight(1f).fillMaxWidth())
+        val local = remember(r) { store.asLocal(r) }
+        PreviewSurface {
+            LocalFileViewer(local, subtitle = listOf(Formatters.bytes(r.size), stringResource(R.string.viewer_saved_copy)).joinToString(" · "), onBack = { viewing = null })
+        }
+        return
+    }
+    viewingCached?.let { c ->
+        val local = remember(c) { store.asLocal(c) }
+        PreviewSurface {
+            LocalFileViewer(
+                local,
+                subtitle = listOfNotNull(c.source?.let(::previewFolder), Formatters.bytes(c.size), stringResource(R.string.viewer_temp_copy)).joinToString(" · "),
+                onBack = { viewingCached = null },
+                onSave = { keepCached(c) },
+            )
         }
         return
     }
@@ -154,8 +179,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
                                 },
                                 onClick = {
                                     if (selecting) selected = if (r.id in selected) selected - r.id else selected + r.id
-                                    else if (FileTypes.kindOf(r.name).isMedia) viewing = r
-                                    else startSafely(context, store.viewIntent(store.asLocal(r)), noApp)
+                                    else viewing = r
                                 },
                                 cardListPosition = cardListPositionOf(i, items.size),
                             )
@@ -193,6 +217,24 @@ fun DownloadsScreen(onBack: () -> Unit) {
                     )
                 }
             }
+            if (cached.isNotEmpty()) {
+                item(key = "recent-h") { SmallTitle(stringResource(R.string.downloads_recent), Modifier.animateItem()) }
+                item(key = "recent") {
+                    val shown = cached.take(RECENT_LIMIT)
+                    GroupCard(Modifier.animateItem()) {
+                        shown.forEachIndexed { i, c ->
+                            BasicComponent(
+                                title = c.name,
+                                summary = listOfNotNull(c.source?.let(::previewFolder), Formatters.bytes(c.size), io.github.tianli0.switchtether.ui.common.relativeTime(c.lastUsedMs)).joinToString(" · "),
+                                startAction = { Icon(fileIconVector(FileTypes.iconOf(c.name, isDir = false)), contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp)) },
+                                endActions = { ToolbarIcon(AppIcons.More, stringResource(R.string.files_actions, c.name), { cachedActions = c }) },
+                                onClick = { viewingCached = c },
+                                cardListPosition = cardListPositionOf(i, shown.size),
+                            )
+                        }
+                    }
+                }
+            }
             item(key = "cache-hint") {
                 Text(
                     stringResource(R.string.downloads_cache_hint),
@@ -209,10 +251,33 @@ fun DownloadsScreen(onBack: () -> Unit) {
             val opts = listOf(
                 stringResource(R.string.downloads_open) to {
                     actionsFor = null
-                    if (FileTypes.kindOf(r.name).isMedia) viewing = r else startSafely(context, store.viewIntent(store.asLocal(r)), noApp)
+                    viewing = r
                 },
+                stringResource(R.string.viewer_open_with) to { actionsFor = null; startSafely(context, store.viewIntent(store.asLocal(r)), noApp) },
                 stringResource(R.string.viewer_share) to { actionsFor = null; startSafely(context, store.shareIntent(store.asLocal(r)), noApp) },
                 stringResource(R.string.downloads_delete) to { actionsFor = null; pending = PendingDelete.Some(setOf(r.id)) },
+            )
+            GroupCard {
+                opts.forEachIndexed { i, (label, act) ->
+                    BasicComponent(
+                        title = label,
+                        titleColor = BasicComponentDefaults.titleColor(color = if (i == opts.lastIndex) LocalDevColors.current.danger else COUITheme.colorScheme.onSurface),
+                        onClick = act,
+                        cardListPosition = cardListPositionOf(i, opts.size),
+                    )
+                }
+            }
+        }
+    }
+
+    cachedActions?.let { c ->
+        PanelSheet(show = true, title = c.name, onDismissRequest = { cachedActions = null }) {
+            val opts = listOf(
+                stringResource(R.string.downloads_open) to { cachedActions = null; viewingCached = c },
+                stringResource(R.string.viewer_open_with) to { cachedActions = null; startSafely(context, store.viewIntent(store.asLocal(c)), noApp) },
+                stringResource(R.string.viewer_share) to { cachedActions = null; startSafely(context, store.shareIntent(store.asLocal(c)), noApp) },
+                stringResource(R.string.downloads_keep) to { cachedActions = null; keepCached(c) },
+                stringResource(R.string.downloads_remove_cached) to { cachedActions = null; scope.launch { store.removeCached(c.key) }; Unit },
             )
             GroupCard {
                 opts.forEachIndexed { i, (label, act) ->
@@ -271,4 +336,16 @@ private fun SelectDot(on: Boolean) {
     ) {
         if (on) Text("✓", style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onPrimary, maxLines = 1, overflow = TextOverflow.Clip)
     }
+}
+
+/** How many recently previewed copies the storage page lists (the cache keeps more, up to its size cap). */
+private const val RECENT_LIMIT = 20
+
+/** A full-page preview inside the storage page: the page colour under the system bars, the viewer between them. */
+@Composable
+private fun PreviewSurface(content: @Composable () -> Unit) {
+    Box(
+        Modifier.fillMaxSize().background(io.github.tianli0.coui17.patterns.pageContainerColor())
+            .statusBarsPadding().navigationBarsPadding(),
+    ) { content() }
 }

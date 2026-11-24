@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -173,7 +174,8 @@ fun CodeViewer(
 
     Column(modifier.fillMaxSize()) {
         // Action row.
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Tools of the viewer: the label lines up with the code card's text, keys 4dp from the edge.
+        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             extraActions()
             Text(
                 listOfNotNull(
@@ -221,12 +223,14 @@ fun CodeViewer(
             )
         }
         if (doc.display.length > CodeHighlighting.MAX_CHARS) {
-            Text(stringResource(R.string.files_highlight_off), style = DevType.label, color = dev.gutter, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+            Text(stringResource(R.string.files_highlight_off), style = DevType.label, color = dev.gutter, modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 6.dp))
         }
         val lineCopied = stringResource(R.string.files_line_copied)
         val shortened = stringResource(R.string.files_line_shortened)
         Box(
-            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp)
+            // A rounded card on the page's 12dp edge, not a square slab against the screen.
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp)
+                .clip(io.github.suqi8.coui.kmp.squircle.SquircleShape(16.dp))
                 .background(dev.codeBackground)
                 .onSizeChanged { viewportPx = it.width }
                 .pointerInput(Unit) {
@@ -293,7 +297,7 @@ private fun CodeLines(
     LazyColumn(
         Modifier.fillMaxSize(),
         state = listState,
-        contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp + LocalBottomBarSpace.current),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp + LocalBottomBarSpace.current),
     ) {
         items(doc.lineCount, key = { it }) { line ->
             val start = doc.lineStart(line)
@@ -323,9 +327,9 @@ private fun CodeLines(
                     (line + 1).toString(),
                     style = style.copy(color = dev.gutter),
                     textAlign = TextAlign.End,
-                    modifier = Modifier.width(gutterWidth).padding(end = 10.dp),
+                    modifier = Modifier.width(gutterWidth).padding(end = 12.dp),
                 )
-                Box(Modifier.weight(1f).clipToBounds().padding(end = 4.dp)) {
+                Box(Modifier.weight(1f).clipToBounds().padding(end = 12.dp)) {
                     if (wrap) {
                         Text(content, style = style, softWrap = true)
                     } else {
@@ -352,7 +356,7 @@ private fun FindBar(
     onClose: () -> Unit,
 ) {
     val dev = LocalDevColors.current
-    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         TextInput(
             value = query,
             onValueChange = onQuery,

@@ -1428,9 +1428,9 @@ refused commit keeps the draft and shows git's message). Desktop: `git::tests::*
 e2e `git_writes_need_step_up_and_replay_by_command_id`. **Not verified:** on a device or emulator (layout of the action
 rows, the step-up prompt for the new scope, toasts), and against remotes that need credentials.
 
-## 25. Session cost and tokens; usage per project (2026-11-25)
+## 26. Session cost and tokens; usage per project (2026-11-25)
 
-### 25.1 Cost capsule and sheet (`SessionCostSheet.kt`)
+### 26.1 Cost capsule and sheet (`SessionCostSheet.kt`)
 - A capsule in the session page's header row (after the branch / terminal / sub-agent capsules,
   before the tools capsule) shows the session's cost — or its tokens when no turn reported a cost
   (observed transcripts, Codex) — with the usage icon. It appears once a loaded turn reported usage.
@@ -1453,7 +1453,7 @@ rows, the step-up prompt for the new scope, toasts), and against remotes that ne
   "项目「X」的用量" opens the project page (§25.2); the sheet closes first so back returns to the
   conversation.
 
-### 25.2 Usage per project
+### 26.2 Usage per project
 - Usage page: **按项目** after 按模型 (`GET /v1/usage/projects`, PROTOCOL §7.3): projects by cost
   with an animated share-of-period bar and an arrow, then "其他项目" and "未关联到会话" as quiet rows,
   and a note that only detail logs keep the session link. Hidden on older desktops (404).
@@ -1461,7 +1461,7 @@ rows, the step-up prompt for the new scope, toasts), and against remotes that ne
   sessions most expensive first (agent · tokens · last activity, share of the project's cost);
   range chips 今天 / 7 天 / 30 天 / 全部 (default 30 days); a row opens the session.
 
-### 25.3 Evidence and limits
+### 26.3 Evidence and limits
 `SessionUsageBreakdownTest` (running-total deltas and restarts, turn split, dedupe, transcripts,
 Codex cache), `CostScreenshotTest` (sheet light / dark / tokens-only, bar tap picks a turn, project
 link, capsule opens the sheet, usage-per-project row opens the project, project page row opens the
@@ -1469,7 +1469,7 @@ session, older desktop), fixture `usage_projects.json` (Rust and Kotlin). Robole
 seen on a device. The per-project numbers were not checked against a real CC Switch database
 (only the SQL compiles and the join / grouping is unit-tested).
 
-## 26. Tablets and unfolded foldables: list | detail (2026-11-25)
+## 27. Tablets and unfolded foldables: list | detail (2026-11-25)
 - From a window width of 840dp (`usesTwoPanes`), with the navigation rail that wide windows already
   had: the tab's root (Home, Sessions, Workspace, Manage) stays on the left (40 %, 320–420dp), and
   what it opens shows on the right with the usual push / pop / predictive-back motion. Narrower
@@ -1485,9 +1485,9 @@ seen on a device. The per-project numbers were not checked against a real CC Swi
 - Evidence: `TwoPaneTest` (width gate incl. phone and split-screen widths, list replacement and
   back, w1280dp screenshots light / dark with the marked row). Not run on a tablet or foldable.
 
-## 25. Push wake and conversation search (2026-11-25)
+## 28. Push wake and conversation search (2026-11-25)
 
-### 25.1 Push wake (UnifiedPush)
+### 28.1 Push wake (UnifiedPush)
 
 Settings → Notifications → **推送唤醒 / Push wake**, opt-in. PROTOCOL.md §7.12, SECURITY.md §7b.
 
@@ -1518,7 +1518,7 @@ Settings → Notifications → **推送唤醒 / Push wake**, opt-in. PROTOCOL.md
 - Unpair keeps the distributor registration but forgets which computer had the endpoint, so the
   next paired computer receives it.
 
-### 25.2 Search conversation content
+### 28.2 Search conversation content
 
 On the Sessions page, while the search bar is open, a chip row offers **会话 / 搜索对话内容**.
 The second mode replaces the list with `GET /v1/sessions/search` results (PROTOCOL.md §7.13):
@@ -1529,7 +1529,7 @@ every match of the query in bold accent (`highlightMatches`, case-insensitive); 
 session. Notes for "searching…", no match, partial scan ("older sessions were not searched") and
 errors. Leaving the search (cancel) returns to the list.
 
-### 25.3 Evidence and limits
+### 28.3 Evidence and limits
 
 - Tests: `core:remote` `PushAndSearchTest` (RFC 8291 Appendix A vector decrypts; a message made by
   the desktop's Rust encryptor decrypts; wrong keys / garbage give null; fixtures
@@ -1546,3 +1546,83 @@ errors. Leaving the search (cancel) returns to the list.
 - **Not verified:** a real distributor (ntfy, Sunup, NextPush…) on a device, delivery while the
   phone dozes, a push server that requires VAPID, the raise-to-foreground binding, the settings UI
   and the search UI on a device, search over a large real history.
+
+## 29. Files: roomier previews, a lightbox, the cache you can open, no dead ends (2026-11-25)
+
+User report: the file preview was cramped, the picture viewer was rough, opening the cache did not
+work well, files the app cannot show led nowhere, and a file with a name seen before showed the old
+copy. Code in `ui/files/` and `files/`; ANDROID_UI §18 and §23.8 still apply.
+
+### 29.1 Spacing
+- **Preview title bar** (`FilePreviewHeader`, shared by the Files page, chat links, the storage
+  page and the Workspace text editor, which had a bar of its own): 60dp, back key on the 8dp edge,
+  12dp to the title, title 17sp semibold over a 13sp line (folder · size · when), keys 4dp apart
+  and 12dp from the edge. It used to be 6dp margins, a 16sp title and a 12sp line.
+- **Code viewer**: the code is a rounded card (16dp squircle) 12dp from the screen edges instead of
+  a square slab 8dp from them; 12dp above the first line, 12dp between line numbers and code and at
+  the end of a line; the tool row and the find bar line up with the card.
+- **Markdown**: 24dp side margins and 12dp above the first block (16 / 8 before); the Rendered /
+  Source switch and notices have 10dp under them.
+- The Workspace editor's raw "utf-8 · LF · size · time · sha" line is gone: size and time are in the
+  title bar's second line; encoding and line ending stay as a quiet line for editing.
+
+### 29.2 Lightbox (`ImageLightbox`)
+Pictures from chat (attachments, pictures in replies, files the agent looked at) open in one
+full-screen viewer:
+- black behind the picture; pinch, double-tap zoom and pan with Telephoto, as in the Files viewer;
+- the pictures of one message are swiped sideways (`ImagePreview.gallery`), "2 / 3" under the name;
+- pull the picture down (or up) to close: it follows the finger, shrinks a little and the black
+  fades with the pull; let go short of 120dp and it springs back; a fast fling closes too. Not while
+  zoomed in (then a drag pans);
+- a tap shows or hides the controls, which also step aside after 4 s: close, name and position on a
+  dark gradient at the top; Share, Save and Open with… on a dark gradient at the bottom. They use the
+  over-media style of COUI's media bar (white on translucent dark, whatever the theme) and the status
+  and navigation bar icons turn light while it is open;
+- Save keeps a picture from the computer as a download (`FileStore.download`) and a picture that only
+  exists in the message as bytes (`FileStore.saveBytes`); Share / Open with hand over a temporary
+  copy (`FileStore.cacheBytes`, keyed by content).
+The old viewer closed on any tap (also on the picture), zoomed with a hand-made transform and put a
+48dp glass disc and a pill button over the picture.
+
+### 29.3 Files the app cannot show
+- An archive, installer, office document or other unknown type opens as a card (`FileHandOffCard`):
+  icon, name, size and type, "No built-in viewer…", **Download to phone** and **Open with…**. Nothing
+  is fetched until one is chosen; both show their progress in the card; after downloading the card
+  offers Open and Manage downloads. It used to fetch the whole file into the preview cache first and
+  then only say there was no viewer — and a file over the 200 MB preview cap ended in an error.
+- A media file over the preview cap shows the same card with Download (a download has no cap).
+- A text link that turns out to be binary now continues to that card ("Preview or open with another
+  app"), and the text viewer opened from chat has Download in its bar and in the "only the
+  beginning is shown" notice; before, both were missing there.
+- "Open with…" of an unknown type asks with `*/*` and a type from Android's `MimeTypeMap` when the
+  app's own table does not know the extension: `application/octet-stream` matched almost no app, so
+  the chooser came up empty.
+
+### 29.4 The cache can be opened
+Downloads & storage lists **Recently previewed** under the cache card (up to 20, newest first:
+name, folder, size, when). A row opens the copy inside the app; its menu offers Open, Open with…,
+Share, **Keep in Downloads** (copied from the cache, no transfer) and Remove from cache. Every copy
+records the remote path it came from (`.source` beside it in its cache folder). Downloads open inside
+the app too, text and code included (read from the local copy, so this works offline); before, only
+media opened here and everything else went straight to other apps.
+
+### 29.5 Same name, stale copy
+Cause: a link from chat carries no size or modified time. Without them `FileStore.resolve` (1) took
+any earlier **download** of that path as current, however old ("unknown values do not disqualify"),
+and (2) trusted a cache copy made without them for 10 minutes. A file changed on the computer — or
+regenerated under the same name — kept showing the old copy.
+Now, when the caller has neither, `resolve` and `download` first ask the computer (`statRemote`: one
+`fs/list` of the folder, 5 s timeout) and key and validate with the answer; a file that changed is
+fetched again. Copies are keyed by desktop, full path, size and modified time (`FileCache.keyFor`),
+so the same name in another folder is another file; a new copy of a path replaces the older one in
+the cache. Offline, `resolve` shows the newest copy of that path that is on the phone (a download,
+else the cache) instead of an error. Reload in the viewer still forces a fresh fetch.
+
+### 29.6 Evidence and limits
+JVM tests `FileFreshnessTest` (keys per folder and per version, a new copy replacing the old one,
+the source note, listing lookup, parent folders) and the existing `FileCacheTest` /
+`DownloadIndexTest`; Robolectric screenshots `files-code-{light,dark}`, `files-handoff-light`,
+`files-handoff-progress-dark`, `files-lightbox` (API 32, synthetic files). **Not seen on a device:**
+the lightbox gestures (pull to close, swipe between pictures, zoom vs. drag), the light system-bar
+icons, sharing / saving from it, opening cached copies with other apps, the stat request against a
+real desktop and the offline fallback.
