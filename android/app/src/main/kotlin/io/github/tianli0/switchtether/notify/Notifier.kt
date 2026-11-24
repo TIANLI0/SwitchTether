@@ -54,12 +54,30 @@ class Notifier(
     /** A Live Update card shows this session; its waits and outcomes are not notified twice. */
     private val coveredByLiveUpdate: (String) -> Boolean = { false },
 ) {
+    /** Not thread-safe: every use holds the Notifier's monitor (events, buttons, timers run on different threads). */
     private val engine = NotificationEngine({ prefs.value }, { LocalTime.now().let { it.hour * 60 + it.minute } }, t = ResourceNotifyText(context))
     private val sessions = ConcurrentHashMap<String, SessionSummary>()
     private val nm = NotificationManagerCompat.from(context)
 
-    /** Approvals / questions still unanswered, per session: the ATTENTION notification goes with the last one. */
-    private val openRequests = ConcurrentHashMap<String, MutableSet<String>>()
+    /**
+     * Approvals / questions still unanswered, per session, in the order they opened (request id → the
+     * event that opened it): the ATTENTION notification goes with the last one, and shows the most
+     * recent one still open when another is resolved.
+     */
+    private val openRequests = ConcurrentHashMap<String, LinkedHashMap<String, AgentEvent>>()
+
+    /** Per session, the request the posted ATTENTION notification shows ("" = a generic wait). */
+    private val attentionShown = ConcurrentHashMap<String, String>()
+
+    private fun forgetRequests(sessionId: String) {
+        openRequests.remove(sessionId)
+        attentionShown.remove(sessionId)
+    }
+
+    private fun requestIdOf(e: AgentEvent): String? = when (e.kind) {
+        EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION, EventKinds.APPROVAL_RESOLVED -> e.data.str("requestId") ?: e.id
+        else -> null
+    }
 
     /** `when` of each posted notification id, kept when the same moment is updated in place. */
     private val postedWhen = ConcurrentHashMap<Int, Long>()
@@ -83,15 +101,29 @@ class Notifier(
                         sessions[it.id] = it
                         refreshActive()
                         // Nobody is waiting any more: drop the "needs you" notification of that session.
-                        if (it.waitingFor == null && it.status != "waiting") {
-                            openRequests.remove(it.id)
-                            cancel(it.id, NotifySlot.ATTENTION)
+                        synchronized(this@Notifier) {
+                            if (it.waitingFor == null && it.status != "waiting") {
+                                forgetRequests(it.id)
+                                cancel(it.id, NotifySlot.ATTENTION)
+                            }
+                            engine.onSessionUpsert(it)
                         }
-                        engine.onSessionUpsert(it)
                     }
-                    "session.event" -> runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()?.let {
-                        noteRequest(it)
-                        engine.onSessionEvent(it, sessions[it.sessionId] ?: lookup(it.sessionId))
+                    "session.event" -> {
+                        runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()?.let { e ->
+                            val summary = sessions[e.sessionId] ?: lookup(e.sessionId)
+                            // One at a time with the notification buttons (requestAnswered): both
+                            // decide which request the "needs you" notification shows.
+                            synchronized(this@Notifier) {
+                                noteRequest(e)
+                                val n = engine.onSessionEvent(e, summary)
+                                if (n != null && post(n, timeoutMs = null) && n.type.slot == NotifySlot.ATTENTION) {
+                                    // Which request the "needs you" notification now shows (its buttons act on it).
+                                    attentionShown[e.sessionId] = requestIdOf(e) ?: ""
+                                }
+                            }
+                        }
+                        null
                     }
                     "session.removed" -> {
                         // The process is gone: it no longer counts as working (the monitor's wake
@@ -99,19 +131,25 @@ class Notifier(
                         (data.str("sessionId") ?: data.str("id"))?.let {
                             sessions.remove(it)
                             refreshActive()
-                            openRequests.remove(it)
-                            cancel(it, NotifySlot.ATTENTION)
+                            synchronized(this@Notifier) {
+                                forgetRequests(it)
+                                cancel(it, NotifySlot.ATTENTION)
+                            }
                         }
                         null
                     }
                     "terminal.created" -> {
-                        data.str("id")?.let { engine.onTerminalCreated(it, data.str("title") ?: data.str("shell")) }
+                        data.str("id")?.let { synchronized(this@Notifier) { engine.onTerminalCreated(it, data.str("title") ?: data.str("shell")) } }
                         null
                     }
-                    "terminal.exited" -> data.str("id")?.let { engine.onTerminalExited(it, data.long("exitCode")) }
+                    "terminal.exited" -> data.str("id")?.let { synchronized(this@Notifier) { engine.onTerminalExited(it, data.long("exitCode")) } }
                     else -> null
                 }
-                intent?.let(::post)
+                if (intent != null) synchronized(this@Notifier) {
+                    if (post(intent, timeoutMs = null) && intent.type.slot == NotifySlot.ATTENTION) {
+                        intent.sessionId?.let { attentionShown[it] = "" } // a generic wait, no request
+                    }
+                }
             }
         }
         scope.launch {
@@ -136,7 +174,10 @@ class Notifier(
                     // Another computer: the previous one's sessions are not its (the active count keeps the CPU awake).
                     if (serverId != null && serverId != desktop.serverId) {
                         sessions.clear()
-                        openRequests.clear()
+                        synchronized(this@Notifier) {
+                            openRequests.clear()
+                            attentionShown.clear()
+                        }
                         refreshActive()
                     }
                     serverId = desktop.serverId
@@ -147,7 +188,7 @@ class Notifier(
                         pendingLost = null
                         if (lostShown) {
                             lostShown = false
-                            val replaced = lostPosted && engine.connection(false, s.desktop.name)?.let { post(it.copy(silent = true), timeoutMs = RECONNECTED_VISIBLE_MS) } == true
+                            val replaced = lostPosted && synchronized(this@Notifier) { engine.connection(false, s.desktop.name) }?.let { post(it.copy(silent = true), timeoutMs = RECONNECTED_VISIBLE_MS) } == true
                             lostPosted = false
                             // Nothing replaced "connection lost" (app in the foreground, type switched
                             // off, same-minute repeat): it must not stay up while connected.
@@ -161,7 +202,7 @@ class Notifier(
                         pendingLost = scope.launch {
                             delay(CONNECTION_LOST_GRACE_MS)
                             // Dated when the connection dropped, not 30 s later.
-                            engine.connection(true, name)?.let { lostPosted = post(it.copy(atMs = droppedAt), timeoutMs = null); lostShown = true }
+                            synchronized(this@Notifier) { engine.connection(true, name) }?.let { lostPosted = post(it.copy(atMs = droppedAt), timeoutMs = null); lostShown = true }
                             pendingLost = null
                         }
                     }
@@ -172,7 +213,7 @@ class Notifier(
         scope.launch {
             while (isActive) {
                 delay(60_000)
-                engine.longRunning(sessions.values).forEach(::post)
+                synchronized(this@Notifier) { engine.longRunning(sessions.values) }.forEach(::post)
             }
         }
     }
@@ -183,7 +224,7 @@ class Notifier(
     }.getOrNull()?.also { sessions[it.id] = it }
 
     /** The phone itself interrupted/stopped a session or killed a terminal: don't notify the echo. */
-    fun noteLocalAction(target: String, action: LocalAction) = engine.noteLocalAction(target, action)
+    fun noteLocalAction(target: String, action: LocalAction) = synchronized(this) { engine.noteLocalAction(target, action) }
 
     private fun notificationId(type: NotifyType, sessionId: String?, slot: NotifySlot, key: String): Int = when {
         type == NotifyType.CONNECTION -> CONNECTION_NOTIFICATION_ID
@@ -194,6 +235,8 @@ class Notifier(
     /**
      * A request opened or resolved (in place with `resolved=true`, or by a separate `approval_resolved`):
      * the "needs you" notification is withdrawn only when no other request of the session is still open.
+     * When it showed the resolved request, it is re-posted for the most recent request still open (its
+     * text and buttons), so its buttons never act on a request that is already answered.
      */
     private fun noteRequest(e: AgentEvent) {
         val resolved = when (e.kind) {
@@ -201,16 +244,49 @@ class Notifier(
             EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION -> e.data.bool("resolved") == true
             else -> return
         }
-        val requestId = e.data.str("requestId") ?: e.id
+        val requestId = requestIdOf(e) ?: return
+        val sid = e.sessionId
         if (!resolved) {
-            openRequests.getOrPut(e.sessionId) { ConcurrentHashMap.newKeySet() }.add(requestId)
+            val open = openRequests.getOrPut(sid) { LinkedHashMap() }
+            synchronized(open) {
+                open.remove(requestId) // seen again (replay): it moves to the end
+                open[requestId] = e
+            }
             return
         }
-        val open = openRequests[e.sessionId]
-        open?.remove(requestId)
-        if (open.isNullOrEmpty()) {
-            openRequests.remove(e.sessionId)
-            cancel(e.sessionId, NotifySlot.ATTENTION)
+        requestResolved(sid, requestId)
+    }
+
+    /**
+     * The user allowed / denied [requestId] from its notification and the desktop confirmed it. Used
+     * instead of cancelling the notification: another request of the session may still be open, and
+     * the desktop's `approval_resolved` may already have replaced the notification with it.
+     */
+    fun requestAnswered(sessionId: String, requestId: String) = requestResolved(sessionId, requestId)
+
+    @Synchronized // the event stream and the notification buttons both resolve requests
+    private fun requestResolved(sid: String, requestId: String) {
+        val open = openRequests[sid]
+        val stillOpen = open?.let { synchronized(it) { it.remove(requestId); it.values.lastOrNull() } }
+        if (stillOpen == null) {
+            forgetRequests(sid)
+            cancel(sid, NotifySlot.ATTENTION)
+            return
+        }
+        when (attentionShown[sid]) {
+            requestId -> Unit // it shows the resolved request: show the one still open instead
+            null -> return cancel(sid, NotifySlot.ATTENTION) // nothing of ours is up (or not known what)
+            else -> return // it already shows another request, or a generic wait
+        }
+        val n = engine.stillOpenRequest(stillOpen, sessions[sid])
+        val id = "$sid:${NotifySlot.ATTENTION}".hashCode()
+        postedWhen.remove(id) // dated when the request still shown was asked
+        if (n != null && post(n, timeoutMs = null)) {
+            attentionShown[sid] = requestIdOf(stillOpen) ?: ""
+        } else {
+            // Not shown again (type switched off, muted, app in front): don't leave the stale buttons up.
+            attentionShown.remove(sid)
+            cancel(sid, NotifySlot.ATTENTION)
         }
     }
 

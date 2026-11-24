@@ -26,6 +26,12 @@ data class OutgoingMessage(
     val messageUuid: String? = null,
     /** A withdraw request is in flight. */
     val withdrawing: Boolean = false,
+    /**
+     * The user's retry goes out under a new id: the desktop answers the same [commandId] with what it
+     * stored — a failure (rejected / `failed`) is replayed, and a command it lost in a restart
+     * (status `unknown`, §5; may or may not have arrived) is refused with 409 for good.
+     */
+    val retryAsNew: Boolean = false,
 )
 
 const val MAX_ATTACHMENTS = 10
@@ -63,7 +69,7 @@ enum class OutgoingStatus {
     /** Sent while offline: goes out (same commandId) as soon as the connection is back ("等待连接"). */
     WAITING_CONNECTION,
 
-    /** Rejected or not confirmed ("发送失败"): the user may retry (same commandId) or delete it. */
+    /** Rejected or not confirmed ("发送失败"): the user may retry (same commandId unless [OutgoingMessage.retryAsNew]) or delete it. */
     FAILED,
 }
 

@@ -32,6 +32,7 @@ fun CommandPromptDialog(prompt: CommandPrompt?, onCheckStatus: () -> Unit, onRet
         is CommandStatus.Succeeded -> stringResource(R.string.cmd_status_succeeded)
         is CommandStatus.Failed -> stringResource(R.string.cmd_status_failed)
         is CommandStatus.Pending -> stringResource(R.string.cmd_status_pending)
+        is CommandStatus.Interrupted -> stringResource(R.string.cmd_status_interrupted)
         CommandStatus.NotFound -> stringResource(R.string.cmd_status_not_found)
         is CommandStatus.Unreachable -> stringResource(R.string.cmd_status_unreachable)
     }
@@ -49,7 +50,7 @@ fun CommandPromptDialog(prompt: CommandPrompt?, onCheckStatus: () -> Unit, onRet
         statusLine?.let { append("\n\n").append(it) }
         prompt.detail?.takeIf { it.isNotBlank() }?.let { append("\n\n").append(it) }
     }
-    val canCheck = prompt.status == null && (prompt.kind == CommandPrompt.Kind.UNKNOWN || prompt.kind == CommandPrompt.Kind.IN_PROGRESS)
+    val canCheck = prompt.canCheckStatus
     val retryId = prompt.retryId
     val (confirmText, onConfirm) = when {
         prompt.busy -> stringResource(R.string.cmd_checking) to {}

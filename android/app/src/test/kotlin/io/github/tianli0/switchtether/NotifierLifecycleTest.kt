@@ -112,8 +112,77 @@ class NotifierLifecycleTest {
         ProtocolJson.encodeToJsonElement(AgentEvent.serializer(), event(id, 1, kind, data, session = "s-two").copy(ts = soon)),
     )
 
-    private fun request(id: String, resolved: Boolean = false) =
-        sessionEvent(id, "approval_request", """{"requestId":"$id","title":"Run: ls","resolved":$resolved}""")
+    private fun request(id: String, resolved: Boolean = false, title: String = "Run: ls") =
+        sessionEvent(id, "approval_request", """{"requestId":"$id","title":"$title","resolved":$resolved}""")
+
+    private fun shown(): android.app.Notification = nm.activeNotifications.single().notification
+
+    private fun android.app.Notification.text() = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
+
+    /** The request id each button of the notification acts on. */
+    private fun android.app.Notification.buttonRequests(): List<String?> =
+        actions.orEmpty().map { shadowOf(it.actionIntent).savedIntent.getStringExtra("request") }
+
+    @Test
+    fun resolvingTheShownRequestShowsTheOlderOneStillOpen() {
+        emit("session.upserted", ProtocolJson.encodeToJsonElement(SessionSummary.serializer(), summary(id = "s-two", status = "waiting")))
+        request("r1", title = "Run: ls")
+        request("r2", title = "Run: rm -rf build")
+        assertEquals("Run: rm -rf build", shown().text())
+        assertEquals(listOf("r2", "r2"), shown().buttonRequests())
+
+        // The newer one is answered (on the computer or from the notification): the notification now
+        // offers the older one, and its allow / deny act on r1, never on the resolved r2.
+        sessionEvent("x2", "approval_resolved", """{"requestId":"r2","decision":"allow"}""")
+        assertEquals("Run: ls", shown().text())
+        assertEquals(listOf("r1", "r1"), shown().buttonRequests())
+    }
+
+    @Test
+    fun aQuestionResolvedInPlaceGivesWayToTheOpenApproval() {
+        emit("session.upserted", ProtocolJson.encodeToJsonElement(SessionSummary.serializer(), summary(id = "s-two", status = "waiting")))
+        request("r1", title = "Run: ls")
+        val q = """{"requestId":"q2","questions":[{"question":"Which branch?","options":[{"label":"main"}]}],"resolved":%s}"""
+        sessionEvent("q2", "question", q.format("false"))
+        assertEquals("Which branch?", shown().text())
+
+        sessionEvent("q2", "question", q.format("true"))
+        assertEquals("Run: ls", shown().text())
+        assertEquals(listOf("r1", "r1"), shown().buttonRequests())
+    }
+
+    @Test
+    fun allowingFromTheNotificationShowsTheOlderOpenRequestWhicheverArrivesFirst() {
+        emit("session.upserted", ProtocolJson.encodeToJsonElement(SessionSummary.serializer(), summary(id = "s-two", status = "waiting")))
+        request("r1", title = "Run: ls")
+        request("r2", title = "Run: rm -rf build")
+
+        // The button's confirmation first, the desktop's approval_resolved after it.
+        notifier.requestAnswered("s-two", "r2")
+        assertEquals(listOf("r1", "r1"), shown().buttonRequests())
+        sessionEvent("x2", "approval_resolved", """{"requestId":"r2","decision":"allow"}""")
+        assertEquals("Run: ls", shown().text())
+        assertEquals(listOf("r1", "r1"), shown().buttonRequests())
+
+        // The other order: the event replaced the notification already, the confirmation keeps it.
+        request("r3", title = "Run: make")
+        sessionEvent("x3", "approval_resolved", """{"requestId":"r3","decision":"allow"}""")
+        notifier.requestAnswered("s-two", "r3")
+        assertEquals(listOf("r1", "r1"), shown().buttonRequests())
+
+        notifier.requestAnswered("s-two", "r1") // the last one
+        assertEquals(0, nm.activeNotifications.size)
+    }
+
+    @Test
+    fun resolvingAnOlderRequestLeavesTheShownOneAlone() {
+        emit("session.upserted", ProtocolJson.encodeToJsonElement(SessionSummary.serializer(), summary(id = "s-two", status = "waiting")))
+        request("r1", title = "Run: ls")
+        request("r2", title = "Run: rm -rf build")
+        sessionEvent("x1", "approval_resolved", """{"requestId":"r1","decision":"deny"}""")
+        assertEquals("Run: rm -rf build", shown().text())
+        assertEquals(listOf("r2", "r2"), shown().buttonRequests())
+    }
 
     @Test
     fun theNeedsYouNotificationStaysWhileAnotherRequestIsOpen() {

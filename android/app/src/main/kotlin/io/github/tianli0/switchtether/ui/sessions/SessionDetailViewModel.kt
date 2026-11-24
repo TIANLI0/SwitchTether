@@ -669,13 +669,29 @@ class SessionDetailViewModel(
         if (st.canSend) deliver(msg.commandId)
     }
 
-    /** Tap on a failed bubble: same commandId, so the desktop runs it at most once. */
+    /**
+     * Tap on a failed bubble: same commandId, so the desktop runs it at most once — unless the old id
+     * can only be answered with a stored failure or a 409 ([OutgoingMessage.retryAsNew]): then the
+     * user's tap sends it again as a new message under a new id.
+     */
     fun retrySend(commandId: String) {
         val st = _state.value
         val bubble = st.outgoing.firstOrNull { it.commandId == commandId } ?: return
         // A second tap while the first POST is in flight must not start another one for the same id.
         if (bubble.status == OutgoingStatus.SENDING) return
-        if (st.canSend) deliver(commandId) else setOutgoing(commandId, OutgoingStatus.WAITING_CONNECTION, null)
+        val id = if (bubble.retryAsNew) renewCommandId(commandId) else commandId
+        if (st.canSend) deliver(id) else setOutgoing(id, OutgoingStatus.WAITING_CONNECTION, null)
+    }
+
+    /** Gives a bubble a new command id (its pending images / files move with it); returns the new id. */
+    private fun renewCommandId(old: String): String {
+        val new = newCommandId()
+        outgoingImages.remove(old)?.let { outgoingImages[new] = it }
+        outgoingAttachments.remove(old)?.let { outgoingAttachments[new] = it }
+        _state.update { st ->
+            st.derive(outgoing = st.outgoing.map { if (it.commandId == old) it.copy(commandId = new, retryAsNew = false) else it })
+        }
+        return new
     }
 
     /** A failed message goes back into the composer (files sent with it have to be picked again). */
@@ -690,11 +706,39 @@ class SessionDetailViewModel(
         _state.update { st -> st.derive(outgoing = st.outgoing.filterNot { it.commandId == commandId }) }
     }
 
-    private fun setOutgoing(commandId: String, status: OutgoingStatus, error: String?) {
+    private fun setOutgoing(commandId: String, status: OutgoingStatus, error: String?, retryAsNew: Boolean = false) {
         _state.update { st ->
             if (st.outgoing.none { it.commandId == commandId }) st // already echoed: nothing to update
-            else st.derive(outgoing = st.outgoing.map { if (it.commandId == commandId) it.copy(status = status, error = error) else it })
+            else st.derive(outgoing = st.outgoing.map { if (it.commandId == commandId) it.copy(status = status, error = error, retryAsNew = retryAsNew) else it })
         }
+    }
+
+    /**
+     * What the desktop's command record says about a message whose POST was not confirmed (or got
+     * `409 command_in_progress`). Pending / succeeded = it has it; `unknown` = it restarted mid-send
+     * and will never finish it: failed, and a retry (the user's tap) uses a new id.
+     */
+    private fun applyCommandStatus(commandId: String, st: io.github.tianli0.switchtether.remote.command.CommandStatus?, otherwise: () -> Unit) {
+        when (st) {
+            is io.github.tianli0.switchtether.remote.command.CommandStatus.Succeeded,
+            is io.github.tianli0.switchtether.remote.command.CommandStatus.Pending -> markDelivered(commandId)
+            is io.github.tianli0.switchtether.remote.command.CommandStatus.Interrupted ->
+                setOutgoing(commandId, OutgoingStatus.FAILED, OUTCOME_UNKNOWN, retryAsNew = true)
+            is io.github.tianli0.switchtether.remote.command.CommandStatus.Failed ->
+                // A stored failure is replayed for the same id: the retry is a new message.
+                setOutgoing(
+                    commandId, OutgoingStatus.FAILED,
+                    (st.record.error as? kotlinx.serialization.json.JsonObject)?.get("message")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content },
+                    retryAsNew = true,
+                )
+            else -> otherwise()
+        }
+    }
+
+    private fun markDelivered(commandId: String) {
+        outgoingImages.remove(commandId)
+        outgoingAttachments.remove(commandId)
+        setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
     }
 
     private fun deliver(commandId: String, after: Job? = null): Job? {
@@ -705,12 +749,14 @@ class SessionDetailViewModel(
         return viewModelScope.launch {
             after?.join() // queued messages reach the agent in the order they were written
             when (val out = repo.sendMessage(sessionId, if (msg.text == "[image]" && imgs.isNotEmpty()) "" else msg.text, commandId, imgs, files)) {
-                is CommandOutcome.Succeeded, is CommandOutcome.InProgress -> {
-                    outgoingImages.remove(commandId)
-                    outgoingAttachments.remove(commandId)
-                    setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
+                // 409 for this id: the desktop has it running — or lost it in a restart (`unknown`
+                // records answer 409 for good), which only its command record tells apart.
+                is CommandOutcome.InProgress ->
+                    applyCommandStatus(commandId, runCatching { repo.commandStatus(commandId) }.getOrNull()) { markDelivered(commandId) }
+                is CommandOutcome.Succeeded -> {
+                    markDelivered(commandId)
                     // Claude Code queues a message sent while it works: keep its id so it can be withdrawn.
-                    val uuid = (out as? CommandOutcome.Succeeded)?.let { queuedMessageUuid(it.response.body) }
+                    val uuid = queuedMessageUuid(out.response.body)
                     if (uuid != null) {
                         _state.update { st ->
                             val queued = st.claudeTools && st.detail.valueOrNull?.summary?.status == "busy"
@@ -719,17 +765,15 @@ class SessionDetailViewModel(
                         }
                     }
                 }
-                is CommandOutcome.Rejected -> setOutgoing(commandId, OutgoingStatus.FAILED, out.error.body.message.ifBlank { out.error.code })
+                // Definitive: it did not run. The desktop stores the failure and replays it for the
+                // same id, so the user's retry goes out as a new request.
+                is CommandOutcome.Rejected -> setOutgoing(commandId, OutgoingStatus.FAILED, out.error.body.message.ifBlank { out.error.code }, retryAsNew = true)
                 is CommandOutcome.NotSent ->
                     if (_state.value.online) setOutgoing(commandId, OutgoingStatus.FAILED, ConnectionManager.describe(out.cause))
                     else setOutgoing(commandId, OutgoingStatus.WAITING_CONNECTION, null)
                 // Sent but unconfirmed (§5): ask the desktop first (read-only); retry only on the user's tap.
-                is CommandOutcome.Unknown -> when (val st = runCatching { repo.commandStatus(commandId) }.getOrNull()) {
-                    is io.github.tianli0.switchtether.remote.command.CommandStatus.Succeeded,
-                    is io.github.tianli0.switchtether.remote.command.CommandStatus.Pending -> setOutgoing(commandId, OutgoingStatus.DELIVERED, null)
-                    is io.github.tianli0.switchtether.remote.command.CommandStatus.Failed ->
-                        setOutgoing(commandId, OutgoingStatus.FAILED, (st.record.error as? kotlinx.serialization.json.JsonObject)?.get("message")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content })
-                    else -> setOutgoing(commandId, OutgoingStatus.FAILED, ConnectionManager.describe(out.cause))
+                is CommandOutcome.Unknown -> applyCommandStatus(commandId, runCatching { repo.commandStatus(commandId) }.getOrNull()) {
+                    setOutgoing(commandId, OutgoingStatus.FAILED, ConnectionManager.describe(out.cause))
                 }
             }
         }
@@ -974,6 +1018,9 @@ class SessionDetailViewModel(
     companion object {
         /** [OutgoingMessage.error] marker: the session ended while the message waited. */
         const val SESSION_ENDED = "session_ended"
+
+        /** Bubble error: the computer restarted while sending (command status `unknown`). */
+        const val OUTCOME_UNKNOWN = "outcome_unknown"
         const val PAGE = 300
         const val CATCH_UP_MAX_PAGES = 20
     }

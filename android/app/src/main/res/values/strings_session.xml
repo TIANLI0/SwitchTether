@@ -122,6 +122,7 @@
     <string name="outgoing_edit">Edit</string>
     <string name="message_copy_mine">Copy message</string>
     <string name="outgoing_session_ended">The session ended; not sent</string>
+    <string name="outgoing_outcome_unknown">Not confirmed: the computer restarted while sending. It may have arrived; retrying sends it again.</string>
     <string name="session_typing">Replying…</string>
     <string name="jump_latest">Back to latest</string>
     <plurals name="new_messages">

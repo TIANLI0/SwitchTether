@@ -52,8 +52,10 @@ client-auth upcall signs the pre-hashed transcript with `NONEwithECDSA`.
 in parallel (`HostRace`) → `GET /v1/hello` (compatibility + `paired`) → `GET /v1/status`
 (epoch/headSeq) → `GET /v1/events?since=&epoch=` WebSocket with JSON `ping` every 20 s.
 `EventStreamReducer` de-duplicates by `seq`, turns `resync` frames / epoch changes into REST
-refetches; seq gaps are normal (device-scoped events). Backoff 1 s…60 s with jitter; network
-callbacks skip the wait. Close codes 4401/4403, HTTP `unpaired`/`device_revoked` (from any
+refetches; seq gaps are normal (device-scoped events). Backoff doubles from 1 s and is capped
+at 15 s (`MAX_BACKOFF_MS`, deliberately short: a task that finished while offline must not be
+reported a minute late), each wait jittered to 50–100 % of its step; network callbacks skip the
+wait. Close codes 4401/4403, HTTP `unpaired`/`device_revoked` (from any
 screen's REST call), `hello.paired == false` or a `device.revoked` event for our id → keys and
 pairing wiped, onboarding shows the reason. Runs only while the app is in the foreground
 (ProcessLifecycleOwner); the "background connection" toggle is stored for Phase B.
@@ -64,10 +66,15 @@ Every side-effecting call carries a UUID `commandId` (body + `Idempotency-Key`).
 classifies: `Succeeded` (with `X-Command-Replayed`), `Rejected` (definitive server error, e.g.
 422 `capability_unavailable` → "BLOCKED" dialog), `NotSent` (connect failed before the request
 was written — tracked with an OkHttp `EventListener`), `Unknown` (written, no answer),
-`InProgress` (409). `CommandTracker` never retries by itself: for Unknown it offers "Check
-status" (`GET /v1/commands/{id}`); only then a retry is offered — same id if the desktop never saw
-it (`not_found`), a new id if it failed; nothing if it succeeded. Offline: drafts are kept,
-nothing is queued.
+`InProgress` (409). `CommandTracker` never retries by itself: for Unknown / InProgress it offers
+"Check status" (`GET /v1/commands/{id}`, again while the answer is still `pending` or the desktop
+is unreachable); only then a retry is offered — same id if the desktop never saw it (`not_found`),
+a new id if it failed or its status is `unknown` (the desktop restarted mid-command: it may have
+taken effect, it will never finish, and the same id is answered 409 for good — the dialog says
+so); nothing if it succeeded or is still pending. Chat messages follow the same rules: an
+`unknown` (or a 409 whose record is `unknown`) marks the bubble failed with "not confirmed", and
+its retry tap sends it under a new id; so does the retry of a rejected / `failed` message (the
+desktop would replay the stored failure for the old id). Offline: drafts are kept, nothing is queued.
 
 ## 5. Native agent renderer
 
@@ -233,6 +240,10 @@ and permission strips, markdown / diff / code renderers and charts.
     Ctrl→C0 (Ctrl+C = 0x03).
 - Step-up `terminal` (`StepUpGate`) runs before create/attach. On expiry (`error step_up_required`
   frame, close 4401, or 403 on upgrade) it asks again instead of failing.
+  `StepUpGate` never waits forever: the pending prompt is held in a StateFlow, so the activity host
+  gets it even if it subscribes late; one nobody picks up within 30 s fails ("could not ask"), a
+  host that goes away mid-prompt resolves it as cancelled, concurrent requests for one scope share
+  one prompt, and grants are cached per scope until 5 s before their expiry.
 
 ### 10.2 Files & Git (§7.7)
 - Browse: roots and directory list (hidden toggle). Sensitive entries show a badge and need a
@@ -517,7 +528,11 @@ ChatGPT-account login. That is a desktop/Codex configuration issue, not an app e
   state is notified once per turn.
 - One notification per (session, slot): ATTENTION (approval / input), STATUS (done / failed /
   stopped / exited), OTHER (connection, terminal). A resolved approval cancels its ATTENTION
-  notification. Grouped per session; tapping opens the session (or the terminal).
+  notification only when no other request of the session is open; when it was the one shown and
+  another is still open, the notification is re-posted quietly for the most recent open request
+  (its title, detail and allow / deny or answer buttons — `NotificationEngine.stillOpenRequest`),
+  so no button acts on an answered request. Allow / deny from the notification goes through the
+  same path. Grouped per session; tapping opens the session (or the terminal).
 - No echo of the phone's own actions: interrupt / stop / kill terminal are noted as
   `LocalAction` for 60 s and the resulting events are not notified.
 - Per-category toggles under Settings → 通知. The stored "enabled" set also records which types

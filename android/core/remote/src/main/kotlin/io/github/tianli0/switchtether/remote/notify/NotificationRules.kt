@@ -286,19 +286,8 @@ class NotificationEngine(
                 if (e.parentId == null) settled.remove(sid)
                 null
             }
-            EventKinds.APPROVAL_REQUEST -> if (e.data.bool("resolved") == true) null else attention(sid) {
-                build(
-                    NotifyType.WAITING_APPROVAL, "approval:${e.data.str("requestId") ?: e.id}", session, sid,
-                    t.needsApproval(name), e.data.str("title") ?: t.approvalRequested(),
-                )?.copy(requestId = e.data.str("requestId"))
-            }
-            EventKinds.QUESTION -> if (e.data.bool("resolved") == true) null else attention(sid) {
-                // The question itself, not "answer in the app": often it can be answered right here.
-                build(
-                    NotifyType.WAITING_INPUT, "question:${e.data.str("requestId") ?: e.id}", session, sid,
-                    t.asksQuestion(name), questionText(e).ifBlank { t.answerHint() },
-                )?.copy(prompt = questionPrompt(e))
-            }
+            EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION ->
+                if (e.data.bool("resolved") == true) null else attention(sid) { requestIntent(e, sid, session, name, dedupe = true) }
             EventKinds.STATUS -> {
                 val state = e.data.str("state") ?: return null
                 val prev = lastStatus.put("evt:$sid", state)
@@ -338,6 +327,35 @@ class NotificationEngine(
             )
             else -> null
         }
+    }
+
+    /** The "needs you" notification of an approval request / question: what is asked, with its buttons. */
+    private fun requestIntent(e: AgentEvent, sid: String, session: SessionSummary?, name: String, dedupe: Boolean): NotifyIntent? =
+        when (e.kind) {
+            EventKinds.APPROVAL_REQUEST -> build(
+                NotifyType.WAITING_APPROVAL, "approval:${e.data.str("requestId") ?: e.id}", session, sid,
+                t.needsApproval(name), e.data.str("title") ?: t.approvalRequested(), dedupe,
+            )?.copy(requestId = e.data.str("requestId"))
+            // The question itself, not "answer in the app": often it can be answered right here.
+            EventKinds.QUESTION -> build(
+                NotifyType.WAITING_INPUT, "question:${e.data.str("requestId") ?: e.id}", session, sid,
+                t.asksQuestion(name), questionText(e).ifBlank { t.answerHint() }, dedupe,
+            )?.copy(prompt = questionPrompt(e))
+            else -> null
+        }
+
+    /**
+     * Another request of the session was resolved while [request] (its opening `approval_request` /
+     * `question` event) is still open: the session's "needs you" notification, rebuilt for [request]
+     * (its title, detail and buttons), so nothing in the shade acts on the resolved one. Replaces the
+     * shown notification quietly; null for a resolved request or one filtered by the preferences.
+     */
+    fun stillOpenRequest(request: AgentEvent, session: SessionSummary?): NotifyIntent? {
+        if (request.data.bool("resolved") == true) return null
+        val sid = request.sessionId
+        val n = requestIntent(request, sid, session, sessionName(session, sid), dedupe = false) ?: return null
+        attentionBy[sid] = true
+        return n.copy(alertOnce = true, atMs = eventMs(request))
     }
 
     /**
@@ -450,8 +468,8 @@ class NotificationEngine(
     fun connection(lost: Boolean, desktop: String): NotifyIntent? =
         build(NotifyType.CONNECTION, "conn:$lost:${nowMs() / 60_000}", null, null, if (lost) t.connectionLost(desktop) else t.reconnected(desktop), "")
 
-    private fun build(type: NotifyType, key: String, s: SessionSummary?, sessionId: String?, title: String, body: String): NotifyIntent? {
-        if (key in seen) return null
+    private fun build(type: NotifyType, key: String, s: SessionSummary?, sessionId: String?, title: String, body: String, dedupe: Boolean = true): NotifyIntent? {
+        if (dedupe && key in seen) return null
         val p = prefs()
         if (type !in p.enabled) return null
         if (s != null && (s.agent in p.mutedAgents || (s.project != null && s.project in p.mutedProjects))) return null

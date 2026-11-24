@@ -163,6 +163,9 @@ class AppContainer(private val context: Context) {
     /** The phone itself interrupted/stopped a session or killed a terminal (suppresses the echo notification). */
     fun noteLocalAction(target: String, action: io.github.tianli0.switchtether.remote.notify.LocalAction) = notifier.noteLocalAction(target, action)
 
+    /** An approval was answered from its notification: withdraw it, or show the session's next open request. */
+    fun requestAnswered(sessionId: String, requestId: String) = notifier.requestAnswered(sessionId, requestId)
+
     /** The new-session sheet was left for the folder picker page; reopen it when the picker closes. */
     val newSessionReopen = MutableStateFlow(false)
     /** One-time hints the user has dismissed (e.g. the read-only session tip). */

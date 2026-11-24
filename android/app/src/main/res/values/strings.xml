@@ -198,6 +198,7 @@
     <string name="cmd_status_succeeded">Desktop: it was carried out.</string>
     <string name="cmd_status_failed">Desktop: it failed. You may try again as a new request.</string>
     <string name="cmd_status_pending">Desktop: still running.</string>
+    <string name="cmd_status_interrupted">Desktop: it restarted while this was running, so it may or may not have been carried out. Retrying sends it again as a new request.</string>
     <string name="cmd_status_not_found">Desktop: it never arrived. Retrying is safe.</string>
     <string name="cmd_status_unreachable">The desktop is still unreachable.</string>
 

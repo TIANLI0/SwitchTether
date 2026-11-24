@@ -14,7 +14,8 @@ fun newCommandId(): String = UUID.randomUUID().toString()
 /**
  * Outcome of one side-effecting request. Nothing here is ever retried automatically: on
  * [NotSent] / [Unknown] / [InProgress] the UI asks the user, and a retry reuses the same
- * [commandId] so the desktop can de-duplicate.
+ * [commandId] so the desktop can de-duplicate — except where [Commands.retryCommandId] says a new
+ * id is needed (a definitive failure, or a command the desktop lost in a restart).
  */
 sealed interface CommandOutcome {
     val commandId: String
@@ -39,6 +40,14 @@ sealed interface CommandStatus {
     data class Succeeded(val record: CommandRecord) : CommandStatus
     data class Failed(val record: CommandRecord) : CommandStatus
     data class Pending(val record: CommandRecord) : CommandStatus
+
+    /**
+     * `unknown` (§5): the desktop restarted while the command was running, so it no longer knows how
+     * it ended — it may or may not have taken effect, and it never will finish. Not pending: the same
+     * id is answered `409 command_in_progress` forever, so a retry (only on the user's explicit
+     * choice, never automatic) is a new request with a NEW id.
+     */
+    data class Interrupted(val record: CommandRecord) : CommandStatus
 
     /** The desktop has no record: it never received the command (or the 24 h record expired). */
     data object NotFound : CommandStatus
@@ -68,6 +77,7 @@ object Commands {
         when (rec.status.lowercase()) {
             "succeeded", "success", "completed", "done" -> CommandStatus.Succeeded(rec)
             "failed", "error" -> CommandStatus.Failed(rec)
+            "unknown" -> CommandStatus.Interrupted(rec)
             else -> CommandStatus.Pending(rec)
         }
     } catch (e: CancellationException) {
@@ -86,10 +96,12 @@ object Commands {
      *   desktop de-duplicates instead of executing twice).
      * - Failed: the stored failure would just be replayed for the same id → a retry is a new
      *   user intent with a NEW id.
+     * - Interrupted: the desktop restarted mid-command and answers the same id with 409 forever →
+     *   a NEW id; the UI says it may already have taken effect.
      */
     fun retryCommandId(status: CommandStatus, originalId: String): String? = when (status) {
         is CommandStatus.NotFound -> originalId
-        is CommandStatus.Failed -> newCommandId()
+        is CommandStatus.Failed, is CommandStatus.Interrupted -> newCommandId()
         else -> null
     }
 }

@@ -329,12 +329,25 @@ class CommandEdgeTest {
         assertTrue(first != null && first != "c1")
         assertTrue(second != null && second != "c1" && second != first)
         assertTrue(Commands.status("c1") { record("ERROR") } is CommandStatus.Failed)
-        // Outcome not known to the desktop either (it restarted mid-command), still running, or done: no retry is offered.
-        for (s in listOf("unknown", "pending", "running", "", "succeeded")) {
+        // Still running, or done: no retry is offered.
+        for (s in listOf("pending", "running", "", "succeeded")) {
             assertNull(s, Commands.retryCommandId(Commands.status("c1") { record(s) }, "c1"))
         }
         assertEquals("c1", Commands.retryCommandId(CommandStatus.NotFound, "c1"))
         assertNull(Commands.retryCommandId(CommandStatus.Unreachable(RuntimeException("x")), "c1"))
+    }
+
+    /**
+     * `unknown` = the desktop restarted while the command ran (§5): it will never finish, and the same
+     * id is answered 409 forever. It used to be read as pending, so no retry was ever offered.
+     */
+    @Test
+    fun aCommandLostInADesktopRestartIsNotPendingAndRetriesUnderANewId() = runBlocking {
+        val st = Commands.status("c1") { record("unknown") }
+        assertTrue("got $st", st is CommandStatus.Interrupted)
+        val retry = Commands.retryCommandId(st, "c1")
+        assertTrue(retry != null && retry != "c1")
+        assertTrue(Commands.retryCommandId(st, "c1") != retry) // each explicit retry is its own new request
     }
 
     /** An answer that cannot be read (2xx with a broken body) is an unknown outcome, not a crash. */

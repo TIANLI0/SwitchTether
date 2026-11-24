@@ -119,6 +119,7 @@
     <string name="outgoing_edit">编辑</string>
     <string name="message_copy_mine">复制消息</string>
     <string name="outgoing_session_ended">会话已结束，未发送</string>
+    <string name="outgoing_outcome_unknown">未确认：发送时电脑重启了，可能已经送达；重试会再次发送。</string>
     <string name="session_typing">正在回复…</string>
     <string name="jump_latest">回到最新</string>
     <plurals name="new_messages">

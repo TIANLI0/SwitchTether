@@ -187,6 +187,7 @@
     <string name="cmd_status_succeeded">电脑端：已执行。</string>
     <string name="cmd_status_failed">电脑端：执行失败。你可以作为新请求重试。</string>
     <string name="cmd_status_pending">电脑端：仍在执行。</string>
+    <string name="cmd_status_interrupted">电脑端：执行过程中电脑重启了，可能已执行也可能未执行。重试会作为新请求再次发送。</string>
     <string name="cmd_status_not_found">电脑端：从未收到。可以安全重试。</string>
     <string name="cmd_status_unreachable">仍然无法连接到电脑。</string>
 

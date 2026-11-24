@@ -31,6 +31,15 @@ data class CommandPrompt(
             status != null -> Commands.retryCommandId(status, commandId)
             else -> null
         }
+
+    /**
+     * "Check status" is offered for an unconfirmed / still-running command until the desktop gives
+     * an answer that settles it: "still running" and "unreachable" may change, so they can be asked
+     * again (otherwise a command that stays pending would leave the user with nothing but OK).
+     */
+    val canCheckStatus: Boolean
+        get() = (kind == Kind.UNKNOWN || kind == Kind.IN_PROGRESS) &&
+            (status == null || status is CommandStatus.Pending || status is CommandStatus.Unreachable)
 }
 
 /**

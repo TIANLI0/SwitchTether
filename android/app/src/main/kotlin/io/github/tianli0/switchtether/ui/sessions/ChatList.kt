@@ -270,6 +270,7 @@ fun OutgoingBubble(
                 OutgoingStatus.FAILED -> {
                     val why = when (m.error) {
                         SessionDetailViewModel.SESSION_ENDED -> stringResource(R.string.outgoing_session_ended)
+                        SessionDetailViewModel.OUTCOME_UNKNOWN -> stringResource(R.string.outgoing_outcome_unknown)
                         null -> stringResource(R.string.outgoing_failed)
                         else -> stringResource(R.string.outgoing_failed) + " · " + m.error
                     }

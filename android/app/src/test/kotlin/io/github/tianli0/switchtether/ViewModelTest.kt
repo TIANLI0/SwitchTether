@@ -284,7 +284,7 @@ class ViewModelTest {
     }
 
     @Test
-    fun rejectedSendFailsAndRetriesWithTheSameCommandId() = runTest(dispatcher) {
+    fun rejectedSendFailsAndRetriesUnderANewCommandId() = runTest(dispatcher) {
         val repo = FakeSessionRepository().apply {
             detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
             nextOutcome = { id -> CommandOutcome.Rejected(id, ApiException(409, ApiErrorBody("conflict", "session busy"), null)) }
@@ -301,9 +301,12 @@ class ViewModelTest {
         repo.nextOutcome = { id -> CommandOutcome.Succeeded(id, io.github.tianli0.switchtether.remote.api.CommandResponse(kotlinx.serialization.json.JsonNull, false)) }
         vm.retrySend(failed.commandId)
         advanceUntilIdle()
-        assertEquals(listOf(failed.commandId, failed.commandId), repo.sent.map { it.first })
+        // The desktop stored that failure and replays it for the same id (§5): the retry is a new request.
+        val (first, second) = repo.sent.map { it.first }
+        assertEquals(failed.commandId, first)
+        assertTrue(second != first)
         assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.single().status)
-        vm.deleteOutgoing(failed.commandId)
+        vm.deleteOutgoing(second)
         assertTrue(vm.state.value.outgoing.isEmpty())
     }
 
@@ -407,6 +410,63 @@ class ViewModelTest {
         assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.single().status)
         assertEquals("", vm.state.value.draft)
         assertEquals(1, repo.sent.size)
+    }
+
+    /** `unknown` = the computer restarted mid-send (§5). It used to read as pending → "delivered" forever. */
+    @Test
+    fun aMessageTheComputerLostInARestartFailsAndRetriesUnderANewIdOnlyOnTap() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply {
+            detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
+            nextOutcome = { id -> CommandOutcome.Unknown(id, IOException("timeout")) }
+            nextStatus = CommandStatus.Interrupted(CommandRecord("x", status = "unknown"))
+        }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        vm.setDraft("deploy")
+        vm.send()
+        advanceUntilIdle()
+        val m = vm.state.value.outgoing.single()
+        assertEquals(OutgoingStatus.FAILED, m.status)
+        assertEquals(SessionDetailViewModel.OUTCOME_UNKNOWN, m.error)
+        assertTrue(m.retryAsNew)
+        assertEquals(1, repo.sent.size) // never resent on its own
+
+        repo.nextOutcome = { id -> CommandOutcome.Succeeded(id, io.github.tianli0.switchtether.remote.api.CommandResponse(kotlinx.serialization.json.JsonNull, false)) }
+        vm.retrySend(m.commandId)
+        advanceUntilIdle()
+        val (first, second) = repo.sent.map { it.first }
+        assertEquals(m.commandId, first)
+        assertTrue(second != first) // the old id is refused for good: a new request
+        val now = vm.state.value.outgoing.single()
+        assertEquals(second, now.commandId)
+        assertEquals(OutgoingStatus.DELIVERED, now.status)
+        assertFalse(now.retryAsNew)
+    }
+
+    /** A same-id retry after the computer restarted is answered 409 for good: not "delivered". */
+    @Test
+    fun aCommandInProgressAnswerIsCheckedAgainstTheCommandRecord() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply {
+            detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
+            nextOutcome = { id -> CommandOutcome.InProgress(id) }
+            nextStatus = CommandStatus.Interrupted(CommandRecord("x", status = "unknown"))
+        }
+        val vm = detailVm(repo)
+        advanceUntilIdle()
+        vm.setDraft("deploy")
+        vm.send()
+        advanceUntilIdle()
+        val m = vm.state.value.outgoing.single()
+        assertEquals(listOf(m.commandId), repo.statusQueries)
+        assertEquals(OutgoingStatus.FAILED, m.status)
+        assertTrue(m.retryAsNew)
+
+        // Still running on the computer: delivered, as before.
+        repo.nextStatus = CommandStatus.Pending(CommandRecord("x", status = "pending"))
+        vm.setDraft("again")
+        vm.send()
+        advanceUntilIdle()
+        assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.last().status)
     }
 
     @Test

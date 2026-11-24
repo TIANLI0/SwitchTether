@@ -130,6 +130,29 @@ class NotificationRulesTest {
         assertNull(e.onSessionEvent(ev("a2", 4, "approval_request", """{"requestId":"r2","resolved":true}"""), session))
     }
 
+    /** After the shown request was resolved, the notification is rebuilt for one still open (already announced). */
+    @Test
+    fun aStillOpenRequestIsRebuiltWithItsOwnTextAndButtonsQuietly() {
+        var prefs = NotifyPrefs()
+        val e = NotificationEngine({ prefs }, { 12 * 60 })
+        val r1 = ev("a1", 3, "approval_request", """{"requestId":"r1","title":"Run ls","resolved":false}""")
+        assertNotNull(e.onSessionEvent(r1, session))
+        assertNotNull(e.onSessionEvent(ev("a2", 4, "approval_request", """{"requestId":"r2","title":"Run rm","resolved":false}"""), session))
+
+        val again = e.stillOpenRequest(r1, session)
+        assertNotNull("an already announced request can be shown again", again)
+        assertEquals(NotifyType.WAITING_APPROVAL, again!!.type)
+        assertEquals("r1", again.requestId)
+        assertEquals("Run ls", again.body)
+        assertTrue("no second sound", again.alertOnce)
+
+        val q = ev("q3", 5, "question", """{"requestId":"q3","questions":[{"id":"b","question":"Which branch?","options":[{"label":"main"}]}]}""")
+        assertEquals("q3", e.stillOpenRequest(q, session)?.prompt?.requestId)
+        assertNull(e.stillOpenRequest(ev("a1", 3, "approval_request", """{"requestId":"r1","resolved":true}"""), session))
+        prefs = NotifyPrefs(mutedProjects = setOf("app"))
+        assertNull("muted meanwhile", e.stillOpenRequest(r1, session))
+    }
+
     @Test
     fun quietHoursWrapMidnightAndMakeSilent() {
         val p = NotifyPrefs(quietHoursEnabled = true, quietStartMin = 22 * 60, quietEndMin = 7 * 60)

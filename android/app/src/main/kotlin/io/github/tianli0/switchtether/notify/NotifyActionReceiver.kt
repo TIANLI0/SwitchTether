@@ -52,7 +52,14 @@ class NotifyActionReceiver : BroadcastReceiver() {
                         else -> null
                     }
                 }
-                report(context, notificationId, session, action, typed, outcome)
+                val request = intent.getStringExtra(EXTRA_REQUEST)
+                if (outcome is CommandOutcome.Succeeded && (action == ACTION_APPROVE || action == ACTION_DENY) && request != null) {
+                    // Not a plain cancel: another request of the session may still be open (and may
+                    // already have taken this notification's place).
+                    container.requestAnswered(session, request)
+                } else {
+                    report(context, notificationId, session, action, typed, outcome)
+                }
             } finally {
                 container.releaseBackgroundConnection()
                 pending.finish()
