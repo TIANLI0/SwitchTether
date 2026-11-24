@@ -44,12 +44,13 @@ import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.loadable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -451,7 +452,7 @@ class FilesViewModel(
                 withContext(Dispatchers.IO) {
                     resolver.openInputStream(uri)!!.use { input ->
                         for ((offset, len) in UploadPlan.chunks(size)) {
-                            if (!isActive) break
+                            ensureActive()
                             val buf = ByteArray(len.toInt())
                             var read = 0
                             while (read < len) {
@@ -459,6 +460,8 @@ class FilesViewModel(
                                 if (r < 0) break
                                 read += r
                             }
+                            // The document ended before the size it reported: never report a truncated upload as done.
+                            if (read < len) throw java.io.IOException("file ended after ${offset + read} of $size bytes")
                             api.uploadChunk(uploadId, offset, if (read == buf.size) buf else buf.copyOf(read))
                             _state.update { it.copy(transfer = it.transfer?.copy(done = offset + read)) }
                         }
@@ -466,6 +469,11 @@ class FilesViewModel(
                 }
                 _state.update { it.copy(transfer = it.transfer?.copy(finished = true)) }
                 browse(dir)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // The job is already cancelled: without NonCancellable the request would never be sent and the
+                // partial upload would stay on the computer.
+                withContext(NonCancellable) { runCatching { api.cancelUpload(uploadId) } }
+                throw e
             } catch (e: Exception) {
                 runCatching { api.cancelUpload(uploadId) }
                 _state.update { it.copy(transfer = it.transfer?.copy(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))) }

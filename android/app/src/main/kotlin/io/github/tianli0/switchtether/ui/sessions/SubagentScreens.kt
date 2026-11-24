@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.coui17.patterns.groupRowShape
+import io.github.suqi8.coui.kmp.basic.cardListPositionOf
+import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.tianli0.coui17.patterns.PageDefaults
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -230,9 +233,9 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
                             stringResource(R.string.subagent_children),
                             style = COUITheme.textStyles.footnote1,
                             color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(start = 24.dp, top = 16.dp, bottom = 6.dp),
+                            modifier = Modifier.padding(start = PageDefaults.TextGutter, end = PageDefaults.TextGutter, top = 16.dp, bottom = 6.dp),
                         )
-                        GroupCard { children.forEachIndexed { i, b -> BranchRow(b.node, last = i == children.lastIndex) { onOpen(Route.Subagent(sessionId, b.node.agentId, b.node.description, agent)) } } }
+                        GroupCard { children.forEachIndexed { i, b -> BranchRow(b.node, last = i == children.lastIndex, position = cardListPositionOf(i, children.size)) { onOpen(Route.Subagent(sessionId, b.node.agentId, b.node.description, agent)) } } }
                     }
                 }
                 if (running) item(key = "live") { Note(stringResource(R.string.subagent_following)) }
@@ -286,11 +289,11 @@ private fun Note(text: String) {
 
 /** A row of the branch tree: connector glyphs, status dot, description, type and time. */
 @Composable
-private fun BranchRow(node: SubagentNode, last: Boolean, onClick: () -> Unit) {
+private fun BranchRow(node: SubagentNode, last: Boolean, position: CardListPosition, onClick: () -> Unit) {
     val dev = LocalDevColors.current
     val running = node.isRunning()
     Row(
-        Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp).testTag("branch-${node.agentId}"),
+        Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).clip(groupRowShape(position)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp).testTag("branch-${node.agentId}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TreeGutter(depth = 0, rails = emptyList(), last = last)

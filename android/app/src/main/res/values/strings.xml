@@ -433,6 +433,8 @@
     <string name="new_session_recent_folders">Recent</string>
     <string name="new_session_all_locations">All locations</string>
     <string name="new_session_filter">Filter folders</string>
+    <string name="new_session_resume">Continue a conversation</string>
+    <string name="new_session_resume_none">New conversation</string>
     <string name="onboarding_paste">Paste from clipboard</string>
     <string name="pair_enter_address">Enter the computer\'s address</string>
     <string name="pair_code_title">Enter the pairing code</string>

@@ -86,6 +86,16 @@ class Notifier(
                         if ((it.kind == "approval_request" || it.kind == "question") && it.data.bool("resolved") == true) cancel(it.sessionId, NotifySlot.ATTENTION)
                         engine.onSessionEvent(it, sessions[it.sessionId] ?: lookup(it.sessionId))
                     }
+                    "session.removed" -> {
+                        // The process is gone: it no longer counts as working (the monitor's wake
+                        // lock follows this count) and nobody can answer its request any more.
+                        (data.str("sessionId") ?: data.str("id"))?.let {
+                            sessions.remove(it)
+                            refreshActive()
+                            cancel(it, NotifySlot.ATTENTION)
+                        }
+                        null
+                    }
                     "terminal.created" -> {
                         data.str("id")?.let { engine.onTerminalCreated(it, data.str("title") ?: data.str("shell")) }
                         null
@@ -111,7 +121,10 @@ class Notifier(
                         pendingLost = null
                         if (lostShown) {
                             lostShown = false
-                            engine.connection(false, s.desktop.name)?.let { post(it.copy(silent = true), timeoutMs = RECONNECTED_VISIBLE_MS) }
+                            val replaced = engine.connection(false, s.desktop.name)?.let { post(it.copy(silent = true), timeoutMs = RECONNECTED_VISIBLE_MS) } ?: false
+                            // Nothing replaced "connection lost" (app in the foreground, type switched
+                            // off, same-minute repeat): it must not stay up while connected.
+                            if (!replaced) runCatching { nm.cancel(CONNECTION_NOTIFICATION_ID) }
                         }
                         wasOnline = true
                     }
@@ -174,15 +187,18 @@ class Notifier(
         mgr.createNotificationChannel(NotificationChannel(SERVICE_CHANNEL, context.getString(R.string.notif_ch_service), NotificationManager.IMPORTANCE_MIN))
     }
 
-    private fun post(n: NotifyIntent) = post(n, timeoutMs = null)
+    private fun post(n: NotifyIntent) {
+        post(n, timeoutMs = null)
+    }
 
-    private fun post(n: NotifyIntent, timeoutMs: Long?) {
-        if (isForeground()) return
+    /** @return whether the notification was handed to the system. */
+    private fun post(n: NotifyIntent, timeoutMs: Long?): Boolean {
+        if (isForeground()) return false
         val sid = n.sessionId
-        if (sid != null && coveredByLiveUpdate(sid) && n.type in COVERED_BY_LIVE_UPDATE) return
+        if (sid != null && coveredByLiveUpdate(sid) && n.type in COVERED_BY_LIVE_UPDATE) return false
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) return
+        ) return false
         val tap = PendingIntent.getActivity(
             context,
             n.key.hashCode(),
@@ -234,7 +250,7 @@ class Notifier(
                 n.replyable && n.type != NotifyType.WAITING_APPROVAL -> b.addAction(NotifyActionReceiver.replyAction(context, sid, id))
             }
         }
-        runCatching { nm.notify(id, b.build()) }
+        return runCatching { nm.notify(id, b.build()) }.isSuccess
     }
 
     private fun whenFor(id: Int, n: NotifyIntent, now: Long): Long {

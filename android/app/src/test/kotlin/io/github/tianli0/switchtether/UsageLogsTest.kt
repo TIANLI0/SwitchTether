@@ -56,6 +56,9 @@ class UsageLogsTest {
     private inner class Repo(val logsSupported: Boolean = true, val total: Int = 45) : ManagementRepository {
         val logCalls = mutableListOf<Triple<Long, Long, Int>>()
         val summaryRanges = mutableListOf<Pair<Long, Long>>()
+        /** Held answers, to let an older request finish after a newer one. */
+        var firstDateGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        val trendGates = mutableMapOf<Long, kotlinx.coroutines.CompletableDeferred<Unit>>()
         private fun no(): Nothing = throw UnsupportedOperationException()
         override val changes: Flow<String> = emptyFlow()
         override suspend fun apps(): List<String> = no()
@@ -64,7 +67,10 @@ class UsageLogsTest {
         override suspend fun testProvider(app: String, id: String, commandId: String): CommandOutcome = no()
         override suspend fun setCredential(app: String, id: String, field: String, value: String, commandId: String): CommandOutcome = no()
         override suspend fun usageSummary(fromSec: Long, toSec: Long, app: String?): UsageSummary { summaryRanges += fromSec to toSec; no() }
-        override suspend fun usageTrend(fromSec: Long, toSec: Long, app: String?): List<DailyUsage> = emptyList()
+        override suspend fun usageTrend(fromSec: Long, toSec: Long, app: String?): List<DailyUsage> {
+            trendGates[fromSec]?.await()
+            return listOf(DailyUsage(date = fromSec.toString(), requests = 1, costUsd = null, tokens = 1))
+        }
         override suspend fun usageModels(fromSec: Long, toSec: Long, app: String?): List<UsageBreakdownRow> = emptyList()
         override suspend fun usageProviders(fromSec: Long, toSec: Long, app: String?): List<UsageBreakdownRow> = emptyList()
         override suspend fun quota(tool: String): QuotaView = no()
@@ -82,7 +88,7 @@ class UsageLogsTest {
             return RequestLogPage((start until minOf(total, start + pageSize)).map(::log), total.toLong(), page, pageSize)
         }
         override suspend fun usageLog(requestId: String) = log(requestId.removePrefix("r").toInt()).copy(errorMessage = "fresh")
-        override suspend fun usageFirstDateMs(app: String?): Long = 1_790_000_000_000
+        override suspend fun usageFirstDateMs(app: String?): Long { firstDateGate?.await(); return 1_790_000_000_000 }
         override suspend fun usageLastSyncMs(): Long = 1_794_600_000_000
         override suspend fun visibleApps(): Map<String, Boolean> = mapOf("gemini" to false, "codex" to true)
     }
@@ -134,5 +140,34 @@ class UsageLogsTest {
         advanceUntilIdle()
         assertNull(vm.state.value.logs)
         assertEquals(ZoneId.of("America/Los_Angeles"), vm.state.value.zone)
+    }
+
+    @Test
+    fun aSlowAnswerForThePreviousRangeDoesNotReplaceTheCurrentOne() = runTest(dispatcher) {
+        val repo = Repo()
+        val shanghaiMidnight = ZonedDateTime.parse("2026-11-14T00:00:00+08:00[Asia/Shanghai]").toEpochSecond()
+        val slowToday = kotlinx.coroutines.CompletableDeferred<Unit>()
+        repo.trendGates[shanghaiMidnight] = slowToday
+        val vm = UsageViewModel(online("Asia/Shanghai"), repo, ZoneId.of("America/Los_Angeles"), { now })
+        advanceUntilIdle() // today's trend is still on its way
+        vm.setPreset(UsageRangePreset.ALL); advanceUntilIdle()
+        slowToday.complete(Unit); advanceUntilIdle()
+        assertEquals("1790000000", vm.state.value.trend.valueOrNull!!.single().date)
+    }
+
+    @Test
+    fun leavingAllWhileItsFirstDateLoadsKeepsTheNewRange() = runTest(dispatcher) {
+        val repo = Repo()
+        val vm = UsageViewModel(online("Asia/Shanghai"), repo, ZoneId.of("America/Los_Angeles"), { now })
+        advanceUntilIdle()
+        val today = vm.state.value.fromSec
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        repo.firstDateGate = gate
+        vm.setPreset(UsageRangePreset.ALL)
+        vm.setPreset(UsageRangePreset.TODAY); advanceUntilIdle()
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(UsageRangePreset.TODAY, vm.state.value.preset)
+        assertEquals(today, vm.state.value.fromSec)
+        assertEquals(today, repo.logCalls.last().first)
     }
 }

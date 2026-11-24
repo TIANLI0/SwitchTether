@@ -214,7 +214,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             item { SectionHeader(stringResource(R.string.settings_about)) }
             item {
                 GroupCard {
-                    KeyValueRow(stringResource(R.string.settings_version), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                    KeyValueRow(stringResource(R.string.settings_version), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", cardListPosition = CardListPosition.Head)
                     val updState by container.updates.state.collectAsStateWithLifecycle()
                     var beta by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(container.updates.includePrerelease) }
                     ArrowPreference(
@@ -235,7 +235,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
                         summary = stringResource(R.string.update_beta_summary),
                         cardListPosition = CardListPosition.Middle,
                     )
-                    KeyValueRow(stringResource(R.string.settings_protocol), "v${io.github.tianli0.switchtether.remote.protocol.CLIENT_PROTOCOL_VERSION}")
+                    KeyValueRow(stringResource(R.string.settings_protocol), "v${io.github.tianli0.switchtether.remote.protocol.CLIENT_PROTOCOL_VERSION}", cardListPosition = CardListPosition.Middle)
                     ArrowPreference(
                         title = stringResource(R.string.settings_licenses),
                         onClick = { onOpen(Route.Licenses) },
@@ -291,18 +291,22 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
                 GroupCard {
-                    KeyValueRow(stringResource(R.string.field_desktop), d.name)
-                    KeyValueRow(stringResource(R.string.field_status), connectionText(conn))
-                    KeyValueRow(stringResource(R.string.field_fingerprint), Fingerprints.grouped(d.fingerprint))
-                    KeyValueRow(stringResource(R.string.field_last_host), (d.lastGoodHost ?: "—") + ":" + d.port)
-                    KeyValueRow(stringResource(R.string.field_addresses), d.hosts.joinToString("\n"))
-                    KeyValueRow(stringResource(R.string.field_device_id), d.deviceId)
-                    KeyValueRow(stringResource(R.string.field_paired_at), Formatters.dateTime(d.pairedAtMs))
-                    KeyValueRow(stringResource(R.string.field_step_up), if (d.stepUpEnabled) stringResource(R.string.stepup_enabled) else stringResource(R.string.stepup_disabled))
-                    KeyValueRow(stringResource(R.string.field_key_storage), container.keys.securityLevel(d.identityAlias))
-                    (conn as? ConnectionState.Online)?.status?.let { s ->
-                        KeyValueRow(stringResource(R.string.field_server_version), "${s.serverVersion} · ${s.platform ?: ""}")
+                    // The visible rows first: the last one is conditional, and each row needs its place in the card.
+                    val rows = buildList {
+                        add(stringResource(R.string.field_desktop) to d.name)
+                        add(stringResource(R.string.field_status) to connectionText(conn))
+                        add(stringResource(R.string.field_fingerprint) to Fingerprints.grouped(d.fingerprint))
+                        add(stringResource(R.string.field_last_host) to (d.lastGoodHost ?: "—") + ":" + d.port)
+                        add(stringResource(R.string.field_addresses) to d.hosts.joinToString("\n"))
+                        add(stringResource(R.string.field_device_id) to d.deviceId)
+                        add(stringResource(R.string.field_paired_at) to Formatters.dateTime(d.pairedAtMs))
+                        add(stringResource(R.string.field_step_up) to (if (d.stepUpEnabled) stringResource(R.string.stepup_enabled) else stringResource(R.string.stepup_disabled)))
+                        add(stringResource(R.string.field_key_storage) to container.keys.securityLevel(d.identityAlias))
+                        (conn as? ConnectionState.Online)?.status?.let { s ->
+                            add(stringResource(R.string.field_server_version) to "${s.serverVersion} · ${s.platform ?: ""}")
+                        }
                     }
+                    rows.forEachIndexed { i, (label, value) -> KeyValueRow(label, value, cardListPosition = cardListPositionOf(i, rows.size)) }
                 }
             }
             item {

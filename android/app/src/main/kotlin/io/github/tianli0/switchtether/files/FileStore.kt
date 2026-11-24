@@ -89,7 +89,7 @@ class FileStore(
         val server = serverId() ?: throw NotConnectedForFilesException()
         val knownSize = size?.takeIf { it > 0 }
         if (!forceRemote) {
-            index.find(server, path).firstOrNull { (knownSize == null || it.size == knownSize) && exists(Uri.parse(it.uri)) }
+            index.find(server, path).firstOrNull { it.matchesRemote(knownSize, modifiedMs) && exists(Uri.parse(it.uri)) }
                 ?.let { return@withContext asLocal(it) }
         }
         val key = FileCache.keyFor(server, path, knownSize, modifiedMs)

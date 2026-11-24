@@ -87,7 +87,12 @@ class FakeSessionRepository : SessionRepository {
         return SessionPage(sessions.filter { query.agent == null || it.agent == query.agent })
     }
 
-    override suspend fun detail(id: String) = detail ?: throw IllegalStateException("no detail")
+    /** When set, `detail` waits for it (a request still in flight). */
+    var detailGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    override suspend fun detail(id: String): SessionDetail {
+        detailGate?.await()
+        return detail ?: throw IllegalStateException("no detail")
+    }
     override suspend fun events(id: String, before: Long?, after: Long?, limit: Int) =
         EventPage(events.filter { before == null || it.seq < before }.takeLast(limit), hasMore && before == null)
 

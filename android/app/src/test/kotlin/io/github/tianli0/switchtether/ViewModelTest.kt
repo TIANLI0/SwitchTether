@@ -314,6 +314,34 @@ class ViewModelTest {
         assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.single().status)
     }
 
+    /** A real reconnect sets Online and then emits a "connected" resync: the catch-up replaces the load. */
+    @Test
+    fun queuedWhileOfflineGoesOutWhenTheReconnectCatchUpReplacesTheLoad() = runTest(dispatcher) {
+        val conn = FakeConnection()
+        val repo = FakeSessionRepository().apply {
+            detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList())
+            events = listOf(event("a1", 1, "assistant_message", """{"text":"hi"}"""))
+        }
+        val vm = detailVm(repo, conn)
+        advanceUntilIdle()
+        conn.state.value = ConnectionState.Offline(TEST_DESKTOP, "down", null)
+        advanceUntilIdle()
+        vm.setDraft("when you can")
+        vm.send()
+        advanceUntilIdle()
+        val queued = vm.state.value.outgoing.single()
+        assertEquals(OutgoingStatus.WAITING_CONNECTION, queued.status)
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        repo.detailGate = gate
+        conn.state.value = ONLINE // load() starts and waits for the detail
+        repo.refetchFlow.tryEmit("connected") // catchUp() cancels it
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf(queued.commandId to "when you can"), repo.sent)
+        assertEquals(OutgoingStatus.DELIVERED, vm.state.value.outgoing.single().status)
+    }
+
     @Test
     fun unknownOutcomeChecksStatusBeforeOfferingRetry() = runTest(dispatcher) {
         val repo = FakeSessionRepository().apply {

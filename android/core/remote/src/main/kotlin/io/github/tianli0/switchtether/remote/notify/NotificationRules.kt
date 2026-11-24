@@ -215,6 +215,16 @@ class NotificationEngine(
      */
     private val attentionBy = HashMap<String, Boolean>()
 
+    /**
+     * Session id → how many "needs you" moments have ended. Part of the generic wait keys: one turn
+     * can stop for the user several times, and each of those waits is announced.
+     */
+    private val waitNo = HashMap<String, Int>()
+
+    private fun waitEnded(sid: String) {
+        waitNo[sid] = (waitNo[sid] ?: 0) + 1
+    }
+
     private inline fun attention(sid: String, make: () -> NotifyIntent?): NotifyIntent? {
         val n = make() ?: return null
         val genericShown = attentionBy[sid] == false
@@ -293,6 +303,7 @@ class NotificationEngine(
                 val state = e.data.str("state") ?: return null
                 val prev = lastStatus.put("evt:$sid", state)
                 if (prev == state) return null
+                if (prev == "waiting_input") waitEnded(sid)
                 when (state) {
                     "running" -> {
                         val fresh = !openTurn.contains(sid)
@@ -305,7 +316,7 @@ class NotificationEngine(
                     }
                     "error" -> failTurn(sid, session, name, e.data.str("detail").orEmpty(), eventMs(e))
                     "interrupted" -> interruptTurn(sid, session, name, t.interrupted(name), e.data.str("detail").orEmpty(), eventMs(e))
-                    "waiting_input" -> build(NotifyType.WAITING_INPUT, "wait-input:$sid:${turn[sid] ?: 0}", session, sid, t.waitingInput(name), "")
+                    "waiting_input" -> build(NotifyType.WAITING_INPUT, "wait-input:$sid:${turn[sid] ?: 0}:${waitNo[sid] ?: 0}", session, sid, t.waitingInput(name), "")
                         ?.copy(replyable = canReply(session))
                     // waiting_approval is announced by the approval_request event (with its title).
                     else -> null
@@ -382,6 +393,7 @@ class NotificationEngine(
         if (!waiting) attentionBy.remove(s.id)
         if (prev == sig) return null
         val prevStatus = prev?.substringBefore('|')
+        if (!waiting && prev != null && (prevStatus == "waiting" || prev.substringAfter('|') != "null")) waitEnded(s.id)
         return when {
             waiting -> {
                 // The request event (with what is asked) already announced this wait: no second alert.
@@ -389,7 +401,7 @@ class NotificationEngine(
                 val approval = isApprovalWait(s.waitingFor)
                 build(
                     if (approval) NotifyType.WAITING_APPROVAL else NotifyType.WAITING_INPUT,
-                    "wait:${s.id}:$sig:${turn[s.id] ?: 0}", s, s.id,
+                    "wait:${s.id}:$sig:${turn[s.id] ?: 0}:${waitNo[s.id] ?: 0}", s, s.id,
                     if (approval) t.needsApproval(name) else t.waitingForYou(name),
                     if (approval) t.approvalRequested() else "",
                 )?.copy(atMs = s.lastActiveAtMs)?.let { n ->

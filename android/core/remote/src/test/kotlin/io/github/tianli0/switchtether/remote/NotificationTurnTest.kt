@@ -11,6 +11,7 @@ import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.remote.protocol.SessionSummary
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -170,6 +171,29 @@ class NotificationTurnTest {
         val next = f.onSessionUpsert(S.copy(status = "waiting", waitingFor = "permission prompt"))
         assertEquals(NotifyType.WAITING_APPROVAL, next?.type)
         assertEquals(false, next!!.alertOnce)
+    }
+
+    @Test
+    fun everyWaitOfOneTurnIsAnnounced() {
+        // Observed session: two permission prompts in the same turn (busy → waiting → busy → waiting).
+        val e = engine()
+        e.onSessionUpsert(S.copy(status = "busy"))
+        val first = e.onSessionUpsert(S.copy(status = "waiting", waitingFor = "permission prompt"))
+        assertEquals(NotifyType.WAITING_APPROVAL, first?.type)
+        assertNull(e.onSessionUpsert(S.copy(status = "busy")))
+        val second = e.onSessionUpsert(S.copy(status = "waiting", waitingFor = "permission prompt"))
+        assertEquals(NotifyType.WAITING_APPROVAL, second?.type)
+        assertEquals(false, second!!.alertOnce)
+        assertNotEquals(first!!.key, second.key)
+        // The same wait reported again is still one notification.
+        assertNull(e.onSessionUpsert(S.copy(status = "waiting", waitingFor = "permission prompt")))
+
+        // Status events: the agent waits for input twice before the turn ends.
+        val f = engine()
+        f.onSessionEvent(ev("st", 1, "status", """{"state":"running"}"""), S)
+        assertEquals(NotifyType.WAITING_INPUT, f.onSessionEvent(ev("st", 2, "status", """{"state":"waiting_input"}"""), S)?.type)
+        assertNull(f.onSessionEvent(ev("st", 3, "status", """{"state":"running"}"""), S))
+        assertEquals(NotifyType.WAITING_INPUT, f.onSessionEvent(ev("st", 4, "status", """{"state":"waiting_input"}"""), S)?.type)
     }
 
     @Test

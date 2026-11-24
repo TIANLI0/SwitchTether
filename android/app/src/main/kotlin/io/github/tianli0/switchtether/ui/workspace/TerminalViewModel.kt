@@ -143,6 +143,8 @@ class TerminalViewModel(
 
     fun select(id: String) {
         if (_state.value.selectedId == id && _state.value.link == TermLink.OPEN) return
+        // Keys queued for the previous terminal must never be typed into this one.
+        if (_state.value.selectedId != id) synchronized(pendingInput) { pendingInput.setLength(0) }
         _state.update { it.copy(selectedId = id, screen = TermScreen(), scrollback = emptyList(), scrollbackTotal = 0, scrollbackDone = false) }
         connect(id)
     }
@@ -159,7 +161,11 @@ class TerminalViewModel(
                 return@launch
             }
             _state.update { it.copy(link = TermLink.CONNECTING, error = null) }
-            if (gate.ensure(StepUpScopes.TERMINAL).isFailure) {
+            val granted = gate.ensure(StepUpScopes.TERMINAL).isSuccess
+            // Superseded while the step-up prompt was up (another terminal selected, disconnect,
+            // page closed): opening now would leave a second, unowned stream alive.
+            if (gen != streamGen) return@launch
+            if (!granted) {
                 _state.update { it.copy(link = TermLink.NEEDS_STEP_UP) }
                 return@launch
             }
@@ -220,8 +226,13 @@ class TerminalViewModel(
         onKill(id)
         viewModelScope.launch {
             runCatching { api.killTerminal(id) }.onFailure { e -> _state.update { it.copy(error = ConnectionManager.describe(e)) } }
-            disconnect()
-            _state.update { st -> st.copy(selectedId = null, screen = TermScreen(), terminals = st.terminals.filter { it.id != id }) }
+            // Another terminal picked while the kill was in flight keeps its stream and selection.
+            if (_state.value.selectedId == id) {
+                disconnect()
+                _state.update { st -> st.copy(selectedId = null, screen = TermScreen(), terminals = st.terminals.filter { it.id != id }) }
+            } else {
+                _state.update { st -> st.copy(terminals = st.terminals.filter { it.id != id }) }
+            }
             refresh()
         }
     }
@@ -299,11 +310,16 @@ class TerminalViewModel(
                 val end = (total - have).coerceAtLeast(0)
                 val start = (end - count).coerceAtLeast(0)
                 if (end <= 0) {
-                    _state.update { it.copy(scrollbackTotal = total, scrollbackDone = true) }
+                    _state.update { if (it.selectedId != id || it.scrollback.size != have) it else it.copy(scrollbackTotal = total, scrollbackDone = true) }
                     return@launch
                 }
                 val page = api.terminalScrollback(id, start, end - start)
-                _state.update { it.copy(scrollback = page.lines + it.scrollback, scrollbackTotal = total, scrollbackDone = start == 0) }
+                // Dropped when the selection changed or another load already prepended (double tap):
+                // the page would land in the wrong terminal or twice.
+                _state.update {
+                    if (it.selectedId != id || it.scrollback.size != have) it
+                    else it.copy(scrollback = page.lines + it.scrollback, scrollbackTotal = total, scrollbackDone = start == 0)
+                }
             } catch (e: ApiException) {
                 _state.update { it.copy(error = "${e.code}: ${e.body.message}") }
             } catch (e: Exception) {

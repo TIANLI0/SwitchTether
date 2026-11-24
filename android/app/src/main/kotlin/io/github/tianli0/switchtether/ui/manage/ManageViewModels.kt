@@ -152,6 +152,9 @@ class UsageViewModel(
     val state: StateFlow<UsageState> = _state.asStateFlow()
     private var logsJob: kotlinx.coroutines.Job? = null
 
+    /** Bumped by every range load: answers for an earlier preset / app must not overwrite the current one. */
+    private var rangeGen = 0
+
     init {
         onOnline(conn) { load() }
         viewModelScope.launch { repo.changes.collect { if (it == "usage.updated") load() } }
@@ -185,10 +188,12 @@ class UsageViewModel(
     }
 
     private suspend fun loadRange() {
+        val gen = ++rangeGen
         val st = _state.value
         val z = desktopZone()
         // "全部" starts at the desktop's first usage day (older desktops: the epoch).
         val first = if (st.preset == UsageRangePreset.ALL) runCatching { repo.usageFirstDateMs(st.app) }.getOrNull() else null
+        if (gen != rangeGen) return // a newer preset / app was chosen while the first date loaded
         val (from, to) = resolveUsageRange(st.preset, nowMs(), z, first)
         val app = st.app
         // A request for the previous range must not hold the slot (it would be dropped on return and
@@ -196,11 +201,11 @@ class UsageViewModel(
         logsJob?.cancel()
         _state.update { it.copy(fromSec = from, toSec = to, zone = z, logs = if (it.logs == null) null else emptyList(), logsTotal = 0, logsPage = -1, logsLoading = false, logsError = false) }
         loadMoreLogs()
-        viewModelScope.launch { val r = loadable { repo.usageSummary(from, to, app) }; _state.update { it.copy(summary = r) } }
-        viewModelScope.launch { val r = loadable { repo.usageTrend(from, to, app) }; _state.update { it.copy(trend = r) } }
+        viewModelScope.launch { val r = loadable { repo.usageSummary(from, to, app) }; _state.update { if (gen == rangeGen) it.copy(summary = r) else it } }
+        viewModelScope.launch { val r = loadable { repo.usageTrend(from, to, app) }; _state.update { if (gen == rangeGen) it.copy(trend = r) else it } }
         // The desktop sorts both tables by request count (descending) by default.
-        viewModelScope.launch { val r = loadable { repo.usageModels(from, to, app).sortedByDescending { it.requests } }; _state.update { it.copy(models = r) } }
-        viewModelScope.launch { val r = loadable { repo.usageProviders(from, to, app).sortedByDescending { it.requests } }; _state.update { it.copy(providers = r) } }
+        viewModelScope.launch { val r = loadable { repo.usageModels(from, to, app).sortedByDescending { it.requests } }; _state.update { if (gen == rangeGen) it.copy(models = r) else it } }
+        viewModelScope.launch { val r = loadable { repo.usageProviders(from, to, app).sortedByDescending { it.requests } }; _state.update { if (gen == rangeGen) it.copy(providers = r) else it } }
         viewModelScope.launch {
             val tools = listOf("claude", "codex")
             val quotas = tools.map { t -> t to loadable { repo.quota(t) } }

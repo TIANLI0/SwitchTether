@@ -103,7 +103,7 @@ object LiveReducer {
             summary.status == "busy" -> if (fromRest && n.isStaleBusy(summary, now)) n else n.startTurnIfIdle(now)
             summary.status == "error" -> n.finish(LivePhase.FAILED, now, summary.lastActiveAtMs)
             summary.status == "idle" || summary.status == "completed" ->
-                if (n.phase in ACTIVE) n.finish(LivePhase.DONE, now, summary.lastActiveAtMs) else n
+                if (n.phase in IN_FLIGHT) n.finish(LivePhase.DONE, now, summary.lastActiveAtMs) else n
             else -> n
         }
         return n.bumpIfChanged(s)
@@ -169,9 +169,10 @@ object LiveReducer {
             EventKinds.APPROVAL_RESOLVED -> if (s.pending?.requestId == d.str("requestId")) s.copy(pending = null).enter(LivePhase.RUNNING, now) else s
             EventKinds.STATUS -> s.copy(bgReported = (d["backgroundTasks"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: s.bgReported).let { s -> when (d.str("state")) {
                 "running" -> if (older) s else s.startTurnIfIdle(now)
-                "idle", "completed" -> if (s.phase in ACTIVE) s.finish(LivePhase.DONE, now, at) else s
-                "error" -> s.finish(LivePhase.FAILED, now, at)
-                "interrupted" -> s.finish(LivePhase.INTERRUPTED, now, at)
+                "idle", "completed" -> if (s.phase in IN_FLIGHT) s.finish(LivePhase.DONE, now, at) else s
+                // An outcome already shown (or an ended session) is not replaced by a late status of the same turn.
+                "error" -> if (s.phase in IN_FLIGHT) s.finish(LivePhase.FAILED, now, at) else s
+                "interrupted" -> if (s.phase in IN_FLIGHT) s.finish(LivePhase.INTERRUPTED, now, at) else s
                 else -> s
             } }
             EventKinds.ERROR -> if (s.phase in ACTIVE) s.finish(LivePhase.FAILED, now, at) else s
@@ -215,6 +216,8 @@ object LiveReducer {
     fun onNotice(s: PinnedSessionState, message: String): PinnedSessionState = s.copy(notice = message, dismissed = false).bumpIfChanged(s)
 
     private val ACTIVE = setOf(LivePhase.RUNNING, LivePhase.WAITING_APPROVAL, LivePhase.WAITING_INPUT)
+    /** A turn in flight, also while the connection is down (OFFLINE is only ever entered from [ACTIVE]): its outcome still applies. */
+    private val IN_FLIGHT = ACTIVE + LivePhase.OFFLINE
     private val FINISHED = setOf(LivePhase.DONE, LivePhase.FAILED, LivePhase.INTERRUPTED)
 
     /** How long after an outcome work steps without a new prompt / `running` status count as the finished turn's tail. */
@@ -225,7 +228,7 @@ object LiveReducer {
     /** Ends the turn in [p]; remembers when (phone clock and, if known, the computer's clock). */
     private fun PinnedSessionState.finish(p: LivePhase, now: Long, serverMs: Long?): PinnedSessionState =
         if (phase == p) copy(pending = null)
-        else enter(p, now).copy(pending = null, finishedAtMs = now, finishedAtServerMs = serverMs ?: 0L)
+        else enter(p, now).copy(pending = null, finishedAtMs = now, finishedAtServerMs = serverMs ?: 0L, beforeOffline = null, beforeOfflineSinceMs = 0)
 
     private fun PinnedSessionState.enter(p: LivePhase, now: Long): PinnedSessionState =
         if (phase == p) this else copy(

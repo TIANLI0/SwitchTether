@@ -181,6 +181,17 @@ class DownloadIndexTest {
     }
 
     @Test
+    fun aDownloadStandsInOnlyForTheRemoteFileItWasMadeFrom() {
+        val r = DownloadRecord("a", "s", "/p/a.pdf", "a.pdf", 1000, "application/pdf", "content://x/a", savedAtMs = 5_000)
+        assertTrue(r.matchesRemote(1000, 4_000))
+        assertTrue(r.matchesRemote(null, null))
+        assertFalse(r.matchesRemote(1001, 4_000))
+        // Rewritten on the computer with the same size after it was downloaded: the old copy is stale.
+        assertFalse(r.matchesRemote(1000, 9_000))
+        assertFalse(r.matchesRemote(null, 9_000))
+    }
+
+    @Test
     fun findsByServerAndRemotePath() {
         val idx = DownloadIndex(File(tmp.root, "idx.json"))
         idx.add(rec("a", path = "/x.pdf", server = "s1", at = 1))

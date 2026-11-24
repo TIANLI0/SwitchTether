@@ -54,6 +54,10 @@ import io.github.tianli0.switchtether.ui.home.RowIcon
 import io.github.suqi8.coui.kmp.basic.TabRowWithContour
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
+import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
+import io.github.tianli0.switchtether.ui.common.relativeTime
+import io.github.tianli0.switchtether.ui.common.sessionDisplayTitle
+import io.github.tianli0.switchtether.ui.common.sessionProjectName
 import io.github.tianli0.coui17.patterns.SheetConfirm
 import io.github.tianli0.coui17.patterns.ActionTone
 import io.github.tianli0.coui17.patterns.LinkButton
@@ -105,10 +109,40 @@ val CLAUDE_PERMISSION_MODES = listOf("default", "acceptEdits", "plan")
 /** A folder an agent was recently used in (from the session list), newest first. */
 data class RecentProject(val path: String, val name: String)
 
+/** How many earlier conversations the launcher offers to continue. */
+const val RESUME_CANDIDATE_LIMIT = 5
+
+/** The launcher's agent id for a session's agent (the session list says `claude` for Claude Code). */
+private fun launcherAgent(agent: String) = if (agent == "claude") "claude_code" else agent
+
+private fun samePath(a: String?, b: String?): Boolean {
+    if (a.isNullOrBlank() || b.isNullOrBlank()) return false
+    return a.trimEnd('/', '\\').equals(b.trimEnd('/', '\\'), ignoreCase = true)
+}
+
+/**
+ * Conversations of [agent] the launcher can continue (`POST /v1/sessions {resumeFrom, mode: "continue"}`):
+ * ended ones only — the desktop refuses a session that is live, busy or waiting — that have a folder,
+ * the ones in [cwd] first, then by last activity, at most [RESUME_CANDIDATE_LIMIT].
+ */
+fun resumeCandidates(sessions: List<SessionSummary>, agent: String, cwd: String?): List<SessionSummary> =
+    sessions.asSequence()
+        .filter { launcherAgent(it.agent) == agent }
+        .filter { !it.isLive && it.status != "busy" && it.status != "waiting" && it.waitingFor == null }
+        .filter { !it.cwd.isNullOrBlank() }
+        .distinctBy { it.id }
+        .sortedWith(compareByDescending<SessionSummary> { samePath(it.cwd, cwd) }.thenByDescending { it.lastActiveAtMs ?: 0L })
+        .take(RESUME_CANDIDATE_LIMIT)
+        .toList()
+
 data class NewSessionState(
     val agent: String = MANAGED_AGENTS.first(),
     val cwd: String? = null,
     val recent: List<RecentProject> = emptyList(),
+    /** The session list the recent folders came from; [resumable] picks the conversations to continue from it. */
+    val sessions: List<SessionSummary> = emptyList(),
+    /** The earlier conversation to continue; null = a new conversation. */
+    val resume: SessionSummary? = null,
     val roots: Loadable<List<FsEntry>> = Loadable.Loading,
     val listing: Loadable<FsListing>? = null,
     val prompt: String = "",
@@ -123,7 +157,12 @@ data class NewSessionState(
     val connection: ConnectionState = ConnectionState.Unpaired,
     val created: SessionSummary? = null,
 ) {
-    val canStart: Boolean get() = cwd != null && connection is ConnectionState.Online
+    /** Conversations offered under the folder row (ordered by the chosen folder, not by the selection). */
+    val resumable: List<SessionSummary> get() = resumeCandidates(sessions, agent, cwd)
+
+    /** Where the session will run: a continued conversation stays in its own folder. */
+    val effectiveCwd: String? get() = resume?.cwd?.takeIf { it.isNotBlank() } ?: cwd
+    val canStart: Boolean get() = effectiveCwd != null && connection is ConnectionState.Online
 }
 
 /** The last launcher choices (agent, model per agent, permission mode), so a new session starts where the last one did. */
@@ -227,7 +266,11 @@ class NewSessionViewModel(
                 .distinctBy { it.first }
                 .take(6)
                 .map { RecentProject(it.first, it.second) }
-            _state.update { st -> st.copy(recent = recent, cwd = st.cwd ?: recent.firstOrNull()?.path) }
+            _state.update { st ->
+                val next = st.copy(recent = recent, sessions = items, cwd = st.cwd ?: recent.firstOrNull()?.path)
+                // A conversation that went live (or left the list) meanwhile can no longer be continued.
+                next.copy(resume = next.resume?.let { r -> next.resumable.firstOrNull { it.id == r.id } })
+            }
         }
     }
 
@@ -256,10 +299,17 @@ class NewSessionViewModel(
     }
 
     fun closeBrowser() = _state.update { it.copy(listing = null) }
-    fun select(path: String) = _state.update { it.copy(cwd = path) }
+    fun select(path: String) = _state.update { it.copy(cwd = path, resume = null) }
+
+    /** Continue [session] instead of starting an empty conversation (null = a new conversation). */
+    fun setResume(session: SessionSummary?) = _state.update { st ->
+        st.copy(resume = session?.takeIf { s -> st.resumable.any { it.id == s.id } })
+    }
     fun setAgent(a: String) {
         prefs.agent = a
-        _state.update { it.copy(agent = a, model = prefs.model(a), effort = prefs.effort(a), recentModels = prefs.recentModels(a), modelOptions = null) }
+        _state.update {
+            it.copy(agent = a, model = prefs.model(a), effort = prefs.effort(a), recentModels = prefs.recentModels(a), modelOptions = null, resume = if (a == it.agent) it.resume else null)
+        }
         if (_state.value.connection is ConnectionState.Online) loadModelOptions()
     }
     fun setPrompt(t: String) = _state.update { it.copy(prompt = t) }
@@ -270,11 +320,11 @@ class NewSessionViewModel(
         _state.update { it.copy(permissionMode = m) }
     }
 
-    fun consumeCreated() = _state.update { it.copy(created = null, prompt = "") }
+    fun consumeCreated() = _state.update { it.copy(created = null, prompt = "", resume = null) }
 
     fun start(label: String) {
         val s = _state.value
-        val cwd = s.cwd ?: return
+        val cwd = s.effectiveCwd ?: return
         val req = NewSessionRequest(
             agent = s.agent,
             cwd = cwd,
@@ -282,6 +332,9 @@ class NewSessionViewModel(
             model = s.model,
             permissionMode = if (s.agent == "claude_code") s.permissionMode else null,
             effort = s.effort.takeIf { it.isNotBlank() && supportsEffort(s.agent) },
+            // Same history, as a session SwitchTether runs; forking is offered on the session's own page.
+            resumeFrom = s.resume?.id,
+            mode = if (s.resume != null) "continue" else null,
         )
         // Remember the model (an empty one too: "agent default" is a choice).
         prefs.setModel(s.agent, s.model.trim())
@@ -341,6 +394,7 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
                 onModel = vm::setModel,
                 onPermissionMode = vm::setPermissionMode,
                 onEffort = vm::setEffort,
+                onResume = vm::setResume,
             )
         }
     }
@@ -363,6 +417,7 @@ fun NewSessionContent(
     onModel: (String) -> Unit,
     onPermissionMode: (String) -> Unit,
     onEffort: (String) -> Unit = {},
+    onResume: (SessionSummary?) -> Unit = {},
 ) {
     val dev = LocalDevColors.current
     var options by rememberSaveable { mutableStateOf(false) }
@@ -374,11 +429,12 @@ fun NewSessionContent(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
         )
         SmallTitle(stringResource(R.string.new_session_cwd))
-        val others = state.recent.filter { it.path != state.cwd }
+        val shownCwd = state.effectiveCwd
+        val others = state.recent.filter { it.path != shownCwd }
         GroupCard(bottom = if (others.isNotEmpty()) 10.dp else 16.dp) {
             ArrowPreference(
-                title = state.cwd?.let(::folderName) ?: stringResource(R.string.new_session_cwd_none),
-                summary = state.cwd,
+                title = shownCwd?.let(::folderName) ?: stringResource(R.string.new_session_cwd_none),
+                summary = shownCwd,
                 startAction = { RowIcon(AppIcons.Files) },
                 onClick = onPickFolder,
                 cardListPosition = CardListPosition.Full,
@@ -392,6 +448,30 @@ fun NewSessionContent(
                 modifier = Modifier.padding(bottom = 16.dp),
             ) {
                 items(others, key = { it.path }) { r -> Chip(selected = false, onClick = { onSelect(r.path) }, label = r.name) }
+            }
+        }
+        val resumable = state.resumable
+        if (resumable.isNotEmpty()) {
+            SmallTitle(stringResource(R.string.new_session_resume))
+            val count = resumable.size + 1
+            GroupCard(bottom = 16.dp) {
+                RadioButtonPreference(
+                    title = stringResource(R.string.new_session_resume_none),
+                    selected = state.resume == null,
+                    onClick = { onResume(null) },
+                    cardListPosition = cardListPositionOf(0, count),
+                    modifier = Modifier.testTag("resume-none"),
+                )
+                resumable.forEachIndexed { i, s ->
+                    RadioButtonPreference(
+                        title = sessionDisplayTitle(s),
+                        summary = listOfNotNull(sessionProjectName(s) ?: s.cwd?.let(::folderName), relativeTime(s.lastActiveAtMs)).joinToString(" · "),
+                        selected = state.resume?.id == s.id,
+                        onClick = { onResume(s) },
+                        cardListPosition = cardListPositionOf(i + 1, count),
+                        modifier = Modifier.testTag("resume:" + s.id),
+                    )
+                }
             }
         }
         TextInput(
@@ -665,6 +745,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
                     onModel = vm::setModel,
                     onPermissionMode = vm::setPermissionMode,
                     onEffort = vm::setEffort,
+                onResume = vm::setResume,
                 )
             }
         }

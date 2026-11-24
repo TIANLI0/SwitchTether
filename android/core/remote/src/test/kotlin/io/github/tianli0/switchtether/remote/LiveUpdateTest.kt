@@ -258,4 +258,32 @@ echo done"}"""))
         val running = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
         assertEquals(LivePhase.ENDED, LiveReducer.onEnded(running, 6_000).phase)
     }
+
+    @Test
+    fun aTurnThatFinishedWhileOfflineIsNotRestoredAsRunning() {
+        val running = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        // Summary first (REST refresh on reconnect), then the connection state.
+        var s = LiveReducer.onConnection(running, online = false, now = 2_000)
+        s = LiveReducer.onUpsert(s, summary.copy(status = "idle"), 3_000, fromRest = true)
+        assertEquals(LivePhase.DONE, LiveReducer.onConnection(s, online = true, now = 4_000).phase)
+        // The same over the stream.
+        s = LiveReducer.onConnection(running, online = false, now = 2_000)
+        s = LiveReducer.onEvent(s, ev("status", """{"state":"idle"}"""), 3_000)
+        assertEquals(LivePhase.DONE, LiveReducer.onConnection(s, online = true, now = 4_000).phase)
+    }
+
+    @Test
+    fun aLateErrorOrInterruptedStatusDoesNotReplaceAnOutcomeAlreadyShown() {
+        val running = LiveReducer.onUpsert(base, summary.copy(status = "busy"), 1_000)
+        val done = LiveReducer.onEvent(running, ev("status", """{"state":"idle"}"""), 2_000)
+        assertEquals(LivePhase.DONE, done.phase)
+        assertEquals(LivePhase.DONE, LiveReducer.onEvent(done, ev("status", """{"state":"error"}"""), 3_000).phase)
+        assertEquals(LivePhase.DONE, LiveReducer.onEvent(done, ev("status", """{"state":"interrupted"}"""), 3_000).phase)
+        val ended = LiveReducer.onEnded(running, 2_000)
+        assertEquals(LivePhase.ENDED, LiveReducer.onEvent(ended, ev("status", """{"state":"error"}"""), 3_000).phase)
+        assertEquals(LivePhase.ENDED, LiveReducer.onEvent(ended, ev("status", """{"state":"interrupted"}"""), 3_000).phase)
+        // A turn in flight still takes them.
+        assertEquals(LivePhase.FAILED, LiveReducer.onEvent(running, ev("status", """{"state":"error"}"""), 3_000).phase)
+        assertEquals(LivePhase.INTERRUPTED, LiveReducer.onEvent(running, ev("status", """{"state":"interrupted"}"""), 3_000).phase)
+    }
 }

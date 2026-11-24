@@ -20,7 +20,15 @@ data class DownloadRecord(
     /** MediaStore content URI string. */
     val uri: String,
     val savedAtMs: Long,
-)
+) {
+    /**
+     * Whether this copy can still stand in for the remote file as a listing describes it now: the same
+     * size, and not changed on the computer after the copy was made (a same-size rewrite is otherwise
+     * indistinguishable). Unknown values do not disqualify.
+     */
+    fun matchesRemote(size: Long?, modifiedMs: Long?): Boolean =
+        (size == null || this.size == size) && (modifiedMs == null || modifiedMs <= 0 || modifiedMs <= savedAtMs)
+}
 
 /**
  * The DOWNLOAD half of the storage design: a small JSON index in `filesDir` (never sent anywhere,

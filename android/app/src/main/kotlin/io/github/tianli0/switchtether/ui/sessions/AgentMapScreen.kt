@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.coui17.patterns.groupRowShape
+import io.github.suqi8.coui.kmp.basic.cardListPositionOf
+import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.tianli0.coui17.patterns.ExpandBody
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.ActionTone
@@ -243,7 +246,7 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
                                 val node = b.node
                                 val open = selected == "a:${node.agentId}"
                                 val hasChildren = branches.getOrNull(branches.indexOf(b) + 1)?.let { it.depth > b.depth } == true
-                                AgentRow(node, b.depth, b.rails, b.last, hasChildren && !open, now) {
+                                AgentRow(node, b.depth, b.rails, b.last, hasChildren && !open, now, tail = b === branches.last() && !open) {
                                     selected = if (open) null else "a:${node.agentId}"
                                 }
                                 ExpandBody(open) {
@@ -270,10 +273,10 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
                     item {
                         GroupCard {
                             Column {
-                                m.backgroundTasks.forEach { t ->
+                                m.backgroundTasks.forEachIndexed { i, t ->
                                     val key = "t:${t.taskId ?: t.callId}"
                                     val open = selected == key
-                                    TaskRow(t, now) { selected = if (open) null else key }
+                                    TaskRow(t, now, rowPosition(i, m.backgroundTasks.size, open)) { selected = if (open) null else key }
                                     ExpandBody(open) {
                                         val taskId = t.taskId
                                         TaskCard(
@@ -395,10 +398,18 @@ internal fun TreeGutter(depth: Int, rails: List<Boolean>, last: Boolean) {
 }
 
 @Composable
-private fun AgentRow(node: SubagentNode, depth: Int, rails: List<Boolean>, last: Boolean, childLine: Boolean, now: Long, onClick: () -> Unit) {
+/** Where a row sits in its group card for the press shape; an open row has its body below it, so its bottom edge is square. */
+private fun rowPosition(index: Int, count: Int, open: Boolean): CardListPosition = when (val p = cardListPositionOf(index, count)) {
+    CardListPosition.Tail -> if (open) CardListPosition.Middle else p
+    CardListPosition.Full -> if (open) CardListPosition.Head else p
+    else -> p
+}
+
+@Composable
+private fun AgentRow(node: SubagentNode, depth: Int, rails: List<Boolean>, last: Boolean, childLine: Boolean, now: Long, tail: Boolean, onClick: () -> Unit) {
     val st = node.mapState()
     Row(
-        Modifier.fillMaxWidth().height(IntrinsicSize.Min).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp).testTag("agent-map-${node.agentId}"),
+        Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(groupRowShape(if (tail) CardListPosition.Tail else CardListPosition.Middle)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp).testTag("agent-map-${node.agentId}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TreeGutter(depth, rails, last)
@@ -492,10 +503,10 @@ private fun AgentCard(
 }
 
 @Composable
-private fun TaskRow(t: BackgroundTaskNode, now: Long, onClick: () -> Unit) {
+private fun TaskRow(t: BackgroundTaskNode, now: Long, position: CardListPosition, onClick: () -> Unit) {
     val st = t.mapState()
     Row(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
+        Modifier.fillMaxWidth().clip(groupRowShape(position)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Dot(stateColor(st))

@@ -417,6 +417,8 @@ class SessionDetailViewModel(
      * completion, resolved approvals/questions) during disconnect are recovered cleanly.
      */
     fun catchUp() {
+        // Nothing loaded yet (only live events so far, or the first load failed): a full load decides.
+        if (_state.value.events !is Loadable.Ready) return load()
         val max = _state.value.log.maxSeq ?: return load()
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
@@ -436,7 +438,8 @@ class SessionDetailViewModel(
                     after = newMax
                 }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
-                if (pages >= CATCH_UP_MAX_PAGES) load() // too far behind: start from the newest page
+                // This catch-up usually cancelled the load() of the same reconnect: queued messages go out here.
+                if (pages >= CATCH_UP_MAX_PAGES) load() else flushWaiting() // too far behind: start from the newest page
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -630,7 +633,9 @@ class SessionDetailViewModel(
     /** Tap on a failed bubble: same commandId, so the desktop runs it at most once. */
     fun retrySend(commandId: String) {
         val st = _state.value
-        if (st.outgoing.none { it.commandId == commandId }) return
+        val bubble = st.outgoing.firstOrNull { it.commandId == commandId } ?: return
+        // A second tap while the first POST is in flight must not start another one for the same id.
+        if (bubble.status == OutgoingStatus.SENDING) return
         if (st.canSend) deliver(commandId) else setOutgoing(commandId, OutgoingStatus.WAITING_CONNECTION, null)
     }
 

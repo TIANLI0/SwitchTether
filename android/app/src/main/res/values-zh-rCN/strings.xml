@@ -418,6 +418,8 @@
     <string name="new_session_recent_folders">最近使用</string>
     <string name="new_session_all_locations">所有位置</string>
     <string name="new_session_filter">筛选文件夹</string>
+    <string name="new_session_resume">继续已有对话</string>
+    <string name="new_session_resume_none">新对话</string>
     <string name="onboarding_paste">从剪贴板粘贴</string>
     <string name="pair_enter_address">手动输入电脑地址</string>
     <string name="pair_code_title">输入配对码</string>
