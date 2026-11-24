@@ -1394,3 +1394,36 @@ id; the stream's `session_id` changes).
   the plan (as the extension does) and is shown as a notice.
 - **End session** is also in the session info sheet (same confirmation), so a Codex session
   SwitchTether started, which has no Claude Code tools page, can be ended.
+
+## 25. Git writes and "本轮改动" (2026-11-25)
+
+**Git page** (Workspace → Git, `ui/workspace/GitPane.kt`). With a desktop that reports feature `git_write`:
+
+- Branch card: tapping it opens the branch panel (`PanelSheet`): local branches (current marked), remote branches without
+  a local one (tap = `git switch <name>`, which creates the tracking branch), "新建分支" (name + "创建并切换").
+- Under it three `SmallButton`s: 获取 · 拉取 ↓n (needs an upstream) · 推送 ↑n, or "发布分支" for a branch without upstream
+  (`push -u origin <branch>`). The running one shows its spinner; all writes are disabled while one runs.
+- 已暂存（n） with "全部取消暂存" and a per-row unstage key; 未暂存（n） with "全部暂存" and per-row discard (↺) and stage
+  (+) keys. Discard always confirms ("已跟踪的文件恢复为暂存时的版本，未跟踪的文件会移到电脑的回收站"). Rows still open the diff.
+- Commit: a multi-line "提交说明" field and "提交（n）" (accent `SmallButton`), enabled with staged files and a message.
+- Success is a toast ("提交：完成"); a failure is a dialog with git's own message (credentials, hooks, non-fast-forward…).
+- Every write asks for the `git_write` step-up once per grant (re-asked once if the desktop says the grant expired).
+
+An older desktop (no `git_write`) keeps the page read-only with a footnote saying so. The staged / unstaged split now
+reads porcelain v2's `.` as "unchanged" (`GitStatusEntry.staged` / `.unstaged`); before, every changed file was listed
+as staged.
+
+**本轮改动** (session page). A capsule "本轮改动" appears next to the branch capsule when the session's folder is a Git
+repository (the desktop reported a branch). It opens the Git page for that folder (`Route.GitReview`) with the files the
+latest turn edited — Edit / Write / MultiEdit / NotebookEdit / apply_patch calls and `file_change` events after the last
+user message, denied / failed edits excluded (`TurnFiles.latestTurn`, `core:remote`) — marked "本轮", sorted first and,
+with the switch "仅本轮" (on by default), the only ones listed; "全部暂存" then stages just those. Absolute paths and paths
+relative to the session folder are mapped into the repository (`TurnFiles.relativize`; Windows paths case-insensitive);
+an untracked folder counts when it holds a turn file.
+
+Evidence: `TurnFilesAndGitTest` (core:remote: turn extraction, patch headers, relativize, porcelain flags, shared
+fixtures), `GitReviewModelTest`, `GitReviewScreenTest` (Robolectric: turn filter and badge, writes offered, commit
+disabled without a message, read-only desktop), `GitWriteFlowTest` (JVM, TLS MockWebServer: review → stage → commit,
+refused commit keeps the draft and shows git's message). Desktop: `git::tests::*` (temp repositories, bare remote),
+e2e `git_writes_need_step_up_and_replay_by_command_id`. **Not verified:** on a device or emulator (layout of the action
+rows, the step-up prompt for the new scope, toasts), and against remotes that need credentials.

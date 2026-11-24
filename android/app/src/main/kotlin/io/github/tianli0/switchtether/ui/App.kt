@@ -321,6 +321,7 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         Route.Files -> io.github.tianli0.switchtether.ui.workspace.FilesPage(onBack, onOpenDownloads = { nav.push(Route.Downloads) })
         Route.Downloads -> io.github.tianli0.switchtether.ui.files.DownloadsScreen(onBack)
         Route.Git -> io.github.tianli0.switchtether.ui.workspace.GitPage(onBack)
+        is Route.GitReview -> io.github.tianli0.switchtether.ui.workspace.GitReviewPage(top.cwd, top.turnFiles, onBack)
         Route.PortForward -> io.github.tianli0.switchtether.ui.workspace.PortForwardScreen(onBack)
         Route.PickFolder -> io.github.tianli0.switchtether.ui.sessions.PickFolderScreen(onBack)
         Route.Providers -> ProvidersScreen(onBack)

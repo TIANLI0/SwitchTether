@@ -578,6 +578,22 @@ class RemoteApi(
         url("v1/git/show").newBuilder().addQueryParameter("repo", repo).addQueryParameter("rev", rev).addQueryParameter("path", path).build(),
     )
 
+    suspend fun gitBranches(repo: String): io.github.tianli0.switchtether.remote.protocol.GitBranches =
+        get(url("v1/git/branches").newBuilder().addQueryParameter("repo", repo).build())
+
+    /** `POST /v1/git/{op}` ([io.github.tianli0.switchtether.remote.protocol.GitOps]); step-up `git_write`. */
+    suspend fun gitWrite(op: String, body: io.github.tianli0.switchtether.remote.protocol.GitWriteBody): CommandResponse =
+        command(body.commandId, url("v1/git", op), body)
+
+    /** The body of a [gitWrite] answer. */
+    fun gitWriteResult(r: CommandResponse): io.github.tianli0.switchtether.remote.protocol.GitWriteResult =
+        decode(io.github.tianli0.switchtether.remote.protocol.GitWriteResult.serializer(), r.body)
+
+    /** `features` of `GET /v1/capabilities` (e.g. `git_write`); empty when the desktop does not say. */
+    suspend fun features(): Set<String> =
+        ((capabilities() as? kotlinx.serialization.json.JsonObject)?.get("features") as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { p -> p.isString }?.content }?.toSet().orEmpty()
+
     // ---- §6 event stream ---------------------------------------------------------------------------
 
     /** Opens `GET /v1/events?since=&epoch=` as a WebSocket on the same pinned client. */

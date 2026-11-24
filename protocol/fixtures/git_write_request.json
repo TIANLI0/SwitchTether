@@ -1,0 +1,11 @@
+{
+  "commandId": "4f1c2b7e-9a0d-4e55-8c3b-2d6f1e0a9b8c",
+  "repo": "/home/u/project",
+  "paths": ["src/lib.rs", "docs/new file.md"],
+  "all": false,
+  "message": "fix: thing",
+  "setUpstream": false,
+  "remote": null,
+  "branch": null,
+  "create": false
+}

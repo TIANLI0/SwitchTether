@@ -22,6 +22,8 @@ sealed interface Route {
     data object Files : Route
     data object Downloads : Route
     data object Git : Route
+    /** "本轮改动": the Git review of a session's folder, [turnFiles] = what its latest turn edited. */
+    data class GitReview(val cwd: String, val turnFiles: List<String>) : Route
     data object PortForward : Route
     data object PickFolder : Route
     data object Providers : Route

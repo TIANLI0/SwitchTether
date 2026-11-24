@@ -118,7 +118,17 @@ data class GitStatusEntry(
     val worktree: String = " ",
     val untracked: Boolean = false,
     val conflicted: Boolean = false,
-)
+) {
+    /** Something is staged for this path (porcelain v2 uses `.` for "unchanged"). */
+    val staged: Boolean get() = !untracked && index.trim() !in UNCHANGED && index != "?"
+
+    /** The working tree differs from the index: untracked, conflicted or modified / deleted. */
+    val unstaged: Boolean get() = untracked || conflicted || worktree.trim() !in UNCHANGED
+
+    private companion object {
+        val UNCHANGED = setOf("", ".")
+    }
+}
 
 @Serializable
 data class RepoStatus(
@@ -141,6 +151,49 @@ data class GitLog(val commits: List<GitCommit> = emptyList())
 
 @Serializable
 data class GitShow(val text: String? = null, val binary: Boolean = false)
+
+/** Body of every Git write, `POST /v1/git/{op}` (step-up `git_write`); fields an op does not use are ignored. */
+@Serializable
+data class GitWriteBody(
+    val commandId: String,
+    val repo: String,
+    val paths: List<String> = emptyList(),
+    /** stage: everything (`git add -A`) instead of [paths]. */
+    val all: Boolean = false,
+    val message: String? = null,
+    val setUpstream: Boolean = false,
+    val remote: String? = null,
+    val branch: String? = null,
+    val create: Boolean = false,
+)
+
+/** Answer of a Git write: the repository afterwards, git's (redacted) output, the new HEAD after commit / pull / checkout. */
+@Serializable
+data class GitWriteResult(val status: RepoStatus = RepoStatus(), val output: String = "", val head: String? = null)
+
+@Serializable
+data class GitBranch(val name: String = "", val current: Boolean = false, val upstream: String? = null, val timeMs: Long = 0)
+
+/** `GET /v1/git/branches`: local branches (current first) and remote-tracking ones without a local branch. */
+@Serializable
+data class GitBranches(
+    val root: String = "",
+    val current: String? = null,
+    val local: List<GitBranch> = emptyList(),
+    val remote: List<GitBranch> = emptyList(),
+)
+
+/** The `op` path segments of `POST /v1/git/{op}`. */
+object GitOps {
+    const val STAGE = "stage"
+    const val UNSTAGE = "unstage"
+    const val DISCARD = "discard"
+    const val COMMIT = "commit"
+    const val PUSH = "push"
+    const val PULL = "pull"
+    const val FETCH = "fetch"
+    const val CHECKOUT = "checkout"
+}
 
 // ---------------------------------------------------------------------------------------------
 // §7.11 Port forwarding

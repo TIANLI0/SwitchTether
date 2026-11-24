@@ -837,3 +837,106 @@ async fn port_forward_tunnel_carries_http_over_mtls() {
     assert_eq!(v["forwards"].as_array().unwrap().len(), 0);
     f.handle.shutdown().await;
 }
+
+#[tokio::test]
+async fn git_writes_need_step_up_and_replay_by_command_id() {
+    let git = |d: &std::path::Path, args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(d)
+            .args(args)
+            .output()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let canon = std::fs::canonicalize(dir.path()).unwrap();
+    let canon = canon
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .to_string();
+    let d = std::path::Path::new(&canon);
+    if git(d, &["init", "-q", "-b", "main"]).is_err() {
+        return; // git not installed here
+    }
+    git(d, &["config", "user.email", "t@example.com"]).unwrap();
+    git(d, &["config", "user.name", "T"]).unwrap();
+    git(d, &["config", "commit.gpgsign", "false"]).unwrap();
+    std::fs::write(d.join("a.txt"), "one\n").unwrap();
+
+    let f = start().await;
+    let c = Client::new(&f);
+    let (kp, spki) = step_up_key();
+    let device_id = pair(&f, &c, Some(&spki)).await;
+    let (s, v) = c.get("/v1/capabilities").await;
+    assert_eq!(s, 200);
+    assert!(v["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x == "git_write"));
+
+    let (s, v) = c
+        .post(
+            "/v1/git/stage",
+            json!({"commandId":"g0","repo":canon,"paths":["a.txt"]}),
+        )
+        .await;
+    assert_eq!(s, 403, "{v}");
+    assert_eq!(v["error"]["details"]["scope"], "git_write");
+    grant(&c, &device_id, &kp, "git_write").await;
+
+    let (s, v) = c
+        .post(
+            "/v1/git/stage",
+            json!({"commandId":"g1","repo":canon,"paths":["a.txt"]}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["status"]["entries"][0]["index"], "A");
+    // Path escaping the repository is refused before git runs.
+    let (s, _) = c
+        .post(
+            "/v1/git/stage",
+            json!({"commandId":"g2","repo":canon,"paths":["../x"]}),
+        )
+        .await;
+    assert_eq!(s, 400);
+    let (s, v) = c
+        .post(
+            "/v1/git/commit",
+            json!({"commandId":"g3","repo":canon,"message":"from the phone"}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    let head = v["head"].as_str().unwrap().to_string();
+    assert_eq!(head.len(), 40);
+    // Same commandId: the stored outcome is replayed, no second commit.
+    std::fs::write(d.join("a.txt"), "two\n").unwrap();
+    git(d, &["add", "-A"]).unwrap();
+    let (s, v) = c
+        .post(
+            "/v1/git/commit",
+            json!({"commandId":"g3","repo":canon,"message":"from the phone"}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["head"], head);
+    let (s, v) = c
+        .get(&format!("/v1/git/log?repo={}&limit=5", url_encode(&canon)))
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(v["commits"].as_array().unwrap().len(), 1);
+    let (s, v) = c
+        .post(
+            "/v1/git/checkout",
+            json!({"commandId":"g4","repo":canon,"branch":"feat/phone","create":true}),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["status"]["branch"], "feat/phone");
+    let (s, v) = c
+        .get(&format!("/v1/git/branches?repo={}", url_encode(&canon)))
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(v["current"], "feat/phone");
+    f.handle.shutdown().await;
+}
