@@ -402,6 +402,14 @@ fun SessionDetailScreen(
         onOpenTools = if (state.claudeTools || state.claudeReadTools) {
             { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId)) }
         } else null,
+        // "本轮改动": the session folder's Git review with the latest turn's files first. Only for a
+        // folder the desktop reported a branch for (a Git repository).
+        onOpenChanges = summary?.cwd?.takeIf { summary.gitBranch != null }?.let { cwd ->
+            {
+                val files = io.github.tianli0.switchtether.remote.session.TurnFiles.latestTurn(state.log.events)
+                onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.GitReview(cwd, files))
+            }
+        },
         onPermissionClick = { showPermission = true },
         onSlashCommand = onSlashCommand,
         // Also here, not only on the Claude Code tools page: a Codex session SwitchTether started
@@ -524,6 +532,8 @@ fun SessionDetailContent(
     onWithdrawOutgoing: ((String) -> Unit)? = null,
     /** Claude Code session tools page (null = not offered for this session). */
     onOpenTools: (() -> Unit)? = null,
+    /** Git review of the session's folder ("本轮改动"; null = not a repository). */
+    onOpenChanges: (() -> Unit)? = null,
     onPermissionClick: (() -> Unit)? = null,
     /** A command picked from the "/" panel (null = no panel). */
     onSlashCommand: ((SlashEntry) -> Unit)? = null,
@@ -665,6 +675,7 @@ fun SessionDetailContent(
                         backgroundTasks = backgroundTasks,
                         onOpenTools = onOpenTools,
                         onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
+                        onOpenChanges = onOpenChanges,
                     )
                 }
                 // The composer floats too. Nothing is laid behind it: only its own keys and field
@@ -704,6 +715,7 @@ private fun StatusChipRow(
     onOpenTerminal: (() -> Unit)? = null,
     /** Background shells of the session: (all, still running). */
     backgroundTasks: Pair<Int, Int> = 0 to 0,
+    onOpenChanges: (() -> Unit)? = null,
 ) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
@@ -732,6 +744,10 @@ private fun StatusChipRow(
                 )
             }
             s.gitBranch?.let { InfoChip(it, icon = AppIcons.Git, color = COUITheme.colorScheme.onSurfaceSecondary, backdrop = bg) }
+            if (onOpenChanges != null) {
+                val changesLabel = stringResource(R.string.git_turn_chip)
+                InfoChip(changesLabel, icon = AppIcons.Edit, onClick = onOpenChanges, modifier = Modifier.semantics { contentDescription = changesLabel }.testTag("chip-changes"), backdrop = bg)
+            }
             if (onOpenTerminal != null) {
                 InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel }, backdrop = bg)
             }

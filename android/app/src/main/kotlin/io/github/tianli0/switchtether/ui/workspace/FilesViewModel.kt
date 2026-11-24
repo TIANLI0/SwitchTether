@@ -32,6 +32,8 @@ import io.github.tianli0.switchtether.remote.protocol.FileContent
 import io.github.tianli0.switchtether.remote.protocol.FsEntry
 import io.github.tianli0.switchtether.remote.protocol.FsListing
 import io.github.tianli0.switchtether.remote.protocol.GitCommit
+import io.github.tianli0.switchtether.remote.protocol.GitOps
+import io.github.tianli0.switchtether.remote.protocol.GitWriteBody
 import io.github.tianli0.switchtether.remote.protocol.PathBody
 import io.github.tianli0.switchtether.remote.protocol.RenameBody
 import io.github.tianli0.switchtether.remote.protocol.RepoStatus
@@ -112,7 +114,23 @@ data class FilesUiState(
     val gitDiff: Pair<String, Loadable<String>>? = null,
     val gitLog: Loadable<List<GitCommit>>? = null,
     val gitShow: Pair<String, Loadable<String>>? = null,
+    /** The desktop offers Git writes (feature `git_write`); without it the page stays read-only. */
+    val gitWritable: Boolean = false,
+    /** The Git write running now ([GitOps]); its buttons show progress. */
+    val gitBusy: String? = null,
+    /** Outcome of the last Git write (toast on success, dialog with git's message on failure). */
+    val gitNotice: GitNotice? = null,
+    val gitBranches: Loadable<io.github.tianli0.switchtether.remote.protocol.GitBranches>? = null,
+    val commitMessage: String = "",
+    /** "本轮改动": files the session's latest turn edited (as the agent wrote them) and its folder. */
+    val turnFiles: List<String> = emptyList(),
+    val turnCwd: String? = null,
+    /** Show only the latest turn's files. */
+    val onlyTurn: Boolean = false,
 )
+
+/** Result of one Git write: [ok] with git's [text] (push / pull output), or the desktop's error message. */
+data class GitNotice(val op: String, val ok: Boolean, val text: String? = null)
 
 /**
  * Files & Git workspace. Reads are plain GETs; every write (save, create, rename, delete,
@@ -120,6 +138,9 @@ data class FilesUiState(
  * `baseSha256` of the version that was opened; a 409 conflict opens [ConflictState] instead of
  * overwriting anything.
  */
+/** Writes after which the commit list changes. */
+private val HISTORY_OPS = setOf(GitOps.COMMIT, GitOps.PULL, GitOps.CHECKOUT, GitOps.PUSH, GitOps.FETCH)
+
 class FilesViewModel(
     private val conn: ConnectionController,
     private val gate: StepUpGate,
@@ -524,7 +545,27 @@ class FilesViewModel(
     // ---- git ------------------------------------------------------------------------------------------
 
     fun setRepo(path: String) {
-        _state.update { it.copy(repo = path, git = null, gitLog = null, gitDiff = null, gitShow = null) }
+        _state.update {
+            // Another repository: the session's "latest turn" no longer applies.
+            val sameRepo = it.repo == path
+            it.copy(
+                repo = path, git = null, gitLog = null, gitDiff = null, gitShow = null, gitBranches = null,
+                turnFiles = if (sameRepo) it.turnFiles else emptyList(),
+                turnCwd = if (sameRepo) it.turnCwd else null,
+                onlyTurn = sameRepo && it.onlyTurn,
+            )
+        }
+        loadGit()
+    }
+
+    /** Opens the review of a session's changes: its folder's repository, the latest turn's files first. */
+    fun openReview(cwd: String, turnFiles: List<String>) {
+        _state.update {
+            it.copy(
+                repo = cwd, git = null, gitLog = null, gitDiff = null, gitShow = null, gitBranches = null,
+                turnFiles = turnFiles, turnCwd = cwd, onlyTurn = turnFiles.isNotEmpty(), commitMessage = "",
+            )
+        }
         loadGit()
     }
 
@@ -535,7 +576,107 @@ class FilesViewModel(
         viewModelScope.launch {
             val st = loadable { api.gitStatus(repo) }
             val log = loadable { api.gitLog(repo).commits }
-            _state.update { it.copy(git = st, gitLog = log) }
+            val writable = runCatching { "git_write" in api.features() }.getOrDefault(false)
+            _state.update { if (it.repo == repo) it.copy(git = st, gitLog = log, gitWritable = writable) else it }
+        }
+    }
+
+    fun setOnlyTurn(on: Boolean) = _state.update { it.copy(onlyTurn = on) }
+
+    fun setCommitMessage(t: String) = _state.update { it.copy(commitMessage = t) }
+
+    fun clearGitNotice() = _state.update { it.copy(gitNotice = null) }
+
+    fun loadBranches() {
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        _state.update { it.copy(gitBranches = Loadable.Loading) }
+        viewModelScope.launch {
+            val b = loadable { api.gitBranches(repo) }
+            _state.update { if (it.repo == repo) it.copy(gitBranches = b) else it }
+        }
+    }
+
+    fun stage(paths: List<String>) = gitWrite(GitOps.STAGE) { id, repo -> GitWriteBody(id, repo, paths = paths) }
+
+    fun stageAll() = gitWrite(GitOps.STAGE) { id, repo -> GitWriteBody(id, repo, all = true) }
+
+    fun unstage(paths: List<String>) = gitWrite(GitOps.UNSTAGE) { id, repo -> GitWriteBody(id, repo, paths = paths) }
+
+    /** Tracked files go back to their staged / committed version; untracked ones to the computer's trash. */
+    fun discard(paths: List<String>) = gitWrite(GitOps.DISCARD) { id, repo -> GitWriteBody(id, repo, paths = paths) }
+
+    fun commit() {
+        val msg = _state.value.commitMessage.trim()
+        if (msg.isEmpty()) return
+        gitWrite(GitOps.COMMIT, after = { _state.update { it.copy(commitMessage = "") } }) { id, repo -> GitWriteBody(id, repo, message = msg) }
+    }
+
+    /** Pushes the current branch; a branch without upstream is published to origin (`-u`). */
+    fun push() {
+        val st = (_state.value.git as? Loadable.Ready)?.value
+        val setUpstream = st != null && st.branch != null && st.upstream == null
+        gitWrite(GitOps.PUSH) { id, repo -> GitWriteBody(id, repo, setUpstream = setUpstream) }
+    }
+
+    fun pull() = gitWrite(GitOps.PULL) { id, repo -> GitWriteBody(id, repo) }
+
+    fun fetch() = gitWrite(GitOps.FETCH) { id, repo -> GitWriteBody(id, repo) }
+
+    fun checkout(branch: String, create: Boolean) =
+        gitWrite(GitOps.CHECKOUT, after = { loadBranches() }) { id, repo -> GitWriteBody(id, repo, branch = branch, create = create) }
+
+    /**
+     * One Git write: `git_write` step-up (asked again once if the grant expired on the desktop), a
+     * commandId, the repository's new state from the answer. Never two at a time.
+     */
+    private fun gitWrite(op: String, after: () -> Unit = {}, body: (String, String) -> GitWriteBody) {
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        if (_state.value.gitBusy != null) return
+        _state.update { it.copy(gitBusy = op, gitNotice = null) }
+        viewModelScope.launch {
+            var outcome: CommandOutcome? = null
+            for (attempt in 0 until 2) {
+                if (gate.ensure(StepUpScopes.GIT_WRITE).isFailure) break
+                val out = Commands.run { id -> api.gitWrite(op, body(id, repo)) }
+                if (out is CommandOutcome.Rejected && out.error.code == ErrorCodes.STEP_UP_REQUIRED) {
+                    gate.invalidate(StepUpScopes.GIT_WRITE)
+                    continue
+                }
+                outcome = out
+                break
+            }
+            when (val out = outcome) {
+                null -> _state.update { it.copy(gitBusy = null, gitNotice = GitNotice(op, ok = false, text = null)) }
+                is CommandOutcome.Succeeded -> {
+                    val res = runCatching { api.gitWriteResult(out.response) }.getOrNull()
+                    _state.update {
+                        it.copy(
+                            gitBusy = null,
+                            git = res?.let { r -> Loadable.Ready(r.status) } ?: it.git,
+                            gitNotice = GitNotice(op, ok = true, text = res?.output?.takeIf { o -> o.isNotBlank() }),
+                        )
+                    }
+                    after()
+                    if (op in HISTORY_OPS || res == null) loadGit()
+                }
+                is CommandOutcome.Rejected -> {
+                    _state.update { it.copy(gitBusy = null, gitNotice = GitNotice(op, ok = false, text = out.error.body.message)) }
+                    loadGit()
+                }
+                is CommandOutcome.NotSent -> {
+                    _state.update { it.copy(gitBusy = null, gitNotice = GitNotice(op, ok = false, text = ConnectionManager.describe(out.cause))) }
+                }
+                is CommandOutcome.Unknown -> {
+                    _state.update { it.copy(gitBusy = null, gitNotice = GitNotice(op, ok = false, text = ConnectionManager.describe(out.cause))) }
+                    loadGit()
+                }
+                is CommandOutcome.InProgress -> {
+                    _state.update { it.copy(gitBusy = null, gitNotice = GitNotice(op, ok = false, text = null)) }
+                    loadGit()
+                }
+            }
         }
     }
 

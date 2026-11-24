@@ -105,7 +105,7 @@ High-risk scopes require a short-lived grant proven by a signature from the Keys
 step-up key (`setUserAuthenticationRequired(true)`), i.e. only after BiometricPrompt /
 device credential succeeded on the phone. The server never trusts a client-side flag.
 
-- `POST /v1/auth/step-up/challenge` `{ "scope": "terminal" | "files_write" | "config_write" | "port_forward" }`
+- `POST /v1/auth/step-up/challenge` `{ "scope": "terminal" | "files_write" | "config_write" | "port_forward" | "git_write" }`
   → `{ "challengeId": "…", "nonce": "<base64url 32B>", "expiresAt": "…" }` (TTL 60 s)
 - Phone signs UTF-8 bytes of
   `"switchtether-stepup-v1\n" + deviceId + "\n" + challengeId + "\n" + nonce + "\n" + scope`
@@ -120,6 +120,7 @@ device credential succeeded on the phone. The server never trusts a client-side 
 | `files_write` | write / create / rename / delete / upload files |
 | `config_write` | provider credential update, config restore, MCP/skill writes |
 | `port_forward` | start (or renew) a port forward lease (§7.11); the lease, not the grant, authorises its tunnel |
+| `git_write` | Git stage / unstage / discard / commit / push / pull / fetch / checkout (§7.7) |
 
 Devices paired without a step-up key cannot use these scopes (`step_up_required` with
 `details.reason = "no_step_up_key"`).
@@ -300,6 +301,33 @@ The desktop runs the terminal emulator (vt100 state machine) and streams screen 
 - `POST /v1/fs/rename` `{commandId, from, to, overwrite?}` · `POST /v1/fs/delete` `{commandId, path, baseSha256?}` (moves to the OS trash) · `POST /v1/fs/mkdir` `{commandId, path}` *(files_write)*
 - `GET /v1/fs/download?path=` (streamed, single `Range` supported; sensitive files refused) · `POST /v1/fs/upload` `{commandId, path, size, sha256?, overwrite?}` → `{uploadId}`, then `PUT /v1/fs/upload/{id}?offset=` raw chunks ≤ 8 MiB, `DELETE /v1/fs/upload/{id}` cancels *(files_write)*
 - `GET /v1/git/status?repo=` · `GET /v1/git/diff?repo=&path=&staged=` · `GET /v1/git/log?repo=&path=&limit=` · `GET /v1/git/show?repo=&rev=&path=` (file at a commit)
+- `GET /v1/git/branches?repo=` → `{ root, current, local: [Branch], remote: [Branch] }`, `Branch = { name, current, upstream, timeMs }`;
+  `local` has the current branch first, then by last commit; `remote` lists remote-tracking branches (`origin/x`, no
+  `*/HEAD`) without a local branch of the same short name (fixture `git_branches.json`).
+
+**Git writes** *(git_write, feature `git_write`)*: `POST /v1/git/{op}` with one body for every op (fixture
+`git_write_request.json`; fields an op does not use are ignored):
+`{ commandId, repo, paths?: [string], all?: bool, message?, setUpstream?: bool, remote?, branch?, create?: bool }`.
+
+| op | git | notes |
+|---|---|---|
+| `stage` | `add -A -- <paths>` (`all: true` → `add -A`) | deletions included |
+| `unstage` | `restore --staged -- <paths>` (no commit yet: `rm --cached -r`) | |
+| `discard` | `restore --worktree -- <paths>`; untracked paths are moved to the OS trash | every path must appear in `git status`; a path with only staged changes or a conflict is refused (unstage / resolve first); never deletes |
+| `commit` | `commit -m <message>` | message trimmed, non-empty, ≤ 16 KiB; no amend |
+| `push` | `push` (`setUpstream` → `push -u <remote or origin> <current branch>`) | |
+| `pull` | `pull --ff-only --no-rebase` | a diverged branch fails with git's message, nothing is merged |
+| `fetch` | `fetch --prune` | |
+| `checkout` | `switch <branch>` / `switch -c <branch>` (`create`) | git refuses a switch that would overwrite local changes; its message is returned |
+
+→ `200 { status: RepoStatus, output, head? }` (fixture `git_write_result.json`): the repository after the write, git's
+stdout + stderr (last 4000 characters, through `redact_text`), the new HEAD after `commit` / `pull` / `checkout`.
+Paths are repository-relative (no absolute paths, no `..` segment, no leading `-`, no control characters) and passed
+literally (`GIT_LITERAL_PATHSPECS=1`) after `--`; branch names follow `git check-ref-format --branch` rules. git never
+prompts: `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, no askpass, `GIT_EDITOR=:`; missing credentials or a signing
+key that needs a passphrase fail with git's message (`400 bad_request`). Timeouts: 30 s (index ops), 60 s (`commit`,
+which runs the user's hooks as a terminal commit would), 120 s (`push` / `pull` / `fetch`). Every write is audited
+(`git.<op>`, repository, path count or branch, outcome) and idempotent by `commandId`.
 
 ### 7.11 Port forwarding (step-up `port_forward`, feature `port_forward`)
 

@@ -67,7 +67,7 @@ certificate, visible in the desktop's device list and revocable.
 - Every endpoint except `GET /v1/hello` and `POST /v1/pair` requires an active paired device.
 - The API is an explicit whitelist (`src-tauri/crates/switchtether-core/src/api/*`); Tauri IPC
   commands are not exposed.
-- **Step-up (biometric) scopes** — `terminal`, `files_write`, `config_write`, `port_forward` — require a grant
+- **Step-up (biometric) scopes** — `terminal`, `files_write`, `config_write`, `port_forward`, `git_write` — require a grant
   obtained by signing a server challenge with a second Keystore key that is usable only after
   BiometricPrompt / device-credential authentication. The server verifies the ECDSA signature
   over `switchtether-stepup-v1\n{deviceId}\n{challengeId}\n{nonce}\n{scope}`; challenges are
@@ -113,6 +113,17 @@ A terminal opened from the phone runs with the full privileges of the logged-in 
 SwitchTether does **not** pretend to filter dangerous commands (string filtering cannot
 restrict a shell). Protections are: biometric step-up, per-device ownership, audit of
 open/close and input volume (never input content), kill on revocation and on quit.
+
+### 7a0. Git writes
+
+Stage, discard, commit, push, pull, fetch and branch switches from the phone need step-up `git_write` and run the
+user's own `git` in the repository they name, with the read path's hardening (no fsmonitor, no external diff /
+textconv) and no way to prompt on the desktop (terminal prompts, Git Credential Manager dialogs and askpass are off).
+They use the credentials and hooks the user already configured, exactly as a terminal would; SwitchTether never
+stores or returns them. Paths are repository-relative and literal; discarding an untracked file moves it to the OS
+trash (the same deny-list as `fs/delete` applies) and never deletes. git's output is redacted before it is returned
+and is not stored beyond the command record; the audit log keeps only the operation, repository, path count or
+branch and the outcome.
 
 ### 7a. Port forwarding
 
@@ -178,7 +189,8 @@ the redactor.
 | Wrong certificate / wrong pin | `e2e: wrong_server_pin_is_rejected_by_client`, `client_without_certificate_is_rejected` |
 | Revoked certificate | `e2e: pairing_then_revocation`, `registry::tests::register_lookup_revoke` |
 | Replay / duplicates | `e2e: idempotent_commands_and_unknown_outcome`, `stepup::tests::full_flow` (challenge replay) |
-| Privilege escalation (no step-up) | `e2e: terminal_requires_step_up_and_streams_output`, `file_write_conflict_over_api`, `port_forward_tunnel_carries_http_over_mtls` |
+| Privilege escalation (no step-up) | `e2e: terminal_requires_step_up_and_streams_output`, `file_write_conflict_over_api`, `port_forward_tunnel_carries_http_over_mtls`, `git_writes_need_step_up_and_replay_by_command_id` |
+| Git path escape / option injection | `git::tests::rejects_paths_that_leave_the_repository`, e2e `../x` refused |
 | Port forward isolation (other device, stop, window abuse, refused port) | `e2e: port_forward_tunnel_carries_http_over_mtls`, `forward::tests::*`; Android `PortForwardTest` |
 | Concurrent operations | `e2e: concurrent_pairing_race_only_one_wins`; live managed-session second answer → 409 |
 | Path traversal / symlinks / denied paths | `files::policy::tests::*`, `files::tests::list_hides_denied_and_hidden`, e2e traversal |

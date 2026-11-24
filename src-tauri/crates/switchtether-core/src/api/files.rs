@@ -1,5 +1,5 @@
-//! File and Git endpoints. Reads need a paired device; writes need the
-//! `files_write` step-up grant.
+//! File and Git endpoints. Reads need a paired device; file writes need the
+//! `files_write` step-up grant, Git writes the `git_write` grant.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -42,6 +42,15 @@ pub fn routes() -> Router<Arc<ApiContext>> {
         .route("/v1/git/diff", get(git_diff))
         .route("/v1/git/log", get(git_log))
         .route("/v1/git/show", get(git_show))
+        .route("/v1/git/branches", get(git_branches))
+        .route("/v1/git/stage", post(git_stage))
+        .route("/v1/git/unstage", post(git_unstage))
+        .route("/v1/git/discard", post(git_discard))
+        .route("/v1/git/commit", post(git_commit))
+        .route("/v1/git/push", post(git_push))
+        .route("/v1/git/pull", post(git_pull))
+        .route("/v1/git/fetch", post(git_fetch))
+        .route("/v1/git/checkout", post(git_checkout))
 }
 
 pub(crate) fn fs_err(e: FsError) -> ApiError {
@@ -576,4 +585,178 @@ async fn git_show(
         .await
         .map(|t| Json(json!({ "text": t, "binary": t.is_none() })))
         .map_err(git_err)
+}
+
+async fn git_branches(
+    State(_c): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<GitQuery>,
+) -> ApiResult<Json<Value>> {
+    let dir = git_dir(&q.repo)?;
+    crate::git::branches(&dir)
+        .await
+        .map(|b| Json(json!(b)))
+        .map_err(git_err)
+}
+
+/// Body of every Git write (`POST /v1/git/*`). Fields not used by an
+/// operation are ignored.
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GitWriteBody {
+    command_id: Option<String>,
+    repo: String,
+    #[serde(default)]
+    paths: Vec<String>,
+    /// stage: stage every change (`git add -A`) instead of `paths`.
+    #[serde(default)]
+    all: bool,
+    message: Option<String>,
+    #[serde(default)]
+    set_upstream: bool,
+    remote: Option<String>,
+    branch: Option<String>,
+    #[serde(default)]
+    create: bool,
+}
+
+#[derive(Clone, Copy)]
+enum GitOp {
+    Stage,
+    Unstage,
+    Discard,
+    Commit,
+    Push,
+    Pull,
+    Fetch,
+    Checkout,
+}
+
+impl GitOp {
+    fn kind(self) -> &'static str {
+        match self {
+            GitOp::Stage => "git.stage",
+            GitOp::Unstage => "git.unstage",
+            GitOp::Discard => "git.discard",
+            GitOp::Commit => "git.commit",
+            GitOp::Push => "git.push",
+            GitOp::Pull => "git.pull",
+            GitOp::Fetch => "git.fetch",
+            GitOp::Checkout => "git.checkout",
+        }
+    }
+}
+
+async fn git_write_op(
+    ctx: Arc<ApiContext>,
+    dev: AuthDevice,
+    b: GitWriteBody,
+    op: GitOp,
+) -> Response {
+    if let Err(e) = require_step_up(&ctx, &dev, Scope::GitWrite) {
+        return e.into_response();
+    }
+    let c = ctx.clone();
+    let command_id = b.command_id.clone();
+    idempotent(
+        &ctx,
+        dev.id().to_string(),
+        command_id,
+        op.kind(),
+        || async move {
+            let dir = git_dir(&b.repo)?;
+            let res = match op {
+                GitOp::Stage if b.all => crate::git::stage_all(&dir).await,
+                GitOp::Stage => crate::git::stage(&dir, &b.paths).await,
+                GitOp::Unstage => crate::git::unstage(&dir, &b.paths).await,
+                GitOp::Discard => crate::git::discard(&dir, &b.paths).await,
+                GitOp::Commit => crate::git::commit(&dir, b.message.as_deref().unwrap_or("")).await,
+                GitOp::Push => crate::git::push(&dir, b.set_upstream, b.remote.as_deref()).await,
+                GitOp::Pull => crate::git::pull(&dir).await,
+                GitOp::Fetch => crate::git::fetch(&dir).await,
+                GitOp::Checkout => {
+                    let branch = b
+                        .branch
+                        .as_deref()
+                        .ok_or_else(|| ApiError::validation("branch is required"))?;
+                    crate::git::checkout(&dir, branch, b.create).await
+                }
+            };
+            let detail = match op {
+                GitOp::Stage if b.all => "all".to_string(),
+                GitOp::Stage | GitOp::Unstage | GitOp::Discard => {
+                    format!("{} path(s)", b.paths.len())
+                }
+                GitOp::Checkout => b.branch.clone().unwrap_or_default(),
+                _ => String::new(),
+            };
+            match res {
+                Ok(mut r) => {
+                    r.output = crate::redact::redact_text(&r.output);
+                    c.registry.audit(
+                        Some(dev.id()),
+                        op.kind(),
+                        Some(&b.repo),
+                        "ok",
+                        Some(&detail),
+                    );
+                    Ok(json!(r))
+                }
+                Err(e) => {
+                    c.registry.audit(
+                        Some(dev.id()),
+                        op.kind(),
+                        Some(&b.repo),
+                        "error",
+                        Some(&detail),
+                    );
+                    Err(git_err(e))
+                }
+            }
+        },
+    )
+    .await
+}
+
+macro_rules! git_write_handler {
+    ($name:ident, $op:expr) => {
+        async fn $name(
+            State(ctx): State<Arc<ApiContext>>,
+            dev: AuthDevice,
+            Json(b): Json<GitWriteBody>,
+        ) -> Response {
+            git_write_op(ctx, dev, b, $op).await
+        }
+    };
+}
+
+git_write_handler!(git_stage, GitOp::Stage);
+git_write_handler!(git_unstage, GitOp::Unstage);
+git_write_handler!(git_discard, GitOp::Discard);
+git_write_handler!(git_commit, GitOp::Commit);
+git_write_handler!(git_push, GitOp::Push);
+git_write_handler!(git_pull, GitOp::Pull);
+git_write_handler!(git_fetch, GitOp::Fetch);
+git_write_handler!(git_checkout, GitOp::Checkout);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_write_request_fixture_parses() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../protocol/fixtures");
+        let b: GitWriteBody = serde_json::from_str(
+            &std::fs::read_to_string(root.join("git_write_request.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(b.repo, "/home/u/project");
+        assert_eq!(b.paths, vec!["src/lib.rs", "docs/new file.md"]);
+        assert_eq!(b.message.as_deref(), Some("fix: thing"));
+        assert!(!b.all && !b.set_upstream && !b.create);
+        // Optional fields may be left out.
+        let min: GitWriteBody = serde_json::from_str(r#"{"commandId":"x","repo":"/r"}"#).unwrap();
+        assert!(min.paths.is_empty() && min.branch.is_none());
+    }
 }
