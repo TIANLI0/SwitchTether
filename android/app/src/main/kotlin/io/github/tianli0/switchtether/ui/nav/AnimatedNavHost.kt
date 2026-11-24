@@ -1,6 +1,13 @@
 package io.github.tianli0.switchtether.ui.nav
 
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
+import androidx.activity.BackEventCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
@@ -57,30 +64,53 @@ fun AnimatedNavHost(nav: NavViewModel, content: @Composable (NavEntry) -> Unit) 
         if (!gesture && seek.targetState != target) seek.animateTo(target)
     }
 
+    // Android's standard predictive back (the system's cross-activity look): while the finger
+    // drags, the page shrinks into a rounded card that leans toward the swipe edge, and the previous
+    // page shows behind it. The transition is parked at its start so both pages are composed; the
+    // card is driven by backProgress. Release shrinks and fades the card away, then pops; cancel
+    // springs the card back.
+    val backProgress = remember { Animatable(0f) }
+    val backExit = remember { Animatable(0f) }
+    var backEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
     PredictiveBackHandler(enabled = nav.previous != null) { events ->
         val to = nav.previous ?: return@PredictiveBackHandler
-        gesture = true
+        var dragged = false
+        var committed = false
         try {
-            var dragged = false
             events.collect { e ->
-                dragged = true
-                seek.seekTo(e.progress, to)
+                if (!dragged) {
+                    dragged = true
+                    gesture = true
+                    seek.seekTo(0f, to)
+                }
+                backEdge = e.swipeEdge
+                backProgress.snapTo(e.progress)
             }
+            committed = true
             if (!dragged) {
-                // The back key (or a back without a drag) sends no progress: run the ordinary pop
-                // instead of finishing an unstarted seek, which cut straight to the previous page.
-                gesture = false
+                // The back key (or a back without a drag) sends no progress: the ordinary pop.
                 nav.back()
                 return@PredictiveBackHandler
             }
-            nav.back() // committed
-            seek.animateTo(to)
+            // Committed: the card finishes shrinking and fades out, then the pop completes.
+            backExit.animateTo(1f, tween(BACK_EXIT_MS, easing = io.github.suqi8.coui.kmp.anim.COUIEase))
+            nav.back()
+            seek.snapTo(to)
         } catch (c: CancellationException) {
-            // Cancelled gesture: return to the screen we started from.
-            scope.launch { seek.animateTo(seek.currentState) }
+            if (dragged) {
+                scope.launch {
+                    backProgress.animateTo(0f, spring(dampingRatio = 1f, stiffness = 500f))
+                    seek.snapTo(seek.currentState)
+                    gesture = false
+                }
+            }
             throw c
         } finally {
-            gesture = false
+            if (committed) {
+                gesture = false
+                backProgress.snapTo(0f)
+                backExit.snapTo(0f)
+            }
         }
     }
 
@@ -91,13 +121,36 @@ fun AnimatedNavHost(nav: NavViewModel, content: @Composable (NavEntry) -> Unit) 
         // activity animation's alpha 1 -> 0.5 over the window's black does.
         val other = if (entry.key == transition.targetState.key) transition.currentState else transition.targetState
         val lower = other.tab == entry.tab && entry.depth < other.depth
-        val scrim by this.transition.animateFloat(
-            transitionSpec = { tween(DURATION, easing = if (gesture) LinearEasing else io.github.suqi8.coui.kmp.anim.COUIEase) },
+        val animatedScrim by this.transition.animateFloat(
+            transitionSpec = { tween(DURATION, easing = io.github.suqi8.coui.kmp.anim.COUIEase) },
             label = "nav-scrim",
         ) { state -> if (lower && state != EnterExitState.Visible) SCRIM_ALPHA else 0f }
+        // During the back gesture: the page being popped is the card; the page under it lightens
+        // as the card shrinks.
+        val popping = gesture && entry.key == transition.currentState.key && entry.key != transition.targetState.key
+        val revealed = gesture && entry.key == transition.targetState.key && entry.key != transition.currentState.key
+        val scrim = if (revealed) BACK_SCRIM * (1f - backProgress.value) * (1f - backExit.value) else animatedScrim
         Box(
             Modifier
                 .fillMaxSize()
+                .then(
+                    if (popping) {
+                        Modifier.graphicsLayer {
+                            val p = backProgress.value
+                            val x = backExit.value
+                            val scale = 1f - BACK_SHRINK * p - BACK_EXIT_SHRINK * x
+                            scaleX = scale
+                            scaleY = scale
+                            val shift = size.width * BACK_SHIFT_FRACTION * p
+                            translationX = if (backEdge == BackEventCompat.EDGE_RIGHT) -shift else shift
+                            alpha = 1f - x
+                            shape = RoundedCornerShape(BACK_CORNER * maxOf(p, x))
+                            clip = true
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
                 // Opaque: a full-width slide must never show two pages through each other.
                 .background(pageColor)
                 .drawWithContent {
@@ -119,6 +172,18 @@ private const val DURATION = 280
 /** The page underneath ends at alpha 0.5 over black. */
 private const val SCRIM_ALPHA = 0.5f
 
+/** Android's predictive back card: 90 % at the end of the drag, leaning toward the swipe edge. */
+private const val BACK_SHRINK = 0.1f
+private const val BACK_SHIFT_FRACTION = 0.04f
+private val BACK_CORNER = 32.dp
+
+/** The page revealed behind the card starts dimmed and lightens with the drag. */
+private const val BACK_SCRIM = 0.25f
+
+/** After release the card shrinks a little further and fades out. */
+private const val BACK_EXIT_SHRINK = 0.06f
+private const val BACK_EXIT_MS = 180
+
 private val OpenEnter = CubicBezierEasing(0.3f, 0.1f, 0.3f, 1f)
 private val OpenExit = CubicBezierEasing(0.3f, 0.15f, 0.3f, 1f)
 private val CloseExit = CubicBezierEasing(0.25f, 0.1f, 0.3f, 1f)
@@ -131,6 +196,15 @@ private val CloseEnter = CubicBezierEasing(0.3f, 0.26f, 0.4f, 1f)
 private fun AnimatedContentTransitionScope<NavEntry>.navTransform(linear: Boolean): ContentTransform {
     val from = initialState
     val to = targetState
+    if (linear) {
+        // The back gesture draws the card itself (graphicsLayer in AnimatedNavHost): nothing moves
+        // here, the previous page waits underneath.
+        return ContentTransform(
+            targetContentEnter = androidx.compose.animation.EnterTransition.None,
+            initialContentExit = androidx.compose.animation.ExitTransition.KeepUntilTransitionsFinished,
+            targetContentZIndex = -1f,
+        )
+    }
     if (from.tab != to.tab) {
         // ColorOS tab switches have no scale: a short cross-fade.
         return fadeIn(tween(TAB_FADE)) togetherWith fadeOut(tween(TAB_FADE))
