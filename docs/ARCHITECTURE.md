@@ -28,7 +28,7 @@ are enough; there is no public server, broker, database server or message queue.
 | `src-tauri/src/switchtether/` | All fork-specific desktop glue |
 | `src-tauri/crates/switchtether-core/` | Remote Core library (tests, examples `dev_server`, `dev_client`, `managed_smoke`) |
 | `src/components/settings/sections/RemoteSection.tsx`, `src/lib/api/remote.ts` | Desktop "Remote" settings page |
-| `android/` | Native Android app (`:app`, `:core:remote`, `:core:security`, `:core:ui`, vendored `third_party/coui17`) |
+| `android/` | Native Android app (`:app`, `:core:remote`, `:core:security`, `:core:ui`, the COUI17 submodule `third_party/coui17`) |
 | `protocol/fixtures/` | JSON fixtures parsed by Rust and Kotlin tests |
 | `docs/` | Protocol, security, compatibility, research evidence |
 

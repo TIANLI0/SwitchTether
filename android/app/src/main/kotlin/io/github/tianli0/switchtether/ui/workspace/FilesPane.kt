@@ -1,11 +1,14 @@
 package io.github.tianli0.switchtether.ui.workspace
 
-import io.github.tianli0.switchtether.ui.common.MenuEntry
-import io.github.tianli0.switchtether.ui.common.AppMenu
-import io.github.tianli0.switchtether.ui.common.TextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.suqi8.coui.kmp.basic.Chip
+import io.github.tianli0.coui17.patterns.LazyGroupRow
+import io.github.tianli0.coui17.patterns.FormDialog
+import io.github.tianli0.coui17.patterns.MenuEntry
+import io.github.tianli0.coui17.patterns.GlassMenu
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.common.resolve
@@ -79,17 +82,16 @@ import io.github.suqi8.coui.kmp.window.WindowDialog
 import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.FsEntry
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
-import io.github.tianli0.switchtether.ui.common.ConfirmDialog
+import io.github.tianli0.coui17.patterns.PanelSheet
+import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.TextInput
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.components.FilterChip
-import io.github.tianli0.switchtether.ui.components.StatusPill
+import io.github.tianli0.coui17.patterns.TextInput
+import io.github.tianli0.coui17.patterns.ToolbarIcon
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.diff.DiffView
 import io.github.tianli0.switchtether.ui.files.RemoteFileRef
 import io.github.tianli0.switchtether.ui.files.RemoteFileViewer
@@ -123,13 +125,13 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
                 vm.clearMessage()
             }
         } else {
-            io.github.suqi8.coui.kmp.window.WindowAlertDialog(
+            ConfirmDialog(
                 show = true,
                 title = stringResource(R.string.files_title),
-                summary = msg.resolve(),
+                message = msg.resolve(),
                 confirmText = stringResource(R.string.action_ok),
                 onConfirm = vm::clearMessage,
-                onCancel = vm::clearMessage,
+                onDismiss = vm::clearMessage,
             )
         }
     }
@@ -209,7 +211,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
             )
             if (searchExpanded || state.query.isNotEmpty()) {
                 Spacer(Modifier.size(6.dp))
-                FilterChip(
+                Chip(
                     label = stringResource(R.string.files_search_content),
                     selected = state.searchContent,
                     onClick = { vm.setSearchContent(!state.searchContent) },
@@ -226,7 +228,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                         SortKey.SIZE to stringResource(R.string.files_sort_size),
                         SortKey.TYPE to stringResource(R.string.files_sort_type),
                     )
-                    AppMenu(
+                    GlassMenu(
                         show = showSortMenu,
                         entries = keys.map { (key, label) ->
                             val active = state.sort.key == key
@@ -237,7 +239,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 }
                 Box {
                     ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { showMoreMenu = true })
-                    AppMenu(
+                    GlassMenu(
                         show = showMoreMenu,
                         entries = listOf(
                             MenuEntry(stringResource(R.string.files_new_file)) { if (listing != null) nameDialog = "file" },
@@ -348,7 +350,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                                 stringResource(R.string.files_count, dirs, list.entries.size - dirs) +
                                     if (list.truncated || list.blocked > 0) " · " + stringResource(R.string.new_session_listing_note, list.blocked) else "",
                                 style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp),
                             )
                         }
                     }
@@ -358,7 +360,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     }
     actionsFor?.let { e ->
         val copied = stringResource(R.string.files_copied)
-        AppBottomSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }) {
+        PanelSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }) {
             val opts = buildList {
                 if (!e.isDir) add(stringResource(R.string.files_download) to { actionsFor = null; vm.download(e) })
                 add(stringResource(R.string.files_copy_path) to {
@@ -386,26 +388,12 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     nameDialog?.let { kind ->
         var name by remember(kind) { mutableStateOf(if (kind == "rename") target?.name.orEmpty() else "") }
         val invalidName = name.contains('/') || name.contains('\\')
-        WindowDialog(
+        FormDialog(
             show = true,
             title = stringResource(if (kind == "folder") R.string.files_new_folder else if (kind == "file") R.string.files_new_file else R.string.files_rename),
-            onDismissRequest = { nameDialog = null },
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                Box(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
-                    Column {
-                        TextInput(name, { name = it }, stringResource(R.string.files_name))
-                        if (invalidName) {
-                            Text(stringResource(R.string.files_name_invalid), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(top = 4.dp, start = 4.dp))
-                        }
-                    }
-                }
-                DialogButtonBar(
-                    negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = { nameDialog = null }),
-                    positive = DialogButtonBarAction(
-                        text = stringResource(R.string.action_ok),
-                        enabled = name.trim().isNotEmpty() && !invalidName,
-                        onClick = {
+            confirmText = stringResource(R.string.action_ok),
+            confirmEnabled = name.trim().isNotEmpty() && !invalidName,
+            onConfirm = {
                             val n = name.trim()
                             if (n.isNotEmpty() && !n.contains('/') && !n.contains('\\')) {
                                 when (kind) {
@@ -416,9 +404,15 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                             }
                             nameDialog = null
                         },
-                    ),
-                )
+            onDismiss = { nameDialog = null },
+        ) {
+            Column {
+                TextInput(name, { name = it }, stringResource(R.string.files_name))
+                if (invalidName) {
+                    Text(stringResource(R.string.files_name_invalid), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(top = 4.dp, start = 4.dp))
+                }
             }
+
         }
     }
     confirmDelete?.let { e ->
@@ -446,23 +440,12 @@ private fun EntryIcon(icon: FileIcon) {
 /** One row of a card group laid out lazily (each row its own item, so folders with thousands of entries scroll smoothly). */
 @Composable
 private fun CardRow(position: CardListPosition, content: @Composable () -> Unit) {
-    val r = io.github.suqi8.coui.kmp.basic.CardDefaults.GroupCornerRadius
-    val shape = when (position) {
-        CardListPosition.Full -> RoundedCornerShape(r)
-        CardListPosition.Head -> RoundedCornerShape(topStart = r, topEnd = r)
-        CardListPosition.Tail -> RoundedCornerShape(bottomStart = r, bottomEnd = r)
-        else -> androidx.compose.ui.graphics.RectangleShape
-    }
-    val last = position == CardListPosition.Tail || position == CardListPosition.Full
-    Box(
-        Modifier.padding(horizontal = 16.dp).padding(bottom = if (last) 8.dp else 0.dp)
-            .clip(shape).background(io.github.suqi8.coui.kmp.basic.CardDefaults.defaultColors().color),
-    ) { content() }
+    LazyGroupRow(position, bottom = 8.dp, content = content)
 }
 
 @Composable
 private fun EmptyNote(text: String) {
-    Text(text, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 16.dp))
+    Text(text, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 16.dp))
 }
 @Composable
 private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {

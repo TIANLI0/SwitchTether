@@ -1,8 +1,8 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.switchtether.ui.components.glassHeader
-import io.github.tianli0.switchtether.ui.components.glassSurface
-import io.github.tianli0.switchtether.ui.components.LocalGlassBackdrop
+import io.github.tianli0.coui17.patterns.glassHeader
+import io.github.tianli0.coui17.patterns.glassSurface
+import io.github.tianli0.coui17.patterns.LocalGlassBackdrop
 import io.github.suqi8.coui.kmp.blur.rememberLayerBackdrop
 import io.github.suqi8.coui.kmp.blur.layerBackdrop
 import io.github.suqi8.coui.kmp.blur.isRuntimeShaderSupported
@@ -10,13 +10,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.CompositionLocalProvider
-import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
-import io.github.tianli0.switchtether.ui.common.SheetButtons
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.SmallButton
-import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.coui17.patterns.SheetButtons
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.SmallButton
+import io.github.tianli0.coui17.patterns.LinkButton
 import androidx.compose.ui.graphics.compositeOver
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
@@ -30,7 +29,7 @@ import io.github.tianli0.switchtether.remote.protocol.arr
 import io.github.tianli0.switchtether.remote.protocol.obj
 import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.double
-import io.github.tianli0.switchtether.ui.components.StatFigure
+import io.github.tianli0.coui17.patterns.StatFigure
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
@@ -98,36 +97,36 @@ import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.str
 import io.github.tianli0.switchtether.remote.session.RenderItem
 import io.github.tianli0.switchtether.ui.appContainer
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
+import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.tianli0.switchtether.ui.common.CommandPromptDialog
-import io.github.tianli0.switchtether.ui.common.ConfirmDialog
+import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
-import io.github.tianli0.switchtether.ui.common.Page
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
+import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.capColor
 import io.github.tianli0.switchtether.ui.common.capStatusLabel
 import io.github.tianli0.switchtether.ui.common.controlColor
 import io.github.tianli0.switchtether.ui.common.controlLabel
 import io.github.tianli0.switchtether.ui.common.originLabel
-import io.github.tianli0.switchtether.ui.common.pageContainerColor
+import io.github.tianli0.coui17.patterns.pageContainerColor
 import io.github.tianli0.switchtether.ui.common.relativeTime
 import io.github.tianli0.switchtether.ui.common.sessionStatusColor
 import io.github.tianli0.switchtether.ui.common.title
 import io.github.tianli0.switchtether.ui.common.waitingLabel
-import io.github.tianli0.switchtether.ui.components.CollapsibleRow
-import io.github.tianli0.switchtether.ui.components.ErrorState
-import io.github.tianli0.switchtether.ui.components.InfoChip
-import io.github.tianli0.switchtether.ui.components.InputPill
-import io.github.tianli0.switchtether.ui.components.InputPillState
-import io.github.tianli0.switchtether.ui.components.LoadingState
-import io.github.tianli0.switchtether.ui.components.RoundIconButton
-import io.github.tianli0.switchtether.ui.components.SegmentPosition
-import io.github.tianli0.switchtether.ui.components.StatusDot
-import io.github.tianli0.switchtether.ui.components.StatusPill
-import io.github.tianli0.switchtether.ui.components.segment
+import io.github.tianli0.coui17.patterns.CollapsibleRow
+import io.github.tianli0.coui17.patterns.ErrorState
+import io.github.tianli0.coui17.patterns.InfoChip
+import io.github.tianli0.coui17.patterns.InputPill
+import io.github.tianli0.coui17.patterns.InputPillState
+import io.github.tianli0.coui17.patterns.LoadingState
+import io.github.tianli0.coui17.patterns.RoundIconButton
+import io.github.tianli0.coui17.patterns.SegmentPosition
+import io.github.tianli0.coui17.patterns.StatusDot
+import io.github.tianli0.coui17.patterns.StatusPill
+import io.github.tianli0.coui17.patterns.segment
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.sessions.render.AgentEventRegistry
 import io.github.tianli0.switchtether.ui.sessions.render.RenderContext
@@ -268,7 +267,7 @@ fun SessionDetailScreen(
                     onSelect = vm::setPermissionMode,
                 )
                 state.permissionError?.let {
-                    Text(stringResource(R.string.tools_permission_failed, it), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 8.dp))
+                    Text(stringResource(R.string.tools_permission_failed, it), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 8.dp))
                 }
             }
         },
@@ -414,7 +413,7 @@ fun SessionDetailScreen(
         ImageViewerDialog(preview = img, onLoadBytes = vm::loadImageBytes, onDismiss = { viewingImage = null })
     }
     viewingFile?.let { ref ->
-        io.github.tianli0.switchtether.ui.common.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
+        io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
             // The page colour runs under the status and gesture bars; the viewer sits between them.
             Box(Modifier.fillMaxSize().background(pageContainerColor()).statusBarsPadding().navigationBarsPadding()) {
                 io.github.tianli0.switchtether.ui.files.RemoteFileViewer(ref, onBack = { viewingFile = null }, onManageDownloads = null)
@@ -495,7 +494,7 @@ fun SessionDetailContent(
         immersive = true,
         ownBarMaterial = true,
     ) {
-        val topInset = io.github.tianli0.switchtether.ui.common.LocalPageTopInset.current
+        val topInset = io.github.tianli0.coui17.patterns.LocalPageTopInset.current
         // Notices that used to take rows above the list now float over its top, under the title bar.
         val topNotices: @Composable () -> Unit = {
         ConnectionBanner(state.connection, onRetryConnection)
@@ -555,7 +554,7 @@ fun SessionDetailContent(
             Box(Modifier.fillMaxSize().then(if (chatBackdrop != null) Modifier.layerBackdrop(chatBackdrop) else Modifier)) {
                 when (val ev = state.events) {
                     Loadable.Loading -> LoadingState(stringResource(R.string.state_loading), Modifier.padding(top = topOverlay))
-                    is Loadable.Failed -> ErrorState(ev.error.title(), ev.error.detail, stringResource(R.string.action_retry), onReload, Modifier.padding(top = topOverlay))
+                    is Loadable.Failed -> ErrorState(ev.error.title(), Modifier.padding(top = topOverlay), ev.error.detail, stringResource(R.string.action_retry), onReload)
                     is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing, bottomInset = composerHeight, topInset = topOverlay)
                 }
             }
@@ -613,7 +612,7 @@ private fun StatusChipRow(
     val s = state.detail.valueOrNull?.summary ?: return
     val terminalLabel = stringResource(R.string.open_terminal)
     val toolsLabel = stringResource(R.string.tools_open)
-    val bg = io.github.tianli0.switchtether.ui.common.pageContainerColor().compositeOver(COUITheme.colorScheme.background)
+    val bg = io.github.tianli0.coui17.patterns.pageContainerColor().compositeOver(COUITheme.colorScheme.background)
     // No fade of their own: the header's material behind them (glassHeader) is the page's only one.
     Column(
         modifier.padding(horizontal = 8.dp, vertical = 2.dp).clip(SquircleShape(18.dp))
@@ -950,7 +949,7 @@ private fun Composer(
             val supportsAttachments = (state.canSend || state.canQueue) && s?.terminalId == null
             if (supportsAttachments) {
                 val canAttach = state.online && state.draftAttachments.size < MAX_ATTACHMENTS
-                io.github.tianli0.switchtether.ui.components.ComposerKey(
+                io.github.tianli0.coui17.patterns.ComposerKey(
                     label = stringResource(R.string.composer_attach),
                     onClick = onPickImage,
                     enabled = canAttach,
@@ -958,7 +957,7 @@ private fun Composer(
                 ) {
                     Icon(AppIcons.Add, contentDescription = null, tint = COUITheme.colorScheme.onSurface.copy(alpha = if (canAttach) 1f else 0.4f), modifier = Modifier.size(22.dp))
                 }
-                Spacer(Modifier.size(io.github.tianli0.switchtether.ui.components.ComposerKeyGap))
+                Spacer(Modifier.size(io.github.tianli0.coui17.patterns.ComposerKeyGap))
             }
             InputPill(
                 value = state.draft,
@@ -969,6 +968,7 @@ private fun Composer(
                     else -> stringResource(R.string.composer_draft_hint)
                 },
                 sendLabel = stringResource(R.string.session_send),
+                sendIcon = AppIcons.Send,
                 onSend = onSend,
                 // Sending never blocks the field: the bubble shows the message's own progress.
                 state = InputPillState(
@@ -997,7 +997,7 @@ private fun ComposerNote(text: String, color: Color) {
 /** Photos or any file: both go to the computer and reach the agent as file paths. */
 @Composable
 private fun AttachSheet(show: Boolean, onImages: () -> Unit, onFiles: () -> Unit, onDismiss: () -> Unit) {
-    AppBottomSheet(show = show, title = stringResource(R.string.composer_attach), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.composer_attach), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             GroupCard {
                 BasicComponent(
@@ -1019,7 +1019,7 @@ private fun AttachSheet(show: Boolean, onImages: () -> Unit, onFiles: () -> Unit
                 stringResource(R.string.attach_where),
                 style = COUITheme.textStyles.footnote2,
                 color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = TextGutter),
+                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter),
             )
         }
     }
@@ -1148,8 +1148,8 @@ private fun pickedFileInfo(context: android.content.Context, uri: android.net.Ur
 /** Bottom sheet with everything about the session that does not fit the chip row. */
 @Composable
 private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: String?, onDismiss: () -> Unit) {
-    AppBottomSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss) {
-        val d = detail ?: return@AppBottomSheet
+    PanelSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss) {
+        val d = detail ?: return@PanelSheet
         val s = d.summary
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             val rows = listOfNotNull(
@@ -1190,7 +1190,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
                 }
             }
             d.capabilities.reason?.let {
-                Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 8.dp))
+                Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp))
             }
         }
     }
@@ -1199,9 +1199,9 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
 /** Confirm sheet for "continue on phone" (fork into a managed session with the same context). */
 @Composable
 private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boolean, canFork: Boolean, enabled: Boolean, busy: Boolean, onConfirm: (fork: Boolean) -> Unit, onDismiss: () -> Unit) {
-    AppBottomSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = SheetTextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 listOf(
                     stringResource(R.string.continue_point_context, agentLabel),
                     stringResource(R.string.continue_point_window),
@@ -1251,14 +1251,14 @@ private fun ApprovalSheet(
     }
     val decision = pending?.second.orEmpty()
     val danger = decision == "deny" || decision == "abort"
-    io.github.suqi8.coui.kmp.window.WindowAlertDialog(
+    ConfirmDialog(
         show = pending != null,
         title = stringResource(R.string.approval_confirm_title),
-        summary = stringResource(R.string.approval_confirm_body, pending?.third.orEmpty()),
+        message = stringResource(R.string.approval_confirm_body, pending?.third.orEmpty()),
         confirmText = pending?.third.orEmpty(),
         cancelText = stringResource(R.string.action_cancel),
         onConfirm = onConfirm,
-        onCancel = onDismiss,
+        onDismiss = onDismiss,
     ) {
         val d = request?.data
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1293,7 +1293,7 @@ private fun ImageViewerDialog(
         scale = (scale * zoomChange).coerceIn(1f, 5f)
         offset = if (scale > 1f) offset + panChange else androidx.compose.ui.geometry.Offset.Zero
     }
-    io.github.tianli0.switchtether.ui.common.FullScreenDialog(onDismissRequest = onDismiss) {
+    io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = onDismiss) {
         Box(
             Modifier
                 .fillMaxSize()

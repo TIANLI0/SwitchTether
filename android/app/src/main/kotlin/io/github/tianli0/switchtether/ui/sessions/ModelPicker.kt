@@ -1,9 +1,9 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
+import io.github.tianli0.coui17.patterns.PageDefaults
 import androidx.compose.foundation.layout.heightIn
 import io.github.suqi8.coui.kmp.basic.SmallTitle
-import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.coui17.patterns.LinkButton
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +15,7 @@ import androidx.compose.ui.text.style.TextAlign
 import io.github.suqi8.coui.kmp.basic.Slider
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.GroupCard
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,8 +33,8 @@ import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.ModelOptions
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
-import io.github.tianli0.switchtether.ui.common.TextInput
+import io.github.tianli0.coui17.patterns.PanelSheet
+import io.github.tianli0.coui17.patterns.TextInput
 
 /** Effort levels offered when the desktop does not send any (older desktop). */
 fun fallbackEfforts(agent: String): List<String> = when (agent) {
@@ -216,7 +216,7 @@ fun ModelEffortSheet(
     /** Further run settings shown under model and effort (Claude Code's permission mode). */
     extra: @Composable () -> Unit = {},
 ) {
-    AppBottomSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             ModelEffortChooser(
                 agent = agent,
@@ -234,7 +234,7 @@ fun ModelEffortSheet(
                 stringResource(R.string.model_sheet_note),
                 style = COUITheme.textStyles.footnote1,
                 color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = SheetTextGutter),
+                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter),
             )
         }
     }

@@ -1,7 +1,9 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.switchtether.ui.components.ExpandBody
-import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.suqi8.coui.kmp.basic.Chip
+import io.github.tianli0.coui17.patterns.LazyGroupRow
+import io.github.tianli0.coui17.patterns.ExpandBody
+import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import androidx.compose.foundation.background
@@ -44,27 +46,26 @@ import androidx.lifecycle.viewModelScope
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import androidx.compose.runtime.saveable.rememberSaveable
-import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
+import io.github.tianli0.coui17.patterns.rememberPageScrollState
 import io.github.tianli0.switchtether.domain.SessionQuery
-import io.github.tianli0.switchtether.ui.common.Page
+import io.github.tianli0.coui17.patterns.Page
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.home.RowIcon
 import io.github.suqi8.coui.kmp.basic.TabRowWithContour
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
-import io.github.tianli0.switchtether.ui.common.SheetConfirm
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.SheetConfirm
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
 import io.github.tianli0.switchtether.connection.ConnectionController
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.domain.NewSessionRequest
@@ -76,18 +77,15 @@ import io.github.tianli0.switchtether.remote.protocol.SessionSummary
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.common.CommandPromptDialog
 import io.github.tianli0.switchtether.ui.common.CommandTracker
-import io.github.tianli0.switchtether.ui.common.ConfirmDialog
+import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Loadable
-import io.github.tianli0.switchtether.ui.common.Page
-import io.github.tianli0.switchtether.ui.common.TextInput
+import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.switchtether.ui.common.loadable
 import io.github.tianli0.switchtether.ui.common.title
-import io.github.tianli0.switchtether.ui.components.Banner
-import io.github.tianli0.switchtether.ui.components.FilterChip
-import io.github.tianli0.switchtether.ui.components.PageCard
-import io.github.tianli0.switchtether.ui.components.SectionHeader
-import io.github.tianli0.switchtether.ui.components.StatusPill
+import io.github.tianli0.coui17.patterns.NoticeBanner
+import io.github.tianli0.coui17.patterns.SectionHeader
+import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -393,7 +391,7 @@ fun NewSessionContent(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                 modifier = Modifier.padding(bottom = 16.dp),
             ) {
-                items(others, key = { it.path }) { r -> FilterChip(r.name, false, { onSelect(r.path) }) }
+                items(others, key = { it.path }) { r -> Chip(selected = false, onClick = { onSelect(r.path) }, label = r.name) }
             }
         }
         TextInput(
@@ -466,14 +464,14 @@ fun NewSessionContent(
                 stringResource(if (state.connection !is ConnectionState.Online) R.string.new_session_need_connection else R.string.new_session_need_folder),
                 style = COUITheme.textStyles.footnote1,
                 color = dev.warn,
-                modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 6.dp),
+                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 6.dp),
             )
         }
         Text(
             stringResource(R.string.new_session_note),
             style = COUITheme.textStyles.footnote1,
             color = COUITheme.colorScheme.onSurfaceVariantSummary,
-            modifier = Modifier.padding(horizontal = SheetTextGutter),
+            modifier = Modifier.padding(horizontal = PageDefaults.TextGutter),
         )
     }
 }
@@ -601,7 +599,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
                             FolderRow(d.name, null, d.sensitive, cardListPositionOf(i + offset, total)) { vm.browse(d.path) }
                         }
                         if (l.value.truncated || l.value.blocked > 0) {
-                            item(key = "note") { Text(stringResource(R.string.new_session_listing_note, l.value.blocked), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) }
+                            item(key = "note") { Text(stringResource(R.string.new_session_listing_note, l.value.blocked), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
                         }
                     }
                 }
@@ -617,18 +615,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
 @Composable
 private fun FolderRow(name: String, path: String?, sensitive: Boolean, position: CardListPosition, onClick: () -> Unit) {
     val dev = LocalDevColors.current
-    val r = io.github.suqi8.coui.kmp.basic.CardDefaults.GroupCornerRadius
-    val shape = when (position) {
-        CardListPosition.Full -> androidx.compose.foundation.shape.RoundedCornerShape(r)
-        CardListPosition.Head -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = r, topEnd = r)
-        CardListPosition.Tail -> androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = r, bottomEnd = r)
-        else -> androidx.compose.ui.graphics.RectangleShape
-    }
-    val last = position == CardListPosition.Tail || position == CardListPosition.Full
-    Box(
-        Modifier.padding(horizontal = 16.dp).padding(bottom = if (last) 16.dp else 0.dp)
-            .clip(shape).background(io.github.suqi8.coui.kmp.basic.CardDefaults.defaultColors().color),
-    ) {
+    LazyGroupRow(position) {
         BasicComponent(
             title = name,
             summary = path,
@@ -655,7 +642,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
             onCreated(created.id, created.title)
         }
     }
-    io.github.tianli0.switchtether.ui.common.AppBottomSheet(
+    io.github.tianli0.coui17.patterns.PanelSheet(
         show = show,
         title = stringResource(R.string.new_session_title),
         onDismissRequest = onDismiss,

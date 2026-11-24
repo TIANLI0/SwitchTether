@@ -1,10 +1,11 @@
 package io.github.tianli0.switchtether.ui.manage
 
-import io.github.tianli0.switchtether.ui.components.ExpandBody
-import io.github.tianli0.switchtether.ui.common.TextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.FormDialog
+import io.github.tianli0.coui17.patterns.ExpandBody
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.compose.foundation.layout.Box
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
@@ -55,10 +56,10 @@ import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
 import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.tianli0.switchtether.ui.home.RowIcon
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import io.github.tianli0.switchtether.remote.protocol.DailyUsage
 import io.github.tianli0.switchtether.remote.protocol.ProviderView
 import io.github.tianli0.switchtether.remote.protocol.QuotaView
@@ -69,19 +70,18 @@ import io.github.tianli0.switchtether.ui.chart.BarChart
 import kotlinx.coroutines.launch
 import io.github.tianli0.switchtether.ui.chart.BarPoint
 import io.github.tianli0.switchtether.ui.common.CommandPromptDialog
-import io.github.tianli0.switchtether.ui.common.ConfirmDialog
+import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.Page
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
+import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.UiError
 import io.github.tianli0.switchtether.ui.common.title
-import io.github.tianli0.switchtether.ui.components.EmptyMessage
-import io.github.tianli0.switchtether.ui.components.PageCard
-import io.github.tianli0.switchtether.ui.components.SectionHeader
-import io.github.tianli0.switchtether.ui.components.StatusPill
+import io.github.tianli0.coui17.patterns.EmptyMessage
+import io.github.tianli0.coui17.patterns.SectionHeader
+import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.theme.DevType
@@ -101,7 +101,7 @@ fun ManageScreen(onOpen: (Route) -> Unit) {
                 ArrowPreference(title = stringResource(R.string.manage_prompts), startAction = { RowIcon(AppIcons.Prompts) }, onClick = { onOpen(Route.Prompts) }, cardListPosition = CardListPosition.Tail)
             }
         }
-        item { Text(stringResource(R.string.manage_write_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 8.dp)) }
+        item { Text(stringResource(R.string.manage_write_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp)) }
     })
 }
 
@@ -169,24 +169,20 @@ fun ProvidersScreen(onBack: () -> Unit) {
     CommandPromptDialog(prompt, vm.commands::checkStatus, vm.commands::retry, vm.commands::dismiss)
     credTarget?.let { (p, f) ->
         var value by remember(p.id, f.path) { mutableStateOf("") }
-        io.github.suqi8.coui.kmp.window.WindowDialog(show = true, title = "$credLabel · ${f.name}", onDismissRequest = { credTarget = null }) {
-            Column(Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.provider_credential_note, p.name), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
-                    io.github.suqi8.coui.kmp.basic.TextField(
-                        value = value, onValueChange = { value = it }, label = f.name, singleLine = true, showPasswordToggle = true,
-                        backgroundMode = io.github.suqi8.coui.kmp.basic.TextFieldMode.Rectangle,
-                    )
-                }
-                DialogButtonBar(
-                    negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = { credTarget = null }),
-                    positive = DialogButtonBarAction(
-                        text = stringResource(R.string.files_save),
-                        enabled = value.isNotBlank(),
-                        onClick = { vm.setCredential("$credLabel: ${p.name}", p.id, f.path, value); credTarget = null },
-                    ),
-                )
-            }
+        FormDialog(
+            show = true,
+            title = "$credLabel · ${f.name}",
+            confirmText = stringResource(R.string.files_save),
+            confirmEnabled = value.isNotBlank(),
+            onConfirm = { vm.setCredential("$credLabel: ${p.name}", p.id, f.path, value); credTarget = null },
+            onDismiss = { credTarget = null },
+        ) {
+            Text(stringResource(R.string.provider_credential_note, p.name), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+            io.github.suqi8.coui.kmp.basic.TextField(
+                value = value, onValueChange = { value = it }, label = f.name, singleLine = true, showPasswordToggle = true,
+                backgroundMode = io.github.suqi8.coui.kmp.basic.TextFieldMode.Rectangle,
+            )
+
         }
     }
 }
@@ -302,28 +298,28 @@ fun UsageContent(
         return
     }
     LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
-        item { PageCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
+        item { GroupCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
         item { SyncNote(state.lastSyncMs, state.zone) }
         item { SectionHeader(stringResource(if (state.hourly) R.string.usage_trend_hourly else R.string.usage_trend_daily)) }
         item {
-            PageCard {
+            GroupCard {
                 SmallLoadable(state.trend, onRetry) { days -> TrendChart(days, state.metric, state.hourly, onMetric) }
             }
         }
         item { SectionHeader(stringResource(R.string.usage_by_provider)) }
-        item { PageCard { SmallLoadable(state.providers, onRetry) { BreakdownTable(it, showAvgCost = false) } } }
+        item { GroupCard { SmallLoadable(state.providers, onRetry) { BreakdownTable(it, showAvgCost = false) } } }
         item { SectionHeader(stringResource(R.string.usage_by_model)) }
-        item { PageCard { SmallLoadable(state.models, onRetry) { BreakdownTable(it, showAvgCost = true) } } }
+        item { GroupCard { SmallLoadable(state.models, onRetry) { BreakdownTable(it, showAvgCost = true) } } }
         item { SectionHeader(stringResource(R.string.usage_quota)) }
         items(state.quotas, key = { it.first }) { (_, q) ->
-            PageCard { SmallLoadable(q, onRetry) { QuotaCard(it) } }
+            GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } }
         }
         // Request log (newer desktops; an older one without the API hides the section).
         state.logs?.let { logs ->
             item { SectionHeader(stringResource(R.string.usage_logs)) }
             if (logs.isEmpty()) {
                 item {
-                    PageCard {
+                    GroupCard {
                         if (state.logsError && !state.logsLoading) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                                 Text(stringResource(R.string.usage_logs_failed), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
@@ -347,7 +343,7 @@ fun UsageContent(
                 }
             } else {
                 item(key = "logs") {
-                    io.github.tianli0.switchtether.ui.common.GroupCard {
+                    io.github.tianli0.coui17.patterns.GroupCard {
                         logs.forEachIndexed { i, l ->
                             RequestLogRow(l, state.zone, io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, logs.size), onClick = { onOpenLog(l) })
                         }
@@ -372,7 +368,7 @@ fun UsageContent(
             }
         }
         item {
-            Text(stringResource(R.string.usage_tz_note), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 8.dp))
+            Text(stringResource(R.string.usage_tz_note), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp))
         }
         item { Spacer(Modifier.height(24.dp)) }
     }

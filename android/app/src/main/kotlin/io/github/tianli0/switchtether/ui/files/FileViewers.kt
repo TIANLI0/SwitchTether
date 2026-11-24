@@ -1,7 +1,7 @@
 package io.github.tianli0.switchtether.ui.files
 
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import android.content.ActivityNotFoundException
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -92,7 +92,7 @@ import io.github.tianli0.switchtether.files.LocalFile
 import io.github.tianli0.switchtether.remote.api.ApiException
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
+import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.CancellationException

@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.coui17.patterns.PageDefaults
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,12 +46,12 @@ import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.Page
+import io.github.tianli0.coui17.patterns.Page
 import io.github.tianli0.switchtether.ui.common.loadable
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
-import io.github.tianli0.switchtether.ui.components.PageCard
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.nav.Route
@@ -219,7 +220,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
                             color = COUITheme.colorScheme.onSurfaceVariantSummary,
                             modifier = Modifier.padding(start = 24.dp, top = 16.dp, bottom = 6.dp),
                         )
-                        PageCard { children.forEachIndexed { i, b -> BranchRow(b.node, last = i == children.lastIndex) { onOpen(Route.Subagent(sessionId, b.node.agentId, b.node.description, agent)) } } }
+                        GroupCard { children.forEachIndexed { i, b -> BranchRow(b.node, last = i == children.lastIndex) { onOpen(Route.Subagent(sessionId, b.node.agentId, b.node.description, agent)) } } }
                     }
                 }
                 if (running) item(key = "live") { Note(stringResource(R.string.subagent_following)) }
@@ -232,7 +233,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
 @Composable
 private fun Breadcrumb(sessionId: String, agent: String, trail: List<SubagentNode>, current: String, onOpen: (Route) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp).testTag("subagent-trail"),
+        Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter, vertical = 6.dp).testTag("subagent-trail"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val crumbs = buildList {
@@ -256,7 +257,7 @@ private fun Breadcrumb(sessionId: String, agent: String, trail: List<SubagentNod
 
 @Composable
 private fun Note(text: String) {
-    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 10.dp))
+    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 10.dp))
 }
 
 /** A row of the branch tree: connector glyphs, status dot, description, type and time. */

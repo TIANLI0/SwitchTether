@@ -1,8 +1,9 @@
 package io.github.tianli0.switchtether.ui.common
 
+import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
-import io.github.tianli0.switchtether.ui.common.SheetButtons
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.SheetButtons
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -33,7 +34,7 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.LocalNetworkAccess
 import io.github.tianli0.switchtether.remote.pairing.LocalNetwork
 import io.github.tianli0.switchtether.ui.appContainer
-import io.github.tianli0.switchtether.ui.components.Banner
+import io.github.tianli0.coui17.patterns.NoticeBanner
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,7 +78,7 @@ fun LocalNetworkPermissionHost() {
         }
     }
     val show = ask != null && access.required && !access.granted.value
-    AppBottomSheet(
+    PanelSheet(
         show = show,
         title = stringResource(R.string.lan_perm_title),
         onDismissRequest = {
@@ -88,7 +89,7 @@ fun LocalNetworkPermissionHost() {
         },
     ) {
         Column(Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = SheetTextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 listOf(R.string.lan_perm_point_direct, R.string.lan_perm_point_discovery, R.string.lan_perm_point_optional).forEach {
                     Row(verticalAlignment = Alignment.Top) {
                         Icon(AppIcons.Done, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(18.dp).padding(top = 2.dp))
@@ -134,7 +135,7 @@ fun LocalNetworkStrip(modifier: Modifier = Modifier) {
     val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = null)
     val d = desktop ?: return
     if (!access.required || granted || d.hosts.none(LocalNetwork::isLocal)) return
-    Banner(
+    NoticeBanner(
         text = stringResource(if (d.relayUrl != null) R.string.lan_perm_strip_relay else R.string.lan_perm_strip),
         color = LocalDevColors.current.warn,
         modifier = modifier.testTag("lan-perm-strip"),

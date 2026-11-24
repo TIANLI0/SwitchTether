@@ -1,8 +1,9 @@
 package io.github.tianli0.switchtether.ui.workspace
 
-import io.github.tianli0.switchtether.ui.common.TextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.FormDialog
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.SmallButton
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -54,17 +55,17 @@ import io.github.tianli0.switchtether.remote.protocol.ListeningPort
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
-import io.github.tianli0.switchtether.ui.common.Page
-import io.github.tianli0.switchtether.ui.common.TextInput
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
+import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.coui17.patterns.TextInput
+import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.loadable
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import io.github.tianli0.switchtether.ui.common.title
-import io.github.tianli0.switchtether.ui.components.StatusPill
+import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.home.RowIcon
 import io.github.tianli0.switchtether.ui.icons.AppIcons
@@ -219,7 +220,7 @@ fun PortForwardScreen(onBack: () -> Unit) {
     }
 
     notice?.let { text ->
-        io.github.tianli0.switchtether.ui.common.ConfirmDialog(
+        io.github.tianli0.coui17.patterns.ConfirmDialog(
             show = true,
             title = stringResource(R.string.forward_title),
             message = text,
@@ -340,7 +341,7 @@ fun PortForwardScreen(onBack: () -> Unit) {
                     stringResource(R.string.forward_hint),
                     style = COUITheme.textStyles.footnote1,
                     color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp),
+                    modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp),
                 )
             }
         }
@@ -406,26 +407,22 @@ private fun ManualPortDialog(
     val remotePort = remote.trim().toIntOrNull()?.takeIf { it in 1..65535 }
     val localPort = if (local.isBlank()) remotePort else local.trim().toIntOrNull()?.takeIf { it in 1..65535 }
     val numbers = KeyboardOptions(keyboardType = KeyboardType.Number)
-    WindowDialog(show = true, title = stringResource(R.string.forward_manual), onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextInput(remote, { remote = it.filter(Char::isDigit).take(5) }, stringResource(R.string.forward_remote_port), keyboardOptions = numbers)
-                TextInput(local, { local = it.filter(Char::isDigit).take(5) }, stringResource(R.string.forward_local_port), keyboardOptions = numbers)
-                Text(
-                    if ((remote.isNotBlank() && remotePort == null) || (local.isNotBlank() && localPort == null)) stringResource(R.string.forward_invalid_port)
-                    else stringResource(R.string.forward_local_hint),
-                    style = COUITheme.textStyles.footnote1,
-                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-            DialogButtonBar(
-                negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = onDismiss),
-                positive = DialogButtonBarAction(
-                    text = stringResource(R.string.forward_start),
-                    enabled = remotePort != null && localPort != null,
-                    onClick = { if (remotePort != null && localPort != null) onConfirm(remotePort, localPort) },
-                ),
-            )
-        }
+    FormDialog(
+        show = true,
+        title = stringResource(R.string.forward_manual),
+        confirmText = stringResource(R.string.forward_start),
+        confirmEnabled = remotePort != null && localPort != null,
+        onConfirm = { if (remotePort != null && localPort != null) onConfirm(remotePort, localPort) },
+        onDismiss = onDismiss,
+    ) {
+        TextInput(remote, { remote = it.filter(Char::isDigit).take(5) }, stringResource(R.string.forward_remote_port), keyboardOptions = numbers)
+        TextInput(local, { local = it.filter(Char::isDigit).take(5) }, stringResource(R.string.forward_local_port), keyboardOptions = numbers)
+        Text(
+            if ((remote.isNotBlank() && remotePort == null) || (local.isNotBlank() && localPort == null)) stringResource(R.string.forward_invalid_port)
+            else stringResource(R.string.forward_local_hint),
+            style = COUITheme.textStyles.footnote1,
+            color = COUITheme.colorScheme.onSurfaceVariantSummary,
+        )
+
     }
 }

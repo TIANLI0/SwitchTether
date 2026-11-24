@@ -46,8 +46,11 @@ cd android
 ./gradlew :app:assembleRelease        # requires signing config, see below
 ```
 
-`coui17` is vendored under `android/third_party/coui17` at a pinned commit; no GitHub token or
-SNAPSHOT repository is needed. Re-vendor with `python third_party/coui17/sync_coui17.py <sha>`.
+The UI library is the [COUI17](https://github.com/TIANLI0/COUI17) repository as a git submodule at
+`android/third_party/coui17`, built from source at the pinned commit; no GitHub token or SNAPSHOT
+repository is needed. After cloning run `git submodule update --init` (or clone with
+`--recurse-submodules`). To take a newer version: `git -C android/third_party/coui17 pull origin main`,
+rebuild, run the tests and commit the submodule pointer.
 
 ### Release signing (Android)
 

@@ -3,8 +3,8 @@ package io.github.tianli0.switchtether.ui.settings
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
-import io.github.tianli0.switchtether.ui.common.SheetButtons
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.SheetButtons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
+import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.update.ReleaseInfo
 import io.github.tianli0.switchtether.ui.common.Formatters
@@ -89,12 +89,12 @@ fun UpdateSheet(
     onDismiss: () -> Unit,
 ) {
     val release = state.release()
-    AppBottomSheet(
+    PanelSheet(
         show = show && release != null,
         title = release?.let { stringResource(R.string.update_sheet_title, it.version.toString()) },
         onDismissRequest = onDismiss,
     ) {
-        val r = release ?: return@AppBottomSheet
+        val r = release ?: return@PanelSheet
         val dev = LocalDevColors.current
         val (label, action) = when (state) {
             is UpdateState.Available -> stringResource(R.string.update_download) to { onDownload(r) }
@@ -104,7 +104,7 @@ fun UpdateSheet(
             else -> null to null
         }
         Column(Modifier.fillMaxWidth()) {
-          Column(Modifier.fillMaxWidth().padding(horizontal = SheetTextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 listOfNotNull(r.name.takeIf { it != r.tag }, r.publishedAt?.take(10), r.apk?.size?.takeIf { it > 0 }?.let(Formatters::bytes)).joinToString(" · "),
                 style = COUITheme.textStyles.footnote1,

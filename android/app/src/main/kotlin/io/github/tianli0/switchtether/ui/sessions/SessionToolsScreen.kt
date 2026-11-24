@@ -1,9 +1,10 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.switchtether.ui.common.TextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.ConfirmDialog
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,17 +60,17 @@ import io.github.tianli0.switchtether.remote.session.ExportedConversation
 import io.github.tianli0.switchtether.remote.session.McpServerStatus
 import io.github.tianli0.switchtether.remote.session.PlanView
 import io.github.tianli0.switchtether.remote.session.RewindResult
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.PanelSheet
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.Page
-import io.github.tianli0.switchtether.ui.common.TextInput
+import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.switchtether.ui.common.UiError
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
-import io.github.tianli0.switchtether.ui.components.StatusDot
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.coui17.patterns.StatusDot
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.markdown.MarkdownView
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -380,7 +381,7 @@ private fun shareConversation(context: android.content.Context, ex: ExportedConv
 
 @Composable
 private fun ToolsNote(text: String, color: Color = COUITheme.colorScheme.onSurfaceVariantSummary) {
-    Text(text, style = COUITheme.textStyles.footnote2, color = color, modifier = Modifier.padding(start = TextGutter, end = TextGutter, bottom = 12.dp))
+    Text(text, style = COUITheme.textStyles.footnote2, color = color, modifier = Modifier.padding(start = PageDefaults.TextGutter, end = PageDefaults.TextGutter, bottom = 12.dp))
 }
 
 @Composable
@@ -448,7 +449,7 @@ fun PermissionModeOptions(current: String?, pending: String?, enabled: Boolean, 
 /** Quick switch from the composer's mode capsule. */
 @Composable
 fun PermissionModeSheet(show: Boolean, current: String?, pending: String?, error: String?, enabled: Boolean, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
-    AppBottomSheet(show = show, title = stringResource(R.string.tools_permission), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.tools_permission), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             PermissionModeOptions(current, pending, enabled, onSelect)
             error?.let { ToolsNote(stringResource(R.string.tools_permission_failed, it), LocalDevColors.current.danger) }
@@ -586,16 +587,14 @@ private fun SideQuestion(st: SessionToolsState, enabled: Boolean, onAsk: (String
             modifier = Modifier.fillMaxWidth().testTag("btw-field"),
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Button(
+            SmallButton(
+                text = stringResource(R.string.tools_side_question_ask),
                 onClick = { onAsk(question) },
-                enabled = enabled && !st.asking && question.isNotBlank(),
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
+                enabled = enabled && question.isNotBlank(),
+                tone = ActionTone.Primary,
+                loading = st.asking,
                 modifier = Modifier.testTag("btw-ask"),
-            ) {
-                if (st.asking) RotatingProgressIndicator(color = COUITheme.colorScheme.onPrimary, size = 16.dp, ringDiameter = 12.8.dp, strokeWidth = 2.dp)
-                else Text(stringResource(R.string.tools_side_question_ask), color = COUITheme.colorScheme.onPrimary, style = io.github.tianli0.switchtether.ui.components.compactButtonTextStyle())
-            }
+            )
         }
         if (st.asking) {
             Text(stringResource(R.string.tools_side_question_waiting), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
@@ -659,14 +658,14 @@ fun RewindDialog(state: RewindState?, onConfirm: () -> Unit, onDismiss: () -> Un
     val preview: RewindResult? = state?.preview
     val canConfirm = state != null && !state.loading && !state.applying && preview?.canRewind == true &&
         preview.error == null && preview.filesChanged.isNotEmpty()
-    io.github.suqi8.coui.kmp.window.WindowAlertDialog(
+    ConfirmDialog(
         show = state != null,
         title = stringResource(R.string.rewind_title),
-        summary = stringResource(R.string.rewind_explain),
+        message = stringResource(R.string.rewind_explain),
         confirmText = stringResource(if (state?.applying == true) R.string.rewind_applying else R.string.rewind_confirm),
         cancelText = stringResource(R.string.action_cancel),
         onConfirm = { if (canConfirm) onConfirm() },
-        onCancel = onDismiss,
+        onDismiss = onDismiss,
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp).testTag("rewind-dialog"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             when {

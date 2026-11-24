@@ -1,6 +1,6 @@
 package io.github.tianli0.switchtether.ui.files
 
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -57,7 +57,7 @@ fun FilePreviewHeader(
         Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        io.github.tianli0.switchtether.ui.common.BackArrow(onBack)
+        io.github.tianli0.coui17.patterns.BackArrow(onBack)
         Spacer(Modifier.width(4.dp))
         Column(Modifier.weight(1f)) {
             Text(

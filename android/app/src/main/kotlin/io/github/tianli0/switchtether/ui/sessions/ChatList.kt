@@ -52,7 +52,7 @@ import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.EventKinds
-import io.github.tianli0.switchtether.ui.components.ChatBubble
+import io.github.tianli0.coui17.patterns.ChatBubble
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.sessions.render.RenderContext
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors

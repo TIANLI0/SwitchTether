@@ -1,0 +1,3 @@
+[submodule "android/third_party/coui17"]
+	path = android/third_party/coui17
+	url = https://github.com/TIANLI0/COUI17.git

@@ -4,7 +4,7 @@ import io.github.tianli0.switchtether.remote.protocol.EventKinds
 import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.str
 import io.github.tianli0.switchtether.remote.session.RenderItem
-import io.github.tianli0.switchtether.ui.components.SegmentPosition
+import io.github.tianli0.coui17.patterns.SegmentPosition
 
 /**
  * One row of the session timeline. Consecutive agent steps (tool calls, sub-agents, thinking

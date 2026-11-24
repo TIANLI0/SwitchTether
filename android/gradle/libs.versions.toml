@@ -1,6 +1,7 @@
 # SwitchTether Android version catalog.
 # Toolchain: AGP 9.5.2, Kotlin 2.4.21, Compose Multiplatform 1.12.2 (androidx.compose pinned to 1.13.0).
-# coui17 upstream was built against AGP 9.3.1 / Kotlin 2.4.10 / CMP 1.11.1 (third_party/coui17/UPSTREAM.md).
+# coui17 upstream was built against AGP 9.3.1 / Kotlin 2.4.10 / CMP 1.11.1 (third_party/coui17/UPSTREAM.md);
+# the COUI17 submodule's module build files resolve their `libs.*` aliases from THIS catalog.
 # No SNAPSHOT / dynamic versions are allowed in this file.
 
 [versions]

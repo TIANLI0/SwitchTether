@@ -1,8 +1,8 @@
 package io.github.tianli0.switchtether.ui.home
 
-import io.github.tianli0.switchtether.ui.common.TextGutter
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.background
@@ -12,10 +12,10 @@ import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,13 +53,13 @@ import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.remote.protocol.UsageSummary
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.switchtether.ui.common.Loadable
-import io.github.tianli0.switchtether.ui.common.Page
+import io.github.tianli0.coui17.patterns.Page
 import io.github.tianli0.switchtether.ui.common.UiError
 import io.github.tianli0.switchtether.ui.common.connectionColor
 import io.github.tianli0.switchtether.ui.common.connectionText
 import io.github.tianli0.switchtether.ui.common.title
-import io.github.tianli0.switchtether.ui.components.EmptyMessage
-import io.github.tianli0.switchtether.ui.components.SectionHeader
+import io.github.tianli0.coui17.patterns.EmptyMessage
+import io.github.tianli0.coui17.patterns.SectionHeader
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.nav.Tab
@@ -84,7 +84,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
             onRefresh = onRefresh,
             topAppBarScrollBehavior = null,
             // The list runs under the title bar; the pull indicator appears below it.
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = io.github.tianli0.switchtether.ui.common.LocalPageTopInset.current),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current),
         ) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
             // Only problems are shown (connecting / offline / revoked / incompatible), as a thin strip.
@@ -178,13 +178,13 @@ private fun CompactTitle(text: String, highlight: Boolean = false) {
         style = COUITheme.textStyles.footnote1,
         fontWeight = FontWeight.Medium,
         color = if (highlight) LocalDevColors.current.warn else COUITheme.colorScheme.onSurfaceVariantSummary,
-        modifier = Modifier.padding(start = TextGutter, end = TextGutter, top = 14.dp, bottom = 6.dp).semantics { heading() },
+        modifier = Modifier.padding(start = PageDefaults.TextGutter, end = PageDefaults.TextGutter, top = 14.dp, bottom = 6.dp).semantics { heading() },
     )
 }
 
 @Composable
 private fun CompactNote(text: String) {
-    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp))
+    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp))
 }
 
 /** One line: today's cost and tokens (or why usage is unavailable); opens the Usage page. */

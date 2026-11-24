@@ -28,6 +28,8 @@ kotlin {
 }
 
 dependencies {
+    // COUI17 page patterns; brings coui-ui, coui-preference and coui-icons with it.
+    api(project(":coui-patterns"))
     api(project(":coui-ui"))
     api(project(":coui-preference"))
     api(project(":coui-icons"))

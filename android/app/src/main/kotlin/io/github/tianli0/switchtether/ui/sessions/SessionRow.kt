@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.tianli0.coui17.patterns.groupRowShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -26,7 +27,7 @@ import io.github.tianli0.switchtether.ui.common.relativeTime
 import io.github.tianli0.switchtether.ui.common.sessionStatusColor
 import io.github.tianli0.switchtether.ui.common.waitingLabel
 import io.github.tianli0.switchtether.ui.common.AgentBadge
-import io.github.tianli0.switchtether.ui.components.StatusPill
+import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
 /**
@@ -49,7 +50,7 @@ fun SessionRow(
     val title = sessionDisplayTitle(session)
     BasicComponent(
         // Long-press rows get their press highlight clipped to the row's rounded card edges (never a square mask).
-        modifier = if (onLongClick != null) modifier.clip(rowShape(position)).combinedClickable(onClick = onClick, onLongClick = onLongClick) else modifier,
+        modifier = if (onLongClick != null) modifier.clip(groupRowShape(position)).combinedClickable(onClick = onClick, onLongClick = onLongClick) else modifier,
         title = title,
         startAction = {
             // No extra end padding: the row's own icon gap is the same as every other list row's.
@@ -103,7 +104,7 @@ fun statusLabel(status: String): String = when (status) {
 @Composable
 fun PinMenuDialog(session: SessionSummary?, pinned: Boolean, onDismiss: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    io.github.tianli0.switchtether.ui.common.ConfirmDialog(
+    io.github.tianli0.coui17.patterns.ConfirmDialog(
         show = session != null,
         title = session?.let { sessionDisplayTitle(it) }.orEmpty(),
         message = stringResource(if (pinned) R.string.pin_menu_unpin_body else R.string.pin_menu_pin_body),
@@ -116,13 +117,3 @@ fun PinMenuDialog(session: SessionSummary?, pinned: Boolean, onDismiss: () -> Un
     )
 }
 
-/** Outline of a row inside a card group (rounded only on the card's outer edges). */
-private fun rowShape(position: CardListPosition): androidx.compose.ui.graphics.Shape {
-    val r = 16.dp
-    return when (position) {
-        CardListPosition.Full -> androidx.compose.foundation.shape.RoundedCornerShape(r)
-        CardListPosition.Head -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = r, topEnd = r)
-        CardListPosition.Tail -> androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = r, bottomEnd = r)
-        else -> androidx.compose.ui.graphics.RectangleShape
-    }
-}

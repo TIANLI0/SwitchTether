@@ -16,13 +16,17 @@ Living log so work survives context limits. Newest entries at the bottom of each
 - `:core:remote` pure JVM: protocol models, pairing link parser, pinned mTLS OkHttp factory, RemoteApi,
   event-stream reducer/client, agent-event log reducer, command outcome helper, step-up payload.
 - `:core:security` Android lib: Keystore identity (TLS client cert) + step-up key + BiometricPrompt.
-- `:core:ui` Android lib: theme over COUITheme, markdown/diff/code renderers, charts, state views.
+- `:core:ui` Android lib: theme over COUI17Theme, markdown/diff/code renderers, charts; exposes
+  COUI17's `coui-patterns` (page scaffold, panels, menus, composer, button tiers, state views).
 - `:app`: screens, ViewModels, ConnectionManager, DataStore, DI container (manual).
-- `third_party/coui17/*`: vendored KMP (android-only) modules, see UPSTREAM.md / PATCHES.md.
+- `third_party/coui17/*`: the COUI17 library (github.com/TIANLI0/COUI17) as a git submodule: KMP
+  (android-only) modules built from source, see its UPSTREAM.md. `git submodule update --init` first.
 
 ## Decisions
-- coui17 vendored at a51f957 via `third_party/coui17/sync_coui17.py` (git archive, LF forced with
-  `-c core.autocrlf=false -c core.eol=lf`; patches re-applied from `patches/`).
+- coui17 was first vendored as source; since 2026-11-24 it is the standalone COUI17 repository,
+  referenced as a submodule. That repository follows upstream by itself (its `upstream-sync`
+  workflow, patches re-applied from `patches/`); here a new version is a submodule bump
+  (`git -C third_party/coui17 pull origin main`, rebuild, run the tests, commit the pointer).
 - Patch 0001 removes `org.lsposed.hiddenapibypass` (AOSP API 36 `View.setBackdropRenderEffect`
   path). Non-OPPO devices fall back to the Compose blur engine (same as API < 36).
 - App theme provides `LocalPlatformAppBarMaterialEnabled/LocalPlatformBottomBarMaterialEnabled = false`

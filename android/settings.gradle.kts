@@ -35,7 +35,8 @@ include(":core:remote")
 include(":core:security")
 include(":core:ui")
 
-// coui17 (Costben/coui17) vendored as source, pinned; see third_party/coui17/UPSTREAM.md.
+// COUI17 (github.com/TIANLI0/COUI17) as a git submodule, built from source at the pinned commit;
+// see third_party/coui17/UPSTREAM.md. Run `git submodule update --init` after cloning.
 listOf(
     "coui-shader",
     "coui-blur",
@@ -44,6 +45,8 @@ listOf(
     "coui-ui",
     "coui-preference",
     "coui-icons",
+    // Page-level patterns (page scaffold, panels, glass menu, composer, button tiers).
+    "coui-patterns",
 ).forEach { name ->
     include(":$name")
     project(":$name").projectDir = file("third_party/coui17/$name")

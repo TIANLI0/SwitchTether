@@ -1,8 +1,9 @@
 package io.github.tianli0.switchtether.ui.onboarding
 
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.StepButtons
+import io.github.tianli0.coui17.patterns.SmallButton
 import android.Manifest
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import android.content.pm.PackageManager
@@ -61,7 +62,7 @@ import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.theme.COUITheme
-import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
+import io.github.tianli0.coui17.patterns.rememberPageScrollState
 import io.github.tianli0.switchtether.BuildConfig
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.PairingException
@@ -69,8 +70,8 @@ import io.github.tianli0.switchtether.domain.PairingResult
 import io.github.tianli0.switchtether.remote.pairing.PairingLink
 import io.github.tianli0.switchtether.remote.tls.Fingerprints
 import io.github.tianli0.switchtether.ui.appContainer
-import io.github.tianli0.switchtether.ui.common.TextInput
-import io.github.tianli0.switchtether.ui.components.Banner
+import io.github.tianli0.coui17.patterns.TextInput
+import io.github.tianli0.coui17.patterns.NoticeBanner
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -160,10 +161,10 @@ fun OnboardingContent(
             .navigationBarsPadding()
             .imePadding()
             .verticalScroll(rememberPageScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = io.github.tianli0.coui17.patterns.PageDefaults.CardGutter, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+        OnPageColumn(Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
             when (state) {
                 PairingUiState.Intro -> IntroContent(linkText, deviceSecure, revokedReason, onLinkTextChange, onSubmitLink, onScan, onPickNearby, onEnterAddress, nearbyOverride)
                 PairingUiState.Scanning -> ScanContent(onScanned, onBack)
@@ -214,7 +215,7 @@ private fun IntroContent(
 ) {
     Title(stringResource(R.string.app_name), stringResource(R.string.onboarding_subtitle))
     if (revokedReason != null) {
-        Banner(stringResource(R.string.onboarding_revoked, revokedReason.second ?: "—", revokedReason.first), LocalDevColors.current.danger, Modifier.clip(SquircleShape(10.dp)))
+        NoticeBanner(stringResource(R.string.onboarding_revoked, revokedReason.second ?: "—", revokedReason.first), LocalDevColors.current.danger, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     Card(Modifier.fillMaxWidth()) {
@@ -230,7 +231,7 @@ private fun IntroContent(
     }
     if (!deviceSecure) {
         Spacer(Modifier.height(12.dp))
-        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
+        NoticeBanner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     Button(
@@ -278,39 +279,13 @@ private fun IntroContent(
 }
 
 /**
- * The actions that end an onboarding step, as the COUI17 button bar draws them: two 44dp capsules
- * side by side, the step's own action filled and on the right. A long or destructive way out is a
- * link under the filled button instead ([secondaryAsLink]).
+ * The onboarding column. It is not inside a `Page`, so it says itself that its content sits on the
+ * page colour: text fields then fill themselves with the card colour instead of vanishing.
  */
 @Composable
-private fun StepButtons(
-    primary: String,
-    onPrimary: () -> Unit,
-    primaryEnabled: Boolean = true,
-    primaryTag: String? = null,
-    secondary: String? = null,
-    onSecondary: () -> Unit = {},
-    secondaryAsLink: Boolean = false,
-) {
-    val tag = if (primaryTag != null) Modifier.testTag(primaryTag) else Modifier
-    val colors = ButtonDefaults.buttonColorsPrimary()
-    if (secondary == null || secondaryAsLink) {
-        Button(onClick = onPrimary, enabled = primaryEnabled, modifier = Modifier.fillMaxWidth().then(tag), colors = colors) {
-            Text(primary, color = if (primaryEnabled) colors.contentColor else colors.disabledContentColor)
-        }
-        if (secondary != null) {
-            Spacer(Modifier.height(4.dp))
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                LinkButton(secondary, onSecondary, color = LocalDevColors.current.danger)
-            }
-        }
-        return
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextButton(text = secondary, onClick = onSecondary, modifier = Modifier.weight(1f))
-        Button(onClick = onPrimary, enabled = primaryEnabled, modifier = Modifier.weight(1f).then(tag), colors = colors) {
-            Text(primary, color = if (primaryEnabled) colors.contentColor else colors.disabledContentColor, maxLines = 1)
-        }
+private fun OnPageColumn(modifier: Modifier, content: @Composable () -> Unit) {
+    androidx.compose.runtime.CompositionLocalProvider(io.github.tianli0.coui17.patterns.LocalOnPageColor provides true) {
+        Column(modifier) { content() }
     }
 }
 
@@ -374,7 +349,7 @@ private fun ConfirmContent(link: PairingLink, deviceSecure: Boolean, onPair: () 
     Text(stringResource(R.string.confirm_fingerprint_hint), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
     if (!deviceSecure) {
         Spacer(Modifier.height(10.dp))
-        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
+        NoticeBanner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     StepButtons(
@@ -454,7 +429,7 @@ private fun CodeContent(
     }
     if (!deviceSecure) {
         Spacer(Modifier.height(10.dp))
-        Banner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
+        NoticeBanner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     StepButtons(
@@ -505,11 +480,11 @@ private fun VerificationContent(result: PairingResult, onDone: () -> Unit, onRej
         },
     )
     if (!result.codesMatch) {
-        Banner(stringResource(R.string.verify_mismatch), dev.danger, Modifier.clip(SquircleShape(10.dp)))
+        NoticeBanner(stringResource(R.string.verify_mismatch), dev.danger, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     if (!result.stepUpEnabled) {
-        Banner(stringResource(R.string.verify_no_stepup), dev.warn, Modifier.clip(SquircleShape(10.dp)))
+        NoticeBanner(stringResource(R.string.verify_no_stepup), dev.warn, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     Spacer(Modifier.height(8.dp))

@@ -37,7 +37,7 @@ import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.files.FileTypes
-import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
+import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 

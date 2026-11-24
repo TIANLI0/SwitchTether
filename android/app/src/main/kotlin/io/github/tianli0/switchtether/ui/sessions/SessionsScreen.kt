@@ -2,7 +2,7 @@ package io.github.tianli0.switchtether.ui.sessions
 
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Box
-import io.github.tianli0.switchtether.ui.components.LinkButton
+import io.github.tianli0.coui17.patterns.LinkButton
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,14 +33,14 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
-import io.github.tianli0.switchtether.ui.common.pageContainerColor
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
+import io.github.tianli0.coui17.patterns.ToolbarIcon
+import io.github.tianli0.coui17.patterns.pageContainerColor
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.nav.Route

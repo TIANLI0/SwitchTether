@@ -1,10 +1,10 @@
 package io.github.tianli0.switchtether.ui.workspace
 
 import androidx.compose.foundation.layout.width
-import io.github.tianli0.switchtether.ui.common.MenuEntry
-import io.github.tianli0.switchtether.ui.common.AppMenu
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.MenuEntry
+import io.github.tianli0.coui17.patterns.GlassMenu
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -91,10 +91,10 @@ import io.github.tianli0.switchtether.remote.protocol.TermCursor
 import io.github.tianli0.switchtether.remote.protocol.TermLine
 import io.github.tianli0.switchtether.remote.terminal.TermKey
 import io.github.tianli0.switchtether.remote.terminal.TermPalette
-import io.github.tianli0.switchtether.ui.common.ConfirmDialog
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
+import io.github.tianli0.coui17.patterns.ConfirmDialog
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
+import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
 private val TermBg = Color(0xFF15171A)
@@ -178,7 +178,7 @@ fun TerminalActions(state: TerminalUiState, vm: TerminalViewModel, controller: T
     }
     Box {
         ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { menu = true })
-        AppMenu(
+        GlassMenu(
             show = menu,
             entries = buildList {
                 add(MenuEntry(stringResource(R.string.term_new)) { controller.showShells = true })
@@ -200,7 +200,7 @@ fun TerminalActions(state: TerminalUiState, vm: TerminalViewModel, controller: T
             onDismiss = { menu = false },
         )
         val shells = state.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
-        AppMenu(
+        GlassMenu(
             show = controller.showShells,
             entries = shells.map { sh -> MenuEntry(sh.name.ifBlank { sh.id }) { vm.create(sh.id.ifBlank { null }, estimate) } },
             onDismiss = { controller.showShells = false },

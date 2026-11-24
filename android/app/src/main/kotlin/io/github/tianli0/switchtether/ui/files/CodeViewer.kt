@@ -1,5 +1,8 @@
 package io.github.tianli0.switchtether.ui.files
 
+import io.github.tianli0.coui17.patterns.MenuEntry
+import io.github.tianli0.coui17.patterns.GlassMenu
+import io.github.tianli0.coui17.patterns.FormDialog
 import android.content.ClipData
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -75,9 +78,9 @@ import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.files.TextDocument
 import io.github.tianli0.switchtether.files.TextMatch
-import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
-import io.github.tianli0.switchtether.ui.common.TextInput
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
+import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
+import io.github.tianli0.coui17.patterns.TextInput
+import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -188,23 +191,21 @@ fun CodeViewer(
             )
             Box {
                 ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { menuOpen = true })
-                WindowListPopup(show = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    val copiedAll = stringResource(R.string.files_copied)
-                    val items = listOf(
-                        stringResource(R.string.files_copy_all) to {
-                            scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(path, text))) }
-                            Toast.makeText(context, copiedAll, Toast.LENGTH_SHORT).show()
-                        },
-                        stringResource(R.string.files_goto_line) to { gotoOpen = true },
-                        stringResource(R.string.files_text_larger) to { fontSp = (fontSp + 1f).coerceAtMost(MAX_FONT_SP) },
-                        stringResource(R.string.files_text_smaller) to { fontSp = (fontSp - 1f).coerceAtLeast(MIN_FONT_SP) },
-                    )
-                    ListPopupColumn {
-                        items.forEachIndexed { i, (label, act) ->
-                            DropdownImpl(text = label, optionSize = items.size, isSelected = false, index = i, onSelectedIndexChange = { menuOpen = false; act() })
-                        }
-                    }
-                }
+                val copiedAll = stringResource(R.string.files_copied)
+                val items = listOf(
+                    stringResource(R.string.files_copy_all) to {
+                        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(path, text))) }
+                        Toast.makeText(context, copiedAll, Toast.LENGTH_SHORT).show()
+                    },
+                    stringResource(R.string.files_goto_line) to { gotoOpen = true },
+                    stringResource(R.string.files_text_larger) to { fontSp = (fontSp + 1f).coerceAtMost(MAX_FONT_SP) },
+                    stringResource(R.string.files_text_smaller) to { fontSp = (fontSp - 1f).coerceAtLeast(MIN_FONT_SP) },
+                )
+                GlassMenu(
+                    show = menuOpen,
+                    onDismiss = { menuOpen = false },
+                    entries = items.map { (label, act) -> MenuEntry(label, onClick = act) },
+                )
             }
         }
         if (findOpen) {
@@ -380,19 +381,19 @@ private fun GotoLineDialog(lineCount: Int, onDismiss: () -> Unit, onGo: (Int) ->
     var value by remember { mutableStateOf("") }
     val n = value.trim().toIntOrNull()
     val valid = n != null && n in 1..lineCount
-    WindowDialog(show = true, title = stringResource(R.string.files_goto_line), onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth()) {
-            Box(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
-                TextInput(
-                    value, { value = it.filter(Char::isDigit) }, stringResource(R.string.files_goto_line_hint, lineCount),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { if (valid) onGo(n!!) }),
-                )
-            }
-            DialogButtonBar(
-                negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = onDismiss),
-                positive = DialogButtonBarAction(text = stringResource(R.string.action_ok), enabled = valid, onClick = { if (valid) onGo(n!!) }),
-            )
-        }
+    FormDialog(
+        show = true,
+        title = stringResource(R.string.files_goto_line),
+        confirmText = stringResource(R.string.action_ok),
+        confirmEnabled = valid,
+        onConfirm = { if (valid) onGo(n!!) },
+        onDismiss = onDismiss,
+    ) {
+        TextInput(
+            value, { value = it.filter(Char::isDigit) }, stringResource(R.string.files_goto_line_hint, lineCount),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
+            keyboardActions = KeyboardActions(onGo = { if (valid) onGo(n!!) }),
+        )
+
     }
 }

@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.common
 
+import io.github.tianli0.coui17.patterns.LocalPageTopInset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -8,8 +9,8 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.NotConnectedException
 import io.github.tianli0.switchtether.remote.api.ApiException
 import io.github.tianli0.switchtether.remote.protocol.ErrorCodes
-import io.github.tianli0.switchtether.ui.components.ErrorState
-import io.github.tianli0.switchtether.ui.components.LoadingState
+import io.github.tianli0.coui17.patterns.ErrorState
+import io.github.tianli0.coui17.patterns.LoadingState
 import kotlin.coroutines.cancellation.CancellationException
 
 /** Async UI value with real loading / error / offline states (no fake data). */

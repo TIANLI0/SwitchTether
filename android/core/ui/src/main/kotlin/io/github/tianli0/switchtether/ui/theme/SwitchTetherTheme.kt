@@ -1,22 +1,17 @@
 package io.github.tianli0.switchtether.ui.theme
 
+import io.github.suqi8.coui.kmp.theme.COUITheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
-import io.github.suqi8.coui.kmp.basic.LocalPlatformAppBarMaterialEnabled
-import io.github.suqi8.coui.kmp.basic.LocalPlatformBottomBarMaterialEnabled
-import io.github.suqi8.coui.kmp.theme.COUITheme
-import io.github.suqi8.coui.kmp.theme.ColorSchemeMode
-import io.github.suqi8.coui.kmp.theme.ThemeController
-import io.github.suqi8.coui.kmp.theme.darkColorScheme
-import io.github.suqi8.coui.kmp.theme.lightColorScheme
+import io.github.tianli0.coui17.patterns.Accent
+import io.github.tianli0.coui17.patterns.COUI17Theme
 
 /** SwitchTether brand accent (logo background). */
 val BrandBlue = Color(0xFF1F6BFF)
@@ -106,73 +101,36 @@ object DevType {
 }
 
 /**
- * App theme: COUITheme (ColorOS look) + developer colors.
+ * App theme: the COUI17 library's `COUI17Theme` (ColorOS look, the brand accent in every accent
+ * slot, system bars matched to the theme) + developer colors.
  *
  * ColorOS 17 glass materials (title-bar buttons, dialogs, sheets, the navigation capsule) use
  * coui17's blur; the library falls back to flat fills below Android 13 or with system blur off.
- * The Oplus-only native materials of coui17 (`LocalPlatform*MaterialEnabled`) are switched off so
- * the library never reflects into private `com.oplus.*` framework classes; the portable Compose
- * blur engine is used everywhere (see third_party/coui17/PATCHES.md).
+ * `COUI17Theme` keeps the Oplus-only native materials off (`platformMaterials = false`), so the
+ * library never reflects into private `com.oplus.*` framework classes; the portable Compose blur
+ * engine is used everywhere (see third_party/coui17/UPSTREAM.md).
  */
 @Composable
 fun SwitchTetherTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -> Unit) {
-    val systemDark = isSystemInDarkTheme()
     val dark = when (mode) {
-        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val controller = remember(mode) {
-        ThemeController(
-            colorSchemeMode = when (mode) {
-                ThemeMode.SYSTEM -> ColorSchemeMode.System
-                ThemeMode.LIGHT -> ColorSchemeMode.Light
-                ThemeMode.DARK -> ColorSchemeMode.Dark
-            },
-            lightColors = lightColorScheme(
-                primary = BrandBlue,
-                primaryVariant = BrandBlue,
-                primaryContainer = BrandBlue,
-                tertiaryContainer = BrandBlue.copy(alpha = 0.15f),
-                onTertiaryContainer = BrandBlue,
-                // The fill of a filled (primary) button. Left at COUI's stock #0080FF it disagreed
-                // with the accent of switches, radios and links on the same screen.
-                containerTheme = BrandBlue,
-            ),
-            darkColors = darkColorScheme(
-                primary = BrandBlueDark,
-                primaryVariant = BrandBlueDark,
-                primaryContainer = BrandBlueDark,
-                tertiaryContainer = BrandBlueDark.copy(alpha = 0.2f),
-                onTertiaryContainer = BrandBlueDark,
-                containerTheme = BrandBlueDark,
-            ),
-        )
-    }
-    // Edge-to-edge: the bars are transparent and the page runs under them, so their icons must follow
-    // the app's own theme (enableEdgeToEdge() only follows the system's: dark icons on a dark page
-    // when the app is set to dark on a light system), and no grey contrast scrim on the gesture bar.
-    val view = androidx.compose.ui.platform.LocalView.current
-    if (!view.isInEditMode) {
-        androidx.compose.runtime.SideEffect {
-            val window = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
-                .filterIsInstance<android.app.Activity>().firstOrNull()?.window ?: return@SideEffect
-            androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !dark
-                isAppearanceLightNavigationBars = !dark
-            }
-            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                window.isNavigationBarContrastEnforced = false
-                window.isStatusBarContrastEnforced = false
-            }
-        }
-    }
-    COUITheme(controller = controller) {
-        CompositionLocalProvider(
-            LocalDevColors provides if (dark) DevColors.Dark else DevColors.Light,
-            LocalPlatformAppBarMaterialEnabled provides false,
-            LocalPlatformBottomBarMaterialEnabled provides false,
-            content = content,
-        )
+    COUI17Theme(
+        mode = when (mode) {
+            ThemeMode.SYSTEM -> io.github.tianli0.coui17.patterns.ThemeMode.System
+            ThemeMode.LIGHT -> io.github.tianli0.coui17.patterns.ThemeMode.Light
+            ThemeMode.DARK -> io.github.tianli0.coui17.patterns.ThemeMode.Dark
+        },
+        accent = BrandAccent,
+    ) {
+        // One red: the developer palette's danger is the COUI scheme's error colour, the one the
+        // library's own danger buttons and links use.
+        val dev = (if (dark) DevColors.Dark else DevColors.Light).copy(danger = COUITheme.colorScheme.error)
+        CompositionLocalProvider(LocalDevColors provides dev, content = content)
     }
 }
+
+/** The brand accent in both themes, for `COUI17Theme`. */
+val BrandAccent = Accent(light = BrandBlue, dark = BrandBlueDark)

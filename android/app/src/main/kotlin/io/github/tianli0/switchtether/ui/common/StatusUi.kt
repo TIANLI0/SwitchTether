@@ -16,7 +16,7 @@ import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
 import io.github.tianli0.switchtether.remote.protocol.ControlLevel
 import io.github.tianli0.switchtether.remote.protocol.Hello
-import io.github.tianli0.switchtether.ui.components.Banner
+import io.github.tianli0.coui17.patterns.NoticeBanner
 import io.github.tianli0.switchtether.ui.theme.DevColors
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.delay
@@ -78,7 +78,7 @@ fun ConnectionBanner(state: ConnectionState, onRetry: () -> Unit, modifier: Modi
     // (only effective when the phone is on the computer's LAN and the computer allows it), then retries.
     val wake = (state as? ConnectionState.Offline)?.desktop?.wake.orEmpty()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    Banner(
+    NoticeBanner(
         text = connectionText(state),
         color = connectionColor(state),
         modifier = modifier,

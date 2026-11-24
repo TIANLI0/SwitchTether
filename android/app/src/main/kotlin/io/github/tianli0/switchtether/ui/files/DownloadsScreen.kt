@@ -1,9 +1,9 @@
 package io.github.tianli0.switchtether.ui.files
 
-import io.github.tianli0.switchtether.ui.common.TextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -44,15 +44,15 @@ import io.github.tianli0.switchtether.files.FileCache
 import io.github.tianli0.switchtether.files.FileStore
 import io.github.tianli0.switchtether.files.FileTypes
 import io.github.tianli0.switchtether.ui.appContainer
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
-import io.github.tianli0.switchtether.ui.common.ConfirmDialog
+import io.github.tianli0.coui17.patterns.PanelSheet
+import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.Page
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.coui17.patterns.ToolbarIcon
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -126,11 +126,11 @@ fun DownloadsScreen(onBack: () -> Unit) {
                 Text(
                     stringResource(R.string.downloads_saved_hint, FileStore.DOWNLOAD_FOLDER),
                     style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = TextGutter).padding(bottom = 8.dp),
+                    modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 8.dp),
                 )
             }
             if (items.isEmpty()) {
-                item { Text(stringResource(R.string.downloads_empty), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) }
+                item { Text(stringResource(R.string.downloads_empty), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
             } else {
                 item {
                     Text(
@@ -193,15 +193,15 @@ fun DownloadsScreen(onBack: () -> Unit) {
                 Text(
                     stringResource(R.string.downloads_cache_hint),
                     style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = TextGutter),
+                    modifier = Modifier.padding(horizontal = PageDefaults.TextGutter),
                 )
             }
-            notice?.let { n -> item { Text(n, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) } }
+            notice?.let { n -> item { Text(n, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) } }
         }
     }
 
     actionsFor?.let { r ->
-        AppBottomSheet(show = true, title = r.name, onDismissRequest = { actionsFor = null }) {
+        PanelSheet(show = true, title = r.name, onDismissRequest = { actionsFor = null }) {
             val opts = listOf(
                 stringResource(R.string.downloads_open) to {
                     actionsFor = null

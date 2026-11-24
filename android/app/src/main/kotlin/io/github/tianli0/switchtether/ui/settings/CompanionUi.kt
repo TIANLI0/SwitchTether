@@ -3,10 +3,10 @@ package io.github.tianli0.switchtether.ui.settings
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.SmallButton
 import android.Manifest
 import android.app.Activity
 import android.content.IntentSender
@@ -40,7 +40,7 @@ import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.CompanionLink
 import io.github.tianli0.switchtether.ui.appContainer
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
+import io.github.tianli0.coui17.patterns.PanelSheet
 
 /**
  * Settings row "Bind computer (Bluetooth)" and its sheet: associate the computer through the
@@ -107,13 +107,13 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
         }
     }
 
-    AppBottomSheet(show = show, title = stringResource(R.string.companion_title), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.companion_title), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
             Text(
                 stringResource(R.string.companion_intro),
                 style = COUITheme.textStyles.footnote1,
                 color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 12.dp),
+                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp),
             )
             if (associations.isNotEmpty()) {
                 GroupCard {
@@ -170,7 +170,7 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
                 )
             }
             message?.let {
-                Text(it, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.error, modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 8.dp))
+                Text(it, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.error, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 8.dp))
             }
         }
     }

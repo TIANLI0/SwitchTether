@@ -1,7 +1,7 @@
 package io.github.tianli0.switchtether
 
 import io.github.tianli0.switchtether.remote.session.AgentEventLog
-import io.github.tianli0.switchtether.ui.components.SegmentPosition
+import io.github.tianli0.coui17.patterns.SegmentPosition
 import io.github.tianli0.switchtether.ui.sessions.TimelineRow
 import io.github.tianli0.switchtether.ui.sessions.buildTimeline
 import io.github.tianli0.switchtether.ui.sessions.pendingRequestKeys

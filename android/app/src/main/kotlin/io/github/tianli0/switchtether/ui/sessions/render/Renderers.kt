@@ -1,10 +1,10 @@
 package io.github.tianli0.switchtether.ui.sessions.render
 
-import io.github.tianli0.switchtether.ui.components.ExpandBody
+import io.github.tianli0.coui17.patterns.ExpandBody
 import androidx.compose.foundation.layout.offset
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
@@ -79,13 +79,13 @@ import io.github.tianli0.switchtether.ui.common.capStatusLabel
 import io.github.tianli0.switchtether.ui.common.resolutionLabel
 import io.github.tianli0.switchtether.ui.common.shortClock
 import io.github.tianli0.switchtether.ui.common.stepStatusLabel
-import io.github.tianli0.switchtether.ui.components.AttentionCard
-import io.github.tianli0.switchtether.ui.components.ChatBubble
-import io.github.tianli0.switchtether.ui.components.CollapsibleRow
-import io.github.tianli0.switchtether.ui.components.StatusPill
+import io.github.tianli0.coui17.patterns.AttentionCard
+import io.github.tianli0.coui17.patterns.ChatBubble
+import io.github.tianli0.coui17.patterns.CollapsibleRow
+import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.components.StepStatus
 import io.github.tianli0.switchtether.ui.components.StepStatusIndicator
-import io.github.tianli0.switchtether.ui.components.TimelineCard
+import io.github.tianli0.coui17.patterns.TimelineCard
 import io.github.tianli0.switchtether.ui.diff.DiffView
 import io.github.tianli0.switchtether.ui.markdown.MarkdownView
 import io.github.tianli0.switchtether.ui.theme.DevType
@@ -902,7 +902,9 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                         tone = ActionTone.Danger,
                     )
                 }
-                Button(
+                SmallButton(
+                    text = stringResource(R.string.render_submit_answer),
+                    tone = ActionTone.Primary,
                     onClick = {
                         val answers = buildJsonObject {
                             questions.forEach { q ->
@@ -925,9 +927,7 @@ fun Question(item: RenderItem, ctx: RenderContext) {
                         ctx.onAnswerAction(d.str("requestId").orEmpty(), answers, "submit")
                     },
                     enabled = enabled && complete,
-                    colors = ButtonDefaults.buttonColorsPrimary(),
-                    size = io.github.suqi8.coui.kmp.basic.ButtonSize.Small,
-                ) { Text(stringResource(R.string.render_submit_answer), color = COUITheme.colorScheme.onPrimary, style = io.github.tianli0.switchtether.ui.components.compactButtonTextStyle()) }
+                )
             }
             if (!ctx.answer.usable) BlockedNote(ctx.answer, ctx.capabilityReason)
         }

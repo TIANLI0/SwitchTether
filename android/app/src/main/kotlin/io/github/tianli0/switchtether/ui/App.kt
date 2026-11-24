@@ -60,8 +60,8 @@ import io.github.tianli0.switchtether.AppContainer
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.SwitchTetherApp
 import io.github.tianli0.switchtether.connection.ConnectionState
-import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
-import io.github.tianli0.switchtether.ui.common.pageContainerColor
+import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
+import io.github.tianli0.coui17.patterns.pageContainerColor
 import io.github.tianli0.switchtether.ui.home.HomeScreen
 import io.github.tianli0.switchtether.ui.manage.ManageScreen
 import io.github.tianli0.switchtether.ui.manage.ProvidersScreen
@@ -100,7 +100,7 @@ fun SwitchTetherRoot() {
       // coui's default sheet close capsule label (patch 0002) follows the app locale.
       CompositionLocalProvider(
         io.github.suqi8.coui.kmp.layout.LocalSheetCloseLabel provides stringResource(R.string.action_close),
-        io.github.tianli0.switchtether.ui.components.LocalExpandStateLabels provides (stringResource(R.string.state_expanded) to stringResource(R.string.state_collapsed)),
+        io.github.tianli0.coui17.patterns.LocalExpandStateLabels provides (stringResource(R.string.state_expanded) to stringResource(R.string.state_collapsed)),
         // Long page titles (session names) scroll instead of being cut (coui patch 0004).
         io.github.suqi8.coui.kmp.basic.LocalTopAppBarTitleMarquee provides true,
         io.github.tianli0.switchtether.ui.code.LocalCodeCopyLabel provides stringResource(R.string.action_copy),

@@ -1,8 +1,9 @@
 package io.github.tianli0.switchtether.ui.common
 
+import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
-import io.github.tianli0.switchtether.ui.common.SheetButtons
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.SheetButtons
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -70,13 +71,13 @@ fun PinExplainSheet() {
     val context = LocalContext.current
     val container = appContainer()
     val pending by pinExplain.collectAsStateWithLifecycle()
-    AppBottomSheet(show = pending != null, title = stringResource(R.string.pin_sheet_title), onDismissRequest = { pinExplain.value = null }) {
+    PanelSheet(show = pending != null, title = stringResource(R.string.pin_sheet_title), onDismissRequest = { pinExplain.value = null }) {
         Column(Modifier.fillMaxWidth()) {
             Text(
                 stringResource(R.string.pin_sheet_body),
                 style = COUITheme.textStyles.body2,
                 color = COUITheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 12.dp),
+                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp),
             )
             val fluidCloud = fluidCloudSettingsIntent(context)
             val openSettings = DialogButtonBarAction(text = stringResource(R.string.pin_open_settings), onClick = { runCatching { context.startActivity(promotionSettingsIntent(context)) } })

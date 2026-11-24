@@ -1,13 +1,14 @@
 package io.github.tianli0.switchtether.ui.workspace
 
-import io.github.tianli0.switchtether.ui.common.MenuEntry
-import io.github.tianli0.switchtether.ui.common.AppMenu
+import io.github.tianli0.coui17.patterns.FormDialog
+import io.github.tianli0.coui17.patterns.MenuEntry
+import io.github.tianli0.coui17.patterns.GlassMenu
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.nav.Route
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageScrollState
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 
 
@@ -62,15 +63,15 @@ import io.github.tianli0.switchtether.ui.code.CodeBlockView
 import io.github.tianli0.switchtether.ui.code.SyntaxHighlighter
 import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace
-import io.github.tianli0.switchtether.ui.common.Page
-import io.github.tianli0.switchtether.ui.common.TextInput
-import io.github.tianli0.switchtether.ui.common.ToolbarIcon
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.components.StatusPill
+import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
+import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.coui17.patterns.TextInput
+import io.github.tianli0.coui17.patterns.ToolbarIcon
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.diff.DiffView
 import io.github.tianli0.switchtether.ui.theme.DevType
@@ -157,7 +158,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                             cardListPosition = cardListPositionOf(term.terminals.size, term.terminals.size + 1),
                         )
                         val shells = term.shells.ifEmpty { listOf(io.github.tianli0.switchtether.remote.protocol.ShellInfo("", stringResource(R.string.term_default_shell), "")) }
-                        AppMenu(
+                        GlassMenu(
                             show = showShells,
                             entries = shells.map { sh ->
                                 MenuEntry(sh.name.ifBlank { sh.id }) {
@@ -329,27 +330,19 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
     var showRepoDialog by rememberSaveable { mutableStateOf(false) }
     if (showRepoDialog) {
         var repoDraft by remember(state.repo) { mutableStateOf(state.repo.orEmpty()) }
-        WindowDialog(
+        FormDialog(
             show = true,
             title = stringResource(R.string.git_repo),
-            onDismissRequest = { showRepoDialog = false },
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                Box(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
-                    TextInput(repoDraft, { repoDraft = it }, stringResource(R.string.git_repo))
-                }
-                DialogButtonBar(
-                    negative = DialogButtonBarAction(text = stringResource(R.string.action_cancel), onClick = { showRepoDialog = false }),
-                    positive = DialogButtonBarAction(
-                        text = stringResource(R.string.action_ok),
-                        enabled = repoDraft.trim().isNotEmpty(),
-                        onClick = {
+            confirmText = stringResource(R.string.action_ok),
+            confirmEnabled = repoDraft.trim().isNotEmpty(),
+            onConfirm = {
                             vm.setRepo(repoDraft.trim())
                             showRepoDialog = false
                         },
-                    ),
-                )
-            }
+            onDismiss = { showRepoDialog = false },
+        ) {
+            TextInput(repoDraft, { repoDraft = it }, stringResource(R.string.git_repo))
+
         }
     }
     Column(Modifier.fillMaxSize()) {

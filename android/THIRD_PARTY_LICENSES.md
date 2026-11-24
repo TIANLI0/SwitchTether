@@ -9,7 +9,7 @@ Settings → About → Open source licenses (`LicensesScreen`).
 
 | Component | Version | License | Notes |
 | :--- | :--- | :--- | :--- |
-| coui17 (`Costben/coui17`) modules coui-ui, coui-preference, coui-icons, coui-core, coui-blur, coui-shader, coui-squircle | source @ `7135f75` | Apache-2.0; 85 files MPL-2.0 | Vendored in `third_party/coui17` (LICENSE, NOTICE kept). MPL sources: https://github.com/Costben/coui17/tree/7135f75aa4346fa03e589e0e41235386f309bdd8/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/kit and …/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit |
+| COUI17 (`TIANLI0/COUI17`, a downstream of `Costben/coui17`) modules coui-ui, coui-preference, coui-icons, coui-core, coui-blur, coui-shader, coui-squircle | submodule @ `c78553d` (upstream `7135f75`) | Apache-2.0; 85 files MPL-2.0 | Git submodule `third_party/coui17` (its LICENSE and NOTICE apply). MPL sources: https://github.com/TIANLI0/COUI17/tree/c78553dc7d17906f414728bb62894ba2ee43dbc3/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/kit and …/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit |
 | ↳ upstreams: COUI (`suqi8/coui`), Miuix (`compose-miuix-ui/miuix`) | — | Apache-2.0 | Credited in coui17 `NOTICE` |
 | ↳ COUI-Kit (`ItosEO/COUI-Kit`) ported files | — | MPL-2.0 | `kit/**` files keep their MPL-2.0 headers |
 | Compose Multiplatform foundation (`org.jetbrains.compose.foundation`) | 1.12.2 | Apache-2.0 | resolves to androidx.compose 1.12.1 (app pins 1.13.0) |
@@ -58,5 +58,5 @@ Transitive dependencies of the above (AndroidX annotation/collection/arch-core, 
 
 ## Deliberately NOT used
 
-- `org.lsposed.hiddenapibypass` (coui17 upstream dependency) — patched out, see `third_party/coui17/PATCHES.md`.
+- `org.lsposed.hiddenapibypass` (coui17 upstream dependency) — patched out in COUI17, see `third_party/coui17/UPSTREAM.md`.
 - Google Play Services / ML Kit, Firebase, analytics/crash SDKs, WebView.

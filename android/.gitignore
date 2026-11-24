@@ -7,4 +7,3 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
-third_party/coui17/.sync-staging/

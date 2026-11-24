@@ -96,6 +96,6 @@ your full user privileges — protect your phone accordingly.
 SwitchTether is MIT-licensed ([LICENSE](LICENSE)). It is a fork of
 [CC Switch](https://github.com/farion1231/cc-switch) by Jason Young (MIT); the original README
 is kept as [README_UPSTREAM.md](README_UPSTREAM.md). The Android UI uses
-[coui17](https://github.com/Costben/coui17) (Apache-2.0, with MPL-2.0 files), vendored at a
-pinned commit under `android/third_party/coui17`. SwitchTether is not affiliated with
+[COUI17](https://github.com/TIANLI0/COUI17) (Apache-2.0, with MPL-2.0 files; a downstream of
+[coui17](https://github.com/Costben/coui17)), a git submodule under `android/third_party/coui17`. SwitchTether is not affiliated with
 Anthropic, OpenAI, OPPO or the CC Switch authors.

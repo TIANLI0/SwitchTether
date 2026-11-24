@@ -196,6 +196,9 @@ jobs:
       HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # android/third_party/coui17 is the COUI17 library (TIANLI0/COUI17) as a submodule.
+          submodules: true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

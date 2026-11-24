@@ -1,7 +1,7 @@
 package io.github.tianli0.switchtether.ui.files
 
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -72,7 +72,7 @@ fun TextFileBody(
 @Composable
 private fun BinaryNotice(file: FileContent, onDownload: (() -> Unit)?, onOpenBinary: (() -> Unit)?) {
     val name = FileTypes.fileName(file.path)
-    io.github.tianli0.switchtether.ui.components.PageCard(Modifier.padding(top = 12.dp)) {
+    io.github.tianli0.coui17.patterns.GroupCard(Modifier.padding(top = 12.dp)) {
         Column(
             Modifier.fillMaxWidth().padding(vertical = 28.dp, horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

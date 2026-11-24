@@ -1,6 +1,6 @@
 package io.github.tianli0.switchtether.ui.manage
 
-import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.coui17.patterns.PageDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,13 +19,13 @@ import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.theme.COUITheme
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
+import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.LocalMoney
 import io.github.tianli0.switchtether.remote.protocol.RequestLog
 import io.github.tianli0.switchtether.remote.usage.UsageFormat
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.GroupCard
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import java.time.Instant
 import java.time.ZoneId
@@ -63,8 +63,8 @@ fun RequestLogRow(log: RequestLog, zone: ZoneId, position: io.github.suqi8.coui.
 /** Request detail (metadata only: the desktop never sends request or response bodies). */
 @Composable
 fun RequestLogSheet(log: RequestLog?, zone: ZoneId, onDismiss: () -> Unit) {
-    AppBottomSheet(show = log != null, title = stringResource(R.string.usage_log_detail), onDismissRequest = onDismiss) {
-        val l = log ?: return@AppBottomSheet
+    PanelSheet(show = log != null, title = stringResource(R.string.usage_log_detail), onDismissRequest = onDismiss) {
+        val l = log ?: return@PanelSheet
         val money = LocalMoney.current
         val rows = listOfNotNull(
             stringResource(R.string.usage_log_time) to requestTime(l.createdAtMs, zone),
@@ -100,7 +100,7 @@ fun RequestLogSheet(log: RequestLog?, zone: ZoneId, onDismiss: () -> Unit) {
 @Composable
 fun SyncNote(lastSyncMs: Long?, zone: ZoneId) {
     lastSyncMs ?: return
-    Row(Modifier.fillMaxWidth().padding(horizontal = TextGutter, vertical = 4.dp), horizontalArrangement = Arrangement.Start) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter, vertical = 4.dp), horizontalArrangement = Arrangement.Start) {
         Text(
             stringResource(R.string.usage_last_sync, requestTime(lastSyncMs, zone).dropLast(3)),
             style = COUITheme.textStyles.footnote2,

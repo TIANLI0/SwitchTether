@@ -1,6 +1,6 @@
 package io.github.tianli0.switchtether.ui.settings
 
-import io.github.tianli0.switchtether.ui.common.TextGutter
+import io.github.tianli0.coui17.patterns.PageDefaults
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
@@ -33,18 +33,16 @@ import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.BuildConfig
 import io.github.tianli0.switchtether.R
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import io.github.tianli0.switchtether.connection.ConnectionManager
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.notify.Notifier
 import io.github.tianli0.switchtether.remote.notify.NotifyPrefs
 import io.github.tianli0.switchtether.remote.notify.NotifyType
-import io.github.tianli0.switchtether.ui.common.TextInput
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
+import io.github.tianli0.coui17.patterns.TextInput
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -52,13 +50,12 @@ import io.github.tianli0.switchtether.remote.protocol.StepUpScopes
 import io.github.tianli0.switchtether.remote.tls.Fingerprints
 import io.github.tianli0.switchtether.security.StepUpSignException
 import io.github.tianli0.switchtether.ui.appContainer
-import io.github.tianli0.switchtether.ui.common.ConfirmDialog
+import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.switchtether.ui.common.Page
+import io.github.tianli0.coui17.patterns.Page
 import io.github.tianli0.switchtether.ui.common.connectionText
-import io.github.tianli0.switchtether.ui.components.KeyValueRow
-import io.github.tianli0.switchtether.ui.components.PageCard
-import io.github.tianli0.switchtether.ui.components.SectionHeader
+import io.github.tianli0.coui17.patterns.KeyValueRow
+import io.github.tianli0.coui17.patterns.SectionHeader
 import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
@@ -84,7 +81,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             item {
-                PageCard {
+                GroupCard {
                     ArrowPreference(
                         title = desktop?.name ?: "—",
                         summary = connectionText(conn),
@@ -97,7 +94,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             manageItems()
             item { SectionHeader(stringResource(R.string.settings_security)) }
             item {
-                PageCard {
+                GroupCard {
                     val stepUp = desktop?.stepUpEnabled == true
                     ArrowPreference(
                         title = stringResource(R.string.settings_stepup_test),
@@ -122,7 +119,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             }
             item { SectionHeader(stringResource(R.string.settings_appearance)) }
             item {
-                PageCard {
+                GroupCard {
                     val modes = listOf(
                         ThemeMode.SYSTEM to R.string.theme_system,
                         ThemeMode.LIGHT to R.string.theme_light,
@@ -142,7 +139,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 item {
                     val ctx = androidx.compose.ui.platform.LocalContext.current
-                    PageCard {
+                    GroupCard {
                         ArrowPreference(
                             title = stringResource(R.string.settings_language),
                             summary = stringResource(R.string.settings_language_summary),
@@ -161,7 +158,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             }
             item { SectionHeader(stringResource(R.string.settings_connection)) }
             item {
-                PageCard {
+                GroupCard {
                     SwitchPreference(
                         checked = background,
                         onCheckedChange = { v -> container.setBackgroundConnection(v) },
@@ -199,7 +196,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             }
             item { SectionHeader(stringResource(R.string.settings_storage)) }
             item {
-                PageCard {
+                GroupCard {
                     ArrowPreference(
                         title = stringResource(R.string.downloads_title),
                         summary = stringResource(R.string.downloads_settings_summary),
@@ -216,7 +213,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             }
             item { SectionHeader(stringResource(R.string.settings_about)) }
             item {
-                PageCard {
+                GroupCard {
                     KeyValueRow(stringResource(R.string.settings_version), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                     val updState by container.updates.state.collectAsStateWithLifecycle()
                     var beta by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(container.updates.includePrerelease) }
@@ -248,7 +245,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             }
             item { SectionHeader(stringResource(R.string.settings_desktop)) }
             item {
-                PageCard {
+                GroupCard {
                     ArrowPreference(
                         title = stringResource(R.string.settings_unpair),
                         summary = stringResource(R.string.settings_unpair_summary),
@@ -257,7 +254,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
                     )
                 }
             }
-            item { Spacer(Modifier.height(32.dp + io.github.tianli0.switchtether.ui.common.LocalBottomBarSpace.current)) }
+            item { Spacer(Modifier.height(32.dp + io.github.tianli0.coui17.patterns.LocalBottomBarSpace.current)) }
         }
     }
     ConfirmDialog(
@@ -293,13 +290,13 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
         val d = desktop ?: return@Page
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
-                PageCard {
+                GroupCard {
                     KeyValueRow(stringResource(R.string.field_desktop), d.name)
                     KeyValueRow(stringResource(R.string.field_status), connectionText(conn))
-                    KeyValueRow(stringResource(R.string.field_fingerprint), Fingerprints.grouped(d.fingerprint), mono = true)
-                    KeyValueRow(stringResource(R.string.field_last_host), (d.lastGoodHost ?: "—") + ":" + d.port, mono = true)
-                    KeyValueRow(stringResource(R.string.field_addresses), d.hosts.joinToString("\n"), mono = true)
-                    KeyValueRow(stringResource(R.string.field_device_id), d.deviceId, mono = true)
+                    KeyValueRow(stringResource(R.string.field_fingerprint), Fingerprints.grouped(d.fingerprint))
+                    KeyValueRow(stringResource(R.string.field_last_host), (d.lastGoodHost ?: "—") + ":" + d.port)
+                    KeyValueRow(stringResource(R.string.field_addresses), d.hosts.joinToString("\n"))
+                    KeyValueRow(stringResource(R.string.field_device_id), d.deviceId)
                     KeyValueRow(stringResource(R.string.field_paired_at), Formatters.dateTime(d.pairedAtMs))
                     KeyValueRow(stringResource(R.string.field_step_up), if (d.stepUpEnabled) stringResource(R.string.stepup_enabled) else stringResource(R.string.stepup_disabled))
                     KeyValueRow(stringResource(R.string.field_key_storage), container.keys.securityLevel(d.identityAlias))
@@ -309,7 +306,7 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
                 }
             }
             item {
-                Text(stringResource(R.string.desktop_info_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp))
+                Text(stringResource(R.string.desktop_info_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp))
             }
         }
     }
@@ -333,7 +330,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     promotable = live.canPromote()
                     onPauseOrDispose { }
                 }
-                PageCard {
+                GroupCard {
                     val fIntent = io.github.tianli0.switchtether.ui.common.fluidCloudSettingsIntent(ctx)
                     ArrowPreference(
                         title = stringResource(R.string.live_settings_status),
@@ -364,7 +361,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                 }
             }
             item {
-                PageCard {
+                GroupCard {
                     NotifyType.entries.forEachIndexed { i, type ->
                         SwitchPreference(
                             checked = type in prefs.enabled,
@@ -377,7 +374,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
             }
             item { SectionHeader(stringResource(R.string.notif_quiet)) }
             item {
-                PageCard {
+                GroupCard {
                     SwitchPreference(
                         checked = prefs.quietHoursEnabled,
                         onCheckedChange = { v -> update { it.copy(quietHoursEnabled = v) } },
@@ -409,7 +406,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
             item { SectionHeader(stringResource(R.string.notif_muted_agents)) }
             item {
                 val agents = (listOf("claude_code", "codex", "dsh") + prefs.mutedAgents).distinct()
-                PageCard {
+                GroupCard {
                     agents.forEachIndexed { i, a ->
                         SwitchPreference(
                             checked = a in prefs.mutedAgents,
@@ -429,7 +426,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                         .getOrNull().orEmpty().mapNotNull { it.project?.takeIf { p -> p.isNotBlank() } }.distinct()
                 }
                 val projects = (prefs.mutedProjects.toList() + known).distinct()
-                PageCard {
+                GroupCard {
                     if (projects.isEmpty()) {
                         io.github.suqi8.coui.kmp.basic.BasicComponent(title = stringResource(R.string.notif_muted_projects_empty), cardListPosition = CardListPosition.Full)
                     }
@@ -444,7 +441,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                 }
             }
             item {
-                PageCard {
+                GroupCard {
                     ArrowPreference(
                         title = stringResource(R.string.notif_system_settings),
                         cardListPosition = CardListPosition.Head,
@@ -464,7 +461,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     )
                 }
             }
-            item { Text(stringResource(R.string.notif_privacy), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter)) }
+            item { Text(stringResource(R.string.notif_privacy), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter)) }
         }
     }
 }
@@ -476,7 +473,7 @@ data class LicenseEntry(val name: String, val license: String, val note: String)
 
 /** Mirrors android/THIRD_PARTY_LICENSES.md. */
 val LICENSES = listOf(
-    LicenseEntry("coui17 (Costben/coui17 @ 7135f75)", "Apache-2.0 (+ MPL-2.0 files in kit/**)", "Vendored source, see third_party/coui17. MPL-2.0 sources: https://github.com/Costben/coui17/tree/7135f75aa4346fa03e589e0e41235386f309bdd8/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/kit and https://github.com/Costben/coui17/tree/7135f75aa4346fa03e589e0e41235386f309bdd8/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit"),
+    LicenseEntry("COUI17 (TIANLI0/COUI17, from Costben/coui17 @ 7135f75)", "Apache-2.0 (+ MPL-2.0 files in kit/**)", "Built from source (git submodule third_party/coui17). MPL-2.0 sources: https://github.com/TIANLI0/COUI17/tree/c78553dc7d17906f414728bb62894ba2ee43dbc3/coui-ui/src/commonMain/kotlin/io/github/suqi8/coui/kmp/kit and https://github.com/TIANLI0/COUI17/tree/c78553dc7d17906f414728bb62894ba2ee43dbc3/coui-ui/src/androidMain/kotlin/io/github/suqi8/coui/kmp/kit"),
     LicenseEntry("COUI (suqi8/coui), Miuix (compose-miuix-ui/miuix)", "Apache-2.0", "Upstream projects of coui17 (NOTICE)"),
     LicenseEntry("COUI-Kit (ItosEO/COUI-Kit)", "MPL-2.0", "Ported files keep their MPL-2.0 headers"),
     LicenseEntry("Jetpack Compose / Compose Multiplatform", "Apache-2.0", "Google LLC, JetBrains s.r.o."),
@@ -498,9 +495,9 @@ val LICENSES = listOf(
 fun LicensesScreen(onBack: () -> Unit) {
     Page(title = stringResource(R.string.settings_licenses), onBack = onBack, immersive = true) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-            item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 12.dp)) }
+            item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
             items(LICENSES) { l ->
-                PageCard {
+                GroupCard {
                     Column(Modifier.padding(14.dp)) {
                         Text(l.name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
                         Text(l.license, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.primary)

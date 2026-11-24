@@ -86,6 +86,6 @@ SwitchTether 是基于 [CC Switch](https://github.com/farion1231/cc-switch) 构�
 
 SwitchTether 采用 MIT 许可证（[LICENSE](LICENSE)），是 Jason Young 的
 [CC Switch](https://github.com/farion1231/cc-switch)（MIT）的分支；原 README 保留为
-[README_UPSTREAM.md](README_UPSTREAM.md)。Android 界面使用 [coui17](https://github.com/Costben/coui17)
-（Apache-2.0，含 MPL-2.0 文件），以固定提交的形式收录于 `android/third_party/coui17`。SwitchTether 与
+[README_UPSTREAM.md](README_UPSTREAM.md)。Android 界面使用 [COUI17](https://github.com/TIANLI0/COUI17)
+（Apache-2.0，含 MPL-2.0 文件，源自 [coui17](https://github.com/Costben/coui17)），以 git submodule 的形式位于 `android/third_party/coui17`。SwitchTether 与
 Anthropic、OpenAI、OPPO 及 CC Switch 作者均无关联。

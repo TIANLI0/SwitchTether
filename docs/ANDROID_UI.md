@@ -17,7 +17,7 @@ Source: `android/`. Build: see `android/DEV_NOTES.md`.
  ├─ :core:security   Android Keystore identity (TLS client cert) + step-up key, BiometricPrompt signer
  └─ :core:ui         SwitchTetherTheme (over COUITheme), markdown / diff / code renderers,
                      Canvas bar chart, state views, chips
-third_party/coui17/* vendored coui17 @ a51f957 (Android-only KMP modules), see UPSTREAM.md / PATCHES.md
+third_party/coui17/* COUI17 (github.com/TIANLI0/COUI17) as a git submodule (Android-only KMP modules), see its UPSTREAM.md
 ```
 
 Layering: Compose screen (stateless `XContent(state, callbacks)` + thin `XScreen(vm)`) →
@@ -190,10 +190,26 @@ Launcher icon: adaptive icon, `#1F6BFF` background + vector foreground converted
 
 ## 8. coui17 integration
 
-Vendored source at a pinned SHA (no SNAPSHOT/JitPack), Android-only KMP modules with our build
-files, `hiddenapibypass` patched out, Oplus private materials disabled at the theme root, Apache
-NOTICE + MPL headers kept, MPL source link in the licenses screen. Re-sync with
-`third_party/coui17/sync_coui17.py`.
+The [COUI17](https://github.com/TIANLI0/COUI17) repository as a git submodule at a pinned commit
+(no SNAPSHOT/JitPack), built from source: Android-only KMP modules, `hiddenapibypass` patched out,
+Oplus private materials disabled at the theme root, Apache NOTICE + MPL headers kept, MPL source
+link in the licenses screen. COUI17 follows `Costben/coui17` by itself (its `upstream-sync`
+workflow); here a new version is a submodule bump.
+
+The generic building blocks this document describes were extracted from the app into COUI17's
+`coui-patterns` module (`io.github.tianli0.coui17.patterns`) and the app now uses them from there.
+Names that changed on the way: `AppBottomSheet` → `PanelSheet`, `AppMenu` → `GlassMenu`,
+`Banner` → `NoticeBanner`, `TextGutter` / `SheetTextGutter` → `PageDefaults.TextGutter`; older
+sections below still use the old names. Moved unchanged: `Page` and its list helpers, `GroupCard`,
+`BackArrow`, `ToolbarIcon`, `SheetButtons`, `ConfirmDialog`, `FullScreenDialog`, `TextInput`,
+`SmallButton` / `LinkButton` / `ActionTone`, `StepButtons`, `StatusPill`, `SectionHeader`, the
+loading / error / empty states, `KeyValueRow`, `glassSurface` / `glassHeader` /
+`LocalGlassBackdrop`, `ExpandBody`, `InputPill` / `ComposerKey` / `RoundIconButton`,
+`CollapsibleRow`, `InfoChip`, `StatFigure`, `StatusDot`, `Modifier.segment`, `ChatBubble`,
+`AttentionCard`, `TimelineCard`. `SwitchTetherTheme` is `COUI17Theme` with the brand accent plus
+`DevColors`. What stays in the app is agent- or product-specific: `AgentAvatar`, `StepStatus` and
+its indicator, `SubStepsToggle`, `PageCard`, `FilterChip`, `CommandPromptDialog`, the connection
+and permission strips, markdown / diff / code renderers and charts.
 
 ## 10. Phase B — Workspace, background, notifications
 

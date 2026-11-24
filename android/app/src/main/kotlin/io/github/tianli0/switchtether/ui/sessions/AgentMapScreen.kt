@@ -1,9 +1,9 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.switchtether.ui.components.ExpandBody
-import io.github.tianli0.switchtether.ui.common.TextGutter
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.ExpandBody
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -59,12 +59,12 @@ import io.github.tianli0.switchtether.remote.session.SubagentNode
 import io.github.tianli0.switchtether.remote.session.SubagentTree
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.switchtether.ui.common.Page
+import io.github.tianli0.coui17.patterns.Page
 import io.github.tianli0.switchtether.ui.common.loadable
-import io.github.tianli0.switchtether.ui.common.pageListPadding
-import io.github.tianli0.switchtether.ui.common.pageScroll
-import io.github.tianli0.switchtether.ui.common.rememberPageListState
-import io.github.tianli0.switchtether.ui.components.PageCard
+import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.theme.DevType
@@ -233,7 +233,7 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
             val byId = m.agents.associateBy { it.agentId }
             LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 item {
-                    PageCard {
+                    GroupCard {
                         Column {
                             MainRow(m.agents, hasChildren = branches.isNotEmpty())
                             if (branches.isEmpty()) {
@@ -268,7 +268,7 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
                         MapNote(pluralStringResource(R.plurals.agent_map_tasks, k, k))
                     }
                     item {
-                        PageCard {
+                        GroupCard {
                             Column {
                                 m.backgroundTasks.forEach { t ->
                                     val key = "t:${t.taskId ?: t.callId}"
@@ -329,7 +329,7 @@ private fun Dot(c: Color) {
 
 @Composable
 private fun MapNote(text: String) {
-    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = TextGutter, vertical = 10.dp))
+    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 10.dp))
 }
 
 /** The session itself, the root of the tree. */

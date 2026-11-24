@@ -145,7 +145,7 @@ class AttachedCodexScreenshotTest {
             Column {
                 listOf(ThemeMode.LIGHT, ThemeMode.DARK).forEach { mode ->
                     SwitchTetherTheme(mode) {
-                        Column(Modifier.background(io.github.tianli0.switchtether.ui.common.pageContainerColor()).padding(vertical = 8.dp)) {
+                        Column(Modifier.background(io.github.tianli0.coui17.patterns.pageContainerColor()).padding(vertical = 8.dp)) {
                             SessionRow(codex, onClick = {}, position = CardListPosition.None)
                             SessionRow(long, onClick = {}, position = CardListPosition.None, onLongClick = {})
                             SessionRow(long.copy(status = "idle"), onClick = {}, position = CardListPosition.None, compact = true)

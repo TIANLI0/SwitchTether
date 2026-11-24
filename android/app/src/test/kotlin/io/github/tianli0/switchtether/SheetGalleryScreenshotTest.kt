@@ -29,15 +29,15 @@ import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.remote.pairing.PairingLink
-import io.github.tianli0.switchtether.ui.common.AppBottomSheet
-import io.github.tianli0.switchtether.ui.common.GroupCard
-import io.github.tianli0.switchtether.ui.common.SheetButtons
-import io.github.tianli0.switchtether.ui.common.SheetConfirm
-import io.github.tianli0.switchtether.ui.common.SheetTextGutter
-import io.github.tianli0.switchtether.ui.common.pageContainerColor
-import io.github.tianli0.switchtether.ui.components.ActionTone
-import io.github.tianli0.switchtether.ui.components.LinkButton
-import io.github.tianli0.switchtether.ui.components.SmallButton
+import io.github.tianli0.coui17.patterns.PanelSheet
+import io.github.tianli0.coui17.patterns.GroupCard
+import io.github.tianli0.coui17.patterns.SheetButtons
+import io.github.tianli0.coui17.patterns.SheetConfirm
+import io.github.tianli0.coui17.patterns.PageDefaults
+import io.github.tianli0.coui17.patterns.pageContainerColor
+import io.github.tianli0.coui17.patterns.ActionTone
+import io.github.tianli0.coui17.patterns.LinkButton
+import io.github.tianli0.coui17.patterns.SmallButton
 import io.github.tianli0.switchtether.ui.onboarding.OnboardingContent
 import io.github.tianli0.switchtether.ui.onboarding.PairingUiState
 import io.github.tianli0.switchtether.ui.sessions.NewSessionContent
@@ -117,7 +117,7 @@ class SheetGalleryScreenshotTest {
 
     @Composable
     private fun NewSession(state: NewSessionState, onStart: () -> Unit = {}, canStart: Boolean = true) {
-        AppBottomSheet(
+        PanelSheet(
             show = true,
             title = "新建会话",
             onDismissRequest = {},
@@ -149,13 +149,13 @@ class SheetGalleryScreenshotTest {
     /** A panel that asks for a decision: text at the 24dp gutter, then the COUI17 button bar. */
     @Composable
     private fun Decision(onPrimary: () -> Unit = {}, onSecondary: () -> Unit = {}) {
-        AppBottomSheet(show = true, title = "在手机上继续", onDismissRequest = {}) {
+        PanelSheet(show = true, title = "在手机上继续", onDismissRequest = {}) {
             Column(Modifier.fillMaxWidth()) {
                 Text(
                     "对话会带着相同的上下文在手机上继续；电脑上原来的窗口不会显示从手机发出的内容。",
                     style = COUITheme.textStyles.body2,
                     color = COUITheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = SheetTextGutter).padding(bottom = 12.dp),
+                    modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp),
                 )
                 SheetButtons(
                     primary = DialogButtonBarAction(text = "接续", onClick = onPrimary),

@@ -61,7 +61,7 @@ fun DiffView(
         }
         }
         if (total > limit) {
-            io.github.tianli0.switchtether.ui.components.LinkButton(showMoreLabel(total - limit), { limit += 400 }, modifier = Modifier.padding(horizontal = 2.dp))
+            io.github.tianli0.coui17.patterns.LinkButton(showMoreLabel(total - limit), { limit += 400 }, modifier = Modifier.padding(horizontal = 2.dp))
         }
     }
 }
