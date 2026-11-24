@@ -264,6 +264,22 @@ class Notifier(
      */
     fun requestAnswered(sessionId: String, requestId: String) = requestResolved(sessionId, requestId)
 
+    /**
+     * After a push wake (docs/PROTOCOL.md §7.12): live sessions as they are now, fed through the same
+     * rules as `session.upserted`. A wait that began while the phone was not connected is announced
+     * even when the event that started it is no longer replayed (the app process was ended meanwhile).
+     */
+    fun catchUp(current: List<SessionSummary>) {
+        current.filter { it.isLive }.forEach { s ->
+            sessions[s.id] = s
+            synchronized(this) {
+                val n = engine.onSessionUpsert(s) ?: return@synchronized
+                if (post(n, timeoutMs = null) && n.type.slot == NotifySlot.ATTENTION) attentionShown[s.id] = ""
+            }
+        }
+        refreshActive()
+    }
+
     @Synchronized // the event stream and the notification buttons both resolve requests
     private fun requestResolved(sid: String, requestId: String) {
         val open = openRequests[sid]

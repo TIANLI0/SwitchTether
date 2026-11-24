@@ -349,6 +349,65 @@ by a newer tunnel, `4403` device revoked / connection closed by the desktop. Any
 transient: reconnect to the same lease. Through the relay (docs/RELAY.md) a forward uses one
 relay tunnel regardless of how many browser connections it carries.
 
+### 7.12 Push wake (feature `push_wake`)
+
+A phone that is not connected learns that something happened through its own UnifiedPush
+distributor (e.g. ntfy, self-hosted or not), which delivers a Web Push message (RFC 8030). The
+message says nothing but "connect now"; the phone then reconnects over its pinned mTLS channel
+and gets the events as usual (§6). Opt-in on the phone (notification settings).
+
+- `GET /v1/push` → `{ "registered": bool, "vapidPublicKey": "<87 chars>" | null }` — whether this
+  device has a subscription, and the desktop's VAPID public key (RFC 8292, uncompressed P-256,
+  base64url) that the phone passes to its distributor (`vapid` extra of UnifiedPush `REGISTER`).
+- `PUT /v1/push` `{ "endpoint", "p256dh", "auth" }` → `{ "registered": true }` — the push endpoint
+  (http(s), ≤ 1000 bytes, no credentials in the URL) and the phone's RFC 8291 receiver keys
+  (uncompressed P-256 public key and 16-byte auth secret, base64url). Replaces the device's
+  previous subscription. Invalid values: `400 validation_failed`.
+- `DELETE /v1/push` → `{ "removed": bool }`.
+- `POST /v1/push/test` → `{ "status": <push server HTTP status>, "delivered": bool }` — one wake now,
+  regardless of the rules below (settings "send a test").
+
+Fixture `protocol/fixtures/push_wake.json` (wire shapes plus a message produced by the desktop's
+encryptor, decryptable with the RFC 8291 Appendix A receiver keys it names).
+
+**When the desktop pushes.** On `session.upserted` transitions: a session starts waiting
+(`status` → `waiting`), a turn ends (`busy` → `idle` / `completed`), or a session fails (→ `error`).
+Each subscribed device that has **no open event WebSocket** is woken; a device that is connected gets
+the event itself. Per device at most one push per 10 s; changes in between yield one trailing push.
+Failures (network, 429, 5xx, other 4xx) back off exponentially from 10 s up to 15 min; `404` / `410`
+from the push server deletes the subscription (audit `push.expired`). While any device has a
+subscription the desktop keeps watching live sessions as if a phone were connected.
+
+**The message.** `POST <endpoint>` with `Content-Encoding: aes128gcm`, `TTL: 600`, `Urgency: high`,
+`Authorization: vapid t=<ES256 JWT>, k=<vapidPublicKey>` (`aud` = the endpoint's origin, `exp` 12 h,
+`sub` the project URL) and one RFC 8291 record whose plaintext is exactly `{"v":1}`. No session id,
+title, text or count is ever sent. The phone ignores any message that does not decrypt with its keys
+and never uses the content.
+
+Subscriptions live in `remote.db` (`push_subscriptions`), are removed with the device on
+revocation, and changes are audited (`push.register` with the endpoint's host only,
+`push.unregister`). The VAPID key pair is created once and kept in `remote.db` (`meta`).
+
+### 7.13 Session search (feature `session_search`)
+
+- `GET /v1/sessions/search?q=&agent=&limit=` → `{ "results": [SearchResult], "partial": bool }`
+
+Full-text search over what the user and the agents **said** (the `user_message` /
+`assistant_message` text the transcript parsers produce; tool calls and their output are not
+searched) in Claude Code, Codex and DeepSeek Harness transcripts known to the desktop (the same set
+as `GET /v1/sessions`). `q`: 1–200 characters, matched case-insensitively character by character (CJK
+and other scripts work; no word splitting). `agent` filters like the session list. `limit` 1–50,
+default 20. Sessions are scanned newest first (at most the last 64 MiB of each transcript) within a
+3 s budget; `partial: true` means the budget ran out before every session was searched. Results come
+in that order (newest first) and the scan stops at `limit` hits.
+
+`SearchResult` (fixture `protocol/fixtures/session_search.json`):
+`{ sessionId, agent, title|null, cwd|null, timeMs|null, snippet, matchCount }` — `snippet` is up to
+40 characters before and 100 after the first match in the newest matching message, whitespace
+collapsed, `…` where cut, passed through the secret redactor; `matchCount` counts matches in all
+searched messages (capped at 999). Desktops without the feature answer `404` (the path is read as a
+session id).
+
 ## 8. Capability negotiation
 
 `GET /v1/capabilities`:
@@ -361,6 +420,8 @@ relay tunnel regardless of how many browser connections it carries.
       "notes": "…" } ],
   "features": ["terminal", "files", "git", "providers", "usage", "mcp", "skills", "prompts", "managed_sessions"] }
 ```
+
+Further features: `push_wake` (§7.12), `session_search` (§7.13).
 
 Session-level `capabilities` override the agent defaults (e.g. a managed session has
 `sendMessage: "VERIFIED"`).
