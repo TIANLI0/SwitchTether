@@ -941,12 +941,18 @@ impl AgentHub {
     fn capabilities_for(&self, s: &SessionSummary) -> Capabilities {
         if !s.managed && s.control == Control::Full {
             let mut c = attached_caps(s);
-            // A stream-json session attached through the opt-in hook can switch model / effort.
+            // Model / effort of a session attached through an opt-in hook belong to the window
+            // that owns it: say so instead of offering a control that `set_options` refuses.
             if s.terminal_id.is_none() && s.liveness == Liveness::Live {
                 let switchable = self
                     .find_managed(&s.id)
                     .is_some_and(|(_, m)| m.can_change_model());
-                c.change_model = switchable.then_some(CapStatus::Partial);
+                if switchable {
+                    c.change_model = Some(CapStatus::Partial);
+                } else {
+                    c.change_model = Some(CapStatus::Blocked);
+                    c.reason.get_or_insert_with(|| ATTACHED_MODEL_REASON.into());
+                }
             }
             return c;
         }
@@ -2263,7 +2269,7 @@ impl AgentHub {
         if !m.can_change_model() {
             return Err(ApiError::unavailable_capability(
                 "BLOCKED",
-                "This session runs in a window on the computer; change its model there.",
+                ATTACHED_MODEL_REASON,
             ));
         }
         if let Some(model) = model.as_deref().map(str::trim) {
@@ -2805,6 +2811,10 @@ fn observed_caps(agent: &str) -> Capabilities {
         }),
     }
 }
+
+/// Why `changeModel` is `BLOCKED` for a session of a user-started process.
+pub(crate) const ATTACHED_MODEL_REASON: &str =
+    "This session runs in a window on the computer; change its model there.";
 
 /// Sessions of user-started processes controlled through switchtether-shim.
 fn attached_caps(s: &SessionSummary) -> Capabilities {

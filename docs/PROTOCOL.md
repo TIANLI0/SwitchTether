@@ -238,8 +238,11 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   changes model and / or effort of a **running** session SwitchTether started; absent = unchanged, `""` or `"default"` = the
   agent's default. Claude Code: `set_model` and `apply_flag_settings {effortLevel}` control requests (as the Agent SDK);
   Codex: sent with the next `turn/start`. Answers the updated `SessionSummary` (with `model`, `effort`). `409` when the
-  session is not running, `422 capability_unavailable` for sessions owned by a window on the computer (attached) and dsh.
-  Advertised per session as `capabilities.changeModel`.
+  session is not running anywhere and cannot be resumed, `422 capability_unavailable` (`details.status: "BLOCKED"`) for
+  sessions owned by a window on the computer — observed ones and ones attached through an opt-in takeover hook, whose
+  model and effort stay with that window — and for dsh.
+  Advertised per session as `capabilities.changeModel`: `PARTIAL` where this request is accepted, `BLOCKED` (with
+  `capabilities.reason`) for a running attached session, absent otherwise. Capability and endpoint always agree.
 - `GET /v1/agents/{agent}/models?session=` → `{agent, models: [{id, label, description?, efforts?}], efforts, source}`
   (fixture `model_options.json`): with a running `session`, the agent's own list (Claude Code's initialize response, Codex
   `model/list`, `source: "agent"`); otherwise the aliases every installation accepts (`source: "builtin"`).
@@ -416,7 +419,8 @@ this change used `managed:<random>` ids that disappeared with the process.
     `mcp_reconnect {server}`; `run_in_background {toolUseId}` → `{backgrounded}` (a running foreground Bash / Agent, the
     IDE's Ctrl+B); `cancel_message {messageUuid}` → `{cancelled}`; `side_question {question}` → `{answer}`; `rename
     {title}`; `rewind {userMessageId, dryRun}` → `{dryRun, canRewind, error?, filesChanged (relative), insertions,
-    deletions}` (files only; managed processes run with file checkpoints on); `export` → `{text, filename}`. Other
+    deletions}` (files only; **switched off**: `REWIND_FILES_ENABLED` is `false`, managed processes run without file
+    checkpoints and the action answers `422 capability_unavailable` "Rewinding files is not enabled."); `export` → `{text, filename}`. Other
     sessions → `422 capability_unavailable`, except that a Claude Code session started on the computer
     (observe-only, detail `claudeReadTools: true`) gets the three tools its files can answer, read-only: `task_output`
     (only the file Claude Code named `<taskId>.output` for that task, kept as `outputFile` on the task's row), `plan`
@@ -429,8 +433,9 @@ this change used `managed:<random>` ids that disappeared with the process.
   - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
     when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`); the detail then has
     `resumable: true` and `nextStart {model, effort, permissionMode}`, and `changeModel` is `PARTIAL`. A session attached
-    through the opt-in hook can switch model / effort while it runs (through switchtether-shim). A session running in a
-    window SwitchTether does not control stays observe-only (`capability_unavailable`).
+    through the opt-in hook keeps the model / effort chosen in its window: `changeModel` is `BLOCKED` and `POST …/options`
+    answers `422 capability_unavailable` (its session tools, `permission_mode` included, still work). A session running
+    in a window SwitchTether does not control stays observe-only (`capability_unavailable`).
   - While a foreground sub-agent runs (before its result exists) its `subagent` row is already there with `status:
     "running"`: from the stream's `task_started` (managed) or from its sidecar `agent-<id>.meta.json` `toolUseId` (observed).
   - `GET /v1/sessions/{id}/subagents/{agentId}/events?before&after&limit` → `{ sessionId, agentId, events, hasMore, lastSeq, meta }`:

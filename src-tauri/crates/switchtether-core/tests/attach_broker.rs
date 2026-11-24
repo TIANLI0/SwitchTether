@@ -222,6 +222,60 @@ async fn claude_stream_session_is_controllable() {
     assert_eq!(env.hub.managed_count(), 0);
 }
 
+/// What a taken-over session advertises about its model and what `POST …/options` does agree:
+/// the IDE owns model and effort, so the capability is BLOCKED, the request is refused with
+/// `capability_unavailable`, and nothing is injected into the user's process.
+#[tokio::test(flavor = "multi_thread")]
+async fn attached_claude_session_capability_matches_model_change() {
+    let env = setup().await;
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    let (mut shim, ack) = Shim::connect(
+        env.port,
+        json!({ "t": "hello", "v": 1, "token": env.token, "kind": "stream", "dialect": "claude",
+                "agent": "claude_code", "origin": "vscode", "cwd": cwd }),
+    )
+    .await;
+    assert_eq!(ack.unwrap()["t"], "welcome");
+    let mut id = None;
+    for _ in 0..100 {
+        let (items, _) = env.hub.list(&SessionQuery::default()).await;
+        if let Some(s) = items.into_iter().find(|s| s.id.starts_with("attached:")) {
+            id = Some(s.id);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let id = id.expect("attached session listed");
+
+    let detail = env.hub.detail(&id).await.unwrap();
+    let caps = &detail["capabilities"];
+    assert_eq!(caps["sendMessage"], "PARTIAL", "still controllable");
+    assert_eq!(caps["changeModel"], "BLOCKED");
+    let reason = caps["reason"].as_str().expect("a reason is given");
+
+    for (model, effort) in [
+        (Some("sonnet".to_string()), None),
+        (None, Some("high".to_string())),
+    ] {
+        let err = env.hub.set_options(&id, model, effort).await.unwrap_err();
+        assert_eq!(
+            serde_json::to_value(err.code).unwrap(),
+            "capability_unavailable"
+        );
+        let details = err.details.expect("status and reason");
+        assert_eq!(details["status"], "BLOCKED");
+        assert_eq!(details["reason"], reason, "same reason as advertised");
+    }
+    // Nothing reached the user's process.
+    let mut l = String::new();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), shim.rd.read_line(&mut l))
+            .await
+            .is_err(),
+        "unexpected frame for the shim: {l}"
+    );
+}
+
 #[tokio::test]
 async fn tty_is_mirrored_as_external_terminal() {
     let env = setup().await;

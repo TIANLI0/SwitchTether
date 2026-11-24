@@ -985,6 +985,10 @@ impl ManagedClaude {
             _ => {
                 // Unsupported host callbacks (hooks/SDK MCP/elicitation) — we
                 // registered none, so decline explicitly instead of hanging.
+                // `elicitation` could become a `question` event like Codex's, but only its
+                // subtype name is known here (docs/research/CLAUDE_CODE_RUNTIME.md §B.4): the
+                // request's fields and the answer's shape have not been captured, and a guessed
+                // wire format is worse than a clear decline.
                 let _ = self
                     .write_line(&json!({
                         "type": "control_response",

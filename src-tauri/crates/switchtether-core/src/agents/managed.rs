@@ -240,10 +240,11 @@ impl ManagedSession for super::claude::managed::ManagedClaude {
         super::claude::managed::ManagedClaude::effort(self)
     }
     fn can_change_model(&self) -> bool {
-        // Started by SwitchTether, or attached through the opt-in takeover hook: `set_model` /
-        // `apply_flag_settings` go through switchtether-shim like the phone's messages (the IDE
-        // ignores the reply to a request it did not send).
-        true
+        // Only a process SwitchTether started. In a session attached through the opt-in takeover
+        // hook the IDE owns model and effort (its own picker would not learn of a change made
+        // behind it), so `set_model` / `set_effort` below refuse; this must say the same, since
+        // `capabilities.changeModel` is derived from it.
+        !self.is_attached()
     }
     async fn models(&self) -> Value {
         super::claude::managed::ManagedClaude::models(self)
@@ -267,7 +268,7 @@ impl ManagedSessionDefaults {
     pub(crate) fn set_model_blocked() -> ApiResult<()> {
         Err(ApiError::unavailable_capability(
             "BLOCKED",
-            "This session runs in a window on the computer; change its model there.",
+            super::ATTACHED_MODEL_REASON,
         ))
     }
 }
