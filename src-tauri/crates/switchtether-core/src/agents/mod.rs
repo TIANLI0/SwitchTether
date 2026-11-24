@@ -349,6 +349,9 @@ impl AgentHub {
             }
             m.insert(id.clone(), session.clone());
         }
+        // Keyed by its conversation (`claude:<uuid>`), it replaces a history view of the same
+        // conversation, which must not tail the transcript a second time.
+        self.loaded.lock().remove(&id);
         self.publish_session(&id);
     }
 
