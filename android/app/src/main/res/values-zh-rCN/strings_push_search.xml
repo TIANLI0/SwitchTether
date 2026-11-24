@@ -1,22 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 推送唤醒（UnifiedPush）与对话内容搜索。docs/ANDROID_UI.md §28。 -->
+<!-- 对话内容搜索。docs/ANDROID_UI.md §28。 -->
 <resources>
-    <string name="push_section">推送唤醒</string>
-    <string name="push_switch">推送唤醒（UnifiedPush）</string>
-    <string name="push_status_off">已关闭。关闭时，应用不在前台时的提醒依赖后台连接。</string>
-    <string name="push_status_no_distributor">未安装 UnifiedPush 分发器。请先安装一个（例如 ntfy），再打开此开关。</string>
-    <string name="push_status_registering">正在等待 %1$s…</string>
-    <string name="push_status_pending">已就绪。手机下次连接电脑时会把推送地址交给电脑。</string>
-    <string name="push_status_active">已通过 %1$s 开启。任务需要你或完成时，电脑会唤醒这台手机。</string>
-    <string name="push_status_active_last">已通过 %1$s 开启 · 上次唤醒 %2$s</string>
-    <string name="push_status_unsupported">电脑上的 SwitchTether 版本太旧，不支持推送唤醒。请先更新电脑端。</string>
-    <string name="push_status_failed">%1$s 拒绝了注册（%2$s）。关闭后重新打开可重试。</string>
-    <string name="push_distributor">分发器</string>
-    <string name="push_test">发送测试唤醒</string>
-    <string name="push_test_ok">已送达推送服务器（HTTP %1$d）</string>
-    <string name="push_test_failed">未送达（HTTP %1$d）</string>
-    <string name="push_test_error">无法发送：请先连接电脑。</string>
-    <string name="push_privacy">唤醒消息端到端加密且不含任何内容——没有会话、标题或文字。推送服务器只知道“何时有事发生”，手机随后直接从电脑获取详情。</string>
     <string name="search_content_mode">搜索对话内容</string>
     <string name="search_content_hint">搜索你和智能体写下的内容，最近的会话优先。</string>
     <string name="search_content_searching">正在搜索…</string>

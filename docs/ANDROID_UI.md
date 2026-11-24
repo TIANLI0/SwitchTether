@@ -1485,38 +1485,17 @@ seen on a device. The per-project numbers were not checked against a real CC Swi
 - Evidence: `TwoPaneTest` (width gate incl. phone and split-screen widths, list replacement and
   back, w1280dp screenshots light / dark with the marked row). Not run on a tablet or foldable.
 
-## 28. Push wake and conversation search (2026-11-25)
+## 28. Conversation search; push wake removed (2026-11-25)
 
-### 28.1 Push wake (UnifiedPush)
+### 28.1 Push wake: removed from the phone
 
-Settings → Notifications → **推送唤醒 / Push wake**, opt-in. PROTOCOL.md §7.12, SECURITY.md §7b.
-
-- The app implements the UnifiedPush connector protocol (spec AND_3.1) itself, without the
-  connector library: `push/PushWake.kt` (state, registration, message handling, desktop hand-over),
-  `push/PushReceiver.kt` (exported messaging receiver for `NEW_ENDPOINT` / `MESSAGE` /
-  `UNREGISTERED` / `REGISTRATION_FAILED` / `TEMP_UNAVAILABLE`, and the `RAISE_TO_FOREGROUND`
-  service a distributor may bind while delivering), manifest `<queries>` for the distributor
-  `REGISTER` action. `REGISTER` / `UNREGISTER` / `MESSAGE_ACK` go to the chosen distributor's
-  package with `FLAG_SHARE_IDENTITY` (API ≥ 34) or the `pi` PendingIntent (older); `REGISTER`
-  carries the computer's VAPID key and "SwitchTether · <computer>" as its description, plus the
-  AND_2 `application` extra for older distributors. Every incoming intent must carry the current
-  connection token; a failed registration gets a new token next time (spec).
-- On `NEW_ENDPOINT` the phone creates RFC 8291 receiver keys (`core:remote`
-  `push/WebPushCrypto.kt`) and, on this and every later connection, `PUT /v1/push` hands endpoint +
-  keys to the computer unless it already has them (`GET /v1/push`). A computer without the feature
-  (404) shows "update SwitchTether on the computer".
-- On `MESSAGE` the bytes must decrypt with the phone's keys (else ignored, still acknowledged);
-  the content is never used. A genuine wake schedules an expedited `ReconnectWorker` (unique, KEEP):
-  connect (≤ 20 s), read the live session list once into the notifier (`Notifier.catchUp`: waits
-  that began while away are announced), keep the connection 20 s for the event replay, then release
-  it unless the app or the monitor service needs it.
-- UI: one switch whose summary is the state (off / no distributor — install e.g. ntfy / waiting for
-  the distributor / ready, the computer gets it on next connect / on via <distributor>, last wake /
-  computer too old / refused (reason)); radio rows when several distributors are installed; "send a
-  test wake" (`POST /v1/push/test`, shows the push server's HTTP status); a footnote on what the push
-  server learns. Distributors are re-read on resume.
-- Unpair keeps the distributor registration but forgets which computer had the endpoint, so the
-  next paired computer receives it.
+A UnifiedPush push wake was built and then taken out of the app at the user's request: on Android a
+push needs a delivery channel, and every channel needs something besides SwitchTether — a
+UnifiedPush distributor app (ntfy and the like), Google's FCM (a developer-run Firebase backend whose
+server key would have to sit on every computer) or a vendor push SDK. The phone therefore has no push
+receiver, no settings entry and no Web Push crypto. Background alerts remain best effort through the
+optional connection service (KNOWN_LIMITATIONS #10). The desktop keeps the `/v1/push` endpoints
+(PROTOCOL.md §7.12); with no phone registering, it never sends anything.
 
 ### 28.2 Search conversation content
 
@@ -1531,21 +1510,10 @@ errors. Leaving the search (cancel) returns to the list.
 
 ### 28.3 Evidence and limits
 
-- Tests: `core:remote` `PushAndSearchTest` (RFC 8291 Appendix A vector decrypts; a message made by
-  the desktop's Rust encryptor decrypts; wrong keys / garbage give null; fixtures
-  `push_wake.json`, `session_search.json`); app `PushWakeTest` (Robolectric: no distributor,
-  REGISTER extras and target package, foreign tokens ignored, NEW_ENDPOINT + ACK, encrypted
-  message wakes / garbage and foreign tokens do not, REGISTRATION_FAILED changes the token,
-  UNREGISTER on disable, desktop hand-over once over a fake HTTP desktop, 404 → unsupported);
+- Tests: `core:remote` `SessionSearchModelTest` (fixture `session_search.json`); app
   `ContentSearchTest` (debounce, only the latest query counts, slow answers cancelled, 404 / 400,
   highlighting incl. CJK).
-- Desktop: Rust unit tests for encryption, VAPID, validation, coalescing, back-off, 410 drop and
-  bus transitions; e2e `push_wake_reaches_the_endpoint_while_the_phone_is_away` (real server,
-  loopback push endpoint). The desktop's encrypted message was also decrypted by an independent
-  RFC 8291 implementation (Python `cryptography`) during development.
-- **Not verified:** a real distributor (ntfy, Sunup, NextPush…) on a device, delivery while the
-  phone dozes, a push server that requires VAPID, the raise-to-foreground binding, the settings UI
-  and the search UI on a device, search over a large real history.
+- **Not verified:** the search UI on a device, search over a large real history.
 
 ## 29. Files: roomier previews, a lightbox, the cache you can open, no dead ends (2026-11-25)
 

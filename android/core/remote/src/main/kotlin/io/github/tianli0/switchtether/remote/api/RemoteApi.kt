@@ -473,17 +473,7 @@ class RemoteApi(
     suspend fun stopForward(id: String): JsonElement =
         executeJson(Request.Builder().url(url("v1/forwards", id)).delete().tagged().build())
 
-    // ---- §7.12 push wake / §7.13 session search ----------------------------------------------------
-
-    suspend fun pushInfo(): io.github.tianli0.switchtether.remote.protocol.PushInfo = get("v1/push")
-
-    suspend fun registerPush(body: io.github.tianli0.switchtether.remote.protocol.PushRegistration): JsonElement =
-        executeJson(request("v1/push").put(encode(body)).build())
-
-    suspend fun unregisterPush(): JsonElement = executeJson(request("v1/push").delete().build())
-
-    suspend fun testPush(): io.github.tianli0.switchtether.remote.protocol.PushTestResult =
-        post("v1/push/test", JsonObject(emptyMap()))
+    // ---- §7.13 session search ------------------------------------------------------------------------
 
     /** Full-text search over what was said in sessions (newest first, bounded on the desktop). */
     suspend fun searchSessions(

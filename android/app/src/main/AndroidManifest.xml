@@ -47,10 +47,6 @@
         <intent>
             <action android:name="oplus.fluid.seeding.settings.main" />
         </intent>
-        <!-- UnifiedPush distributors (push wake, docs/PROTOCOL.md §7.12). -->
-        <intent>
-            <action android:name="org.unifiedpush.android.distributor.REGISTER" />
-        </intent>
     </queries>
 
     <!--
@@ -138,29 +134,6 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
-        <!--
-          UnifiedPush messaging receiver (push wake, opt-in in notification settings). Exported because
-          the distributor is another app; every intent must carry our random connection token, and a
-          message only counts when it decrypts with this phone's keys. It can only make the app connect.
-        -->
-        <receiver
-            android:name=".push.PushReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
-                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
-                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
-                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
-                <action android:name="org.unifiedpush.android.connector.TEMP_UNAVAILABLE" />
-            </intent-filter>
-        </receiver>
-        <service
-            android:name=".push.PushRaiseService"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="org.unifiedpush.android.connector.RAISE_TO_FOREGROUND" />
-            </intent-filter>
-        </service>
         <!-- Hands cached / downloaded remote files to viewers and other apps (read grant only; never a file:// URI). -->
         <provider
             android:name="androidx.core.content.FileProvider"

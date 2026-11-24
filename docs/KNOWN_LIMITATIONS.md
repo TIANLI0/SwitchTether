@@ -55,16 +55,11 @@ TODO list. Each item says what the user experiences.
    on the computer's LAN and the computer's adapter / firmware already allow Wake-on-LAN
    (SwitchTether never changes those). A sleeping computer cannot be woken from outside its
    LAN (Tailscale, relay). Not yet verified against a real sleeping computer.
-10. Android background delivery is best effort: there is no FCM. Without the opt-in push wake,
-    notifications depend on the optional foreground connection service and vendor battery
-    policies; Doze can delay them. With push wake (UnifiedPush, PROTOCOL.md §7.12) the computer
-    wakes the phone through the user's own distributor (e.g. ntfy) when a session waits, finishes
-    or fails; delivery then depends on that distributor and push server, and the phone still has
-    to reach the computer (LAN, Tailscale or relay) to learn what happened. If the app process was
-    ended since the last connection, a wake announces open approvals / questions (read from the
-    current session list) but not turns that finished meanwhile (the event replay restarts at the
-    desktop's head). Missed events are otherwise fetched after reconnecting (event replay) or by
-    refreshing (resync). Push wake is UNTESTED with a real distributor on a device.
+10. Android background delivery is best effort: there is no push channel (FCM or UnifiedPush
+    would need a third-party app or a hosted backend, which the phone app does not use).
+    Notifications depend on the optional foreground connection service and vendor battery
+    policies; Doze can delay them. Missed events are fetched after reconnecting (event replay) or
+    by refreshing (resync).
 10f. Session content search reads the last 64 MiB of each transcript within 3 s, newest sessions
     first; on very large histories older sessions may be reported as not searched (`partial`).
     It searches message text only, not tool output, and sessions of other CC Switch providers
