@@ -83,8 +83,14 @@ class PairingViewModel(
         }
     }
 
-    /** QR result: anything that is not a pairing link is reported, scanning can be restarted. */
-    fun onScanned(text: String) = submitLink(text)
+    /**
+     * QR result: anything that is not a pairing link is reported, scanning can be restarted. The
+     * camera keeps delivering frames for a moment after the first hit; only the scanning screen
+     * takes them, so a late frame cannot pull a running pairing back to the confirm screen.
+     */
+    fun onScanned(text: String) {
+        if (_state.value == PairingUiState.Scanning) submitLink(text)
+    }
 
     /** "附近的电脑": pair the advertised computer with its pairing code. */
     fun pickNearby(d: DiscoveredDesktop) {
@@ -110,7 +116,17 @@ class PairingViewModel(
             }
             a.host to a.port
         } else {
-            (s.host ?: return) to s.port
+            val h = s.host ?: run {
+                // No address to contact: shown as "unreachable"; its retry lets the user type one.
+                lastCodeManual = true
+                _state.value = PairingUiState.Failed(
+                    PairingTarget.Code(s.desktopName.orEmpty(), emptyList(), s.port, s.fingerprint, ""),
+                    PairingException.Reason.UNREACHABLE,
+                    null,
+                )
+                return
+            }
+            h to s.port
         }
         val normalized = PairingTarget.normalizeCode(code) ?: run {
             _state.value = s.copy(error = CodeError.INVALID_CODE)

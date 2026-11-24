@@ -99,7 +99,7 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
 private val TermBg = Color(0xFF15171A)
 private val TermFg = Color(0xFFDADDE1)
-private const val SENTINEL = "\u200B\u200B"
+internal const val SENTINEL = "\u200B\u200B"
 
 /** Builds one terminal row; the cursor cell is drawn inverted. */
 fun termLineAnnotated(line: TermLine, cursorX: Int?): AnnotatedString = buildAnnotatedString {
@@ -413,6 +413,22 @@ private fun ExtraKeys(state: TerminalUiState, vm: TerminalViewModel, imeVisible:
     }
 }
 
+/** What one edit of the hidden input field means for the terminal: [backspaces] × Backspace, then [text]. */
+internal data class ImeEdit(val backspaces: Int, val text: String)
+
+/**
+ * Diff of the hidden field against what it held before: appended text is typed, removed text is
+ * sent as Backspace, a replacement (IME correction, composing region) is both. The sentinel's
+ * zero-width characters are never typed. Works with composing IMEs.
+ *
+ * Backspaces are counted in code points, not UTF-16 units: the shell deletes one character per
+ * Backspace, so an emoji (a surrogate pair) removed from the field is one key, not two.
+ */
+internal fun imeEdit(old: String, new: String): ImeEdit {
+    val common = old.commonPrefixWith(new).length
+    return ImeEdit(old.codePointCount(common, old.length), new.substring(common).replace("​", ""))
+}
+
 /**
  * Invisible text field that receives the soft keyboard. It starts with a 2-char sentinel so a
  * Backspace on an empty line is still observable; edits are diffed and forwarded.
@@ -423,14 +439,10 @@ private fun HiddenInput(focus: FocusRequester, onText: (String) -> Unit, onKey: 
     BasicTextField(
         value = value,
         onValueChange = { nv ->
-            // Diff against what the field held before: appended text is typed, removed text is sent
-            // as Backspace, a replacement (IME correction) is both. Works with composing IMEs.
-            val old = value.text
+            val edit = imeEdit(value.text, nv.text)
+            repeat(edit.backspaces) { onKey(TermKey.BACKSPACE) }
+            if (edit.text.isNotEmpty()) onText(edit.text)
             val new = nv.text
-            val common = old.commonPrefixWith(new).length
-            repeat(old.length - common) { onKey(TermKey.BACKSPACE) }
-            val added = new.substring(common).replace("\u200B", "")
-            if (added.isNotEmpty()) onText(added)
             value = if (!new.startsWith(SENTINEL) || new.length > 256) TextFieldValue(SENTINEL, TextRange(SENTINEL.length)) else nv
         },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Send, autoCorrectEnabled = false),

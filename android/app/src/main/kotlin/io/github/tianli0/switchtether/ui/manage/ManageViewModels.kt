@@ -275,15 +275,19 @@ class ToggleListViewModel(
         if (kind == ToggleListKind.PROMPTS) load()
     }
 
+    /** Latest load wins: an older answer landing after a newer one (quick toggles) is dropped. */
+    private var loadGen = 0
+
     fun load() {
+        val gen = ++loadGen
         viewModelScope.launch {
             when (kind) {
-                ToggleListKind.MCP -> { val r = loadable { repo.mcpServers() }; _state.update { it.copy(items = r) } }
-                ToggleListKind.SKILLS -> { val r = loadable { repo.skills() }; _state.update { it.copy(items = r) } }
+                ToggleListKind.MCP -> { val r = loadable { repo.mcpServers() }; _state.update { if (gen == loadGen) it.copy(items = r) else it } }
+                ToggleListKind.SKILLS -> { val r = loadable { repo.skills() }; _state.update { if (gen == loadGen) it.copy(items = r) else it } }
                 ToggleListKind.PROMPTS -> {
                     val app = _state.value.app
                     val r = loadable { repo.prompts(app) }
-                    _state.update { if (it.app == app) it.copy(prompts = r) else it }
+                    _state.update { if (gen == loadGen && it.app == app) it.copy(prompts = r) else it }
                 }
             }
         }

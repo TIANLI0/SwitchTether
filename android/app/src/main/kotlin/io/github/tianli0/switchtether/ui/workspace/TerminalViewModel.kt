@@ -77,6 +77,8 @@ class TerminalViewModel(
     private val saveFontSp: (Int) -> Unit = {},
     initialColumns: Int = 0,
     private val saveColumns: (Int) -> Unit = {},
+    /** The desktop's terminal API, null while not online. Tests pass a fake. */
+    private val terminalApi: () -> TerminalApi? = { conn.apiOrNull()?.let(::RemoteTerminalApi) },
 ) : ViewModel() {
     private val _state = MutableStateFlow(TerminalUiState(fontSp = initialFontSp.coerceIn(8, 22), columns = initialColumns.takeIf { it in COLUMN_CHOICES } ?: 0))
     val state: StateFlow<TerminalUiState> = _state.asStateFlow()
@@ -85,6 +87,9 @@ class TerminalViewModel(
     /** Keys typed while the stream is (re)connecting: sent once it opens, never silently dropped. */
     private val pendingInput = StringBuilder()
     private var streamGen = 0
+
+    /** The [streamGen] of a connect that is waiting for the step-up prompt, else -1. */
+    private var promptGen = -1
     private var resizeJob: Job? = null
     private var lastSize: Pair<Int, Int>? = null
 
@@ -94,14 +99,19 @@ class TerminalViewModel(
                 _state.update { it.copy(online = s is ConnectionState.Online) }
                 if (s is ConnectionState.Online) {
                     refresh()
-                    _state.value.selectedId?.let { if (_state.value.link == TermLink.CLOSED) connect(it) }
+                    // CONNECTING too: a stream that was being opened when the network went away can
+                    // hang until the socket times out. Not while the step-up prompt is up, though —
+                    // that connect is alive, and restarting it would ask the user a second time.
+                    val link = _state.value.link
+                    val stuck = link == TermLink.CONNECTING && promptGen != streamGen
+                    _state.value.selectedId?.let { if (link == TermLink.CLOSED || stuck) connect(it) }
                 }
             }
         }
     }
 
     fun refresh() {
-        val api = conn.apiOrNull() ?: return
+        val api = terminalApi() ?: return
         viewModelScope.launch {
             val r = runCatching { api.terminals() }
             r.onSuccess { list: TerminalList ->
@@ -113,7 +123,7 @@ class TerminalViewModel(
     /** Step-up then `POST /v1/terminals` (idempotent by commandId). */
     /** [size]: the grid the terminal will be shown in; else the last measured one. */
     fun create(shell: String?, size: Pair<Int, Int>? = null) {
-        val api = conn.apiOrNull() ?: return
+        val api = terminalApi() ?: return
         if (!stepUpAvailable()) {
             _state.update { it.copy(link = TermLink.NO_STEP_UP_KEY) }
             return
@@ -152,7 +162,7 @@ class TerminalViewModel(
     /** (Re)attaches: a reconnect simply receives a fresh snapshot (mosh-style). */
     fun connect(target: String? = null) {
         val id = target ?: _state.value.selectedId ?: return
-        val api = conn.apiOrNull() ?: return
+        val api = terminalApi() ?: return
         ws?.cancel()
         val gen = ++streamGen
         viewModelScope.launch {
@@ -161,7 +171,12 @@ class TerminalViewModel(
                 return@launch
             }
             _state.update { it.copy(link = TermLink.CONNECTING, error = null) }
-            val granted = gate.ensure(StepUpScopes.TERMINAL).isSuccess
+            promptGen = gen
+            val granted = try {
+                gate.ensure(StepUpScopes.TERMINAL).isSuccess
+            } finally {
+                if (promptGen == gen) promptGen = -1
+            }
             // Superseded while the step-up prompt was up (another terminal selected, disconnect,
             // page closed): opening now would leave a second, unowned stream alive.
             if (gen != streamGen) return@launch
@@ -208,7 +223,11 @@ class TerminalViewModel(
 
     private fun stepUpExpired() {
         gate.invalidate(StepUpScopes.TERMINAL)
+        // The cancel below is reported as a late onFailure: without a new generation it would turn
+        // NEEDS_STEP_UP into CLOSED with an error.
+        streamGen++
         ws?.cancel()
+        ws = null
         _state.update { it.copy(link = TermLink.NEEDS_STEP_UP) }
     }
 
@@ -222,7 +241,7 @@ class TerminalViewModel(
 
     fun kill() {
         val id = _state.value.selectedId ?: return
-        val api = conn.apiOrNull() ?: return
+        val api = terminalApi() ?: return
         onKill(id)
         viewModelScope.launch {
             runCatching { api.killTerminal(id) }.onFailure { e -> _state.update { it.copy(error = ConnectionManager.describe(e)) } }
@@ -241,17 +260,18 @@ class TerminalViewModel(
 
     fun typeText(s: String) {
         val st = _state.value
-        send(KeyEncoder.text(s, st.ctrl, st.alt))
-        clearLatches()
+        if (send(KeyEncoder.text(s, st.ctrl, st.alt))) clearLatches()
     }
 
     fun key(k: TermKey) {
         val st = _state.value
-        send(KeyEncoder.key(k, st.screen.flags.applicationCursor, st.ctrl, st.alt))
-        clearLatches()
+        if (send(KeyEncoder.key(k, st.screen.flags.applicationCursor, st.ctrl, st.alt))) clearLatches()
     }
 
-    fun paste(s: String) = send(KeyEncoder.paste(s, _state.value.screen.flags.bracketedPaste))
+    /** Same path as typed input: sent when open, queued while connecting (the button is off otherwise). */
+    fun paste(s: String) {
+        send(KeyEncoder.paste(s, _state.value.screen.flags.bracketedPaste))
+    }
 
     fun toggleCtrl() = _state.update { it.copy(ctrl = !it.ctrl) }
 
@@ -261,16 +281,17 @@ class TerminalViewModel(
 
     private fun inputMsg(data: String) = buildJsonObject { put("type", "input"); put("data", data) }.toString()
 
-    private fun send(data: String) {
-        if (data.isEmpty()) return
-        when (_state.value.link) {
-            TermLink.OPEN -> ws?.send(inputMsg(data))
+    /** Whether [data] went out or was queued; false = nothing was sent (a latched Ctrl/Alt stays). */
+    private fun send(data: String): Boolean {
+        if (data.isEmpty()) return false
+        return when (_state.value.link) {
+            TermLink.OPEN -> ws?.send(inputMsg(data)) == true
             // Typed before the stream opened: kept (bounded) and sent on open.
             TermLink.CONNECTING -> synchronized(pendingInput) {
-                if (pendingInput.length + data.length <= MAX_PENDING_INPUT) pendingInput.append(data)
+                (pendingInput.length + data.length <= MAX_PENDING_INPUT).also { fits -> if (fits) pendingInput.append(data) }
             }
             // Disconnected: the page shows a "not connected" strip with a reconnect button.
-            else -> Unit
+            else -> false
         }
     }
 
@@ -302,7 +323,7 @@ class TerminalViewModel(
     /** Loads up to [count] more scrollback lines above the screen (`GET …/scrollback`). */
     fun loadScrollback(count: Int = 200) {
         val id = _state.value.selectedId ?: return
-        val api = conn.apiOrNull() ?: return
+        val api = terminalApi() ?: return
         viewModelScope.launch {
             try {
                 val total = api.terminalScrollback(id, 0, 1).total
