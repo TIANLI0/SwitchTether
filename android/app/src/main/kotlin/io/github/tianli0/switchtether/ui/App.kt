@@ -338,7 +338,7 @@ private fun TwoPaneHost(nav: NavViewModel) {
     CompositionLocalProvider(io.github.tianli0.switchtether.ui.nav.LocalSelectedSessionId provides selected) {
         io.github.tianli0.switchtether.ui.nav.ListDetailPanes(
             list = {
-                androidx.compose.animation.Crossfade(nav.tab, label = "pane-list") { t ->
+                androidx.compose.animation.Crossfade(nav.tab, animationSpec = androidx.compose.animation.core.tween(150), label = "pane-list") { t ->
                     listStates.SaveableStateProvider("list/${t.name}") {
                         Destination(nav, io.github.tianli0.switchtether.ui.nav.NavEntry(t, null, 0), onOpenRoot = nav::openFromList)
                     }

@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -50,10 +51,12 @@ fun SessionRow(
     val dev = LocalDevColors.current
     val agent = Formatters.agentLabel(session.agent)
     val title = sessionDisplayTitle(session)
-    // Two-pane layout: the session open beside the list is marked with a soft accent fill.
+    // Two-pane layout: the session open beside the list keeps the press layer, as a selected COUI
+    // card-list row does (COUICardListSelectedItemLayout: couiColorPress, #1F000000 / #33FFFFFF).
     val open = io.github.tianli0.switchtether.ui.nav.LocalSelectedSessionId.current == session.id
+    val pressLayer = if (COUITheme.colorScheme.background.luminance() < 0.5f) androidx.compose.ui.graphics.Color(0x33FFFFFF) else androidx.compose.ui.graphics.Color(0x1F000000)
     val marked = if (open) {
-        modifier.clip(groupRowShape(position)).background(COUITheme.colorScheme.primary.copy(alpha = 0.10f)).testTag("session-row-selected")
+        modifier.clip(groupRowShape(position)).background(pressLayer).testTag("session-row-selected")
     } else {
         modifier
     }

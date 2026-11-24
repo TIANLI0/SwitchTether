@@ -1626,3 +1626,35 @@ the source note, listing lookup, parent folders) and the existing `FileCacheTest
 the lightbox gestures (pull to close, swipe between pictures, zoom vs. drag), the light system-bar
 icons, sharing / saving from it, opening cached copies with other apps, the stat request against a
 real desktop and the offline fallback.
+
+## 30. ColorOS SDK alignment: transitions, composer rim, expand, selection, menu blur (2026-11-25)
+
+Values compared against the COUI SDK bundled in OPPO Health 6.7.17 (com.heytap.health, HeyTap-signed),
+read for the numbers only; no SDK code or resources were copied.
+
+- **Page push / pop** (`ui/nav/AnimatedNavHost.kt`) follow `Animation.COUI.Activity` instead of a
+  Material shared X axis. Push: the new page slides in over the whole width, opaque, 350ms on
+  (0.3, 0.1, 0.3, 1); the page underneath moves to −30% on (0.3, 0.15, 0.3, 1) and dims under a black
+  scrim to 0.5 on COUIEase (0.33, 0, 0.67, 1) — it stays visible. Pop runs back: the top page leaves to
+  +100% on (0.25, 0.1, 0.3, 1), the page underneath returns from −30% on (0.3, 0.26, 0.4, 1) and the
+  scrim clears. Every page now paints the page colour, so a full-width slide never shows two pages
+  through each other. The predictive back gesture maps its progress linearly onto the pop (an eased
+  seek made the page jump at the start of the drag); release and cancel finish on the same spec.
+- **Tab switches** are a 150ms cross-fade without the 0.96 scale-in (a Material fade-through mark);
+  the tablet list pane's `Crossfade` uses the same 150ms.
+- **Composer rim** (`coui-patterns` `glassSurface`): the 0.5dp solid hairline (dark on the light
+  theme) is replaced by the material edge with its inward fade: `TYPE_FRAMEWORK_CIRCLE_1` for round
+  keys (light 0.2 / 1.9dp / fade 0.15, dark 0.6 / 1.9dp / 0.1), `TYPE_FRAMEWORK_CAPSULE_1` for the
+  field and capsules; the rim follows the control's own corner radius. Without runtime shaders the
+  hairline stays.
+- **ExpandBody** (`coui-patterns` `States.kt`): 400ms on (0.3, 0, 0.1, 1) both ways for size and fade,
+  so alpha tracks the shown height fraction (`ExpandableRecyclerConnector`) and finishes with the
+  400ms `ExpandArrow` turn (it used to be a ~300ms spring with a short separate fade).
+- **Selected session row** (tablet list | detail): the neutral press layer of a selected COUI card
+  row (`couiColorPress`, #1F000000 / #33FFFFFF) instead of a 10% accent fill.
+- **Menu snapshot blur** (`coui-patterns` `Menu.kt`): three box passes of radius 3 at 1/8 scale,
+  σ ≈ 26px, matching the popup material's 25px (it was ≈ 36px). The snapshot's tint layers live in
+  coui-ui's list popup.
+
+Not seen on a device: the transitions on real hardware, the material rims (they need runtime
+shaders with a GPU), the predictive back feel.
