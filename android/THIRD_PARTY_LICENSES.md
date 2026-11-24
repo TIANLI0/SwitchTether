@@ -33,7 +33,7 @@ Settings → About → Open source licenses (`LicensesScreen`).
 | `kotlinx-coroutines` | 1.11.0 | Apache-2.0 | |
 | `kotlinx-serialization-json` | 1.13.0 | Apache-2.0 | |
 | Phosphor Icons, Compose port `com.adamglin:phosphor-icon` | 1.0.0 | MIT | App icon set (Regular / Fill); icons © Phosphor Icons (phosphoricons.com, MIT); unused icons removed by R8 in release |
-| Telephoto `me.saket.telephoto:zoomable`, `sub-sampling-image` | 0.19.0 | Apache-2.0 | Zoomable images and PDF pages in the file viewer |
+| Telephoto `me.saket.telephoto:zoomable`, `sub-sampling-image`, `flick` | 0.19.0 | Apache-2.0 | Zoomable images and PDF pages in the file viewer; flick-to-dismiss in the image lightbox |
 | multiplatform-markdown-renderer `com.mikepenz:multiplatform-markdown-renderer` (+ `-code`) | 0.46.0 | Apache-2.0 | Rendered Markdown in the file viewer |
 | JetBrains Markdown `org.jetbrains:markdown` | 0.7.17 | Apache-2.0 | Markdown parser (via the renderer) |
 | Highlights `dev.snipme:highlights` | 1.2.0 | Apache-2.0 | Syntax highlighting in the file viewer |

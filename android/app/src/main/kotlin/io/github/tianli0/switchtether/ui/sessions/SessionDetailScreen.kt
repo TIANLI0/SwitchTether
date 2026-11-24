@@ -497,7 +497,7 @@ fun SessionDetailScreen(
         ImageViewerDialog(preview = img, onLoadBytes = vm::loadImageBytes, onDismiss = { viewingImage = null })
     }
     viewingFile?.let { ref ->
-        io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
+        io.github.tianli0.switchtether.ui.common.AppFullScreenDialog(onDismissRequest = { viewingFile = null }) {
             // The page colour runs under the status and gesture bars; the viewer sits between them.
             Box(Modifier.fillMaxSize().background(pageContainerColor()).statusBarsPadding().navigationBarsPadding()) {
                 io.github.tianli0.switchtether.ui.files.RemoteFileViewer(ref, onBack = { viewingFile = null }, onManageDownloads = null)
@@ -565,6 +565,8 @@ fun SessionDetailContent(
     val hints = remember(appCtx) { (appCtx as? io.github.tianli0.switchtether.SwitchTetherApp)?.container?.hintPrefs }
     var tipDismissed by rememberSaveable { mutableStateOf(hints?.getBoolean("readonly_tip_dismissed", false) == true) }
     val listState = rememberLazyListState()
+    // Shared by the list (follows the newest message) and the floating "back to latest" pill.
+    val follow = rememberFollowState()
     val scope = rememberCoroutineScope()
     val displayTitle = summary?.let { io.github.tianli0.switchtether.ui.common.sessionDisplayTitle(it) } ?: initialTitle ?: stringResource(R.string.session_unnamed)
     Page(
@@ -573,7 +575,7 @@ fun SessionDetailContent(
             listOfNotNull(
                 Formatters.agentLabel(s.agent),
                 io.github.tianli0.switchtether.ui.common.sessionProjectName(s)?.takeIf { it != displayTitle },
-                s.model,
+                s.model?.let(::shortModelName),
             ).joinToString(" · ")
         } ?: "",
         onBack = onBack,
@@ -660,7 +662,7 @@ fun SessionDetailContent(
                 when (val ev = state.events) {
                     Loadable.Loading -> LoadingState(stringResource(R.string.state_loading), Modifier.padding(top = topOverlay))
                     is Loadable.Failed -> ErrorState(ev.error.title(), Modifier.padding(top = topOverlay), ev.error.detail, stringResource(R.string.action_retry), onReload)
-                    is Loadable.Ready -> EventList(state, ctx, listState, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing, bottomInset = composerHeight, topInset = topOverlay)
+                    is Loadable.Ready -> EventList(state, ctx, listState, follow, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing, bottomInset = composerHeight, topInset = topOverlay)
                 }
             }
             CompositionLocalProvider(LocalGlassBackdrop provides chatBackdrop) {
@@ -687,6 +689,13 @@ fun SessionDetailContent(
                         costLabel = usageBreakdown?.let { costChipLabel(it) },
                         onOpenCost = { showCost = true },
                     )
+                }
+                // "Back to latest" floats with the other controls, outside the recorded list, so its
+                // glass has the conversation to blur (inside the list it could only paint a flat fill).
+                if (state.events is Loadable.Ready) {
+                    Box(Modifier.fillMaxSize()) {
+                        NewMessagesPill(listState, follow, chatRows(state), composerHeight)
+                    }
                 }
                 // The composer floats too. Nothing is laid behind it: only its own keys and field
                 // are glass, the conversation stays sharp around them (the title bar is the page's
@@ -845,6 +854,7 @@ private fun EventList(
     state: SessionDetailState,
     ctx: RenderContext,
     listState: androidx.compose.foundation.lazy.LazyListState,
+    follow: FollowState,
     onLoadOlder: () -> Unit,
     onToggleSteps: (String) -> Unit,
     onRetryOutgoing: (String) -> Unit,
@@ -857,7 +867,6 @@ private fun EventList(
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val rows = chatRows(state)
-    val follow = rememberFollowState()
     // Opening a session lands at the bottom; only then may scrolling to the top load older pages.
     // Saveable: coming back from a sub-agent page keeps the reading position instead of jumping down.
     var initialScrollDone by androidx.compose.runtime.saveable.rememberSaveable(state.sessionId) { mutableStateOf(false) }
@@ -906,7 +915,6 @@ private fun EventList(
                 }
             }
         }
-        NewMessagesPill(listState, follow, rows, bottomInset)
     }
 }
 
@@ -1070,7 +1078,9 @@ private fun Composer(
         if (showModel || showInterrupt) {
             // Above the field: the run settings on the left, "stop" on the right while a turn runs.
             // Stop is a labelled capsule here, not a fourth key squeezed into the input row.
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // SpaceBetween, not a weighted spacer: the spacer took half the row, so the settings capsule
+            // was cut at half the width with room to spare.
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 if (showModel && s != null) {
                     // Model and effort of the running session, one tap away (like the IDE's model picker).
                     Row(
@@ -1097,7 +1107,7 @@ private fun Composer(
                         )
                     }
                 }
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.size(8.dp))
                 if (showInterrupt) {
                     val stopLabel = stringResource(R.string.session_interrupt)
                     Spacer(Modifier.size(8.dp))

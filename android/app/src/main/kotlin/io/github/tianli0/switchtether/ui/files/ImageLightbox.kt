@@ -80,6 +80,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.saket.telephoto.flick.FlickToDismiss
+import me.saket.telephoto.flick.FlickToDismissState
+import me.saket.telephoto.flick.rememberFlickToDismissState
 import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.ZoomableContentLocation
 import me.saket.telephoto.zoomable.rememberZoomableState
@@ -101,9 +104,6 @@ data class LightboxImage(
     override fun hashCode(): Int = (name.hashCode() * 31 + (path?.hashCode() ?: 0)) * 31 + (local?.hashCode() ?: 0)
 }
 
-/** How far a drag must pull the picture down (or up) before letting go closes the lightbox. */
-private val DISMISS_DISTANCE = 120.dp
-
 /**
  * The full-screen picture viewer (a lightbox): black behind the picture, pinch / double-tap zoom and
  * pan (Telephoto), swipe sideways between the pictures of one message, pull down to close (the
@@ -120,11 +120,12 @@ fun ImageLightbox(
     loadBytes: (suspend (String) -> ByteArray?)? = null,
 ) {
     if (images.isEmpty()) return
-    io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = onDismiss) {
+    io.github.tianli0.switchtether.ui.common.AppFullScreenDialog(onDismissRequest = onDismiss) {
         LightboxContent(images, startIndex.coerceIn(0, images.lastIndex), onDismiss, loadBytes)
     }
 }
 
+@OptIn(me.saket.telephoto.ExperimentalTelephotoApi::class)
 @Composable
 internal fun LightboxContent(
     images: List<LightboxImage>,
@@ -142,9 +143,22 @@ internal fun LightboxContent(
     val pager = rememberPagerState(initialPage = startIndex) { images.size }
     var chrome by remember { mutableStateOf(true) }
     var zoomed by remember { mutableStateOf(false) }
-    val drag = remember { Animatable(0f) }
     val loaded = remember { mutableStateMapOf<Int, ByteArray>() }
-    val dismissPx = with(density) { DISMISS_DISTANCE.toPx() }
+    // Telephoto's flick-to-dismiss: the picture follows the finger with rubber banding and is
+    // thrown off screen (or springs back) on release by distance and velocity.
+    val flick = rememberFlickToDismissState(dismissThresholdRatio = 0.12f, rotateOnDrag = false)
+    val flickGesture = flick.gestureState
+    LaunchedEffect(flickGesture) {
+        when (flickGesture) {
+            is FlickToDismissState.GestureState.Dragging -> chrome = false
+            // Leave while the picture is still flying out, as the library suggests.
+            is FlickToDismissState.GestureState.Dismissing -> {
+                delay(flickGesture.animationDuration / 2)
+                onDismiss()
+            }
+            else -> Unit
+        }
+    }
     // Controls step aside after a few seconds of looking; any tap brings them back.
     LaunchedEffect(chrome, pager.currentPage) {
         if (chrome) {
@@ -153,34 +167,15 @@ internal fun LightboxContent(
         }
     }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("image-lightbox")) {
-        val heightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
-        val pull = (abs(drag.value) / (heightPx * 0.5f)).coerceIn(0f, 1f)
+        val pull = (flick.offsetFraction * 2f).coerceIn(0f, 1f)
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 1f - 0.75f * pull)))
+        FlickToDismiss(state = flick, enabled = !zoomed, modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pager,
             userScrollEnabled = !zoomed,
             beyondViewportPageCount = 1,
             key = { it },
-            modifier = Modifier.fillMaxSize()
-                .graphicsLayer {
-                    translationY = drag.value
-                    val s = 1f - 0.12f * pull
-                    scaleX = s
-                    scaleY = s
-                }
-                .draggable(
-                    state = rememberDraggableState { delta -> scope.launch { drag.snapTo(drag.value + delta) } },
-                    orientation = Orientation.Vertical,
-                    enabled = !zoomed,
-                    onDragStarted = { chrome = false },
-                    onDragStopped = { velocity ->
-                        if (abs(drag.value) > dismissPx || abs(velocity) > 2_400f) {
-                            onDismiss()
-                        } else {
-                            drag.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 500f))
-                        }
-                    },
-                ),
+            modifier = Modifier.fillMaxSize(),
         ) { index ->
             LightboxPage(
                 image = images[index],
@@ -190,9 +185,10 @@ internal fun LightboxContent(
                 onZoomed = { if (index == pager.currentPage) zoomed = it },
             )
         }
+        }
         val current = images[pager.currentPage]
         AnimatedVisibility(
-            visible = chrome && pull == 0f,
+            visible = chrome && pull < 0.01f,
             enter = fadeIn() + slideInVertically { -it / 3 },
             exit = fadeOut() + slideOutVertically { -it / 3 },
             modifier = Modifier.align(Alignment.TopCenter),
@@ -215,7 +211,7 @@ internal fun LightboxContent(
         }
         if (store != null) {
             AnimatedVisibility(
-                visible = chrome && pull == 0f,
+                visible = chrome && pull < 0.01f,
                 enter = fadeIn() + slideInVertically { it / 3 },
                 exit = fadeOut() + slideOutVertically { it / 3 },
                 modifier = Modifier.align(Alignment.BottomCenter),

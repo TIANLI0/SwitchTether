@@ -107,12 +107,14 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
     val opened: (@Composable () -> Unit)? = when {
         viewer != null -> {
             {
-                BackHandler(onBack = vm::closeViewer)
-                RemoteFileViewer(
-                    ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
-                    onBack = vm::closeViewer,
-                    onManageDownloads = onOpenDownloads,
-                )
+                val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(onBack = vm::closeViewer)
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().then(back)) {
+                    RemoteFileViewer(
+                        ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
+                        onBack = vm::closeViewer,
+                        onManageDownloads = onOpenDownloads,
+                    )
+                }
             }
         }
         state.conflict != null -> { { ConflictScreen(state, vm) } }
@@ -188,14 +190,14 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     val clipboard = androidx.compose.ui.platform.LocalClipboard.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // Back: leave search results, then clear the quick filter, then go up a folder.
-    BackHandler(enabled = state.results != null || state.query.isNotEmpty() || listing?.parent != null) {
+    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(enabled = state.results != null || state.query.isNotEmpty() || listing?.parent != null) {
         when {
             state.results != null -> vm.clearSearch().also { searchExpanded = false }
             state.query.isNotEmpty() -> vm.setQuery("")
             else -> listing?.parent?.let(vm::browse)
         }
     }
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().then(back)) {
         roots.takeIf { it.size > 1 }?.let { rs ->
             val currentPath = listing?.path.orEmpty()
             val selectedRoot = rs.indexOfFirst { FileListing.isInside(it.path, currentPath) }.coerceAtLeast(0)
@@ -492,8 +494,8 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
 
 @Composable
 private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
-    BackHandler(onBack = vm::requestCloseFile)
-    Column(Modifier.fillMaxSize()) {
+    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(onBack = vm::requestCloseFile)
+    Column(Modifier.fillMaxSize().then(back)) {
         val f = (state.file as? Loadable.Ready)?.value
         val name = f?.path?.let(FileTypes::fileName).orEmpty()
         // The same title bar as every file preview: back, name over folder · size · modified, keys.

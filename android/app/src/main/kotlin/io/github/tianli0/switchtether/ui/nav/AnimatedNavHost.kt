@@ -110,8 +110,11 @@ fun AnimatedNavHost(nav: NavViewModel, content: @Composable (NavEntry) -> Unit) 
     }
 }
 
-/** `coui_open_slide_*` / `coui_close_slide_*`: 350ms. */
-private const val DURATION = 350
+/**
+ * `coui_open_slide_*` / `coui_close_slide_*` run 350ms; that felt slow on the device, so the same
+ * curves run in 280ms (an in-app page change, not a new window).
+ */
+private const val DURATION = 280
 
 /** The page underneath ends at alpha 0.5 over black. */
 private const val SCRIM_ALPHA = 0.5f

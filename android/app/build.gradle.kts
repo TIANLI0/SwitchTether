@@ -18,8 +18,8 @@ android {
         minSdk = 29
         // Android 17. Local network access needs ACCESS_LOCAL_NETWORK (requested at runtime).
         targetSdk = 37
-        versionCode = 17
-        versionName = "0.1.16"
+        versionCode = 18
+        versionName = "0.1.17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 64-bit ARM (ARMv8) devices only; smaller APK.
         ndk { abiFilters += "arm64-v8a" }
@@ -128,6 +128,8 @@ dependencies {
     // File viewer: zoomable / tiled images, rendered Markdown, syntax highlighting (all Apache-2.0).
     implementation(libs.telephoto.zoomable)
     implementation(libs.telephoto.sub.sampling.image)
+    // Flick-to-dismiss for the image lightbox (same author / license as zoomable, Apache-2.0).
+    implementation(libs.telephoto.flick)
     implementation(libs.markdown.renderer)
     implementation(libs.markdown.renderer.code)
     implementation(libs.highlights)

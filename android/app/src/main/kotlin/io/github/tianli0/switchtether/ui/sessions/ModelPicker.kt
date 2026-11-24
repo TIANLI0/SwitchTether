@@ -63,7 +63,7 @@ fun effortLabel(e: String): String = when (e) {
 @Composable
 fun modelEffortSummary(model: String?, effort: String?): String =
     listOfNotNull(
-        model?.takeIf { it.isNotBlank() && it != "default" } ?: stringResource(R.string.model_default),
+        model?.takeIf { it.isNotBlank() && it != "default" }?.let(::shortModelName) ?: stringResource(R.string.model_default),
         effort?.takeIf { it.isNotBlank() && it != "default" }?.let { stringResource(R.string.effort_short, effortLabel(it)) },
     ).joinToString(" · ")
 
@@ -241,5 +241,25 @@ fun ModelEffortSheet(
                 modifier = Modifier.padding(horizontal = PageDefaults.TextGutter),
             )
         }
+    }
+}
+
+/** `claude-opus-5-5` / `claude-sonnet-4-5-20250929` / `claude-opus-4-8[1m]` → `Opus 5.5` / `Sonnet 4.5` / `Opus 4.8 1M`. */
+private val CLAUDE_MODEL = Regex("""^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m])?$""", RegexOption.IGNORE_CASE)
+
+/**
+ * A model id short enough for a capsule: Claude ids become family and version; others (aliases such
+ * as `opus`, Codex's `gpt-5.1-codex`) are kept, with a known alias capitalised.
+ */
+fun shortModelName(model: String): String {
+    val m = CLAUDE_MODEL.matchEntire(model.trim())
+    if (m != null) {
+        val family = m.groupValues[1].replaceFirstChar { it.uppercase() }
+        val version = listOf(m.groupValues[2], m.groupValues[3]).filter { it.isNotEmpty() }.joinToString(".")
+        return listOfNotNull(family, version, "1M".takeIf { m.groupValues[4].isNotEmpty() }).joinToString(" ")
+    }
+    return when (model.lowercase()) {
+        "opus", "sonnet", "haiku", "fable" -> model.replaceFirstChar { it.uppercase() }
+        else -> model
     }
 }
