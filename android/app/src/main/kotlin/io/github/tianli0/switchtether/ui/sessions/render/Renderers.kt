@@ -807,6 +807,8 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
             val options = d["options"].arr().orEmpty().mapNotNull { it.obj() }
             // Disabled while a decision is on its way: a second tap must not send a second decision.
             val enabled = ctx.approve.usable && ctx.online && !ctx.requestBusy
+            // The agent presents its plan: Claude Code's three answers instead of allow / deny.
+            val approvePlan = ctx.onApprovePlan?.takeIf { isPlanExitApproval(d.str("toolName"), options.mapNotNull { it.str("id") }) }
             // Compact, end-aligned actions (a card's buttons, not a page's): they wrap onto the next
             // line when the desktop's labels are long.
             androidx.compose.foundation.layout.FlowRow(
@@ -814,7 +816,17 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                options.forEach { o ->
+                if (approvePlan != null) {
+                    val rid = d.str("requestId").orEmpty()
+                    val keep = stringResource(R.string.plan_keep_planning)
+                    val review = stringResource(R.string.plan_approve_review)
+                    val auto = stringResource(R.string.plan_approve_auto)
+                    if (options.any { it.str("id") == "deny" }) {
+                        SmallButton(keep, { ctx.onApprove(rid, "deny", keep) }, enabled = enabled, modifier = Modifier.testTag("plan-keep"))
+                    }
+                    SmallButton(review, { approvePlan(rid, "default", review) }, enabled = enabled, modifier = Modifier.testTag("plan-approve-review"))
+                    SmallButton(auto, { approvePlan(rid, "acceptEdits", auto) }, enabled = enabled, tone = ActionTone.Primary, modifier = Modifier.testTag("plan-approve-auto"))
+                } else options.forEach { o ->
                     val id = o.str("id") ?: return@forEach
                     val label = decisionOptionLabel(id, o.str("label"))
                     val primary = id == "allow"
@@ -834,6 +846,13 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
         }
     }
 }
+
+/** Tool name of the approval with which Claude Code presents its plan and asks to leave plan mode. */
+const val EXIT_PLAN_MODE_TOOL = "ExitPlanMode"
+
+/** The plan choices replace allow / deny only for that tool, and only if the request can be allowed. */
+fun isPlanExitApproval(toolName: String?, optionIds: List<String>): Boolean =
+    toolName == EXIT_PLAN_MODE_TOOL && "allow" in optionIds
 
 /** Localized label for the protocol's decision ids; unknown ids keep the desktop's label. */
 @Composable

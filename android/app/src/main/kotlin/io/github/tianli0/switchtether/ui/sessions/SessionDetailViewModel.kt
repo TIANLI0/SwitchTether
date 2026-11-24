@@ -855,6 +855,33 @@ class SessionDetailViewModel(
         commands.run(label) { id -> repo.resolveApproval(sessionId, requestId, decision, id) }
     }
 
+    // ---- Plan approval (ExitPlanMode): approve, then leave plan mode ---------------------------------
+
+    /**
+     * Claude Code's "Yes, and auto-accept edits" / "Yes, and manually approve edits": allows the
+     * `ExitPlanMode` request and, only once that succeeded, switches the session to [mode]
+     * (`acceptEdits` / `default`; it is in `plan`, where the work would stay blocked). A failed
+     * mode change shows the usual command prompt under [modeLabel]; nothing is retried by itself.
+     */
+    fun approvePlan(label: String, modeLabel: String, requestId: String, mode: String) {
+        if (!_state.value.canUseClaudeTools) return resolveApproval(label, requestId, "allow")
+        commands.run(label, onSuccess = {
+            // After the tracker has finished with the approval (it clears its prompt on success).
+            viewModelScope.launch {
+                kotlinx.coroutines.yield()
+                commands.run(modeLabel, onSuccess = { out ->
+                    val now = ClaudeTools.parseMode(out.response.body, mode)
+                    _state.update { st ->
+                        val d = st.detail.valueOrNull ?: return@update st
+                        st.copy(detail = Loadable.Ready(d.copy(permissionMode = now)))
+                    }
+                }) { id -> repo.claudeTool(sessionId, ClaudeTools.PERMISSION_MODE, jsonOf("mode" to mode), id) }
+            }
+        }) { id -> repo.resolveApproval(sessionId, requestId, "allow", id) }
+    }
+
+    // ---- end of plan approval ----------------------------------------------------------------------
+
     fun answer(label: String, requestId: String, answers: JsonObject?, action: String? = null) {
         commands.run(label) { id -> repo.answer(sessionId, requestId, answers, id, action) }
     }

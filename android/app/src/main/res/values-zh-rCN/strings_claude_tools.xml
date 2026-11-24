@@ -11,6 +11,10 @@
     <string name="tools_permission_hint">立即作用于正在运行的会话，相当于 Claude Code 里的 Shift+Tab。</string>
     <string name="perm_bypass_short">Bypass</string>
     <string name="perm_bypass">Bypass permissions：跳过所有权限确认（仅当会话以此模式启动时可用）</string>
+    <string name="perm_auto_short">Auto</string>
+    <string name="perm_auto">Auto mode：安全的操作直接执行，有风险的会被拦下，不再询问</string>
+    <string name="perm_dont_ask_short">Don\'t ask</string>
+    <string name="perm_dont_ask">Don\'t ask：未预先允许的操作一律拒绝，不再询问</string>
     <string name="perm_unknown">模式：%1$s</string>
     <string name="tools_permission_failed">无法切换模式：%1$s</string>
 
@@ -20,6 +24,13 @@
     <string name="tools_context_kind_free">空闲</string>
     <string name="tools_context_kind_buffer">预留</string>
     <string name="tools_context_kind_deferred">延迟加载</string>
+    <string name="tools_session_cost">本会话费用</string>
+    <string name="tools_session_cost_tokens">输入 %1$s · 输出 %2$s tokens</string>
+    <string name="tools_session_cost_partial">只统计本机已加载的对话部分，更早的轮次未计入。</string>
+
+    <string name="plan_approve_auto">批准并自动接受编辑</string>
+    <string name="plan_approve_review">批准，逐项确认编辑</string>
+    <string name="plan_keep_planning">继续规划</string>
 
     <string name="tools_plan">Plan</string>
     <string name="tools_plan_none">还没有 Plan。Plan 在规划模式下生成。</string>

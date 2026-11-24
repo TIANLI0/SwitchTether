@@ -50,6 +50,12 @@ data class RenderContext(
     val isBackgrounding: (toolUseId: String) -> Boolean = { false },
     /** Claude Code session tools: "rewind files to before this message" for a user message id (null = not offered). */
     val onRewindFiles: ((userMessageId: String) -> Unit)? = null,
+    /**
+     * Leaving plan mode like Claude Code: approve an `ExitPlanMode` request and then switch the
+     * session to [mode] (`acceptEdits` or `default`). Null = not offered (no Claude Code session
+     * tools, or offline): the card keeps the plain allow / deny.
+     */
+    val onApprovePlan: ((requestId: String, mode: String, label: String) -> Unit)? = null,
 )
 
 typealias EventRenderer = @Composable (item: RenderItem, ctx: RenderContext) -> Unit

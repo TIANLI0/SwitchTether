@@ -11,6 +11,10 @@
     <string name="tools_permission_hint">Applies to the running session at once, like Shift+Tab in Claude Code.</string>
     <string name="perm_bypass_short">Bypass</string>
     <string name="perm_bypass">Bypass permissions: skip all permission prompts (only if the session was started with it)</string>
+    <string name="perm_auto_short">Auto</string>
+    <string name="perm_auto">Auto mode: safe actions run without asking, risky ones are blocked</string>
+    <string name="perm_dont_ask_short">Don\'t ask</string>
+    <string name="perm_dont_ask">Don\'t ask: anything not already allowed is denied instead of asking</string>
     <string name="perm_unknown">Mode: %1$s</string>
     <string name="tools_permission_failed">Could not change the mode: %1$s</string>
 
@@ -20,6 +24,13 @@
     <string name="tools_context_kind_free">free</string>
     <string name="tools_context_kind_buffer">reserved</string>
     <string name="tools_context_kind_deferred">deferred</string>
+    <string name="tools_session_cost">Session cost</string>
+    <string name="tools_session_cost_tokens">Input %1$s · Output %2$s tokens</string>
+    <string name="tools_session_cost_partial">Counts the part of the conversation loaded on this phone; earlier turns are not included.</string>
+
+    <string name="plan_approve_auto">Approve and auto-accept edits</string>
+    <string name="plan_approve_review">Approve, review each edit</string>
+    <string name="plan_keep_planning">Keep planning</string>
 
     <string name="tools_plan">Plan</string>
     <string name="tools_plan_none">No plan yet. Plans are written in plan mode.</string>

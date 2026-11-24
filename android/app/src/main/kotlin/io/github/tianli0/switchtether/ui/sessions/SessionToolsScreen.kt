@@ -280,6 +280,7 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
     ) {
         // A session started on the computer is observe-only: what its files hold, nothing that needs the process.
         val readOnly = detail.claudeReadTools
+        val sessionCost = androidx.compose.runtime.remember(detail.log) { sessionCost(detail.log.events) }
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("session-tools"), contentPadding = pageListPadding()) {
             if (!detail.online) {
                 item { ToolsNote(stringResource(R.string.tools_offline), LocalDevColors.current.warn) }
@@ -302,6 +303,10 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
             if (!readOnly) item {
                 SectionTitle(stringResource(R.string.tools_context), onRefresh = vm::loadContext)
                 GroupCard { ToolLoadable(st.context, vm::loadContext) { ContextUsageView(it) } }
+            }
+            // What the loaded part of the conversation cost (nothing when no turn reported a cost).
+            sessionCost?.let { cost ->
+                item { SessionCostCard(cost, partial = detail.hasMoreBefore) }
             }
             item {
                 SectionTitle(stringResource(R.string.tools_plan), onRefresh = vm::loadPlan)
@@ -435,6 +440,8 @@ private fun <T> ToolLoadable(state: Loadable<T>, onRetry: () -> Unit, content: @
 fun permissionModeLabel(mode: String?): String = when (mode) {
     "acceptEdits" -> stringResource(R.string.perm_accept_edits_short)
     "plan" -> stringResource(R.string.perm_plan_short)
+    "auto" -> stringResource(R.string.perm_auto_short)
+    "dontAsk" -> stringResource(R.string.perm_dont_ask_short)
     "bypassPermissions" -> stringResource(R.string.perm_bypass_short)
     "default", null -> stringResource(R.string.perm_default_short)
     else -> stringResource(R.string.perm_unknown, mode)
@@ -444,11 +451,13 @@ fun permissionModeLabel(mode: String?): String = when (mode) {
 private fun permissionModeSummary(mode: String): String = when (mode) {
     "acceptEdits" -> stringResource(R.string.perm_accept_edits)
     "plan" -> stringResource(R.string.perm_plan)
+    "auto" -> stringResource(R.string.perm_auto)
+    "dontAsk" -> stringResource(R.string.perm_dont_ask)
     "bypassPermissions" -> stringResource(R.string.perm_bypass)
     else -> stringResource(R.string.perm_default)
 }
 
-/** The four modes the phone offers, the current one selected; a switch in flight shows a spinner. */
+/** The modes the phone offers in a session, the current one selected; a switch in flight shows a spinner. */
 @Composable
 fun PermissionModeOptions(current: String?, pending: String?, enabled: Boolean, onSelect: (String) -> Unit) {
     val modes = ClaudeTools.PERMISSION_MODES
@@ -543,6 +552,31 @@ private fun ContextUsageView(u: ContextUsage) {
             }
         }
     }
+}
+
+/** "Session cost": the summed cost in the display currency, input / output tokens under the title. */
+@Composable
+private fun SessionCostCard(cost: SessionCost, partial: Boolean) {
+    GroupCard {
+        BasicComponent(
+            title = stringResource(R.string.tools_session_cost),
+            summary = stringResource(
+                R.string.tools_session_cost_tokens,
+                io.github.tianli0.switchtether.remote.usage.UsageFormat.tokens(cost.inputTokens),
+                io.github.tianli0.switchtether.remote.usage.UsageFormat.tokens(cost.outputTokens),
+            ),
+            endActions = {
+                Text(
+                    io.github.tianli0.switchtether.remote.usage.UsageFormat.money(cost.costUsd, io.github.tianli0.switchtether.domain.LocalMoney.current, 4),
+                    style = COUITheme.textStyles.body1,
+                    color = COUITheme.colorScheme.onSurface,
+                )
+            },
+            cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Full,
+            modifier = Modifier.testTag("tools-session-cost"),
+        )
+    }
+    if (partial) ToolsNote(stringResource(R.string.tools_session_cost_partial))
 }
 
 @Composable

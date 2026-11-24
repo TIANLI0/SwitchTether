@@ -174,6 +174,7 @@ fun SessionDetailScreen(
     val agentLabel = Formatters.agentLabel(agent)
     val cancelLabel = stringResource(R.string.action_cancel)
     val claudeTools = state.claudeTools
+    val permissionLabel = stringResource(R.string.tools_permission)
     val backgrounding = state.backgrounding
     val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent, summary?.cwd, busy, claudeTools, backgrounding) {
         val caps = state.detail.valueOrNull?.capabilities
@@ -191,6 +192,9 @@ fun SessionDetailScreen(
                 if (decision == "allow" || decision == "deny") vm.resolveApproval("$approveLabel: $label", rid, decision)
                 else pendingApproval = Triple(rid, decision, label)
             },
+            onApprovePlan = if (state.canUseClaudeTools) {
+                { rid, mode, label -> vm.approvePlan("$approveLabel: $label", permissionLabel, rid, mode) }
+            } else null,
             onAnswer = { rid, answers -> vm.answer(answerLabel, rid, answers) },
             onAnswerAction = { rid, answers, action ->
                 vm.answer(if (action == "cancel") cancelLabel else answerLabel, rid, answers, action)

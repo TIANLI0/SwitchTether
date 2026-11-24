@@ -31,8 +31,11 @@ object ClaudeTools {
     const val REWIND = "rewind"
     const val EXPORT = "export"
 
-    /** Permission modes the phone offers (Shift+Tab in the CLI; bypass only works when started with it). */
-    val PERMISSION_MODES: List<String> = listOf("default", "acceptEdits", "plan", "bypassPermissions")
+    /**
+     * Permission modes the phone offers in a running session (Shift+Tab in the CLI; bypass only works
+     * when started with it). The desktop refuses a mode the installed Claude Code does not know.
+     */
+    val PERMISSION_MODES: List<String> = listOf("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
 
     /** Tools a running foreground call of which can be moved to the background (Ctrl+B in the IDE). */
     private val BACKGROUNDABLE_TOOLS = setOf("Bash", "Agent", "Task")
