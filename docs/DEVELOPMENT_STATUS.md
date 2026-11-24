@@ -595,12 +595,12 @@ springs), expansion alpha spring. Buttons: `CONTENT_CAPSULE_1/2` (+ disabled) ri
 lights by type, standard press springs (0 / 0.25 press, 0.6 / 0.5 release, scale 0.85). Toolbar keys:
 `CIRCLE_1` inner fade, `OPAQUE_SMALL_2` press light, light-theme caustic. Popup: enter damping 0.87 / 0.80,
 two-layer snapshot tint, ~25px blur. Dialog: SDK tints, light inner fade 0.6. List rows: tap rises to 0.7.
-Switch: dark press / hover colours, system click sound. Dark page background #000000. Page transitions:
+Switch: dark press / hover colours, system click sound. Dark page background stays #303030 (user preference; the SDK declares #000000). Page transitions:
 ColorOS activity slide (full-width, 350ms curves, underlying page -30% under a 0.5 black scrim); the back
 key runs the full pop; tab switch is a plain 150ms cross-fade; ExpandBody 400ms in step with the arrow;
 composer / round keys use the material rim; selected session row uses the neutral press colour.
 
 Checks: Android `:core:remote:test testDebugUnitTest :app:assembleDebug` — app 332 / core:remote 188, 0
 failures. Emulator (software GPU, animations slowed 5x): push / pop (button and back key), bar show / hide,
-dark page verified. Not verifiable on the emulator: every glass material (rims, inner fades, blur tints);
+dark page checked. Not verifiable on the emulator: every glass material (rims, inner fades, blur tints);
 needs the user's OPPO phone. Switch size left unchanged until measured on the device.
