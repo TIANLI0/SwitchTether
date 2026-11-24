@@ -88,6 +88,8 @@ import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
+import io.github.tianli0.switchtether.ui.common.NoticeVisibility
+import io.github.tianli0.switchtether.ui.common.rememberLast
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
@@ -267,10 +269,14 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 }
             }
         }
-        if (state.navigatingTo != null && listing != null) {
+        NoticeVisibility(state.navigatingTo != null && listing != null) {
             LinearProgressIndicator(progress = null, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         }
-        state.transfer?.let { TransferRow(it, vm, onOpenDownloads) }
+        // The transfer card folds away when it is closed, still showing what it showed.
+        val transfer = rememberLast(state.transfer)
+        NoticeVisibility(state.transfer != null) {
+            if (transfer != null) TransferRow(transfer, vm, onOpenDownloads)
+        }
         val results = state.results
         if (results != null) {
             LoadableContent(results, onRetry = vm::search) { hits ->
@@ -408,7 +414,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         ) {
             Column {
                 TextInput(name, { name = it }, stringResource(R.string.files_name))
-                if (invalidName) {
+                NoticeVisibility(invalidName) {
                     Text(stringResource(R.string.files_name_invalid), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(top = 4.dp, start = 4.dp))
                 }
             }

@@ -181,7 +181,10 @@ fun RemoteFileViewer(
                 enabled = !save.running && ready?.fromDownload != true,
             )
         }
-        SaveRow(save, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
+        // The save line grows in under the header instead of pushing the preview down at once.
+        io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.running || save.error != null || save.record != null) {
+            SaveRow(save, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (val p = phase) {
                 is Phase.Loading -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {

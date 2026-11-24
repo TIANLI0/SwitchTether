@@ -126,7 +126,7 @@ fun SessionsContent(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             )
             // Project filter: only once sessions of more than one project are known.
-            if (state.knownProjects.size > 1) {
+            io.github.tianli0.switchtether.ui.common.NoticeVisibility(state.knownProjects.size > 1) {
                 val projects = listOf<String?>(null) + state.knownProjects
                 io.github.suqi8.coui.kmp.basic.ChipTabGroup(
                     tabs = projects.map { ChipTabData(it ?: stringResource(R.string.sessions_all_projects)) },
@@ -159,11 +159,13 @@ fun SessionsContent(
                         }
                         groups.forEach { (groupTitle, list) ->
                             if (list.isEmpty()) return@forEach
-                            if (groupTitle != null) item(key = "h-$groupTitle") { SmallTitle(stringResource(groupTitle)) }
+                            // A group (its title, its card) is one item: it fades in and out with the
+                            // scope and glides when the group above it grows or empties.
+                            if (groupTitle != null) item(key = "h-$groupTitle") { SmallTitle(stringResource(groupTitle), Modifier.animateItem()) }
                             item(key = "g-$groupTitle") {
                                 // One row per conversation: resumed / continued sessions fold under the newest one.
                                 val grouped = androidx.compose.runtime.remember(list) { io.github.tianli0.switchtether.domain.SessionGrouping.group(list) }
-                                GroupCard {
+                                GroupCard(Modifier.animateItem()) {
                                     val rows = buildList<Pair<io.github.tianli0.switchtether.remote.protocol.SessionSummary?, io.github.tianli0.switchtether.domain.SessionGroup>> {
                                         grouped.forEach { g ->
                                             add(g.primary to g)

@@ -2,6 +2,11 @@ package io.github.tianli0.switchtether.ui.common
 
 import androidx.compose.ui.platform.testTag
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,14 +71,40 @@ fun connectionText(state: ConnectionState): String {
     }
 }
 
+/**
+ * A strip or notice in a column that folds in and out (height and fade) instead of popping, so
+ * what is below it glides. Content that needs data which is gone while it folds away takes it
+ * from [rememberLast].
+ */
+@Composable
+fun NoticeVisibility(visible: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    AnimatedVisibility(visible = visible, modifier = modifier, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) { content() }
+}
+
+/** The last non-null [value]: what a notice keeps showing while it folds away after its data is gone. */
+@Composable
+fun <T : Any> rememberLast(value: T?): T? {
+    val last = remember { androidx.compose.ui.node.Ref<T>() }
+    if (value != null) last.value = value
+    return last.value
+}
+
 /** Thin banner for non-online states, used at the top of pages. */
 @Composable
 fun ConnectionBanner(state: ConnectionState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     // Android 17: LAN access not granted → say what still works and offer to fix it.
     LocalNetworkStrip()
     // Online (direct or through the relay) is never a banner: the path is shown once, on the
-    // Home connection card and in Manage → computer details.
-    if (state is ConnectionState.Online) return
+    // Home connection card and in Manage → computer details. The banner folds away when the link
+    // comes back, still showing the state it had.
+    val shown = rememberLast(state.takeIf { it !is ConnectionState.Online })
+    NoticeVisibility(state !is ConnectionState.Online) {
+        if (shown != null) ConnectionNotice(shown, onRetry, modifier)
+    }
+}
+
+@Composable
+private fun ConnectionNotice(state: ConnectionState, onRetry: () -> Unit, modifier: Modifier) {
     // The computer reported Wake-on-LAN targets: "唤醒并重试" sends magic packets on this network
     // (only effective when the phone is on the computer's LAN and the computer allows it), then retries.
     val wake = (state as? ConnectionState.Offline)?.desktop?.wake.orEmpty()

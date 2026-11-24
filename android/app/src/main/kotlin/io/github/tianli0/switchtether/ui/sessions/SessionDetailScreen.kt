@@ -567,14 +567,16 @@ fun SessionDetailContent(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("readonly-tip"),
             )
         }
-        if (state.pending.isNotEmpty()) {
-            val n = state.pending.size
+        // Folds away once the last request is answered, still showing the count it had.
+        val pendingShown = io.github.tianli0.switchtether.ui.common.rememberLast(state.pending.size.takeIf { it > 0 })
+        io.github.tianli0.switchtether.ui.common.NoticeVisibility(state.pending.isNotEmpty()) {
+            val n = pendingShown ?: 1
             TopTips(
                 text = pluralStringResource(R.plurals.pending_banner, n, n),
                 startIcon = { Icon(AppIcons.Lock, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
                 actionText = stringResource(R.string.pending_banner_action),
                 onAction = {
-                    val idx = state.timeline.indexOfFirst { it.key == state.pending.first() }
+                    val idx = state.timeline.indexOfFirst { it.key == state.pending.firstOrNull() }
                     if (idx >= 0) scope.launch { listState.animateScrollToItem(idx + 1) }
                 },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("pending-banner"),

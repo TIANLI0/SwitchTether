@@ -133,13 +133,18 @@ fun LocalNetworkStrip(modifier: Modifier = Modifier) {
     val access = container.localNetwork
     val granted by access.granted.collectAsStateWithLifecycle()
     val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = null)
-    val d = desktop ?: return
-    if (!access.required || granted || d.hosts.none(LocalNetwork::isLocal)) return
-    NoticeBanner(
-        text = stringResource(if (d.relayUrl != null) R.string.lan_perm_strip_relay else R.string.lan_perm_strip),
-        color = LocalDevColors.current.warn,
-        modifier = modifier.testTag("lan-perm-strip"),
-        action = stringResource(R.string.lan_perm_grant),
-        onAction = { localNetworkAsk.value = LocalNetworkAsk() },
-    )
+    val missing = desktop?.takeIf { access.required && !granted && it.hosts.any(LocalNetwork::isLocal) }
+    // Folds away once the permission is granted, still showing its text.
+    val d = rememberLast(missing)
+    NoticeVisibility(missing != null) {
+        if (d != null) {
+            NoticeBanner(
+                text = stringResource(if (d.relayUrl != null) R.string.lan_perm_strip_relay else R.string.lan_perm_strip),
+                color = LocalDevColors.current.warn,
+                modifier = modifier.testTag("lan-perm-strip"),
+                action = stringResource(R.string.lan_perm_grant),
+                onAction = { localNetworkAsk.value = LocalNetworkAsk() },
+            )
+        }
+    }
 }

@@ -117,7 +117,7 @@ fun UpdateSheet(
             when (state) {
                 is UpdateState.Downloading -> {
                     LinearProgressIndicator(
-                        progress = if (state.total > 0) (state.done.toFloat() / state.total).coerceIn(0f, 1f) else 0f,
+                        progress = androidx.compose.animation.core.animateFloatAsState(if (state.total > 0) (state.done.toFloat() / state.total).coerceIn(0f, 1f) else 0f, label = "download").value,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(stringResource(R.string.update_progress, Formatters.bytes(state.done), Formatters.bytes(state.total)), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)

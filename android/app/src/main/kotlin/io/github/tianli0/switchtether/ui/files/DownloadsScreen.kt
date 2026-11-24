@@ -121,8 +121,10 @@ fun DownloadsScreen(onBack: () -> Unit) {
         },
     ) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 4.dp)) {
-            item { SmallTitle(stringResource(R.string.downloads_section_saved)) }
-            item {
+            // Keyed sections: deleting downloads lets what is below the list glide up, and the
+            // lines of the list fade when the last file goes.
+            item(key = "saved-h") { SmallTitle(stringResource(R.string.downloads_section_saved)) }
+            item(key = "saved-hint") {
                 Text(
                     stringResource(R.string.downloads_saved_hint, FileStore.DOWNLOAD_FOLDER),
                     style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
@@ -130,16 +132,16 @@ fun DownloadsScreen(onBack: () -> Unit) {
                 )
             }
             if (items.isEmpty()) {
-                item { Text(stringResource(R.string.downloads_empty), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
+                item(key = "empty") { Text(stringResource(R.string.downloads_empty), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.animateItem().padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
             } else {
-                item {
+                item(key = "total") {
                     Text(
                         pluralStringResource(R.plurals.downloads_total, items.size, items.size, Formatters.bytes(items.sumOf { it.size })),
-                        style = DevType.label, color = LocalDevColors.current.gutter, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 6.dp),
+                        style = DevType.label, color = LocalDevColors.current.gutter, modifier = Modifier.animateItem().padding(horizontal = 16.dp).padding(bottom = 6.dp),
                     )
                 }
-                item {
-                    GroupCard {
+                item(key = "files") {
+                    GroupCard(Modifier.animateItem()) {
                         items.forEachIndexed { i, r ->
                             BasicComponent(
                                 title = r.name,
@@ -160,28 +162,30 @@ fun DownloadsScreen(onBack: () -> Unit) {
                         }
                     }
                 }
-                item {
-                    if (selecting) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            SmallButton(
-                                text = stringResource(R.string.downloads_select_all),
-                                onClick = { selected = if (selected.size == items.size) emptySet() else items.map { it.id }.toSet() },
-                            )
-                            SmallButton(
-                                text = stringResource(R.string.downloads_delete_selected, selected.size),
-                                enabled = selected.isNotEmpty(),
-                                tone = ActionTone.Danger,
-                                onClick = { pending = PendingDelete.Some(selected) },
-                            )
+                item(key = "actions") {
+                    Box(Modifier.animateItem()) {
+                        if (selecting) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                SmallButton(
+                                    text = stringResource(R.string.downloads_select_all),
+                                    onClick = { selected = if (selected.size == items.size) emptySet() else items.map { it.id }.toSet() },
+                                )
+                                SmallButton(
+                                    text = stringResource(R.string.downloads_delete_selected, selected.size),
+                                    enabled = selected.isNotEmpty(),
+                                    tone = ActionTone.Danger,
+                                    onClick = { pending = PendingDelete.Some(selected) },
+                                )
+                            }
+                        } else {
+                            LinkButton(stringResource(R.string.downloads_delete_all), { pending = PendingDelete.All }, modifier = Modifier.padding(horizontal = 14.dp), color = LocalDevColors.current.danger)
                         }
-                    } else {
-                        LinkButton(stringResource(R.string.downloads_delete_all), { pending = PendingDelete.All }, modifier = Modifier.padding(horizontal = 14.dp), color = LocalDevColors.current.danger)
                     }
                 }
             }
-            item { SmallTitle(stringResource(R.string.downloads_section_cache)) }
-            item {
-                GroupCard {
+            item(key = "cache-h") { SmallTitle(stringResource(R.string.downloads_section_cache), Modifier.animateItem()) }
+            item(key = "cache") {
+                GroupCard(Modifier.animateItem()) {
                     BasicComponent(
                         title = stringResource(R.string.downloads_cache_title),
                         summary = stringResource(R.string.downloads_cache_summary, Formatters.bytes(cacheBytes), Formatters.bytes(FileCache.DEFAULT_MAX_BYTES)),
@@ -189,14 +193,14 @@ fun DownloadsScreen(onBack: () -> Unit) {
                     )
                 }
             }
-            item {
+            item(key = "cache-hint") {
                 Text(
                     stringResource(R.string.downloads_cache_hint),
                     style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = PageDefaults.TextGutter),
+                    modifier = Modifier.animateItem().padding(horizontal = PageDefaults.TextGutter),
                 )
             }
-            notice?.let { n -> item { Text(n, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) } }
+            notice?.let { n -> item(key = "notice") { Text(n, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.warn, modifier = Modifier.animateItem().padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) } }
         }
     }
 

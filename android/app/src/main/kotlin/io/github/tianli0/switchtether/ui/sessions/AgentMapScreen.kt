@@ -327,7 +327,9 @@ fun agentStateLabel(s: AgentMapState): String = stringResource(
 
 @Composable
 private fun Dot(c: Color) {
-    Canvas(Modifier.size(8.dp)) { drawCircle(c) }
+    // A state change (working → finished) blends instead of switching.
+    val color by androidx.compose.animation.animateColorAsState(c, label = "agent-dot")
+    Canvas(Modifier.size(8.dp)) { drawCircle(color) }
 }
 
 @Composable
@@ -484,7 +486,7 @@ private fun AgentCard(
                 color = COUITheme.colorScheme.primary,
                 modifier = Modifier.clickable(role = Role.Button) { promptOpen = !promptOpen },
             )
-            if (promptOpen) SelectionContainer { Text(p, style = DevType.code, color = COUITheme.colorScheme.onSurfaceSecondary) }
+            ExpandBody(promptOpen) { SelectionContainer { Text(p, style = DevType.code, color = COUITheme.colorScheme.onSurfaceSecondary) } }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SmallButton(stringResource(R.string.agent_map_open_transcript), onOpenTranscript)
@@ -562,7 +564,10 @@ private fun TaskCard(
             }
         }
         if (stopFailed) CardText(stringResource(R.string.agent_map_stop_failed), LocalDevColors.current.danger)
-        if (showOutput && output != null) TaskOutputBlock(output)
+        ExpandBody(showOutput && output != null) {
+            // The block's parts keep the card's own spacing.
+            if (output != null) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { TaskOutputBlock(output) }
+        }
     }
 }
 

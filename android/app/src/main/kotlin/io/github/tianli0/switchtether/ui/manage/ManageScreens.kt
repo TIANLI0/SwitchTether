@@ -140,15 +140,18 @@ fun ProvidersScreen(onBack: () -> Unit) {
             LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 if (view.providers.isEmpty()) item { EmptyMessage(stringResource(R.string.provider_empty)) }
                 items(view.providers, key = { it.id }) { p ->
-                    ProviderCard(
-                        p = p,
-                        current = p.id == view.currentId,
-                        test = state.testResults[p.id],
-                        busy = busy,
-                        onSwitch = { confirmSwitch = p },
-                        onTest = { vm.test("$testLabel: ${p.name}", p.id) },
-                        onCredential = { f -> credTarget = p to f },
-                    )
+                    // Each provider is its own card: it fades in and glides to its place.
+                    Box(Modifier.animateItem()) {
+                        ProviderCard(
+                            p = p,
+                            current = p.id == view.currentId,
+                            test = state.testResults[p.id],
+                            busy = busy,
+                            onSwitch = { confirmSwitch = p },
+                            onTest = { vm.test("$testLabel: ${p.name}", p.id) },
+                            onCredential = { f -> credTarget = p to f },
+                        )
+                    }
                 }
                 item { Spacer(Modifier.height(24.dp)) }
             }
@@ -308,7 +311,7 @@ fun UsageContent(
         item { GroupCard { SmallLoadable(state.models, onRetry) { BreakdownTable(it, showAvgCost = true) } } }
         item { SectionHeader(stringResource(R.string.usage_quota)) }
         items(state.quotas, key = { it.first }) { (_, q) ->
-            GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } }
+            Box(Modifier.animateItem()) { GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } } }
         }
         // Request log (newer desktops; an older one without the API hides the section).
         state.logs?.let { logs ->
@@ -654,7 +657,7 @@ private fun QuotaCard(q: QuotaView) {
                         },
                     )
                 }
-                io.github.suqi8.coui.kmp.basic.LinearProgressIndicator(progress = ((pct ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
+                io.github.suqi8.coui.kmp.basic.LinearProgressIndicator(progress = androidx.compose.animation.core.animateFloatAsState(((pct ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f), label = "quota").value, modifier = Modifier.fillMaxWidth())
                 quotaResetText(t.resetsAt)?.let {
                     Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                 }

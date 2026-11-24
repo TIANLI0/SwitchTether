@@ -85,7 +85,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
                     ArrowPreference(
                         title = desktop?.name ?: "—",
                         summary = connectionText(conn),
-                        startAction = { Box(Modifier.padding(end = 12.dp).size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(io.github.tianli0.switchtether.ui.common.connectionColor(conn))) },
+                        startAction = { Box(Modifier.padding(end = 12.dp).size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.animation.animateColorAsState(io.github.tianli0.switchtether.ui.common.connectionColor(conn), label = "conn-dot").value)) },
                         onClick = { onOpen(Route.DesktopInfo) },
                         cardListPosition = CardListPosition.Full,
                     )

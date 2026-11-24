@@ -94,47 +94,51 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                 is Loadable.Failed -> item(key = "error") {
                     GroupCard { BasicComponent(title = s.error.title(), summary = s.error.detail, cardListPosition = CardListPosition.Full) }
                 }
+                // Each section (its title, its card) is one item: when a section comes or goes
+                // (a session starts waiting, the last one finishes) it fades and the rest glide.
                 is Loadable.Ready -> {
                     if (state.attention.isNotEmpty()) {
-                        item(key = "att-h") { CompactTitle(stringResource(R.string.home_attention, state.attention.size), highlight = true) }
-                        item(key = "att") { SessionGroup(state.attention, onOpen) }
+                        item(key = "att-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_attention, state.attention.size), highlight = true) } }
+                        item(key = "att") { Box(Modifier.animateItem()) { SessionGroup(state.attention, onOpen) } }
                     }
-                    item(key = "live-h") { CompactTitle(stringResource(R.string.home_running, state.running.size)) }
+                    item(key = "live-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_running, state.running.size)) } }
                     item(key = "live") {
-                        if (state.running.isEmpty()) {
-                            GroupCard {
-                                BasicComponent(
-                                    title = stringResource(R.string.home_no_live),
-                                    endActions = { val c = io.github.tianli0.switchtether.ui.appContainer(); SmallButton(stringResource(R.string.new_session_title), { c.newSessionReopen.value = true }) },
-                                    cardListPosition = CardListPosition.Full,
-                                )
+                        Box(Modifier.animateItem()) {
+                            if (state.running.isEmpty()) {
+                                GroupCard {
+                                    BasicComponent(
+                                        title = stringResource(R.string.home_no_live),
+                                        endActions = { val c = io.github.tianli0.switchtether.ui.appContainer(); SmallButton(stringResource(R.string.new_session_title), { c.newSessionReopen.value = true }) },
+                                        cardListPosition = CardListPosition.Full,
+                                    )
+                                }
+                            } else {
+                                SessionGroup(state.running.take(MAX_ROWS), onOpen)
                             }
-                        } else {
-                            SessionGroup(state.running.take(MAX_ROWS), onOpen)
                         }
                     }
                     if (state.idle.isNotEmpty()) {
-                        item(key = "idle-h") { CompactTitle(stringResource(R.string.home_idle, state.idle.size)) }
+                        item(key = "idle-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_idle, state.idle.size)) } }
                         // Idle sessions are background: a few are enough here, the rest are one tap away.
-                        item(key = "idle") { SessionGroup(state.idle.take(MAX_IDLE_ROWS), onOpen) }
+                        item(key = "idle") { Box(Modifier.animateItem()) { SessionGroup(state.idle.take(MAX_IDLE_ROWS), onOpen) } }
                     }
                     if (state.running.size > MAX_ROWS || state.idle.size > MAX_IDLE_ROWS) {
                         item(key = "all-live") {
                             // A quiet link under the groups, not a slab across the page.
-                            Box(Modifier.fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.animateItem().fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
                                 LinkButton(stringResource(R.string.home_see_all_live, state.live.size), { onSelectTab(Tab.SESSIONS) })
                             }
                         }
                     }
                     if (state.recent.isNotEmpty()) {
-                        item(key = "recent-h") { CompactTitle(stringResource(R.string.home_recent)) }
-                        item(key = "recent") { SessionGroup(state.recent, onOpen) }
+                        item(key = "recent-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_recent)) } }
+                        item(key = "recent") { Box(Modifier.animateItem()) { SessionGroup(state.recent, onOpen) } }
                     }
                 }
             }
-            item(key = "more-h") { CompactTitle(stringResource(R.string.home_more)) }
+            item(key = "more-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_more)) } }
             item(key = "more") {
-                GroupCard {
+                GroupCard(Modifier.animateItem()) {
                     UsageRow(state.usageToday, onRefresh, cardListPositionOf(0, 3)) { onOpen(Route.Usage) }
                     ArrowPreference(
                         title = stringResource(R.string.manage_providers),

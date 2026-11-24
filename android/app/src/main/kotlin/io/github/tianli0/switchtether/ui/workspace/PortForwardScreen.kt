@@ -249,11 +249,13 @@ fun PortForwardScreen(onBack: () -> Unit) {
         immersive = true,
     ) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-            item { ConnectionBanner(conn, { container.connection.retryNow() }) }
+            // Sections are keyed items: a forward that starts or stops fades its section in or
+            // out and the sections below glide to their place.
+            item(key = "connection") { ConnectionBanner(conn, { container.connection.retryNow() }) }
             if (active.isNotEmpty()) {
-                item { SmallTitle(stringResource(R.string.forward_active)) }
-                item {
-                    GroupCard {
+                item(key = "active-h") { SmallTitle(stringResource(R.string.forward_active), Modifier.animateItem()) }
+                item(key = "active") {
+                    GroupCard(Modifier.animateItem()) {
                         active.forEachIndexed { i, f ->
                             ActiveForwardRow(
                                 f,
@@ -269,9 +271,9 @@ fun PortForwardScreen(onBack: () -> Unit) {
             }
             val resumable = st.resumable.filter { r -> active.none { it.leaseId == r.id } }
             if (resumable.isNotEmpty()) {
-                item { SmallTitle(stringResource(R.string.forward_resumable)) }
-                item {
-                    GroupCard {
+                item(key = "resumable-h") { SmallTitle(stringResource(R.string.forward_resumable), Modifier.animateItem()) }
+                item(key = "resumable") {
+                    GroupCard(Modifier.animateItem()) {
                         resumable.forEachIndexed { i, r ->
                             BasicComponent(
                                 title = "localhost:${r.port}",
@@ -284,13 +286,13 @@ fun PortForwardScreen(onBack: () -> Unit) {
                     }
                 }
             }
-            item { SmallTitle(stringResource(R.string.forward_listening)) }
-            item {
+            item(key = "listening-h") { SmallTitle(stringResource(R.string.forward_listening), Modifier.animateItem()) }
+            item(key = "listening") {
                 val ports = st.ports.valueOrNull.orEmpty()
                 // Rows: [state line when there is no port] + ports + "enter a port".
                 val lead = if (ports.isEmpty()) 1 else 0
                 val rows = lead + ports.size + 1
-                GroupCard {
+                GroupCard(Modifier.animateItem()) {
                     when (val p = st.ports) {
                         is Loadable.Failed -> BasicComponent(
                             title = p.error.title(),
@@ -336,12 +338,12 @@ fun PortForwardScreen(onBack: () -> Unit) {
                     )
                 }
             }
-            item {
+            item(key = "hint") {
                 Text(
                     stringResource(R.string.forward_hint),
                     style = COUITheme.textStyles.footnote1,
                     color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp),
+                    modifier = Modifier.animateItem().padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp),
                 )
             }
         }

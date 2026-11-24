@@ -694,7 +694,7 @@ fun Plan(item: RenderItem) {
             SubtleMeta(stringResource(R.string.render_plan_progress, done, items.size))
         }
         if (items.isNotEmpty()) {
-            LinearProgressIndicator(progress = done.toFloat() / items.size, modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp))
+            LinearProgressIndicator(progress = androidx.compose.animation.core.animateFloatAsState(done.toFloat() / items.size, label = "plan-progress").value, modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp))
         }
         items.forEach {
             val st = it.str("status")

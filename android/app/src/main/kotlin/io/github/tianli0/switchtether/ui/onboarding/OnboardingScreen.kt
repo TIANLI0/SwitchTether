@@ -395,7 +395,7 @@ private fun CodeContent(
             modifier = Modifier.fillMaxWidth().testTag("pair-address"),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
         )
-        if (state.error == CodeError.INVALID_ADDRESS) ErrorLine(stringResource(R.string.pair_address_invalid))
+        io.github.tianli0.switchtether.ui.common.NoticeVisibility(state.error == CodeError.INVALID_ADDRESS) { ErrorLine(stringResource(R.string.pair_address_invalid)) }
         Spacer(Modifier.height(12.dp))
     } else {
         Card(Modifier.fillMaxWidth()) {
@@ -415,7 +415,7 @@ private fun CodeContent(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done, autoCorrectEnabled = false),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (code.length == 6) onSubmit(address, code) }),
     )
-    if (state.error == CodeError.INVALID_CODE) ErrorLine(stringResource(R.string.pair_code_invalid))
+    io.github.tianli0.switchtether.ui.common.NoticeVisibility(state.error == CodeError.INVALID_CODE) { ErrorLine(stringResource(R.string.pair_code_invalid)) }
     Spacer(Modifier.height(12.dp))
     // Nothing vouches for this computer's certificate in advance on this path (the LAN
     // advertisement is unauthenticated too): the verification code is the real check.

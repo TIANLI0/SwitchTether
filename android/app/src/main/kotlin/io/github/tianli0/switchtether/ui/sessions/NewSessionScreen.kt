@@ -447,7 +447,7 @@ fun NewSessionContent(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                 modifier = Modifier.padding(bottom = 16.dp),
             ) {
-                items(others, key = { it.path }) { r -> Chip(selected = false, onClick = { onSelect(r.path) }, label = r.name) }
+                items(others, key = { it.path }) { r -> Chip(selected = false, onClick = { onSelect(r.path) }, label = r.name, modifier = Modifier.animateItem()) }
             }
         }
         val resumable = state.resumable

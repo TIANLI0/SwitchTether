@@ -223,7 +223,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
                     item(key = "empty") { Note(stringResource(if (running) R.string.subagent_starting else R.string.subagent_no_steps)) }
                 }
                 items(items, key = { it.key }) { item ->
-                    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).padding(start = 12.dp * item.depth.coerceAtMost(4))) {
+                    Box(Modifier.animateItem().fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).padding(start = 12.dp * item.depth.coerceAtMost(4))) {
                         AgentEventRegistry.rendererFor(item.event.kind)(item, ctx)
                     }
                 }

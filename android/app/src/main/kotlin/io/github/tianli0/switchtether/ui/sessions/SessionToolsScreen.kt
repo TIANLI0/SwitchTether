@@ -618,7 +618,7 @@ private fun McpRow(
     BasicComponent(
         title = s.title?.takeIf { it.isNotBlank() && it != s.name }?.let { "${s.name} · $it" } ?: s.name,
         summary = summary,
-        startAction = { StatusDot(color, Modifier.padding(end = 12.dp)) },
+        startAction = { StatusDot(androidx.compose.animation.animateColorAsState(color, label = "mcp-dot").value, Modifier.padding(end = 12.dp)) },
         endActions = {
             SmallButton(
                 text = stringResource(if (reconnecting) R.string.tools_mcp_reconnecting else R.string.tools_mcp_reconnect),
@@ -654,7 +654,7 @@ private fun SideQuestion(st: SessionToolsState, enabled: Boolean, onAsk: (String
                 modifier = Modifier.testTag("btw-ask"),
             )
         }
-        if (st.asking) {
+        io.github.tianli0.switchtether.ui.common.NoticeVisibility(st.asking) {
             Text(stringResource(R.string.tools_side_question_waiting), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
         }
         st.askError?.let { Text(it, style = COUITheme.textStyles.footnote2, color = LocalDevColors.current.danger) }
