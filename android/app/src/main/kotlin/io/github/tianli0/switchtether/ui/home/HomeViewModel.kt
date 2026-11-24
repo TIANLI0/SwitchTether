@@ -29,7 +29,7 @@ data class HomeState(
     /** A pull-to-refresh is in flight (the list stays visible). */
     val refreshing: Boolean = false,
 ) {
-    val live: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }
+    val live: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { it.isLive }.sortedWith(RECENT_FIRST)
     /** Live sessions that wait for the user (approval / question / input): shown first on Home. */
     val attention: List<SessionSummary> get() = live.filter { it.status == "waiting" || it.waitingFor != null }
     val waitingCount: Int get() = attention.size
@@ -38,8 +38,11 @@ data class HomeState(
     val running: List<SessionSummary> get() = notWaiting.filter { !it.isIdle }
     /** Live sessions sitting idle (process open, turn finished): listed apart so "running" means running. */
     val idle: List<SessionSummary> get() = notWaiting.filter { it.isIdle }
-    val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedByDescending { it.lastActiveAtMs ?: 0L }.take(5)
+    val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedWith(RECENT_FIRST).take(5)
 }
+
+/** Most recently active first; the id breaks ties so a live update never reshuffles equal rows. */
+private val RECENT_FIRST: Comparator<SessionSummary> = compareByDescending<SessionSummary> { it.lastActiveAtMs ?: 0L }.thenBy { it.id }
 
 private val SessionSummary.isIdle: Boolean get() = status == "idle" || status == "completed"
 
@@ -53,6 +56,9 @@ class HomeViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow(HomeState(connection = conn.state.value))
     val state: StateFlow<HomeState> = _state.asStateFlow()
+
+    /** Live changes that arrive while a list request is in flight (one map per request). */
+    private val changedDuringFetch = ArrayList<MutableMap<String, SessionSummary?>>()
 
     init {
         // Last list seen from this desktop, at once (replaced by the first successful load).
@@ -71,13 +77,19 @@ class HomeViewModel(
         viewModelScope.launch {
             sessions.changes.collect { ch ->
                 when (ch) {
-                    is SessionChange.Upserted -> _state.update { st ->
-                        val list = st.sessions.valueOrNull ?: return@update st
-                        st.copy(sessions = Loadable.Ready(listOf(ch.session) + list.filter { it.id != ch.session.id }))
+                    is SessionChange.Upserted -> {
+                        changedDuringFetch.forEach { it[ch.session.id] = ch.session }
+                        _state.update { st ->
+                            val list = st.sessions.valueOrNull ?: return@update st
+                            st.copy(sessions = Loadable.Ready(listOf(ch.session) + list.filter { it.id != ch.session.id }))
+                        }
                     }
-                    is SessionChange.Removed -> _state.update { st ->
-                        val list = st.sessions.valueOrNull ?: return@update st
-                        st.copy(sessions = Loadable.Ready(list.filter { it.id != ch.id }))
+                    is SessionChange.Removed -> {
+                        changedDuringFetch.forEach { it[ch.id] = null }
+                        _state.update { st ->
+                            val list = st.sessions.valueOrNull ?: return@update st
+                            st.copy(sessions = Loadable.Ready(list.filter { it.id != ch.id }))
+                        }
                     }
                     SessionChange.ApprovalsChanged -> refreshSessions()
                     is SessionChange.Event -> Unit
@@ -93,7 +105,19 @@ class HomeViewModel(
     }
 
     private fun refreshSessions() = viewModelScope.launch {
-        val r = loadable { sessions.list(SessionQuery(), limit = 50).items }
+        val changed = LinkedHashMap<String, SessionSummary?>()
+        changedDuringFetch += changed
+        val fetched = try {
+            loadable { sessions.list(SessionQuery(), limit = 50).items }
+        } finally {
+            changedDuringFetch.remove(changed)
+        }
+        // The answer was read before these live changes: they stay on top of it.
+        val r = if (fetched is Loadable.Ready && changed.isNotEmpty()) {
+            Loadable.Ready(changed.values.filterNotNull() + fetched.value.filter { it.id !in changed })
+        } else {
+            fetched
+        }
         // A failed refresh keeps the list that is already shown.
         _state.update { if (r is Loadable.Failed && it.sessions is Loadable.Ready) it else it.copy(sessions = r) }
     }

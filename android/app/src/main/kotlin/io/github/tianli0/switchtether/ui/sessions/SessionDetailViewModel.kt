@@ -318,6 +318,12 @@ class SessionDetailViewModel(
     private val draftFlow = MutableStateFlow<String?>(null)
     private var loadJob: Job? = null
 
+    /** Live events that arrive while [load] fetches the newest page: re-applied over that page. */
+    private var liveDuringLoad: MutableList<AgentEvent>? = null
+
+    /** Bumped whenever [load] replaces the log: an older page fetched for the previous log is dropped. */
+    private var logGeneration = 0
+
     init {
         // Where the conversation stood last time, at once (replaced by the first successful load).
         viewModelScope.launch {
@@ -329,7 +335,8 @@ class SessionDetailViewModel(
                     n = n.copy(detail = Loadable.Ready(SessionDetail(cachedSummary, io.github.tianli0.switchtether.remote.protocol.SessionCapabilities(readHistory = "VERIFIED"), emptyList())))
                 }
                 if (n.events !is Loadable.Ready && cached != null && cached.events.isNotEmpty()) {
-                    n = n.derive(log = AgentEventLog.of(cached.events)).copy(events = Loadable.Ready(Unit), hasMoreBefore = cached.hasMoreBefore)
+                    // Live events that arrived before the cache was read stay.
+                    n = n.derive(log = AgentEventLog.of(cached.events).upsert(n.log.events)).copy(events = Loadable.Ready(Unit), hasMoreBefore = cached.hasMoreBefore)
                 }
                 n
             }
@@ -352,7 +359,10 @@ class SessionDetailViewModel(
         viewModelScope.launch {
             repo.changes.collect { ch ->
                 when (ch) {
-                    is SessionChange.Event -> if (ch.event.sessionId == sessionId) applyEvents(listOf(ch.event))
+                    is SessionChange.Event -> if (ch.event.sessionId == sessionId) {
+                        liveDuringLoad?.add(ch.event)
+                        applyEvents(listOf(ch.event))
+                    }
                     is SessionChange.Upserted -> if (ch.session.id == sessionId) {
                         val before = _state.value.detail.valueOrNull?.summary
                         if (before != null && (before.liveness != ch.session.liveness || before.control != ch.session.control)) {
@@ -401,22 +411,39 @@ class SessionDetailViewModel(
                         awaitingReply = false,
                     ).derive()
                 }
+                flushWaiting() // queued messages cannot go out any more: say so instead of "waiting"
                 return@launch
             }
             // A failed reload keeps what is shown (cached or earlier) instead of an empty page.
             _state.update { if (d is Loadable.Failed && it.detail is Loadable.Ready) it else it.copy(detail = d) }
+            val live = ArrayList<AgentEvent>()
             try {
+                liveDuringLoad = live
                 val page = repo.events(sessionId, limit = PAGE)
-                val log = AgentEventLog.of(page.events)
+                // The page was read before these live events: they go on top of it instead of being lost.
+                val log = AgentEventLog.of(page.events).upsert(live)
+                logGeneration++
                 _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
+                endStaleWait(d)
                 flushWaiting()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.update { if (it.events is Loadable.Ready && it.log.size > 0) it else it.copy(events = Loadable.Failed(UiError.from(e))) }
+            } finally {
+                if (liveDuringLoad === live) liveDuringLoad = null
             }
         }
+    }
+
+    /**
+     * A turn that ended without output while the phone was away ends the wait for a reply too: the
+     * fresh detail says the session is not working, so nothing more will follow our message.
+     */
+    private fun endStaleWait(d: Loadable<SessionDetail>) {
+        val working = d.valueOrNull?.summary?.let { it.isLive && it.status == "busy" } ?: return
+        if (!working) _state.update { if (it.awaitingReply) it.copy(awaitingReply = false).derive() else it }
     }
 
     /**
@@ -446,6 +473,7 @@ class SessionDetailViewModel(
                     after = newMax
                 }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
+                endStaleWait(d)
                 // This catch-up usually cancelled the load() of the same reconnect: queued messages go out here.
                 if (pages >= CATCH_UP_MAX_PAGES) load() else flushWaiting() // too far behind: start from the newest page
             } catch (e: CancellationException) {
@@ -461,10 +489,13 @@ class SessionDetailViewModel(
         val min = st.log.minSeq ?: return
         if (!st.hasMoreBefore || st.loadingOlder) return
         _state.update { it.copy(loadingOlder = true) }
+        val generation = logGeneration
         viewModelScope.launch {
             try {
                 val page = repo.events(sessionId, before = min, limit = PAGE)
                 _state.update {
+                    // load() replaced the log meanwhile: this page belongs to the old one (seq gap, stale hasMore).
+                    if (generation != logGeneration) return@update it.copy(loadingOlder = false)
                     val log = it.log.upsert(page.events)
                     it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, loadingOlder = false)
                 }
@@ -666,12 +697,13 @@ class SessionDetailViewModel(
         }
     }
 
-    private fun deliver(commandId: String) {
-        val msg = _state.value.outgoing.firstOrNull { it.commandId == commandId } ?: return
+    private fun deliver(commandId: String, after: Job? = null): Job? {
+        val msg = _state.value.outgoing.firstOrNull { it.commandId == commandId } ?: return after
         val imgs = outgoingImages[commandId].orEmpty()
         val files = outgoingAttachments[commandId].orEmpty()
         setOutgoing(commandId, OutgoingStatus.SENDING, null)
-        viewModelScope.launch {
+        return viewModelScope.launch {
+            after?.join() // queued messages reach the agent in the order they were written
             when (val out = repo.sendMessage(sessionId, if (msg.text == "[image]" && imgs.isNotEmpty()) "" else msg.text, commandId, imgs, files)) {
                 is CommandOutcome.Succeeded, is CommandOutcome.InProgress -> {
                     outgoingImages.remove(commandId)
@@ -706,9 +738,10 @@ class SessionDetailViewModel(
     /** Back online with a fresh detail: send what the user queued, or say why it cannot go. */
     private fun flushWaiting() {
         val st = _state.value
+        var previous: Job? = null
         st.outgoing.filter { it.status == OutgoingStatus.WAITING_CONNECTION }.forEach { m ->
             when {
-                st.canSend -> deliver(m.commandId)
+                st.canSend -> previous = deliver(m.commandId, previous)
                 st.online && st.detail.valueOrNull?.summary?.isLive == false -> setOutgoing(m.commandId, OutgoingStatus.FAILED, SESSION_ENDED)
                 st.online -> setOutgoing(m.commandId, OutgoingStatus.FAILED, null)
             }

@@ -134,6 +134,15 @@ class ConnectionPathTest {
         assertEquals(desktop.hostName, saved.hosts.first())
     }
 
+    /** The background worker's bounded probe: reaching the desktop is a plain `true`, not a cancellation. */
+    @Test
+    fun probeOnceReportsThatTheDesktopWasReached() {
+        val m = manager(MemoryStore(paired(desktop.port))) { _, _ -> emptyList() }
+        val reached = runBlocking { withTimeout(30_000) { m.probeOnce(timeoutMs = 20_000) } }
+        m.stop()
+        assertTrue(reached)
+    }
+
     @Test
     fun relayIsTheLastResortAndNeverStoredAsAHost() {
         // Fake raw-TCP relay that splices accepted phones to the fake desktop.

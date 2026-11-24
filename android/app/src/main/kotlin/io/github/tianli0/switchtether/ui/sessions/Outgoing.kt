@@ -74,6 +74,10 @@ fun normalizeMessage(text: String): String = text.trim().replace(Regex("\\s+"), 
  * Drops outgoing messages whose real `user_message` arrived. Exact match first: the desktop echoes
  * the commandId as `data.clientId`. Older desktops: same normalized text, sent from the phone (or
  * unknown source), newer than the send; each event replaces at most one bubble, oldest first.
+ *
+ * With the same text sent more than once, an echo goes to a bubble the desktop accepted before one
+ * that failed, never to one that was not sent yet; the bubbles that stay only look at events after
+ * it from then on (otherwise the next call would hand the same echo to the second bubble).
  */
 fun reconcileOutgoing(outgoing: List<OutgoingMessage>, log: AgentEventLog): List<OutgoingMessage> {
     if (outgoing.isEmpty()) return outgoing
@@ -81,26 +85,27 @@ fun reconcileOutgoing(outgoing: List<OutgoingMessage>, log: AgentEventLog): List
     if (users.isEmpty()) return outgoing
     val byClientId = users.mapNotNull { e -> e.data.str("clientId")?.let { it to e.id } }.toMap()
     val used = HashSet<String>()
-    val remaining = ArrayList<OutgoingMessage>(outgoing.size)
-    for (m in outgoing) {
-        val exact = byClientId[m.commandId]
-        if (exact != null) {
-            used += exact
-            continue
-        }
+    val echoed = HashSet<String>()
+    /** Normalized text → seq of the newest event the fallback consumed for it. */
+    val consumed = HashMap<String, Long>()
+    for (m in outgoing) if (byClientId[m.commandId] != null) echoed += m.commandId
+    val candidates = outgoing.filter { it.commandId !in echoed && it.status != OutgoingStatus.WAITING_CONNECTION }
+    for (m in candidates.filter { it.status != OutgoingStatus.FAILED } + candidates.filter { it.status == OutgoingStatus.FAILED }) {
         val norm = normalizeMessage(m.text)
         val fallback = users.firstOrNull { e ->
             e.id !in used && e.data.str("clientId") == null && e.seq > m.afterSeq &&
                 (e.data.str("source") ?: "unknown") in setOf("phone", "unknown") &&
                 normalizeMessage(e.data.str("text").orEmpty()) == norm
-        }
-        if (fallback != null) {
-            used += fallback.id
-            continue
-        }
-        remaining += m
+        } ?: continue
+        used += fallback.id
+        echoed += m.commandId
+        consumed[norm] = maxOf(consumed[norm] ?: 0L, fallback.seq)
     }
-    return if (remaining.size == outgoing.size) outgoing else remaining
+    if (echoed.isEmpty()) return outgoing
+    return outgoing.filter { it.commandId !in echoed }.map { m ->
+        val seq = consumed[normalizeMessage(m.text)]
+        if (seq != null && seq > m.afterSeq) m.copy(afterSeq = seq) else m
+    }
 }
 
 /**

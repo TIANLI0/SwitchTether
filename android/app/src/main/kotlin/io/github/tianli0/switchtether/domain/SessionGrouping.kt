@@ -12,6 +12,19 @@ data class SessionGroup(val primary: SessionSummary, val others: List<SessionSum
     val size: Int get() = 1 + others.size
 }
 
+/** Waiting for the user (approval / question / input); only a running session can be. */
+val SessionSummary.needsAttention: Boolean get() = isLive && (status == "waiting" || waitingFor != null)
+
+/**
+ * The one order of session rows: running first, among them the ones waiting for the user, then the
+ * most recently active. The id breaks ties (no timestamp, same timestamp), so rows keep their place
+ * whatever order the desktop or a live update delivered them in.
+ */
+val SESSION_ORDER: Comparator<SessionSummary> = compareByDescending<SessionSummary> { it.isLive }
+    .thenByDescending { it.needsAttention }
+    .thenByDescending { it.lastActiveAtMs ?: 0L }
+    .thenBy { it.id }
+
 object SessionGrouping {
     private val GENERIC = setOf("", "untitled", "new session", "新会话", "未命名")
 
@@ -36,10 +49,9 @@ object SessionGrouping {
                 if (j != null) parent[find(i)] = find(j)
             }
         }
-        val order = compareByDescending<SessionSummary> { it.isLive }.thenByDescending { it.lastActiveAtMs ?: 0L }
         return sessions.indices.groupBy { find(it) }.values
-            .map { idx -> idx.map { sessions[it] }.sortedWith(order) }
+            .map { idx -> idx.map { sessions[it] }.sortedWith(SESSION_ORDER) }
             .map { SessionGroup(it.first(), it.drop(1)) }
-            .sortedWith(compareBy<SessionGroup> { 0 }.thenByDescending { it.primary.isLive }.thenByDescending { it.primary.lastActiveAtMs ?: 0L })
+            .sortedWith(compareBy(SESSION_ORDER) { it.primary })
     }
 }

@@ -51,11 +51,7 @@ data class SessionsState(
             .filter { agent == null || it.agent == agent }
             .filter { project == null || it.project == project }
             // Live first; among live sessions the ones waiting for the user lead (like Home).
-            .sortedWith(
-                compareByDescending<SessionSummary> { it.isLive }
-                    .thenByDescending { it.isLive && (it.status == "waiting" || it.waitingFor != null) }
-                    .thenByDescending { it.lastActiveAtMs ?: 0L },
-            )
+            .sortedWith(io.github.tianli0.switchtether.domain.SESSION_ORDER)
 }
 
 @OptIn(FlowPreview::class)
@@ -64,6 +60,10 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     val state: StateFlow<SessionsState> = _state.asStateFlow()
     private val queryFlow = MutableStateFlow("")
     private var loadJob: Job? = null
+    private var moreJob: Job? = null
+
+    /** Live changes that arrive while [reload] waits for the list (re-applied over the answer). */
+    private var changedDuringReload: MutableMap<String, SessionSummary?>? = null
 
     init {
         // Last list seen from this desktop, at once (replaced by the first successful load).
@@ -82,13 +82,19 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
         viewModelScope.launch {
             repo.changes.collect { ch ->
                 when (ch) {
-                    is SessionChange.Upserted -> _state.update { st ->
-                        val list = st.items.valueOrNull ?: return@update st
-                        st.copy(items = Loadable.Ready(listOf(ch.session) + list.filter { it.id != ch.session.id })).withKnown()
+                    is SessionChange.Upserted -> {
+                        changedDuringReload?.put(ch.session.id, ch.session)
+                        _state.update { st ->
+                            val list = st.items.valueOrNull ?: return@update st
+                            st.copy(items = Loadable.Ready(upserted(list, ch.session, st.query))).withKnown()
+                        }
                     }
-                    is SessionChange.Removed -> _state.update { st ->
-                        val list = st.items.valueOrNull ?: return@update st
-                        st.copy(items = Loadable.Ready(list.filter { it.id != ch.id }))
+                    is SessionChange.Removed -> {
+                        changedDuringReload?.put(ch.id, null)
+                        _state.update { st ->
+                            val list = st.items.valueOrNull ?: return@update st
+                            st.copy(items = Loadable.Ready(list.filter { it.id != ch.id }))
+                        }
                     }
                     else -> Unit
                 }
@@ -113,19 +119,38 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
         queryFlow.value = q
     }
 
+    /**
+     * A live update of one session. While a search is active the desktop decides what matches, so a
+     * session that is not in the result is not added to it (it is only refreshed when it is there).
+     */
+    private fun upserted(list: List<SessionSummary>, session: SessionSummary, query: String): List<SessionSummary> = when {
+        query.isBlank() -> listOf(session) + list.filter { it.id != session.id }
+        else -> list.map { if (it.id == session.id) session else it }
+    }
+
     fun reload() {
         loadJob?.cancel()
+        // A next page still in flight belongs to the list (and the filters) being replaced.
+        moreJob?.cancel()
+        if (_state.value.loadingMore) _state.update { it.copy(loadingMore = false) }
         loadJob = viewModelScope.launch {
             if (_state.value.items !is Loadable.Ready) _state.update { it.copy(items = Loadable.Loading) }
             val s = _state.value
+            val changed = LinkedHashMap<String, SessionSummary?>()
             try {
+                changedDuringReload = changed
                 val page = repo.list(SessionQuery(s.agent, s.project, s.query.ifBlank { null }), limit = 100)
-                _state.update { it.copy(items = Loadable.Ready(page.items), nextCursor = page.nextCursor).withKnown() }
+                // The answer was read before these live changes: they stay on top of it.
+                var items = page.items.filter { it.id !in changed || changed[it.id] != null }
+                changed.values.filterNotNull().forEach { items = upserted(items, it, s.query) }
+                _state.update { it.copy(items = Loadable.Ready(items), nextCursor = page.nextCursor).withKnown() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // Keep showing the last known list; only an empty screen turns into an error.
                 _state.update { if (it.items is Loadable.Ready) it else it.copy(items = Loadable.Failed(UiError.from(e))) }
+            } finally {
+                if (changedDuringReload === changed) changedDuringReload = null
             }
         }
     }
@@ -135,7 +160,7 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
         val cursor = s.nextCursor ?: return
         if (s.loadingMore) return
         _state.update { it.copy(loadingMore = true) }
-        viewModelScope.launch {
+        moreJob = viewModelScope.launch {
             try {
                 val page = repo.list(SessionQuery(s.agent, s.project, s.query.ifBlank { null }), cursor = cursor, limit = 100)
                 _state.update { st ->

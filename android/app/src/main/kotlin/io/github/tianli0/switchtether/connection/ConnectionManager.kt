@@ -36,10 +36,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
@@ -116,7 +115,7 @@ class ConnectionManager(
     override val resyncs: SharedFlow<String> = _resyncs.asSharedFlow()
 
     private val wake = Channel<Unit>(Channel.CONFLATED)
-    private val lock = Mutex()
+    private val jobLock = Any()
     private var job: Job? = null
     @Volatile private var api: RemoteApi? = null
     @Volatile private var cursor: StreamCursor = StreamCursor.INITIAL
@@ -127,18 +126,19 @@ class ConnectionManager(
 
     /** Starts (or restarts) the connection loop for the stored desktop. */
     fun start() {
-        scope.launch {
-            lock.withLock {
-                if (job?.isActive == true) return@withLock
-                job = scope.launch { runLoop() }
-            }
+        // Decided here, not in a coroutine of its own: a stop() right after start() must find the job.
+        synchronized(jobLock) {
+            if (job?.isActive == true) return
+            job = scope.launch { runLoop() }
         }
     }
 
     /** Stops networking (app in background, unpair). */
     fun stop() {
-        job?.cancel()
-        job = null
+        synchronized(jobLock) {
+            job?.cancel()
+            job = null
+        }
         api = null
         when (val s = _state.value) {
             is ConnectionState.Online -> _state.value = ConnectionState.Offline(s.desktop, null, null)
@@ -166,7 +166,8 @@ class ConnectionManager(
         if (currentApi != null) {
             scope.launch {
                 val alive = withTimeoutOrNull(3_000) { runCatching { currentApi.hello() }.isSuccess } ?: false
-                if (!alive) {
+                // Only the connection that was probed: a reconnect meanwhile has a socket of its own.
+                if (!alive && api === currentApi) {
                     streamJob?.cancel()
                 }
             }
@@ -180,16 +181,9 @@ class ConnectionManager(
         val identity = identityLoader(desktop.identityAlias) ?: return false
         if (_state.value is ConnectionState.Online) return true
         start()
-        return withTimeoutOrNull(timeoutMs) {
-            var reached = false
-            state.collect { s ->
-                if (s is ConnectionState.Online) {
-                    reached = true
-                    throw CancellationException("probe_done")
-                }
-            }
-            reached
-        } ?: (_state.value is ConnectionState.Online)
+        // (Leaving the collection with a CancellationException of our own would cancel the caller.)
+        return withTimeoutOrNull(timeoutMs) { state.first { it is ConnectionState.Online } } != null ||
+            _state.value is ConnectionState.Online
     }
 
     private suspend fun runLoop() {
@@ -197,7 +191,8 @@ class ConnectionManager(
         while (scope.isActive) {
             val desktop = pairingStore.current()
             if (desktop == null) {
-                _state.value = ConnectionState.Unpaired
+                // After a revoke nothing is stored either: keep the reason for the onboarding screen.
+                if (_state.value !is ConnectionState.Revoked) _state.value = ConnectionState.Unpaired
                 return
             }
             val identity = identityLoader(desktop.identityAlias)
@@ -425,7 +420,7 @@ class ConnectionManager(
     private fun isRevokedTlsAlert(e: Throwable): Boolean =
         e.causeChain().any { it.message?.contains("revoked", ignoreCase = true) == true }
 
-    private fun backoffMs(attempt: Int): Long {
+    internal fun backoffMs(attempt: Int): Long {
         val base = (1_000L shl (attempt - 1).coerceIn(0, 6)).coerceAtMost(MAX_BACKOFF_MS)
         return base / 2 + Random.nextLong(base / 2 + 1)
     }

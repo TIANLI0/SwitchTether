@@ -82,19 +82,46 @@ class FakeSessionRepository : SessionRepository {
         return nextOutcome(commandId)
     }
 
+    /** Every list request, in order. */
+    val listQueries = mutableListOf<SessionQuery>()
+
+    /** When set, answers `list` instead of [sessions] (paging, requests still in flight). */
+    var listHandler: (suspend (SessionQuery, String?) -> SessionPage)? = null
+
     override suspend fun list(query: SessionQuery, cursor: String?, limit: Int): SessionPage {
         listCalls++
+        listQueries += query
+        listHandler?.let { return it(query, cursor) }
         return SessionPage(sessions.filter { query.agent == null || it.agent == query.agent })
     }
 
     /** When set, `detail` waits for it (a request still in flight). */
     var detailGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    /** When set, `detail` fails with it. */
+    var detailError: Exception? = null
     override suspend fun detail(id: String): SessionDetail {
         detailGate?.await()
+        detailError?.let { throw it }
         return detail ?: throw IllegalStateException("no detail")
     }
-    override suspend fun events(id: String, before: Long?, after: Long?, limit: Int) =
-        EventPage(events.filter { before == null || it.seq < before }.takeLast(limit), hasMore && before == null)
+
+    /** When set, `events` fails with it. */
+    var eventsError: Exception? = null
+
+    /** When set, the answer to a newest-page request (already read) stays in flight until it completes. */
+    var eventsGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+    /** Same for an older page (`before=`). */
+    var olderGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    override suspend fun events(id: String, before: Long?, after: Long?, limit: Int): EventPage {
+        eventsError?.let { throw it }
+        val page = EventPage(
+            events.filter { (before == null || it.seq < before) && (after == null || it.seq > after) }.takeLast(limit),
+            hasMore && before == null && after == null,
+        )
+        (if (before != null) olderGate else if (after == null) eventsGate else null)?.await()
+        return page
+    }
 
     override suspend fun payload(sessionId: String, eventId: String, offset: Long, limit: Int) = PayloadChunk("full output", offset, 11, true)
 
@@ -107,8 +134,12 @@ class FakeSessionRepository : SessionRepository {
     ): CommandOutcome {
         sent += commandId to text
         sentAttachments[commandId] = attachments
+        sendGate?.await()
         return nextOutcome(commandId)
     }
+
+    /** When set, a POST of a message stays in flight until it completes. */
+    var sendGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
     /** commandId -> attachment ids of each sent message. */
     val sentAttachments = mutableMapOf<String, List<String>>()
