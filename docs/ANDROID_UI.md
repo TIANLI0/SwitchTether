@@ -1263,3 +1263,79 @@ glass, the bottom edge, the menus' frosted snapshot, the animations in motion, t
 frame by frame (the list follows one frame behind the inset), the fixed-width terminal against a
 real shell, the edge-to-edge preview windows, and the download-from-cache path (no automated test:
 it needs MediaStore).
+
+## 24. Slash commands in the composer (2026-11-24)
+
+Typing "/" in the session composer works like in Claude Code: the matching commands appear in a
+panel over the input row, and a tap runs one.
+
+### 24.1 When the panel shows
+- Only for **Claude Code** sessions whose composer can send (started by SwitchTether, or taken
+  over with full control; also a conversation that the next message resumes). Codex and every
+  other agent get no panel: the phone does not invent commands for them.
+- While the draft is one token that starts with "/" (`slashQuery`): "/", "/co", "/compact". A
+  space or a line break ends it ("/compact " is a chosen command with arguments to come), and so
+  does any text before the slash. The caret position is not looked at: the draft is a plain string.
+- Matches (`filterSlashCommands`): names that start with what was typed, then names that contain
+  it, case-insensitive, at most 8.
+- The send key is unchanged: "/compact" typed by hand and sent is an ordinary message.
+
+### 24.2 The panel
+`SlashSuggestionPanel` (`ui/sessions/SlashPanel.kt`) sits in the composer directly above the input
+row: the composer's glass (`glassSurface(SquircleShape(20.dp), halo = true)`, opaque where blur is
+not available), at most 240dp high and scrolling beyond that. A row is at least 44dp: "/name" in
+medium weight, the argument hint after it in the summary colour, the description below as a
+footnote. Press feedback is clipped to the panel (the first and last rows carry its corners). It
+grows out of the input row and fades in (`AnimatedVisibility`: fade + `expandVertically` from the
+bottom) and leaves the same way. The conversation does not move for it: the panel's height is
+taken out of the composer height the list makes room for.
+
+The field is `DraftInputPill`, a copy of COUI17's `InputPill` (same measures, glass and send key)
+that keeps a `TextFieldValue`: when the draft is replaced from outside the keyboard (a picked
+command, a failed message put back for editing) the caret goes to its end. `InputPill` takes a
+plain string, so the caret would stay inside the inserted "/name ". This belongs in COUI17 as an
+`InputPill` overload; the copy goes when the library has it.
+
+### 24.3 Where the list comes from
+- The desktop: `POST /v1/sessions/{id}/claude/commands` (the wire format is in docs/PROTOCOL.md),
+  asked once per session while the phone drives a running Claude Code process, and again after a
+  reconnect. Names come without the slash; entries without a usable name and repeats are dropped.
+- The phone's own list (`builtinSlashCommands`), with descriptions in both languages
+  (`strings_slash.xml`): compact, clear, context, cost, model, permissions, plan, mcp, rename,
+  export, btw, review, init, memory, help.
+- **Fallback rule** (`mergeSlashCommands`): any failure of the call (an older desktop answers
+  404 / 422, no connection) is an empty list, silently. With an empty list the built-in one is
+  used alone. Otherwise both are shown: built-in names keep their place and take the desktop's
+  entry (its argument hint, and its description unless that is blank, in which case the phone's
+  text stays); the desktop's other commands follow in its order.
+
+### 24.4 What a tap does (`slashActionFor`)
+
+| Command | Action |
+|---|---|
+| model | the model / effort sheet |
+| permissions | the permission mode sheet |
+| context, mcp, plan, export, btw | the session tools page (it has no anchors, so it opens at its top) |
+| rename | a dialog asking for the new title (the same `rename` tool as on the tools page) |
+| help | a half-screen panel (`PanelSheet`) with every command of this session; a row there does the same as in the "/" panel |
+| anything else with an argument hint | the draft becomes "/name " and the keyboard stays for the argument |
+| anything else | "/name" is sent at once, through the normal send path (optimistic bubble, queueing, retry) |
+
+For the phone's own actions the typed "/…" is cleared and nothing is sent. They need the Claude
+Code session tools (`claudeTools`); a conversation that is not running has none, so its panel
+lists only the commands that are messages (and `model` when the model can be changed). None of the
+built-in commands has an argument hint, so on an older desktop "compact", "clear", "cost",
+"review", "init" and "memory" are sent as they are; arguments can still be typed by hand.
+
+### 24.5 Evidence and limits
+JVM / Robolectric (API 32): `SlashCommandsTest` (query, filter order and cap, merge, action
+mapping), `SlashCommandsViewModelTest` (older desktop and failing repository fall back to the
+built-in list, merge, reload after reconnect, send / insert / phone-side pick, no commands for
+Codex and read-only sessions), `SlashPanelTest` (the panel appears for "/", tapping "/compact"
+sends "/compact", an inserted command leaves the caret at the end, no panel for Codex), and
+`SlashCommandsApiTest` in `core/remote` (path, body, lenient parsing, 404 / 422).
+**Not verified:** anything on a device (the glass and halo of the panel, the animation, the panel
+together with the IME, the caret with a real keyboard's composing text), and the call against a
+real desktop: the desktop side of `claude/commands` was written at the same time and the two were
+not run together. Whether Claude Code acts on each built-in name when it arrives as a message in
+a managed session (`/cost`, `/review`, `/init`, `/memory` in particular) was not tried either.

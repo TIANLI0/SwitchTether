@@ -31,6 +31,9 @@ object ClaudeTools {
     const val REWIND = "rewind"
     const val EXPORT = "export"
 
+    /** The slash commands the running agent offers (`{commands: [{name, description, argumentHint}], source}`). */
+    const val COMMANDS = "commands"
+
     /**
      * Permission modes the phone offers in a running session (Shift+Tab in the CLI; bypass only works
      * when started with it). The desktop refuses a mode the installed Claude Code does not know.
@@ -130,6 +133,16 @@ object ClaudeTools {
 
     fun parseFlag(e: JsonElement?, key: String): Boolean = e.obj()?.bool(key) == true
 
+    /**
+     * `{commands: [...]}` of the `commands` tool: names without the leading slash, blank and repeated
+     * names dropped, missing texts as `""`. Anything else (an older desktop's error body) is no list.
+     */
+    fun parseCommands(e: JsonElement?): List<SlashCommand> =
+        e.obj()?.get("commands").arr().orEmpty().mapNotNull { it.obj() }.mapNotNull { c ->
+            val name = c.str("name")?.trim()?.trimStart('/')?.takeIf { it.isNotEmpty() && it.none(Char::isWhitespace) } ?: return@mapNotNull null
+            SlashCommand(name, c.str("description")?.trim().orEmpty(), c.str("argumentHint")?.trim().orEmpty())
+        }.distinctBy { it.name.lowercase() }
+
     /** `messageUuid` of a `POST …/messages` response (Claude Code sessions SwitchTether started), else null. */
     fun messageUuidOf(sendResponse: JsonElement?): String? = sendResponse.obj()?.str("messageUuid")?.takeIf { isMessageUuid(it) }
 }
@@ -173,3 +186,13 @@ data class RewindResult(
 )
 
 data class ExportedConversation(val text: String, val filename: String?)
+
+/** One slash command of the agent (`/name args`): run by sending it as an ordinary message. */
+@kotlinx.serialization.Serializable
+data class SlashCommand(
+    /** Without the leading slash. */
+    val name: String,
+    val description: String = "",
+    /** What follows the name (`[instructions]`, `<pr-number>`), `""` when it takes nothing. */
+    val argumentHint: String = "",
+)

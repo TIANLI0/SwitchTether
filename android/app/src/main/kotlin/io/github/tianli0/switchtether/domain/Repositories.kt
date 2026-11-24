@@ -89,6 +89,22 @@ interface SessionRepository {
     suspend fun claudeTool(id: String, action: String, params: JsonObject = JsonObject(emptyMap()), commandId: String = newCommandId()): CommandOutcome =
         throw UnsupportedOperationException("Claude Code session tools")
 
+    /**
+     * The slash commands the running Claude Code process offers (`POST …/claude/commands`). Any
+     * failure (an older desktop answers 404 / 422, no connection) is an empty list: the phone
+     * then offers its built-in ones.
+     */
+    suspend fun claudeCommands(id: String): List<io.github.tianli0.switchtether.remote.session.SlashCommand> = try {
+        when (val out = claudeTool(id, io.github.tianli0.switchtether.remote.session.ClaudeTools.COMMANDS)) {
+            is CommandOutcome.Succeeded -> io.github.tianli0.switchtether.remote.session.ClaudeTools.parseCommands(out.response.body)
+            else -> emptyList()
+        }
+    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        emptyList()
+    }
+
     /** One sub-agent's own steps (read-only). */
     suspend fun subagentEvents(id: String, agentId: String, limit: Int = 300): io.github.tianli0.switchtether.remote.session.SubagentPage =
         throw UnsupportedOperationException("sub-agent transcripts")
@@ -257,6 +273,14 @@ class RemoteSessionRepository(
 
     override suspend fun claudeTool(id: String, action: String, params: JsonObject, commandId: String) =
         conn.command(commandId) { api, c -> api.claudeTool(id, action, c, params) }
+
+    override suspend fun claudeCommands(id: String): List<io.github.tianli0.switchtether.remote.session.SlashCommand> = try {
+        conn.withApi { it.claudeCommands(id) }
+    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        emptyList() // older desktop (404 / 422) or no connection: the built-in list is used
+    }
 
     override suspend fun subagentEvents(id: String, agentId: String, limit: Int) =
         conn.withApi { it.subagentEvents(id, agentId, limit) }

@@ -302,6 +302,15 @@ class RemoteApi(
         return CommandResponse(parseJson(r.text), r.headers["X-Command-Replayed"] == "true")
     }
 
+    /**
+     * `POST /v1/sessions/{id}/claude/commands`: the slash commands the running Claude Code process
+     * offers. A desktop without the action answers 404 / 422, which throws like any other call.
+     */
+    suspend fun claudeCommands(sessionId: String, commandId: String = io.github.tianli0.switchtether.remote.command.newCommandId()): List<io.github.tianli0.switchtether.remote.session.SlashCommand> =
+        io.github.tianli0.switchtether.remote.session.ClaudeTools.parseCommands(
+            claudeTool(sessionId, io.github.tianli0.switchtether.remote.session.ClaudeTools.COMMANDS, commandId).body,
+        )
+
     /** Side-effecting client for calls the desktop may take minutes to answer (never retried). */
     private val slowClient: OkHttpClient by lazy {
         client.newBuilder().readTimeout(200, java.util.concurrent.TimeUnit.SECONDS).build()

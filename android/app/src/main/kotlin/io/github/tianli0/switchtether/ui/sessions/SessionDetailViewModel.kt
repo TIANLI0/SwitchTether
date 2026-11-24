@@ -31,9 +31,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -112,6 +114,8 @@ data class SessionDetailState(
     val backgrounding: Set<String> = emptySet(),
     val rewind: RewindState? = null,
     val notice: ToolNotice? = null,
+    /** Slash commands the running agent reported ("Slash commands" block of the view model; rules in SlashCommands.kt). */
+    val desktopSlashCommands: List<io.github.tianli0.switchtether.remote.session.SlashCommand> = emptyList(),
 ) {
     val online: Boolean get() = connection is ConnectionState.Online
     fun cap(c: Capability): CapStatus = detail.valueOrNull?.capabilities?.status(c) ?: CapStatus.UNKNOWN
@@ -885,6 +889,54 @@ class SessionDetailViewModel(
     fun answer(label: String, requestId: String, answers: JsonObject?, action: String? = null) {
         commands.run(label) { id -> repo.answer(sessionId, requestId, answers, id, action) }
     }
+
+    // ==== Slash commands ("/" panel over the composer): BEGIN ==========================================
+    // The rules (built-in list, merge, filter, what a tap does) are pure functions in SlashCommands.kt,
+    // and so are the derived `slashCommands` / `slashSuggestions` of the state. This block loads
+    // the running agent's own list and runs a picked command.
+
+    init {
+        // Once per session while the phone drives a running Claude Code process, and again after a
+        // reconnect or a resume (the condition turns false and true again).
+        viewModelScope.launch {
+            _state
+                .map { st -> st.canUseClaudeTools && st.canSend && supportsSlashCommands(st.detail.valueOrNull?.summary?.agent) }
+                .distinctUntilChanged()
+                .collect { ready -> if (ready) loadSlashCommands() }
+        }
+    }
+
+    /** An older desktop has no such action: any failure leaves the phone's built-in list. */
+    private suspend fun loadSlashCommands() {
+        val list = try {
+            repo.claudeCommands(sessionId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        _state.update { if (it.desktopSlashCommands == list) it else it.copy(desktopSlashCommands = list) }
+    }
+
+    /**
+     * A command picked from the "/" panel or the "/help" list. A command without arguments goes
+     * out as the message "/name" through [send]; one with arguments becomes the draft "/name ";
+     * for everything the phone does itself the typed "/…" is cleared and the caller opens it.
+     */
+    fun pickSlashCommand(entry: SlashEntry): SlashAction {
+        val action = slashActionFor(entry)
+        when (action) {
+            SlashAction.SEND -> {
+                setDraft("/${entry.name}")
+                send()
+            }
+            SlashAction.INSERT -> setDraft("/${entry.name} ")
+            else -> setDraft("")
+        }
+        return action
+    }
+
+    // ==== Slash commands: END =========================================================================
 
     companion object {
         /** [OutgoingMessage.error] marker: the session ended while the message waited. */

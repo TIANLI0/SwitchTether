@@ -119,7 +119,6 @@ import io.github.tianli0.switchtether.ui.common.waitingLabel
 import io.github.tianli0.coui17.patterns.CollapsibleRow
 import io.github.tianli0.coui17.patterns.ErrorState
 import io.github.tianli0.coui17.patterns.InfoChip
-import io.github.tianli0.coui17.patterns.InputPill
 import io.github.tianli0.coui17.patterns.InputPillState
 import io.github.tianli0.coui17.patterns.LoadingState
 import io.github.tianli0.coui17.patterns.RoundIconButton
@@ -301,6 +300,39 @@ fun SessionDetailScreen(
         },
     )
     RewindDialog(state.rewind, onConfirm = vm::confirmRewind, onDismiss = vm::dismissRewind)
+    // Slash commands: what the phone does itself opens here; the rest is a message (view model).
+    var showSlashHelp by rememberSaveable { mutableStateOf(false) }
+    var showSlashRename by rememberSaveable { mutableStateOf(false) }
+    val onSlashCommand: (SlashEntry) -> Unit = { entry ->
+        when (vm.pickSlashCommand(entry)) {
+            SlashAction.SEND, SlashAction.INSERT -> Unit
+            SlashAction.OPEN_MODEL -> {
+                if (modelChangeable) vm.loadModelOptions()
+                showModels = true
+            }
+            SlashAction.OPEN_PERMISSION -> showPermission = true
+            SlashAction.RENAME -> showSlashRename = true
+            SlashAction.HELP -> showSlashHelp = true
+            // Context, plan, MCP, export and the side question are sections of the session tools page.
+            SlashAction.OPEN_TOOLS, SlashAction.CONTEXT, SlashAction.PLAN, SlashAction.MCP, SlashAction.EXPORT, SlashAction.SIDE_QUESTION ->
+                onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId))
+        }
+    }
+    SlashHelpSheet(
+        show = showSlashHelp,
+        commands = state.slashCommands,
+        onPick = {
+            showSlashHelp = false
+            onSlashCommand(it)
+        },
+        onDismiss = { showSlashHelp = false },
+    )
+    SlashRenameDialog(
+        show = showSlashRename && state.claudeTools,
+        current = state.detail.valueOrNull?.summary?.title.orEmpty(),
+        onRename = vm::renameSession,
+        onDismiss = { showSlashRename = false },
+    )
     val noticeText = when (val n = state.notice) {
         null -> null
         ToolNotice.Withdrawn -> stringResource(R.string.tools_withdrawn)
@@ -362,6 +394,7 @@ fun SessionDetailScreen(
             { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId)) }
         } else null,
         onPermissionClick = { showPermission = true },
+        onSlashCommand = onSlashCommand,
     )
 
     AttachSheet(
@@ -466,6 +499,8 @@ fun SessionDetailContent(
     /** Claude Code session tools page (null = not offered for this session). */
     onOpenTools: (() -> Unit)? = null,
     onPermissionClick: (() -> Unit)? = null,
+    /** A command picked from the "/" panel (null = no panel). */
+    onSlashCommand: ((SlashEntry) -> Unit)? = null,
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
@@ -560,8 +595,10 @@ fun SessionDetailContent(
         }
         var composerHeightPx by remember { mutableStateOf(0) }
         var topOverlayPx by remember { mutableStateOf(0) }
+        // The "/" panel opens over the conversation: it is not part of what the list makes room for.
+        var slashPanelPx by remember { mutableStateOf(0) }
         val density = androidx.compose.ui.platform.LocalDensity.current
-        val composerHeight = with(density) { composerHeightPx.toDp() }
+        val composerHeight = with(density) { (composerHeightPx - slashPanelPx).coerceAtLeast(0).toDp() }
         // Title bar + notices + capsules: where the first message starts at rest.
         val topOverlay = with(density) { topOverlayPx.toDp() }.coerceAtLeast(topInset)
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -597,7 +634,7 @@ fun SessionDetailContent(
                 // are glass, the conversation stays sharp around them (the title bar is the page's
                 // one progressive blur).
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { composerHeightPx = it.height }) {
-                    Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) })
+                    Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) }, onSlashCommand = onSlashCommand, onSlashPanelHeight = { slashPanelPx = it })
                 }
             }
         }
@@ -814,6 +851,8 @@ private fun Composer(
     onModelClick: () -> Unit = {},
     onPermissionClick: (() -> Unit)? = null,
     onViewImage: (io.github.tianli0.switchtether.ui.sessions.render.ImagePreview) -> Unit = {},
+    onSlashCommand: ((SlashEntry) -> Unit)? = null,
+    onSlashPanelHeight: (Int) -> Unit = {},
 ) {
     val s = state.detail.valueOrNull?.summary
     Column(
@@ -957,6 +996,10 @@ private fun Composer(
         } else if (state.resumesOnSend) {
             ComposerNote(stringResource(R.string.composer_resume_hint), COUITheme.colorScheme.onSurfaceSecondary)
         }
+        // Slash commands matching the "/…" being typed, directly above the input row.
+        if (onSlashCommand != null) {
+            SlashSuggestionPanel(state.slashSuggestions, onSlashCommand, Modifier.onSizeChanged { onSlashPanelHeight(it.height) })
+        }
         // The input row, as a ColorOS toolbar: attach key, field, send key.
         Row(verticalAlignment = Alignment.Bottom) {
             // Files are uploaded right away, so attaching needs the connection (sending can still queue).
@@ -973,7 +1016,8 @@ private fun Composer(
                 }
                 Spacer(Modifier.size(io.github.tianli0.coui17.patterns.ComposerKeyGap))
             }
-            InputPill(
+            // InputPill with a caret that follows a draft set from outside (a picked slash command).
+            DraftInputPill(
                 value = state.draft,
                 onValueChange = onDraft,
                 placeholder = when {
