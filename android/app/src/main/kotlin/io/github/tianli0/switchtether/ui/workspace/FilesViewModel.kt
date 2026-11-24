@@ -353,7 +353,7 @@ class FilesViewModel(
     fun keepMineAsCopy() {
         val c = _state.value.conflict ?: return
         val f = (_state.value.file as? Loadable.Ready)?.value ?: return
-        write(f, c.mine, base = null, path = c.suggestedCopyPath, createOnly = true) { openPath(f.path) }
+        write(f, c.mine, base = null, path = c.suggestedCopyPath, createOnly = true) { openPath(f.path, f.sensitive) }
     }
 
     /** Discard my edit and show the desktop's version. */
@@ -389,10 +389,16 @@ class FilesViewModel(
 
     // ---- create / rename / delete ---------------------------------------------------------------------
 
-    fun mkdir(name: String) = pathOp(R.string.files_op_mkdir) { api, id -> api.fsMkdir(PathBody(id, join(currentDir() ?: return@pathOp null, name))) }
+    fun mkdir(name: String) {
+        val dir = currentDir() ?: return noDirectory(R.string.files_op_mkdir)
+        pathOp(R.string.files_op_mkdir) { api, id -> api.fsMkdir(PathBody(id, join(dir, name))) }
+    }
+
+    /** No directory is loaded yet: report it like any other refused operation; nothing is sent. */
+    private fun noDirectory(label: Int) = _state.update { it.copy(message = UiText(R.string.files_msg_rejected, listOf(label, "no directory"))) }
 
     fun newFile(name: String) {
-        val dir = currentDir() ?: return
+        val dir = currentDir() ?: return noDirectory(R.string.files_op_save)
         val path = join(dir, name)
         write(FileContent(path = path), "", base = null, path = path, createOnly = true) { browse(dir) }
     }
@@ -404,9 +410,9 @@ class FilesViewModel(
     /** Moves to the desktop's trash/recycle bin (server side). */
     fun delete(entry: FsEntry) = pathOp(R.string.files_op_delete) { api, id -> api.fsDelete(PathBody(id, entry.path)) }
 
-    private fun pathOp(label: Int, op: suspend (RemoteApi, String) -> CommandResponse?) {
+    private fun pathOp(label: Int, op: suspend (RemoteApi, String) -> CommandResponse) {
         viewModelScope.launch {
-            val out = writeOp(label) { api, id -> op(api, id) ?: throw IllegalStateException("no directory") }
+            val out = writeOp(label, op)
             when (out) {
                 is CommandOutcome.Succeeded -> _state.update { it.copy(message = UiText(R.string.files_msg_ok, listOf(label))) }
                 is CommandOutcome.Rejected -> _state.update { it.copy(message = UiText(R.string.files_msg_rejected, listOf(label, "${out.error.code}: ${out.error.body.message}"))) }
@@ -447,7 +453,13 @@ class FilesViewModel(
                 _state.update { it.copy(transfer = it.transfer?.copy(error = (begin as? CommandOutcome.Rejected)?.error?.body?.message ?: "upload refused")) }
                 return@launch
             }
-            val api = api() ?: return@launch
+            val api = api()
+            if (api == null) {
+                // The connection went away after the upload was opened: no request can be sent, not even the
+                // cancel, but the transfer must not look in progress forever.
+                _state.update { it.copy(transfer = it.transfer?.copy(error = "not connected to the computer")) }
+                return@launch
+            }
             try {
                 withContext(Dispatchers.IO) {
                     resolver.openInputStream(uri)!!.use { input ->

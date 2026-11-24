@@ -39,19 +39,31 @@ class FileCache(
     @Synchronized
     fun begin(key: String, displayName: String): Pending {
         dir.mkdirs()
-        val tmp = File(dir, "$TMP_PREFIX$key")
+        // Leftovers of this key from a crashed run (no live download owns them) are swept here; the temp
+        // files of downloads still in flight are never touched.
+        dir.listFiles().orEmpty()
+            .filter { it.isFile && (it.name == "$TMP_PREFIX$key" || it.name.startsWith("$TMP_PREFIX$key-")) && it.name !in live }
+            .forEach { it.delete() }
+        // One temp file per download: two concurrent downloads of the same file never share bytes.
+        val tmp = File(dir, "$TMP_PREFIX$key-${seq.incrementAndGet()}-${java.util.UUID.randomUUID()}")
         tmp.delete()
+        live += tmp.name
         return Pending(key, FileTypes.safeFileName(displayName), tmp)
     }
 
     /** Moves the finished temp file into place, then evicts above the cap (never the file just added). */
     @Synchronized
     fun commit(p: Pending): File {
+        live -= p.file.name
+        check(p.file.isFile) { "nothing to move into cache" }
         val entryDir = File(dir, p.key)
         entryDir.deleteRecursively()
         entryDir.mkdirs()
         val dest = File(entryDir, p.name)
-        check(p.file.renameTo(dest)) { "cannot move into cache" }
+        if (!p.file.renameTo(dest)) {
+            p.file.delete()
+            error("cannot move into cache")
+        }
         dest.setLastModified(clock())
         entryDir.setLastModified(clock())
         evict(keep = p.key)
@@ -60,6 +72,7 @@ class FileCache(
 
     @Synchronized
     fun abort(p: Pending) {
+        live -= p.file.name
         p.file.delete()
     }
 
@@ -80,8 +93,13 @@ class FileCache(
 
     @Synchronized
     fun clear() {
+        live.clear()
         dir.listFiles()?.forEach { it.deleteRecursively() }
     }
+
+    /** Temp file names owned by a download of THIS process that is still in flight (guarded by the monitor). */
+    private val live = HashSet<String>()
+    private val seq = java.util.concurrent.atomic.AtomicLong()
 
     private class Entry(val key: String, val size: Long, val lastUsed: Long)
 

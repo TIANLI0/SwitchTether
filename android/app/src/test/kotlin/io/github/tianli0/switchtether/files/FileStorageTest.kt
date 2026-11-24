@@ -152,6 +152,52 @@ class FileCacheTest {
     }
 
     @Test
+    fun concurrentDownloadsOfTheSameFileNeverShareATempFile() {
+        val dir = tmp.newFolder("c")
+        val cache = FileCache(dir)
+        val a = cache.begin("k", "x.bin")
+        a.file.writeBytes(ByteArray(10) { 1 })
+        val b = cache.begin("k", "x.bin") // must neither delete nor reuse the first temp file
+        assertNotEquals(a.file, b.file)
+        assertEquals(10, a.file.length())
+        b.file.writeBytes(ByteArray(20) { 2 })
+        assertTrue(cache.commit(a).readBytes().all { it == 1.toByte() })
+        val f = cache.commit(b)
+        assertEquals(20, f.length())
+        assertTrue(f.readBytes().all { it == 2.toByte() })
+        assertEquals(f, cache.get("k"))
+        assertEquals(20, cache.sizeBytes()) // no temp file left behind
+        assertTrue(dir.listFiles()!!.none { it.isFile })
+    }
+
+    @Test
+    fun aFailedDownloadDoesNotDisturbAnotherOneOfTheSameFile() {
+        val cache = FileCache(tmp.newFolder("c"))
+        val a = cache.begin("k", "x.bin")
+        val b = cache.begin("k", "x.bin")
+        a.file.writeBytes(ByteArray(5))
+        b.file.writeBytes(ByteArray(7))
+        cache.abort(a)
+        assertFalse(a.file.exists())
+        assertEquals(7, cache.commit(b).length())
+    }
+
+    @Test
+    fun tempFilesLeftByACrashedRunAreSweptOnTheNextDownloadOfThatFile() {
+        val dir = tmp.newFolder("c")
+        File(dir, ".part-k").writeBytes(ByteArray(30)) // old naming
+        File(dir, ".part-k-1-dead").writeBytes(ByteArray(30))
+        File(dir, ".part-other-1-dead").writeBytes(ByteArray(4))
+        val cache = FileCache(dir)
+        assertEquals(64, cache.sizeBytes())
+        val p = cache.begin("k", "x.bin")
+        assertEquals(4, cache.sizeBytes()) // only the other key's leftover remains
+        p.file.writeBytes(ByteArray(3))
+        cache.commit(p)
+        assertEquals(7, cache.sizeBytes())
+    }
+
+    @Test
     fun clearRemovesEverything() {
         val cache = FileCache(tmp.newFolder("c"))
         put(cache, "a", "a.bin", 10)

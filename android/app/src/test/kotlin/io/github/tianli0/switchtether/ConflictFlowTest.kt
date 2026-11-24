@@ -83,6 +83,37 @@ class ConflictFlowTest {
     private fun body(): String = server.takeRequest(5, TimeUnit.SECONDS)!!.body!!.utf8()
 
     @Test
+    fun creatingBeforeAnyDirectoryIsLoadedReportsAMessageAndSendsNothing() {
+        vm.mkdir("x")
+        assertNotNull(vm.state.value.message)
+        vm.clearMessage()
+        vm.newFile("y.txt")
+        assertNotNull(vm.state.value.message)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun keepMineAsCopyReopensASensitiveFileWithItsConfirmation() {
+        server.enqueue(json(200, """{"path":"D:\\p\\.env","text":"one","sha256":"s1","size":3,"encoding":"utf-8","sensitive":true}"""))
+        vm.openPath("D:\\p\\.env", allowSensitive = true)
+        await { vm.state.value.file is Loadable.Ready }
+        server.takeRequest()
+        vm.startEdit()
+        vm.setEditText("mine")
+        server.enqueue(json(409, """{"error":{"code":"conflict","message":"changed","details":{"currentSha256":"s2","currentText":"desktop","suggestedCopyPath":"D:\\p\\.env (conflict)"}}}"""))
+        vm.save()
+        await { vm.state.value.conflict != null }
+        body()
+        server.enqueue(json(200, """{"sha256":"c1"}"""))
+        server.enqueue(json(200, """{"path":"D:\\p\\.env","text":"desktop","sha256":"s2","size":7,"sensitive":true}"""))
+        vm.keepMineAsCopy()
+        await { (vm.state.value.file as? Loadable.Ready)?.value?.sha256 == "s2" }
+        body()
+        val reread = server.takeRequest(5, TimeUnit.SECONDS)!!
+        assertTrue(reread.url.toString().contains("allowSensitive=true"))
+    }
+
+    @Test
     fun conflictThenKeepMineAsCopyThenOverwrite() {
         server.enqueue(json(200, """{"path":"D:\\p\\a.txt","text":"one","sha256":"s1","size":3,"encoding":"utf-8"}"""))
         vm.openPath("D:\\p\\a.txt")
