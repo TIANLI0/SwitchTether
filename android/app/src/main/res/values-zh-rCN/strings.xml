@@ -220,6 +220,9 @@
     <string name="usage_requests">请求数</string>
     <string name="usage_success">成功率</string>
     <string name="usage_no_data">此时间段没有数据。</string>
+    <string name="usage_heat_less">少</string>
+    <string name="usage_heat_more">多</string>
+    <string name="usage_heat_none">没有用量。</string>
     <string name="quota_unavailable">不可用</string>
     <string name="quota_no_reason">电脑端未提供原因。</string>
     <string name="toggle_enable">启用</string>
