@@ -195,8 +195,10 @@ class LiveUpdatesOrderingTest {
         assertTrue(result.dismissible)
         assertTrue(!result.promoted)
         assertTrue("sounded only once", !result.alert)
+        // `isPinned` turns false when the pin set changes, a moment before `unpin` hands the card to
+        // the channel (on the settling thread): wait for the release itself.
+        waitUntil { s.id in released }
         assertTrue("the card stays up", s.id !in ended)
-        assertTrue(s.id in released)
         // Opening the session in the app clears it.
         live.onSessionOpened(s.id)
         assertTrue(s.id in ended)
