@@ -557,3 +557,30 @@ bar's glass was never painted); small title bars and the session page use the ap
 "stop" as a capsule above it and no blur band behind it; "Bypass" keeps Claude Code's name. Desktop: a managed Claude
 session records the permission mode Claude Code reports (not released). Robolectric and `cargo test -p switchtether-core`
 only; not seen on a device.
+
+## Git writes, push wake, content search, cost sheet, two panes, file previews, session page pass (2026-11-25, branch `feat/d`)
+
+Merged from parallel branches (details in ANDROID_UI §25–§29, PROTOCOL §7.3 / §7.7 / §7.12 / §7.13, SECURITY):
+Git stage / unstage / discard (to trash) / commit / push / pull --ff-only / fetch / branches behind step-up `git_write`
+and the "本轮改动" review; UnifiedPush push wake (RFC 8291 encrypted, content-free) and conversation content search;
+session cost sheet and usage per project; tablet list | detail; file previews, lightbox, openable cache, unsupported
+files downloadable, stale same-name copies re-validated; relay on Go 1.27.4 with current wrangler / TypeScript.
+
+Session page fixes found on an emulator (API 37, dev server, real transcripts read-only): calls without a result end
+with their turn (error / interrupt); refused tools stay "已拒绝"; readable error text; Bash steps titled by their
+description (core keeps it when the input is truncated); sub-agents resumed with SendMessage run again (core);
+background-task capsule; streamed events folded off the main thread in batches (an ANR when opening a large live
+session); a reloaded page no longer stops following the newest message; Fluid Cloud chip texts ≤ 4 characters;
+inline code tint in the dark theme.
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check`, core clippy `-D warnings`, desktop clippy `-D warnings` | Passed |
+| `cargo test -p switchtether-core` | 187 unit + 5 attach + 17 TLS/API e2e passed |
+| `cargo test --lib switchtether` | 10 passed, 1 ignored |
+| Android `:core:remote:test testDebugUnitTest :app:assembleDebug` | app 332 / core:remote 188 tests, 0 failures, 1 existing skip |
+| relay `go vet`, `go test`; `npm run typecheck` (cloudflare) | Passed |
+
+Not verified: anything on a real phone. The emulator renders without a hardware GPU, so the frosted glass (bottom
+navigation capsule, header, composer) does not draw there and was not judged; push wake with a real distributor;
+Git writes against remotes that need credentials; per-project usage against a real CC Switch database.
