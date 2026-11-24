@@ -61,7 +61,18 @@ fun AnimatedNavHost(nav: NavViewModel, content: @Composable (NavEntry) -> Unit) 
         val to = nav.previous ?: return@PredictiveBackHandler
         gesture = true
         try {
-            events.collect { e -> seek.seekTo(e.progress, to) }
+            var dragged = false
+            events.collect { e ->
+                dragged = true
+                seek.seekTo(e.progress, to)
+            }
+            if (!dragged) {
+                // The back key (or a back without a drag) sends no progress: run the ordinary pop
+                // instead of finishing an unstarted seek, which cut straight to the previous page.
+                gesture = false
+                nav.back()
+                return@PredictiveBackHandler
+            }
             nav.back() // committed
             seek.animateTo(to)
         } catch (c: CancellationException) {
