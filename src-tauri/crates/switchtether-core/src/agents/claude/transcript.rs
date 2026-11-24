@@ -57,6 +57,8 @@ pub struct ClaudeParser {
     agent_calls: HashMap<String, String>,
     /// Background shell task id (`backgroundTaskId`, the notification's `<task-id>`) -> Bash call id.
     bg_shells: HashMap<String, String>,
+    /// The last record was a `compact_boundary`: a synthetic user message now is its summary.
+    after_compact_boundary: bool,
     /// Background tasks (agents, shells) still running, from stream-json
     /// `background_tasks_changed`; always 0 for transcripts, which do not record it.
     pub background_tasks: usize,
@@ -113,11 +115,19 @@ enum SlashRecord {
     Command(String),
     /// A local command's output as plain text (may be empty).
     Output(String),
+    /// `<local-command-caveat>`: the harness's note to the model that local command output
+    /// follows. Never shown.
+    Caveat,
 }
 
 fn slash_record(text: &str) -> Option<SlashRecord> {
     const OUTPUT_TAGS: [&str; 2] = ["local-command-stdout", "local-command-stderr"];
     let t = text.trim_start();
+    // The VS Code extension (2.1.331) classifies user records the same way: `<command-name>` →
+    // record, `<local-command-stdout|stderr>` → output, `<local-command-caveat>` → caveat.
+    if t.starts_with("<local-command-caveat>") {
+        return Some(SlashRecord::Caveat);
+    }
     if t.starts_with("<command-name>") || t.starts_with("<command-message>") {
         let name = xml_tag(t, "command-name").or_else(|| xml_tag(t, "command-message"))?;
         let mut cmd = format!("/{}", name.trim_start_matches('/'));
@@ -132,7 +142,9 @@ fn slash_record(text: &str) -> Option<SlashRecord> {
         .any(|tag| t.starts_with(&format!("<{tag}>")))
     {
         let mut parts = Vec::new();
-        let mut rest = t.to_string();
+        // A forked skill's launch record (`<forked-skill-launch>{json}</forked-skill-launch>`)
+        // may trail the output; the extension strips it, it is not output.
+        let (mut rest, _) = take_blocks(t, "forked-skill-launch");
         for tag in OUTPUT_TAGS {
             let (r, blocks) = take_blocks(&rest, tag);
             rest = r;
@@ -149,6 +161,28 @@ fn slash_record(text: &str) -> Option<SlashRecord> {
         return Some(SlashRecord::Output(out));
     }
     None
+}
+
+/// `/name args` when `text` is Claude Code's record of a slash command (`<command-name>` …), as
+/// the user typed it; `None` for anything else.
+pub(crate) fn slash_command_text(text: &str) -> Option<String> {
+    match slash_record(text)? {
+        SlashRecord::Command(c) => Some(c),
+        _ => None,
+    }
+}
+
+/// Text the user typed to run a slash command (`/compact`, `/my-plugin:deploy args`), not a
+/// path such as `/usr/bin/foo`. Such text never names the conversation.
+fn is_typed_slash_command(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix('/') else {
+        return false;
+    };
+    let name = rest.split_whitespace().next().unwrap_or("");
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
 }
 
 /// Text without terminal escape sequences (local commands print for a terminal).
@@ -499,7 +533,10 @@ impl ClaudeParser {
         };
         let mut out = match rec.get("type").and_then(|t| t.as_str()) {
             Some("user") => self.user(rec, &ts),
-            Some("assistant") => self.assistant(rec, &ts),
+            Some("assistant") => {
+                self.after_compact_boundary = false;
+                self.assistant(rec, &ts)
+            }
             Some("system") => self.system(rec, &ts),
             Some("stream_event") => self.stream_event(rec, &ts),
             Some("result") => self.result(rec, &ts),
@@ -587,6 +624,7 @@ impl ClaudeParser {
     }
 
     fn user(&mut self, rec: &Value, ts: &str) -> Vec<EventDraft> {
+        let after_compact = std::mem::take(&mut self.after_compact_boundary);
         if rec.get("isMeta").and_then(|v| v.as_bool()) == Some(true) {
             return vec![];
         }
@@ -594,6 +632,10 @@ impl ClaudeParser {
         let msg = rec.get("message").cloned().unwrap_or(Value::Null);
         let content = msg.get("content").cloned().unwrap_or(Value::Null);
         let mut out = Vec::new();
+        // stream-json marks what a transcript calls `isMeta` as `isSynthetic` (the VS Code
+        // extension maps one to the other): a prompt command's expanded text, the local command
+        // caveat, the summary a /compact leaves behind. The user did not type it.
+        let synthetic = rec.get("isSynthetic").and_then(Value::as_bool) == Some(true);
 
         // A background task reporting back. Claude Code delivers it as a user turn, but the user
         // did not write it: it updates the sub-agent row and never becomes a message or a title.
@@ -602,7 +644,11 @@ impl ClaudeParser {
             return self.task_notification(&uuid, &raw_text, ts);
         }
 
-        if rec.get("isCompactSummary").and_then(|v| v.as_bool()) == Some(true) {
+        // The extension takes the synthetic string message right after a `compact_boundary` as
+        // the summary, with or without `isCompactSummary`.
+        if rec.get("isCompactSummary").and_then(|v| v.as_bool()) == Some(true)
+            || (synthetic && after_compact && content.is_string())
+        {
             let (p, _) = preview(&content_text(&content), PREVIEW_LIMIT);
             out.push(EventDraft::new(
                 format!("{uuid}:summary"),
@@ -636,6 +682,10 @@ impl ClaudeParser {
             }
         }
 
+        if synthetic {
+            return out;
+        }
+
         // Plain user text (string content or text blocks) or image-only user message.
         let raw = content_text(&content);
         let (text, context) = strip_injected_with_context(&raw);
@@ -662,6 +712,7 @@ impl ClaudeParser {
                     && !is_sidechain(rec)
                     && !rec_has_parent(rec)
                     && !text.is_empty()
+                    && !is_typed_slash_command(&text)
                 {
                     self.title =
                         clean_title(Some(preview(&crate::redact::redact_text(&text), 120).0));
@@ -711,6 +762,7 @@ impl ClaudeParser {
                 d.turn_id = Some(uuid.to_string());
                 vec![d]
             }
+            SlashRecord::Caveat => vec![],
             SlashRecord::Output(text) if text.is_empty() => vec![],
             SlashRecord::Output(text) => {
                 let (p, _) = preview(&text, PREVIEW_LIMIT);
@@ -1426,7 +1478,10 @@ impl ClaudeParser {
                         .unwrap_or_default()
                 )
             }
-            "compact_boundary" => "Conversation compacted".to_string(),
+            "compact_boundary" => {
+                self.after_compact_boundary = true;
+                "Conversation compacted".to_string()
+            }
             "api_error" => {
                 let attempt = rec
                     .get("retryAttempt")
@@ -1730,7 +1785,9 @@ mod tests {
         );
         assert_eq!(ev[0].kind, "system");
         assert_eq!(ev[0].data["text"], "No MCP servers configured.");
-        // stream-json reports local output as plain `content`.
+        // Any other `system` record with plain `content` is shown as it is. (No evidence that
+        // stream-json uses a `local_command_output` subtype: the VS Code extension reads local
+        // output from `<local-command-stdout>` user messages, see the next test.)
         let ev = p.feed(&json!({"type":"system","subtype":"local_command_output","uuid":"s3","content":"Compacted."}));
         assert_eq!(ev[0].kind, "system");
         assert_eq!(ev[0].data["text"], "Compacted.");
@@ -1748,6 +1805,71 @@ mod tests {
         let ev = p.feed(&json!({"type":"user","uuid":"u","message":{"content":"what does <command-name> mean?"}}));
         assert_eq!(ev[0].data["text"], "what does <command-name> mean?");
         assert_eq!(p.title.as_deref(), Some("what does <command-name> mean?"));
+    }
+
+    /// A slash command run in a stream-json session (`--replay-user-messages`), in the shapes the
+    /// VS Code extension 2.1.331 handles: the command replayed under its own `uuid` as a
+    /// `<command-name>` record, a prompt command's expanded text and the local command caveat as
+    /// `isSynthetic` user messages (a transcript's `isMeta`), local output as a user message, the
+    /// /compact summary as a synthetic string right after `compact_boundary`.
+    #[test]
+    fn stream_json_slash_command_records() {
+        let mut p = ClaudeParser::new();
+        // Typed text: a user message that never names the conversation.
+        let ev = p.feed(&json!({"type":"user","uuid":"u0","message":{"content":[{"type":"text","text":"/review 42"}]}}));
+        assert_eq!(ev[0].kind, "user_message");
+        assert_eq!(ev[0].data["text"], "/review 42");
+        assert!(p.title.is_none());
+        // The replay: same id, so it replaces the bubble instead of adding one.
+        let ev = p.feed(&json!({"type":"user","uuid":"u0","isReplay":true,"message":{"content":
+            "<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>42</command-args>"}}));
+        assert_eq!((ev[0].id.as_str(), ev[0].kind), ("u0", "user_message"));
+        assert_eq!(ev[0].data["text"], "/review 42");
+        // The expanded prompt the model gets is not something the user typed.
+        assert!(p
+            .feed(&json!({"type":"user","uuid":"x1","isSynthetic":true,"isReplay":true,"message":{"content":
+                [{"type":"text","text":"## Review the pull request\nRun gh pr view 42 and …"}]}}))
+            .is_empty());
+        // The caveat, flagged or not.
+        for flag in [json!(true), Value::Null] {
+            assert!(p
+                .feed(&json!({"type":"user","uuid":"c1","isSynthetic":flag,"message":{"content":
+                    "<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages.</local-command-caveat>"}}))
+                .is_empty());
+        }
+        // Local output, with a forked skill's launch record behind it.
+        let ev = p.feed(&json!({"type":"user","uuid":"o1","isReplay":true,"message":{"content":
+            "<local-command-stdout>Launched skill</local-command-stdout>\n<forked-skill-launch>{\"agentId\":\"a1\",\"skillName\":\"s\",\"description\":\"/s\"}</forked-skill-launch>"}}));
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].data["text"], "Launched skill");
+        // /compact: boundary, then the summary as a synthetic string.
+        p.feed(&json!({"type":"system","subtype":"compact_boundary","uuid":"cb","compact_metadata":{"trigger":"manual","pre_tokens":1000}}));
+        let ev = p.feed(&json!({"type":"user","uuid":"cs","isSynthetic":true,"message":{"content":"This session is being continued … Summary: the work so far"}}));
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].data["subtype"], "compact_summary");
+        // Only right after the boundary.
+        assert!(p
+            .feed(&json!({"type":"user","uuid":"cs2","isSynthetic":true,"message":{"content":"later meta text"}}))
+            .is_empty());
+        // Tool results in a synthetic message still update their call.
+        p.feed(
+            &json!({"type":"assistant","uuid":"a1","message":{"id":"m1","content":[
+            {"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}),
+        );
+        let ev = p.feed(
+            &json!({"type":"user","uuid":"r1","isSynthetic":true,"message":{"content":[
+            {"type":"tool_result","tool_use_id":"t1","content":"a.txt"}]}}),
+        );
+        assert!(ev.iter().any(|e| e.kind == "tool_call"), "{ev:?}");
+        assert!(ev.iter().all(|e| e.kind != "user_message"));
+        // A path is not a command: it names the conversation.
+        p.feed(&json!({"type":"user","uuid":"u9","message":{"content":"/usr/local/bin/tool crashes on start"}}));
+        assert_eq!(
+            p.title.as_deref(),
+            Some("/usr/local/bin/tool crashes on start")
+        );
     }
 
     #[test]

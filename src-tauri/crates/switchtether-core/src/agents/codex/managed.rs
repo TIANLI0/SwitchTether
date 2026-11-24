@@ -369,12 +369,29 @@ impl CodexConn {
 
 /// Questions for an MCP elicitation (`{mode, message, serverName, url, requestedSchema}`): one
 /// per schema property, or one confirmation. Also used for Claude Code's `elicitation` request.
+/// The URL of a URL elicitation when the phone may offer to open it: `http(s)` only, one line.
+/// Anything else (`javascript:`, `intent:`, `file:` …) from an MCP server is dropped.
+pub(crate) fn elicitation_url(params: &Value) -> Option<String> {
+    let url = s(params, "url")?;
+    let url = url.trim();
+    let lower = url.to_ascii_lowercase();
+    ((lower.starts_with("https://") || lower.starts_with("http://"))
+        && url.len() <= 8192
+        && !url.chars().any(|c| c.is_control() || c.is_whitespace()))
+    .then(|| url.to_string())
+}
+
+/// The texts an MCP server writes (message, field titles and descriptions) are redacted like
+/// other agent text that reaches the phone; the URL of a URL elicitation is not (the user has to
+/// open it), nor are option labels / values (they are what the answer sends back).
 pub(crate) fn elicitation_to_questions(params: &Value) -> Vec<Value> {
     let mode = s(params, "mode").unwrap_or_default();
-    let msg = s(params, "message").unwrap_or_else(|| "Input requested".into());
+    let msg = crate::redact::redact_text(
+        &s(params, "message").unwrap_or_else(|| "Input requested".into()),
+    );
     let server = s(params, "serverName").unwrap_or_default();
     if mode == "url" {
-        let url = s(params, "url").unwrap_or_default();
+        let url = elicitation_url(params).unwrap_or_default();
         return vec![json!({
             "id": "__confirm__",
             "header": if server.is_empty() { Value::Null } else { json!(server) },
@@ -386,9 +403,11 @@ pub(crate) fn elicitation_to_questions(params: &Value) -> Vec<Value> {
             ],
         })];
     }
+    // No fields to fill in (no schema, or `properties: {}`): one confirmation.
     let Some(props) = params
         .pointer("/requestedSchema/properties")
         .and_then(|p| p.as_object())
+        .filter(|p| !p.is_empty())
     else {
         return vec![json!({
             "id": "__confirm__",
@@ -402,8 +421,9 @@ pub(crate) fn elicitation_to_questions(params: &Value) -> Vec<Value> {
     props
         .iter()
         .map(|(k, schema)| {
-            let title = s(schema, "title").unwrap_or_else(|| k.clone());
-            let desc = s(schema, "description");
+            let title =
+                crate::redact::redact_text(&s(schema, "title").unwrap_or_else(|| k.clone()));
+            let desc = s(schema, "description").map(|d| crate::redact::redact_text(&d));
             let ty = s(schema, "type").unwrap_or_else(|| "string".into());
             let mut multi = false;
             let mut options: Vec<Value> = Vec::new();
@@ -978,8 +998,8 @@ impl ManagedCodex {
                     "serverName": params.get("serverName"),
                     "resolved": false,
                 });
-                if let Some(u) = params.get("url") {
-                    data["url"] = u.clone();
+                if let Some(u) = elicitation_url(&params) {
+                    data["url"] = json!(u);
                 }
                 EventDraft::new(&event_id, "question", &ts, data)
             }

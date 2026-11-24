@@ -127,6 +127,8 @@ const COMMAND_HINT_MAX: usize = 120;
 /// More than any real installation offers; bounds what a phone has to hold.
 const COMMANDS_MAX: usize = 500;
 const COMMAND_ALIASES_MAX: usize = 5;
+/// Attached mode: prompts shown before their replay arrived; a bound, not an expected size.
+const ECHOED_MAX: usize = 256;
 
 fn clip(text: &str, max: usize) -> String {
     text.trim().chars().take(max).collect()
@@ -596,12 +598,50 @@ impl ManagedClaude {
         (!t.is_empty()).then(|| t.join("\n").trim().to_string())
     }
 
+    /// Attached mode: whether a user message on the process's stdout is the replay
+    /// (`--replay-user-messages`) of one already shown by [`Self::echo_user`]. A replay keeps the
+    /// `uuid` of the message it repeats but not always its text: a slash command comes back as
+    /// Claude Code's `<command-name>` record (the VS Code extension matches replays by `uuid`
+    /// and replaces the text of its bubble). Without a `uuid` the text decides, a command record
+    /// compared as the `/name args` it stands for.
+    fn take_echo(&self, v: &Value) -> bool {
+        let text = Self::user_text(v);
+        let mut echoed = self.echoed.lock();
+        if let Some(u) = v.get("uuid").and_then(Value::as_str) {
+            if echoed.remove(&format!("uuid:{u}")) {
+                if let Some(t) = &text {
+                    echoed.remove(&format!("text:{t}"));
+                    if let Some(c) = super::transcript::slash_command_text(t) {
+                        echoed.remove(&format!("text:{c}"));
+                    }
+                }
+                return true;
+            }
+        }
+        let Some(t) = text else { return false };
+        if echoed.remove(&format!("text:{t}")) {
+            return true;
+        }
+        super::transcript::slash_command_text(&t)
+            .is_some_and(|c| echoed.remove(&format!("text:{c}")))
+    }
+
     /// Attached mode: record a user message that went into the agent.
     fn echo_user(&self, v: &Value, source: Option<&str>) {
         let Some(text) = Self::user_text(v) else {
             return;
         };
-        self.echoed.lock().insert(text);
+        {
+            let mut echoed = self.echoed.lock();
+            if let Some(u) = v.get("uuid").and_then(Value::as_str) {
+                echoed.insert(format!("uuid:{u}"));
+            }
+            echoed.insert(format!("text:{text}"));
+            // A message the replay never matches must not pile up.
+            if echoed.len() > ECHOED_MAX {
+                echoed.clear();
+            }
+        }
         let mut rec = v.clone();
         rec["uuid"] = json!(format!("in:{}", crate::util::new_id()));
         rec["timestamp"] = json!(crate::util::now_rfc3339());
@@ -951,20 +991,23 @@ impl ManagedClaude {
             Some("control_request") => self.on_control_request(v).await,
             Some("control_cancel_request") => {
                 if let Some(rid) = v.get("request_id").and_then(|r| r.as_str()) {
-                    if let Some(p) = self.pending.lock().remove(rid) {
+                    let removed = self.pending.lock().remove(rid);
+                    if let Some(p) = removed {
                         self.resolved.lock().insert(rid.to_string(), "agent".into());
                         self.log.lock().update(&p.event_id, true, |e| {
                             e.data["resolved"] = json!(true);
                             e.data["decision"] = json!("cancelled");
                             e.data["by"] = json!("agent");
                         });
+                        // Nothing left to answer: the agent works on (as after an answer).
+                        if self.pending.lock().is_empty() && self.status() == "waiting" {
+                            self.set_status("busy");
+                            self.publish_status("running", None);
+                        }
                     }
                 }
             }
-            Some("user")
-                if self.remote.is_some()
-                    && Self::user_text(&v).is_some_and(|t| self.echoed.lock().remove(&t)) =>
-            {
+            Some("user") if self.remote.is_some() && self.take_echo(&v) => {
                 // Replay of a prompt already shown.
             }
             Some(_) => {
@@ -986,6 +1029,16 @@ impl ManagedClaude {
                         && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
                 }) {
                     merge_commands(&mut self.state.lock().commands, names);
+                }
+                // `system`/`commands_changed` carries the whole new list (skills or plugins
+                // loaded mid-session), in the initialize response's shape: it replaces the list,
+                // as the VS Code extension 2.1.331 does (`latestCommands = commands`).
+                if let Some(c) = v.get("commands").filter(|c| {
+                    ty == "system"
+                        && c.is_array()
+                        && v.get("subtype").and_then(|s| s.as_str()) == Some("commands_changed")
+                }) {
+                    self.state.lock().commands = normalize_commands(c);
                 }
                 if let Some(sid) = v
                     .get("session_id")
@@ -1134,11 +1187,14 @@ impl ManagedClaude {
                         .map(str::trim)
                         .filter(|t| !t.is_empty())
                 };
-                let message = text("message")
-                    .or(text("description"))
-                    .or(text("title"))
-                    .unwrap_or("Input requested")
-                    .to_string();
+                // Redacted like the rest of what the agent shows the phone (the URL is not: the
+                // user has to open it).
+                let message = crate::redact::redact_text(
+                    text("message")
+                        .or(text("description"))
+                        .or(text("title"))
+                        .unwrap_or("Input requested"),
+                );
                 let server = text("display_name").or(text("mcp_server_name"));
                 let params = json!({
                     "mode": req.get("mode"), "message": message, "serverName": server,
@@ -1150,7 +1206,8 @@ impl ManagedClaude {
                 // the user is asked: alone for a single field, above the first one otherwise.
                 if params
                     .pointer("/requestedSchema/properties")
-                    .is_some_and(Value::is_object)
+                    .and_then(Value::as_object)
+                    .is_some_and(|p| !p.is_empty())
                     && params["mode"] != "url"
                 {
                     let single = questions.len() == 1;
@@ -1169,7 +1226,7 @@ impl ManagedClaude {
                     "elicitationMode": req.get("mode"), "serverName": server,
                     "message": message, "resolved": false,
                 });
-                if let Some(u) = text("url") {
+                if let Some(u) = crate::agents::codex::managed::elicitation_url(&params) {
                     data["url"] = json!(u);
                 }
                 let draft =
@@ -1527,6 +1584,225 @@ mod tests {
         let late = m.respond("e4", "answer", None, None, None, "phone").await;
         assert_eq!(late.unwrap_err().code, crate::error::ErrorCode::Conflict);
         assert!(rx.try_recv().is_err());
+        // Nothing is left to answer: the session is not stuck in "waiting".
+        assert_eq!(m.status(), "busy");
+        assert_eq!(
+            m.log.lock().get("status:current").unwrap().data["state"],
+            "running"
+        );
+    }
+
+    /// A withdrawn request leaves the session waiting while another one is still open.
+    #[tokio::test]
+    async fn cancelling_one_of_two_requests_keeps_waiting() {
+        let (m, _rx) = fake();
+        elicit(&m, "a", json!({ "message": "First?" })).await;
+        elicit(&m, "b", json!({ "message": "Second?" })).await;
+        m.on_message(json!({ "type": "control_cancel_request", "request_id": "a" }))
+            .await;
+        assert_eq!(m.status(), "waiting");
+        assert_eq!(m.pending_request_ids(), ["b"]);
+    }
+
+    /// What an MCP server sends is not trusted: its texts are redacted like other agent text, a
+    /// URL the phone could open must be http(s), and a form without fields is a confirmation
+    /// (not a question card with no questions).
+    #[tokio::test]
+    async fn elicitation_texts_are_redacted_and_urls_checked() {
+        let (m, mut rx) = fake();
+        let secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
+        let data = elicit(
+            &m,
+            "e1",
+            json!({ "mcp_server_name": "s", "message": format!("Use key {secret} to continue?"),
+                "requested_schema": { "type": "object", "properties": {
+                    "a": { "type": "string", "title": format!("Token {secret}"),
+                           "description": "token=abc123" },
+                    "b": { "type": "string" } } } }),
+        )
+        .await;
+        let shown = data.to_string();
+        assert!(!shown.contains(secret), "{shown}");
+        assert!(!shown.contains("abc123"), "{shown}");
+        assert!(data["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Use key [REDACTED]"));
+        m.respond("e1", "cancel", None, None, None, "phone")
+            .await
+            .unwrap();
+        sent(&mut rx);
+
+        for (rid, url) in [
+            ("u1", "javascript:alert(1)"),
+            ("u2", "intent://scan/#Intent;scheme=zxing;end"),
+            ("u3", "file:///etc/passwd"),
+            ("u4", "https://example.com/a b"),
+        ] {
+            let data = elicit(
+                &m,
+                rid,
+                json!({ "message": "Open this", "mode": "url", "url": url }),
+            )
+            .await;
+            assert!(data.get("url").is_none(), "{url} must not be offered");
+            assert!(!data.to_string().contains(url), "{url} shown in {data}");
+        }
+        let data = elicit(
+            &m,
+            "u5",
+            json!({ "message": "Open this", "mode": "url", "url": " HTTPS://example.com/ok?state=1 " }),
+        )
+        .await;
+        assert_eq!(data["url"], "HTTPS://example.com/ok?state=1");
+
+        let data = elicit(
+            &m,
+            "f1",
+            json!({ "message": "Continue?", "requested_schema": { "type": "object", "properties": {} } }),
+        )
+        .await;
+        let qs = data["questions"].as_array().unwrap();
+        assert_eq!(qs.len(), 1);
+        assert_eq!(qs[0]["id"], "__confirm__");
+        assert_eq!(qs[0]["question"], "Continue?");
+        m.respond(
+            "f1",
+            "answer",
+            None,
+            None,
+            Some(json!({ "__confirm__": "ok" })),
+            "phone",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            sent(&mut rx)["response"]["response"],
+            json!({ "action": "accept", "content": {} })
+        );
+    }
+
+    fn user_bubbles(m: &ManagedClaude) -> Vec<String> {
+        m.log
+            .lock()
+            .iter()
+            .filter(|e| e.kind == "user_message")
+            .map(|e| e.data["text"].as_str().unwrap_or("").to_string())
+            .collect()
+    }
+
+    /// Attached session: Claude Code replays a slash command under the `uuid` it was sent with
+    /// but as its `<command-name>` record (the VS Code extension matches replays by `uuid` and
+    /// replaces its bubble's text). One bubble per command, from the phone or the IDE; its output
+    /// is a `system` note.
+    #[tokio::test]
+    async fn attached_slash_command_replay_is_not_a_second_bubble() {
+        let (tx, mut shim) = tokio::sync::mpsc::unbounded_channel();
+        let m = ManagedClaude::attached(
+            "cc".into(),
+            PathBuf::from("."),
+            Arc::new(Mutex::new(SessionLog::new("cc", None))),
+            tx,
+            "vscode",
+        );
+        // From the phone (injected through the shim, shown at once).
+        m.send_message("/compact keep the API notes").await.unwrap();
+        let uuid = m.last_message_uuid().unwrap();
+        // Sent as the text of an ordinary user message, as the VS Code extension does.
+        let frame: Value = serde_json::from_str(&shim.try_recv().unwrap()).unwrap();
+        let line: Value = serde_json::from_str(frame["line"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            line["message"]["content"][0]["text"],
+            "/compact keep the API notes"
+        );
+        assert_eq!(line["uuid"], uuid.as_str());
+        out(
+            &m,
+            json!({ "type": "user", "uuid": uuid, "isReplay": true, "session_id": "s",
+                "message": { "role": "user", "content":
+                "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>keep the API notes</command-args>" } }),
+        )
+        .await;
+        assert_eq!(user_bubbles(&m), ["/compact keep the API notes"]);
+
+        // Typed in the IDE: the host's own frame, then the replay.
+        m.on_remote_frame(json!({ "t": "in", "line": json!({ "type": "user", "uuid": "ide-1",
+            "session_id": "", "parent_tool_use_id": null,
+            "message": { "role": "user", "content": [{ "type": "text", "text": "/cost" }] } }).to_string() }))
+            .await;
+        out(
+            &m,
+            json!({ "type": "user", "uuid": "ide-1", "isReplay": true,
+                "message": { "role": "user", "content": "<command-name>/cost</command-name>\n<command-message>cost</command-message>\n<command-args></command-args>" } }),
+        )
+        .await;
+        // Without a uuid the record still matches the text it stands for.
+        m.on_remote_frame(json!({ "t": "in", "line": json!({ "type": "user",
+            "message": { "role": "user", "content": "/context" } }).to_string() }))
+            .await;
+        out(
+            &m,
+            json!({ "type": "user",
+                "message": { "role": "user", "content": "<command-name>/context</command-name>" } }),
+        )
+        .await;
+        // The command's output (a replayed user message of its own) is shown once, as a note.
+        out(
+            &m,
+            json!({ "type": "user", "uuid": "o1", "isReplay": true,
+                "message": { "role": "user", "content": "<local-command-stdout>Total cost: $0.12</local-command-stdout>" } }),
+        )
+        .await;
+        assert_eq!(
+            user_bubbles(&m),
+            ["/compact keep the API notes", "/cost", "/context"]
+        );
+        let notes: Vec<String> = m
+            .log
+            .lock()
+            .iter()
+            .filter(|e| e.kind == "system" && e.data["subtype"] == "command")
+            .map(|e| e.data["text"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(notes, ["Total cost: $0.12"]);
+        // A slash command never names the conversation.
+        assert!(m.title().is_none());
+        // Nothing of the matched messages is kept.
+        assert!(m.echoed.lock().is_empty());
+    }
+
+    /// `system`/`commands_changed` (skills / plugins loaded mid-session) replaces the list.
+    #[tokio::test]
+    async fn commands_changed_replaces_the_command_list() {
+        let m = attached();
+        out(
+            &m,
+            json!({"type": "control_response", "response": {"subtype": "success", "request_id": "i",
+            "response": {"commands": [
+                {"name": "compact", "description": "Summarise", "argumentHint": ""},
+                {"name": "old-skill", "description": "", "argumentHint": ""}
+            ]}}}),
+        )
+        .await;
+        out(
+            &m,
+            json!({"type": "system", "subtype": "commands_changed", "session_id": "s", "commands": [
+                {"name": "compact", "description": "Summarise", "argumentHint": "<instructions>"},
+                {"name": "new-skill", "description": "Fresh", "argumentHint": "", "plugin": "p"}
+            ]}),
+        )
+        .await;
+        let list = m.commands();
+        assert_eq!(names(&list), ["compact", "new-skill"]);
+        assert_eq!(list[0]["argumentHint"], "<instructions>");
+        assert!(list[1].get("plugin").is_none());
+        // Malformed: ignored, the list stays.
+        out(
+            &m,
+            json!({"type": "system", "subtype": "commands_changed", "commands": "x"}),
+        )
+        .await;
+        assert_eq!(m.commands().len(), 2);
     }
 
     #[tokio::test]

@@ -260,8 +260,13 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   elicitation, `url`. A form has one question per property of the requested schema (`id` = property name; `enum` /
   `oneOf` → options, boolean → `true` / `false`, array of enum → multi-select, anything else free text; `required`
   from the schema); for Claude Code the server's message is the text of a single question, or leads the first of
-  several. Without a schema, and for a URL elicitation, there is one question with `id: "__confirm__"` (URL: one
-  option `Accept`, the phone shows / opens `url`). The answer goes back to the agent as an MCP `ElicitResult`:
+  several. Without a schema (or with no properties), and for a URL elicitation, there is one question with
+  `id: "__confirm__"` (URL: one option `Accept`, the phone shows / opens `url`). What the server wrote (message, field
+  titles and descriptions) is redacted like other agent text; `url` is sent only when it is a single-line `http(s)`
+  URL (anything else, e.g. `javascript:` or `intent:`, is dropped and the question is a plain confirmation), and is not
+  redacted since the user has to open it. Option labels / values are not changed (they are what the answer returns).
+  Claude Code may withdraw an elicitation with `control_cancel_request`: the question is resolved with `decision:
+  "cancelled"`, `by: "agent"`, and a late answer gets `409`. The answer goes back to the agent as an MCP `ElicitResult`:
   `action: "submit"` (default) → `{action: "accept", content}` with `content` = `answers` typed after the schema
   (`"true"` → `true`, numbers parsed; no `content` for a URL elicitation), `"decline"` → `{action: "decline"}`,
   `"cancel"` → `{action: "cancel"}`. Hook callbacks are never forwarded (declined with an error). In a session
@@ -443,7 +448,9 @@ this change used `managed:<random>` ids that disappeared with the process.
   - **Slash commands** (`POST /v1/sessions/{id}/claude/commands`, fixture `protocol/fixtures/claude_commands.json`): the
     slash commands the session's own Claude Code process reported — built-in ones, custom commands from
     `.claude/commands`, skills and plugin commands — taken from its `initialize` control response (`commands`) and, for
-    names it did not list, from `slash_commands` of the stream's `system`/`init` message. No control request is sent.
+    names it did not list, from `slash_commands` of the stream's `system`/`init` message; a later `system`
+    `commands_changed` message (same entry shape, skills / plugins loaded mid-session) replaces the whole list. No
+    control request is sent.
     Each entry has three strings: `name` (without the leading `/`, ≤ 80 characters), `description` (≤ 300, `""`
     when unknown) and `argumentHint` (≤ 120, `""` when none), plus an optional `aliases` (other names of the same
     command, same rules as `name`, at most 5; the key is absent when there are none). Unique by `name`, in the
@@ -454,8 +461,13 @@ this change used `managed:<random>` ids that disappeared with the process.
     or a `system`/`init` message (names only) pass; otherwise `none`. A session that is running in a window
     SwitchTether does not control → `422 capability_unavailable` like the other tools. **Running a command needs no
     endpoint of its own:** send `/name args` as the text of an ordinary message (`POST …/messages`), as the Agent SDK
-    does. In the log the command appears as a `user_message` with that text, and what a local command prints as a
-    `system` event (`subtype: "command"` from a transcript, `local_command_output` from the stream).
+    and the VS Code extension do. In the log the command appears as one `user_message` with that text (Claude Code
+    replays it under the same `uuid` as its `<command-name>` record; both are the same bubble, and a command never
+    becomes the conversation's title), and what a local command prints as a `system` event with `subtype: "command"`
+    (in transcripts and in the stream alike Claude Code delivers it as `<local-command-stdout>` /
+    `<local-command-stderr>`; a stream-json `system` message with other `content` is shown as it is). What the user
+    did not type is never a `user_message`: the local command caveat, a prompt command's expanded text (stream-json
+    `isSynthetic`, transcript `isMeta`); the summary a `/compact` leaves is a `system` `compact_summary`.
   - **Models** (`GET /v1/agents/{agent}/models?session=`): the agent's own list — from the running session, else read by a
     short SwitchTether-owned probe (Claude Code `initialize` with no MCP servers, Codex app-server `model/list`; no
     message, no conversation) and cached 30 min. With an official list the built-in aliases are not added, hidden Codex
