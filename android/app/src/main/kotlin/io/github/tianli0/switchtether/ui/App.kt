@@ -37,6 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -245,12 +248,32 @@ fun MainShell() {
                         AnimatedNavHost(nav) { Destination(nav, it) }
                     }
                 }
-                AnimatedVisibility(
-                    visible = showBar,
-                    enter = slideInVertically { it } + fadeIn(),
-                    exit = slideOutVertically { it } + fadeOut(),
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                ) {
+                // ColorOS shows and hides the bar in place (COUIBottomFloatingNavigationBarMenuView
+                // .doMenuViewShowOrHideAnim): scale 0.8 <-> 1 on a response 0.35 / bounce 0.35 spring,
+                // alpha on 0.2 / 0, and a 30px foreground blur on 0.3 / 0. It never slides.
+                val barAlpha by androidx.compose.animation.core.animateFloatAsState(
+                    if (showBar) 1f else 0f, couiSpring(response = 0.2f, bounce = 0f), label = "bar-alpha",
+                )
+                val barScale by androidx.compose.animation.core.animateFloatAsState(
+                    if (showBar) 1f else 0.8f, couiSpring(response = 0.35f, bounce = 0.35f), label = "bar-scale",
+                )
+                val barBlurPx by androidx.compose.animation.core.animateFloatAsState(
+                    if (showBar) 0f else 30f, couiSpring(response = 0.3f, bounce = 0f), label = "bar-blur",
+                )
+                if (showBar || barAlpha > 0.01f) {
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .graphicsLayer {
+                                alpha = barAlpha.coerceIn(0f, 1f)
+                                scaleX = barScale
+                                scaleY = barScale
+                            }
+                            .then(if (barBlurPx > 0.5f) Modifier.blur(with(density) { barBlurPx.toDp() }, androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded) else Modifier)
+                            // A hiding bar takes no touches.
+                            .then(if (showBar) Modifier else Modifier.pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } }),
+                    ) {
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -287,11 +310,21 @@ fun MainShell() {
                             }
                         }
                     }
+                    }
                 }
             }
         }
     }
 }
+
+/**
+ * A COUI spring (`COUISpringForce` response / bounce) as a Compose spec: stiffness is
+ * (2π / response)², damping ratio is 1 − bounce.
+ */
+private fun <T> couiSpring(response: Float, bounce: Float) = androidx.compose.animation.core.spring<T>(
+    dampingRatio = 1f - bounce,
+    stiffness = (2f * Math.PI.toFloat() / response).let { it * it },
+)
 
 /**
  * List | detail: the current tab's root on the left (cross-fading between tabs, each keeping its
