@@ -701,7 +701,10 @@ fun SessionDetailContent(
                 // are glass, the conversation stays sharp around them (the title bar is the page's
                 // one progressive blur).
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { composerHeightPx = it.height }) {
-                    Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) }, onSlashCommand = onSlashCommand, onSlashPanelHeight = { slashPanelPx = it })
+                    // One blur for the whole composer (field, keys, capsules, notes) instead of one per control.
+                    io.github.tianli0.coui17.patterns.GlassGroup(Modifier.fillMaxWidth()) {
+                        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) }, onSlashCommand = onSlashCommand, onSlashPanelHeight = { slashPanelPx = it })
+                    }
                 }
             }
         }
