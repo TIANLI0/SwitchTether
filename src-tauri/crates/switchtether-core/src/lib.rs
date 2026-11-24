@@ -42,6 +42,7 @@ pub mod server;
 pub mod stepup;
 pub mod terminal;
 pub mod tls;
+pub mod usage_projects;
 pub mod util;
 pub mod wake;
 

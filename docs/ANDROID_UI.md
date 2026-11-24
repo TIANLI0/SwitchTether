@@ -1427,3 +1427,60 @@ disabled without a message, read-only desktop), `GitWriteFlowTest` (JVM, TLS Moc
 refused commit keeps the draft and shows git's message). Desktop: `git::tests::*` (temp repositories, bare remote),
 e2e `git_writes_need_step_up_and_replay_by_command_id`. **Not verified:** on a device or emulator (layout of the action
 rows, the step-up prompt for the new scope, toasts), and against remotes that need credentials.
+
+## 25. Session cost and tokens; usage per project (2026-11-25)
+
+### 25.1 Cost capsule and sheet (`SessionCostSheet.kt`)
+- A capsule in the session page's header row (after the branch / terminal / sub-agent capsules,
+  before the tools capsule) shows the session's cost — or its tokens when no turn reported a cost
+  (observed transcripts, Codex) — with the usage icon. It appears once a loaded turn reported usage.
+  Tapping it opens **费用与用量**, a `PanelSheet` (page colour, page gutters, §22.2).
+- Hero card like the usage page's: total cost (4 decimals) or total tokens, "平均每轮", then turns ·
+  total tokens · cache hit rate.
+- **逐轮趋势**: one bar per turn (`sessionUsageBreakdown`, split at user messages). Metric chips
+  费用 / Token when a cost exists. Cost bars are the turn's growth of the agent's running total (a
+  lower total starts a new run, as in §24.6); token bars stack cache read / cache write / input /
+  output (one accent family for the prompt, the warm tone for the reply) with a legend. Bars grow
+  in with the expand spring (`dampingRatio 0.9, stiffness 420`, the same as `ExpandBody`) when the
+  sheet opens or the metric changes; the picked bar is full colour, the rest dimmed; bars are
+  6–22dp wide, spread over the card when few, scroll sideways (starting at the latest turn) when
+  many. Tapping a bar picks its turn; its detail box (the heatmap detail's look) cross-fades:
+  "第 n 轮", time, the first line of the message that started it, cost · tokens · duration, the mix.
+- **Token 构成**: input / output / cache write / cache read rows with an animated share bar, then
+  cache hit rate and "最近一次请求的上下文 ≈ N tokens" (the last request's prompt tokens; for Codex,
+  whose input includes cached tokens, the input alone).
+- Notes under it when only part of the conversation is loaded. Last, an arrow row
+  "项目「X」的用量" opens the project page (§25.2); the sheet closes first so back returns to the
+  conversation.
+
+### 25.2 Usage per project
+- Usage page: **按项目** after 按模型 (`GET /v1/usage/projects`, PROTOCOL §7.3): projects by cost
+  with an animated share-of-period bar and an arrow, then "其他项目" and "未关联到会话" as quiet rows,
+  and a note that only detail logs keep the session link. Hidden on older desktops (404).
+- `Route.ProjectUsage(project)`: the project's cost, directory, requests / tokens / sessions, and its
+  sessions most expensive first (agent · tokens · last activity, share of the project's cost);
+  range chips 今天 / 7 天 / 30 天 / 全部 (default 30 days); a row opens the session.
+
+### 25.3 Evidence and limits
+`SessionUsageBreakdownTest` (running-total deltas and restarts, turn split, dedupe, transcripts,
+Codex cache), `CostScreenshotTest` (sheet light / dark / tokens-only, bar tap picks a turn, project
+link, capsule opens the sheet, usage-per-project row opens the project, project page row opens the
+session, older desktop), fixture `usage_projects.json` (Rust and Kotlin). Robolectric only; nothing
+seen on a device. The per-project numbers were not checked against a real CC Switch database
+(only the SQL compiles and the join / grouping is unit-tested).
+
+## 26. Tablets and unfolded foldables: list | detail (2026-11-25)
+- From a window width of 840dp (`usesTwoPanes`), with the navigation rail that wide windows already
+  had: the tab's root (Home, Sessions, Workspace, Manage) stays on the left (40 %, 320–420dp), and
+  what it opens shows on the right with the usual push / pop / predictive-back motion. Narrower
+  windows — every phone, a folded foldable, split screen — are unchanged (the same code path as
+  before).
+- With nothing open the right pane shows a hint (`PaneEmptyState`). A row opened from the list
+  replaces the detail (`NavViewModel.openFromList`), so back clears the selection instead of
+  walking through earlier rows; deeper pages (tools, sub-agents) push as before. The open session's
+  row is marked with a soft accent fill (`LocalSelectedSessionId`). The navigation state lives in
+  the ViewModel, so rotating or folding keeps the selected session (folded, it shows full screen).
+- Files: from 720dp of available width (the tablet's detail pane), an open file or media viewer
+  shows beside its folder; back closes the file first.
+- Evidence: `TwoPaneTest` (width gate incl. phone and split-screen widths, list replacement and
+  back, w1280dp screenshots light / dark with the marked row). Not run on a tablet or foldable.
