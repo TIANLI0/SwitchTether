@@ -365,6 +365,7 @@ fun SessionDetailScreen(
         onOpenSession(created.id, created.title)
     }
 
+    val turnEdited = remember(state.log) { io.github.tianli0.switchtether.remote.session.TurnFiles.latestTurn(state.log.events).isNotEmpty() }
     SessionDetailContent(
         state = state,
         initialTitle = initialTitle,
@@ -402,9 +403,10 @@ fun SessionDetailScreen(
         onOpenTools = if (state.claudeTools || state.claudeReadTools) {
             { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId)) }
         } else null,
-        // "本轮改动": the session folder's Git review with the latest turn's files first. Only for a
-        // folder the desktop reported a branch for (a Git repository).
-        onOpenChanges = summary?.cwd?.takeIf { summary.gitBranch != null }?.let { cwd ->
+        // "本轮改动": the session folder's Git review with the latest turn's files first. For a folder
+        // the desktop reported a branch for, or once the latest turn edited files (observed sessions
+        // often carry no branch; the review says so itself when the folder is not a repository).
+        onOpenChanges = summary?.cwd?.takeIf { summary.gitBranch != null || turnEdited }?.let { cwd ->
             {
                 val files = io.github.tianli0.switchtether.remote.session.TurnFiles.latestTurn(state.log.events)
                 onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.GitReview(cwd, files))

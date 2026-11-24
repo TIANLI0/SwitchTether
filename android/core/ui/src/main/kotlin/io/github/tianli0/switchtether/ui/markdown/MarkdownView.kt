@@ -58,7 +58,9 @@ fun MarkdownView(
 @Composable
 private fun inlineColors(): InlineColors {
     val dev = LocalDevColors.current
-    return InlineColors(link = COUITheme.colorScheme.primary, codeText = dev.codeText, codeBackground = dev.codeBackground)
+    // An inline span is a light tint of the text colour, not the inset of a code block: in the dark
+    // theme the block colour is darker than the page and a word in it read as a hole in the line.
+    return InlineColors(link = COUITheme.colorScheme.primary, codeText = dev.codeText, codeBackground = COUITheme.colorScheme.onSurface.copy(alpha = 0.08f))
 }
 
 @Composable
