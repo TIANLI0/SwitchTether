@@ -27,6 +27,7 @@ import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.str
 import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
+import io.github.tianli0.switchtether.remote.protocol.EventKinds
 import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.remote.protocol.SessionSummary
 import java.time.LocalTime
@@ -57,6 +58,9 @@ class Notifier(
     private val sessions = ConcurrentHashMap<String, SessionSummary>()
     private val nm = NotificationManagerCompat.from(context)
 
+    /** Approvals / questions still unanswered, per session: the ATTENTION notification goes with the last one. */
+    private val openRequests = ConcurrentHashMap<String, MutableSet<String>>()
+
     /** `when` of each posted notification id, kept when the same moment is updated in place. */
     private val postedWhen = ConcurrentHashMap<Int, Long>()
 
@@ -79,11 +83,14 @@ class Notifier(
                         sessions[it.id] = it
                         refreshActive()
                         // Nobody is waiting any more: drop the "needs you" notification of that session.
-                        if (it.waitingFor == null && it.status != "waiting") cancel(it.id, NotifySlot.ATTENTION)
+                        if (it.waitingFor == null && it.status != "waiting") {
+                            openRequests.remove(it.id)
+                            cancel(it.id, NotifySlot.ATTENTION)
+                        }
                         engine.onSessionUpsert(it)
                     }
                     "session.event" -> runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()?.let {
-                        if ((it.kind == "approval_request" || it.kind == "question") && it.data.bool("resolved") == true) cancel(it.sessionId, NotifySlot.ATTENTION)
+                        noteRequest(it)
                         engine.onSessionEvent(it, sessions[it.sessionId] ?: lookup(it.sessionId))
                     }
                     "session.removed" -> {
@@ -92,6 +99,7 @@ class Notifier(
                         (data.str("sessionId") ?: data.str("id"))?.let {
                             sessions.remove(it)
                             refreshActive()
+                            openRequests.remove(it)
                             cancel(it, NotifySlot.ATTENTION)
                         }
                         null
@@ -112,16 +120,35 @@ class Notifier(
             // the same notification says so quietly and goes away.
             var wasOnline = false
             var lostShown = false
+            // Whether "lost" really reached the shade (not with the app in front): only then is "reconnected" news.
+            var lostPosted = false
+            var serverId: String? = null
             var pendingLost: kotlinx.coroutines.Job? = null
             var droppedAt = 0L
             conn.state.collect { s ->
+                val desktop = when (s) {
+                    is ConnectionState.Online -> s.desktop
+                    is ConnectionState.Offline -> s.desktop
+                    is ConnectionState.Connecting -> s.desktop
+                    else -> null
+                }
+                if (desktop != null) {
+                    // Another computer: the previous one's sessions are not its (the active count keeps the CPU awake).
+                    if (serverId != null && serverId != desktop.serverId) {
+                        sessions.clear()
+                        openRequests.clear()
+                        refreshActive()
+                    }
+                    serverId = desktop.serverId
+                }
                 when (s) {
                     is ConnectionState.Online -> {
                         pendingLost?.cancel()
                         pendingLost = null
                         if (lostShown) {
                             lostShown = false
-                            val replaced = engine.connection(false, s.desktop.name)?.let { post(it.copy(silent = true), timeoutMs = RECONNECTED_VISIBLE_MS) } ?: false
+                            val replaced = lostPosted && engine.connection(false, s.desktop.name)?.let { post(it.copy(silent = true), timeoutMs = RECONNECTED_VISIBLE_MS) } == true
+                            lostPosted = false
                             // Nothing replaced "connection lost" (app in the foreground, type switched
                             // off, same-minute repeat): it must not stay up while connected.
                             if (!replaced) runCatching { nm.cancel(CONNECTION_NOTIFICATION_ID) }
@@ -134,7 +161,7 @@ class Notifier(
                         pendingLost = scope.launch {
                             delay(CONNECTION_LOST_GRACE_MS)
                             // Dated when the connection dropped, not 30 s later.
-                            engine.connection(true, name)?.let { post(it.copy(atMs = droppedAt)); lostShown = true }
+                            engine.connection(true, name)?.let { lostPosted = post(it.copy(atMs = droppedAt), timeoutMs = null); lostShown = true }
                             pendingLost = null
                         }
                     }
@@ -162,6 +189,29 @@ class Notifier(
         type == NotifyType.CONNECTION -> CONNECTION_NOTIFICATION_ID
         sessionId != null && slot != NotifySlot.OTHER -> "$sessionId:$slot".hashCode()
         else -> key.hashCode()
+    }
+
+    /**
+     * A request opened or resolved (in place with `resolved=true`, or by a separate `approval_resolved`):
+     * the "needs you" notification is withdrawn only when no other request of the session is still open.
+     */
+    private fun noteRequest(e: AgentEvent) {
+        val resolved = when (e.kind) {
+            EventKinds.APPROVAL_RESOLVED -> true
+            EventKinds.APPROVAL_REQUEST, EventKinds.QUESTION -> e.data.bool("resolved") == true
+            else -> return
+        }
+        val requestId = e.data.str("requestId") ?: e.id
+        if (!resolved) {
+            openRequests.getOrPut(e.sessionId) { ConcurrentHashMap.newKeySet() }.add(requestId)
+            return
+        }
+        val open = openRequests[e.sessionId]
+        open?.remove(requestId)
+        if (open.isNullOrEmpty()) {
+            openRequests.remove(e.sessionId)
+            cancel(e.sessionId, NotifySlot.ATTENTION)
+        }
     }
 
     private fun cancel(sessionId: String, slot: NotifySlot) {

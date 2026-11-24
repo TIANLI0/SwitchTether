@@ -176,11 +176,7 @@ class LiveUpdates(
                         ?.let { onStreamUpsert(it) }
                     "session.event" -> runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()
                         ?.let { onStreamEvent(it) }
-                    "session.removed" -> (data["sessionId"] ?: data["id"])?.toString()?.trim('"')?.let {
-                        // The process exited; the same conversation resumed later is a new run to follow.
-                        runState[it] = AutoFollow.Run.ENDED
-                        ended(it)
-                    }
+                    "session.removed" -> (data["sessionId"] ?: data["id"])?.toString()?.trim('"')?.let { onStreamRemoved(it) }
                 }
             }
         }
@@ -221,6 +217,11 @@ class LiveUpdates(
             pinnedAt.clear()
             liveSeen.clear()
             runState.clear()
+            bgClearedAt.clear()
+            announcedTurn.clear()
+            lastPost.clear()
+            streamMark.clear()
+            resolvedRequests.clear()
         }
         currentServerId = serverId
         _pins.value = prefs.getStringSet(key(serverId), emptySet()).orEmpty().toSet()
@@ -239,6 +240,20 @@ class LiveUpdates(
     internal fun onStreamUpsert(s: SessionSummary): Unit = synchronized(lock) {
         streamMark[s.id] = streamTick.incrementAndGet()
         onUpsert(s, fromRest = false)
+    }
+
+    /** `session.removed` from the event stream: the process exited. */
+    internal fun onStreamRemoved(sessionId: String): Unit = synchronized(lock) {
+        // The same conversation resumed later is a new run to follow.
+        runState[sessionId] = AutoFollow.Run.ENDED
+        ended(sessionId)
+        // Nothing streams for it any more.
+        streamMark.remove(sessionId)
+    }
+
+    /** Session ids some per-session bookkeeping is still held for (tests: nothing may outlive its session). */
+    internal fun trackedSessions(): Set<String> = synchronized(lock) {
+        announcedTurn.keys + lastPost.keys + streamMark.keys + bgClearedAt.keys
     }
 
     /** `session.event` from the event stream. */
@@ -415,6 +430,11 @@ class LiveUpdates(
             persistSet(unpinnedKey(currentServerId), unpinned)
         }
         setPins(_pins.value - sessionId)
+        // No longer "restored, waiting for its name": pinned again, it is a new pin that shows at once.
+        restoredPins.remove(sessionId)
+        // Only meaningful for the state just dropped (a later pin starts a new turn and posts at once).
+        announcedTurn.remove(sessionId)
+        lastPost.remove(sessionId)
         pending.remove(sessionId)?.cancel()
         pendingDue.remove(sessionId)
         endJobs.remove(sessionId)?.cancel()
@@ -599,12 +619,14 @@ class LiveUpdates(
         return s.copy(title = title, project = project ?: s.project)
     }
 
+    /**
+     * Called under [lock], and stored before it returns (`apply()` updates the in-memory prefs at
+     * once and queues the disk writes in order): a write launched per change could land out of order
+     * and restore an older set after a restart. Keyed like the other sets of this computer.
+     */
     private fun setPins(p: Set<String>) {
         _pins.value = p
-        scope.launch {
-            val serverId = pairingStore.current()?.serverId ?: ""
-            prefs.edit().putStringSet(key(serverId), p).apply()
-        }
+        prefs.edit().putStringSet(key(currentServerId), p).apply()
     }
 
     private fun persistSet(prefKey: String, set: Set<String>) {
