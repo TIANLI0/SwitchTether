@@ -4361,7 +4361,8 @@ mod tests {
             "commands": [
                 {"name": "compact", "description": "Clear conversation history but keep a summary in context",
                  "argumentHint": "<optional custom summarization instructions>"},
-                {"name": "/review", "description": "Review a pull request", "argumentHint": ""},
+                {"name": "/review", "description": "Review a pull request", "argumentHint": "",
+                 "aliases": ["rv"], "builtin": false, "plugin": "team-tools"},
                 {"name": "compact", "description": "duplicate"},
                 "my-plugin:deploy"
             ],
@@ -4380,8 +4381,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r, fixture);
-        // Only the three strings per command leave the desktop.
+        // Only name, description, argumentHint and aliases leave the desktop.
         assert!(!r.to_string().contains("example.com"));
+        assert!(!r.to_string().contains("team-tools"));
         // After the process exited there is no list any more.
         m.on_remote_frame(json!({ "t": "exit" })).await;
         let r = hub.claude_tool("cc", "commands", &json!({})).await.unwrap();

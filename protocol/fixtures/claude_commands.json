@@ -5,7 +5,7 @@
       "description": "Clear conversation history but keep a summary in context",
       "argumentHint": "<optional custom summarization instructions>"
     },
-    { "name": "review", "description": "Review a pull request", "argumentHint": "" },
+    { "name": "review", "description": "Review a pull request", "argumentHint": "", "aliases": ["rv"] },
     { "name": "my-plugin:deploy", "description": "", "argumentHint": "" }
   ],
   "source": "agent"

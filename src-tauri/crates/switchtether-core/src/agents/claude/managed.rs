@@ -119,6 +119,7 @@ const COMMAND_DESCRIPTION_MAX: usize = 300;
 const COMMAND_HINT_MAX: usize = 120;
 /// More than any real installation offers; bounds what a phone has to hold.
 const COMMANDS_MAX: usize = 500;
+const COMMAND_ALIASES_MAX: usize = 5;
 
 fn clip(text: &str, max: usize) -> String {
     text.trim().chars().take(max).collect()
@@ -131,9 +132,12 @@ fn command_name(raw: &str) -> Option<String> {
     (!name.is_empty() && !name.chars().any(char::is_control)).then_some(name)
 }
 
-/// Claude Code's slash command list as the phone gets it: `{ name, description, argumentHint }`
-/// (strings only, clipped, texts redacted), first occurrence of a name wins, order kept. Entries
-/// may be objects (`{name, description, argumentHint}`, the initialize response) or bare names.
+/// Claude Code's slash command list as the phone gets it: `{ name, description, argumentHint,
+/// aliases? }` (strings only, clipped, texts redacted), first occurrence of a name wins, order
+/// kept. Entries may be objects (the initialize response: `{name, description, argumentHint,
+/// aliases?, builtin?, plugin?}`, as the VS Code extension 2.1.331 validates it) or bare names.
+/// `aliases` (other names of the command, at most 5) is only present when there are any;
+/// `builtin` and `plugin` are not passed on.
 pub fn normalize_commands(raw: &Value) -> Vec<Value> {
     let mut out = Vec::new();
     merge_commands(&mut out, raw);
@@ -161,11 +165,31 @@ pub fn merge_commands(list: &mut Vec<Value>, raw: &Value) {
         if list.iter().any(|k| k["name"] == name.as_str()) {
             continue;
         }
-        list.push(json!({
+        let mut aliases: Vec<String> = Vec::new();
+        for a in c
+            .get("aliases")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if aliases.len() >= COMMAND_ALIASES_MAX {
+                break;
+            }
+            if let Some(a) = a.as_str().and_then(command_name) {
+                if a != name && !aliases.contains(&a) {
+                    aliases.push(a);
+                }
+            }
+        }
+        let mut entry = json!({
             "name": name,
             "description": text(c, &["description"], COMMAND_DESCRIPTION_MAX),
             "argumentHint": text(c, &["argumentHint", "argument_hint"], COMMAND_HINT_MAX),
-        }));
+        });
+        if !aliases.is_empty() {
+            entry["aliases"] = json!(aliases);
+        }
+        list.push(entry);
     }
 }
 
@@ -1149,11 +1173,13 @@ mod tests {
     fn commands_are_normalised_deduplicated_and_clipped() {
         let long = "x".repeat(1000);
         let list = normalize_commands(&json!([
-            {"name": "/compact", "description": " Summarise ", "argumentHint": "<instructions>"},
+            {"name": "/compact", "description": " Summarise ", "argumentHint": "<instructions>",
+             "aliases": [], "builtin": true},
             {"name": "compact", "description": "again"},
             "/clear",
             "clear",
-            {"name": "review", "description": long, "argumentHint": long, "source": "plugin", "path": "C:/secret"},
+            {"name": "review", "description": long, "argumentHint": long, "plugin": "my-plugin", "path": "C:/secret",
+             "aliases": ["/rv", "rv", "review", long, 7, "a\nb", "", "r3", "r4", "r5", "r6"]},
             {"name": long},
             {"name": "  "},
             {"name": "two\nlines"},
@@ -1172,8 +1198,20 @@ mod tests {
         );
         assert_eq!(list[2]["description"].as_str().unwrap().len(), 300);
         assert_eq!(list[2]["argumentHint"].as_str().unwrap().len(), 120);
-        // Only the three strings, whatever else the agent says about a command.
-        assert!(list.iter().all(|c| c.as_object().unwrap().len() == 3));
+        // Aliases: no leading "/", clipped, unique, not the name itself, at most five; the key
+        // is absent when there are none.
+        assert_eq!(
+            list[2]["aliases"],
+            json!(["rv", &long[..80], "r3", "r4", "r5"])
+        );
+        assert!(list[0].get("aliases").is_none());
+        // Nothing else the agent says about a command is passed on.
+        assert_eq!(list[2].as_object().unwrap().len(), 4);
+        assert!(list
+            .iter()
+            .enumerate()
+            .all(|(i, c)| i == 2 || c.as_object().unwrap().len() == 3));
+        assert!(!json!(list).to_string().contains("my-plugin"));
         // Absent or malformed lists are empty, not errors.
         assert!(normalize_commands(&Value::Null).is_empty());
         assert!(normalize_commands(&json!({"commands": "x"})).is_empty());

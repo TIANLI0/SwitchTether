@@ -422,7 +422,7 @@ this change used `managed:<random>` ids that disappeared with the process.
     deletions}` (files only; **switched off**: `REWIND_FILES_ENABLED` is `false`, managed processes run without file
     checkpoints and the action answers `422 capability_unavailable` "Rewinding files is not enabled."); `export` → `{text, filename}`;
     `commands` (body `{}`) → `{ "commands": [ { "name": "compact", "description": "…", "argumentHint": "<optional
-    custom summarization instructions>" } ], "source": "agent" }` — see **Slash commands** below. Other
+    custom summarization instructions>", "aliases"?: ["…"] } ], "source": "agent" }` — see **Slash commands** below. Other
     sessions → `422 capability_unavailable`, except that a Claude Code session started on the computer
     (observe-only, detail `claudeReadTools: true`) gets the three tools its files can answer, read-only: `task_output`
     (only the file Claude Code named `<taskId>.output` for that task, kept as `outputFile` on the task's row), `plan`
@@ -432,9 +432,10 @@ this change used `managed:<random>` ids that disappeared with the process.
     slash commands the session's own Claude Code process reported — built-in ones, custom commands from
     `.claude/commands`, skills and plugin commands — taken from its `initialize` control response (`commands`) and, for
     names it did not list, from `slash_commands` of the stream's `system`/`init` message. No control request is sent.
-    Each entry is exactly three strings: `name` (without the leading `/`, ≤ 80 characters), `description` (≤ 300, `""`
-    when unknown) and `argumentHint` (≤ 120, `""` when none); unique by `name`, in the agent's order; texts redacted,
-    nothing else about a command (source, path, plugin) is sent. `source` is `agent` when the list is not empty.
+    Each entry has three strings: `name` (without the leading `/`, ≤ 80 characters), `description` (≤ 300, `""`
+    when unknown) and `argumentHint` (≤ 120, `""` when none), plus an optional `aliases` (other names of the same
+    command, same rules as `name`, at most 5; the key is absent when there are none). Unique by `name`, in the
+    agent's order; texts redacted, nothing else about a command (`builtin`, `plugin`, paths) is sent. `source` is `agent` when the list is not empty.
     **Fallback rule:** when the process is not running (ended, or a conversation a message would resume) or never
     reported a list, the answer is `200 { "commands": [], "source": "none" }` and the client offers its built-in list.
     A session attached through the takeover hook has a list only if SwitchTether saw the IDE's `initialize` response
