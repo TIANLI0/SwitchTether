@@ -32,7 +32,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
-/** UnifiedPush connector (spec AND_3) and the desktop hand-over of push wake (ANDROID_UI.md §25.1). */
+/** UnifiedPush connector (spec AND_3) and the desktop hand-over of push wake (ANDROID_UI.md §28.1). */
 @RunWith(AndroidJUnit4::class)
 class PushWakeTest {
     private val context: Context = ApplicationProvider.getApplicationContext()

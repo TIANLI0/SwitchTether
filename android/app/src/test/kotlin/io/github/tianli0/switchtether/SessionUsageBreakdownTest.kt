@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** Per-turn usage for the cost sheet (docs/ANDROID_UI.md §25.1). */
+/** Per-turn usage for the cost sheet (docs/ANDROID_UI.md §26.1). */
 class SessionUsageBreakdownTest {
     @Test
     fun costedTurnsTakeTheGrowthOfTheRunningTotal() {

@@ -545,7 +545,7 @@ fun SessionDetailContent(
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
-    // Cost and tokens of the loaded turns (§25); the capsule only shows when a turn reported usage.
+    // Cost and tokens of the loaded turns (§26); the capsule only shows when a turn reported usage.
     var showCost by rememberSaveable { mutableStateOf(false) }
     val usageBreakdown = remember(state.log, summary?.agent) { sessionUsageBreakdown(state.log.events, summary?.agent) }
     // Scans of the whole log, redone only when the log changes (not on every recomposition).

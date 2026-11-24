@@ -43,7 +43,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Tablet / unfolded-foldable list | detail layout (docs/ANDROID_UI.md §26). Synthetic data. */
+/** Tablet / unfolded-foldable list | detail layout (docs/ANDROID_UI.md §27). Synthetic data. */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [32], qualifiers = "zh-rCN-w1280dp-h800dp-xhdpi")

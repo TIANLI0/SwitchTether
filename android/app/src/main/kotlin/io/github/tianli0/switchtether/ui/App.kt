@@ -215,7 +215,7 @@ fun MainShell() {
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxSize()) {
-                    // Tablets / unfolded foldables: the tab's list stays beside what it opened (§26).
+                    // Tablets / unfolded foldables: the tab's list stays beside what it opened (§27).
                     if (twoPanes) TwoPaneHost(nav)
                     else AnimatedNavHost(nav) { Destination(nav, it) }
                 }

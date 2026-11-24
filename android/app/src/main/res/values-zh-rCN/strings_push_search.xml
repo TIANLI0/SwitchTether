@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 推送唤醒（UnifiedPush）与对话内容搜索。docs/ANDROID_UI.md §25。 -->
+<!-- 推送唤醒（UnifiedPush）与对话内容搜索。docs/ANDROID_UI.md §28。 -->
 <resources>
     <string name="push_section">推送唤醒</string>
     <string name="push_switch">推送唤醒（UnifiedPush）</string>

@@ -63,7 +63,7 @@ import io.github.tianli0.switchtether.ui.nav.Route
 
 /**
  * "按项目" on the usage page: projects by cost, each a row with its share of the period's cost
- * that opens the project's page; logs without a session are one quiet row at the end (§25.3).
+ * that opens the project's page; logs without a session are one quiet row at the end (§26.3).
  */
 fun LazyListScope.projectUsageSection(projects: Loadable<ProjectUsageView>?, onRetry: () -> Unit, onOpenProject: (String) -> Unit) {
     projects ?: return // older desktop without the API

@@ -84,7 +84,7 @@ fun costChipLabel(b: SessionUsageBreakdown): String =
  * "费用与用量": the session's cost, a per-turn bar chart (cost, or tokens stacked as cache read /
  * cache write / input / output), the selected turn's numbers, the token mix with the cache hit rate
  * and the last request's context, and a link to the project's usage. Opened from the cost capsule
- * on the session page (docs/ANDROID_UI.md §25).
+ * on the session page (docs/ANDROID_UI.md §26).
  */
 @Composable
 fun SessionCostSheet(

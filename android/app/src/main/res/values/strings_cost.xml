@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Session cost sheet (docs/ANDROID_UI.md §25) -->
+    <!-- Session cost sheet (docs/ANDROID_UI.md §26) -->
     <string name="cost_sheet_title">Cost and tokens</string>
     <string name="cost_chip_a11y">Cost and tokens of this session: %1$s</string>
     <string name="cost_total">Cost of this session</string>

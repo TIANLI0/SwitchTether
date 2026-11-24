@@ -47,7 +47,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * The session cost sheet, the cost capsule and usage per project (docs/ANDROID_UI.md §25), rendered
+ * The session cost sheet, the cost capsule and usage per project (docs/ANDROID_UI.md §26), rendered
  * into build/outputs/screenshots/cost-*.png with their interactions. Synthetic data only.
  */
 @RunWith(AndroidJUnit4::class)

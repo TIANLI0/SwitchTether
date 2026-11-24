@@ -65,7 +65,7 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     /** Live changes that arrive while [reload] waits for the list (re-applied over the answer). */
     private var changedDuringReload: MutableMap<String, SessionSummary?>? = null
 
-    /** "Search conversation content": full-text search on the computer (ANDROID_UI.md §25.2). */
+    /** "Search conversation content": full-text search on the computer (ANDROID_UI.md §28.2). */
     val content = ContentSearch(viewModelScope, { q, a ->
         (conn.apiOrNull() ?: throw io.github.tianli0.switchtether.connection.NotConnectedException()).searchSessions(q, a)
     })

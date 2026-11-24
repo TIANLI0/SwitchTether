@@ -141,7 +141,7 @@ fun SessionsContent(
                     modifier = Modifier.padding(bottom = 4.dp).testTag("project-filter"),
                 )
             }
-            // While searching: titles (the list below) or what was said in the sessions (§25.2).
+            // While searching: titles (the list below) or what was said in the sessions (§28.2).
             val searching = searchExpanded || state.query.isNotEmpty()
             io.github.tianli0.switchtether.ui.common.NoticeVisibility(searching) {
                 io.github.suqi8.coui.kmp.basic.ChipTabGroup(

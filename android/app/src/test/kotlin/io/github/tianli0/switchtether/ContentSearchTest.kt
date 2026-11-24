@@ -21,7 +21,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** "Search conversation content" on the Sessions page (ANDROID_UI.md §25.2). */
+/** "Search conversation content" on the Sessions page (ANDROID_UI.md §28.2). */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContentSearchTest {
     private fun hit(id: String) = SessionSearchResult(sessionId = id, agent = "claude_code", snippet = "… fix the Login page …", matchCount = 1)

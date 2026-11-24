@@ -127,7 +127,7 @@ class AppContainer(private val context: Context) {
         appScope.launch { pairingStore.desktop.collect { pairedServerIdCache = it?.serverId } }
     }
 
-    /** Push wake through UnifiedPush (opt-in; docs/PROTOCOL.md §7.12, ANDROID_UI.md §25). */
+    /** Push wake through UnifiedPush (opt-in; docs/PROTOCOL.md §7.12, ANDROID_UI.md §28). */
     val pushWake: io.github.tianli0.switchtether.push.PushWake by lazy {
         io.github.tianli0.switchtether.push.PushWake(
             context = context,

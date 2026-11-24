@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** What the "search conversation content" part of the Sessions page shows. ANDROID_UI.md §25.2. */
+/** What the "search conversation content" part of the Sessions page shows. ANDROID_UI.md §28.2. */
 data class ContentSearchUi(
     val enabled: Boolean = false,
     val query: String = "",

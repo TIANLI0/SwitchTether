@@ -474,7 +474,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
 
 private fun hm(min: Int) = "%02d:%02d".format(min / 60, min % 60)
 
-/** Push wake (UnifiedPush) switch, distributor choice, status and a test button. ANDROID_UI.md §25. */
+/** Push wake (UnifiedPush) switch, distributor choice, status and a test button. ANDROID_UI.md §28. */
 @Composable
 private fun PushWakeSettings() {
     val container = appContainer()

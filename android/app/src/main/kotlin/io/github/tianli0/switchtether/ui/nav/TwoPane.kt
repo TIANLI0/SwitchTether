@@ -27,7 +27,7 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 /**
- * Tablets and unfolded foldables (docs/ANDROID_UI.md §26): from this window width on, a tab's root
+ * Tablets and unfolded foldables (docs/ANDROID_UI.md §27): from this window width on, a tab's root
  * list stays on the left and what it opens shows on the right. Narrower windows (every phone, a
  * folded foldable, split screen) keep the one-page navigation unchanged.
  */

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Push wake (UnifiedPush) and session content search. docs/ANDROID_UI.md §25. -->
+<!-- Push wake (UnifiedPush) and session content search. docs/ANDROID_UI.md §28. -->
 <resources>
     <string name="push_section">Push wake</string>
     <string name="push_switch">Push wake (UnifiedPush)</string>

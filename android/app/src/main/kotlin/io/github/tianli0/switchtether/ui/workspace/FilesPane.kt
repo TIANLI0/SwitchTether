@@ -119,7 +119,7 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
         file != null -> { { FileScreen(state, vm) } }
         else -> null
     }
-    // Wide enough (a tablet's detail pane, §26): the folder stays on the left while a file is open.
+    // Wide enough (a tablet's detail pane, §27): the folder stays on the left while a file is open.
     // The opened file's back handler is composed after the browser's, so back closes the file first.
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         when {
@@ -588,5 +588,5 @@ private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
 /** Outcome messages that only report success: shown as a toast instead of a dialog. */
 private val QUIET_MESSAGES = setOf(R.string.files_msg_saved, R.string.files_msg_saved_as, R.string.files_msg_ok, R.string.files_msg_cancelled)
 
-/** Width from which an open file shows beside its folder instead of replacing it (§26). */
+/** Width from which an open file shows beside its folder instead of replacing it (§27). */
 private val FILES_SPLIT_MIN_WIDTH = 720.dp

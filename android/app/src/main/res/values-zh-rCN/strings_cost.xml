@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 会话费用面板（docs/ANDROID_UI.md §25） -->
+    <!-- 会话费用面板（docs/ANDROID_UI.md §26） -->
     <string name="cost_sheet_title">费用与用量</string>
     <string name="cost_chip_a11y">本会话费用与用量：%1$s</string>
     <string name="cost_total">本会话费用</string>
