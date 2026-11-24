@@ -100,6 +100,11 @@ pub trait ManagedSession: Send + Sync {
             "This session does not offer Claude Code session tools.",
         ))
     }
+    /// Slash commands the running Claude Code process reported (`{name, description,
+    /// argumentHint}`), empty when unknown.
+    fn claude_commands(&self) -> Vec<Value> {
+        Vec::new()
+    }
     /// Current permission mode (`default`, `acceptEdits`, `plan`, …) when known.
     fn permission_mode(&self) -> Option<String> {
         None
@@ -203,6 +208,9 @@ impl ManagedSession for super::claude::managed::ManagedClaude {
         timeout: std::time::Duration,
     ) -> ApiResult<Value> {
         super::claude::managed::ManagedClaude::control(self, request, timeout).await
+    }
+    fn claude_commands(&self) -> Vec<Value> {
+        super::claude::managed::ManagedClaude::commands(self)
     }
     fn permission_mode(&self) -> Option<String> {
         super::claude::managed::ManagedClaude::permission_mode(self)

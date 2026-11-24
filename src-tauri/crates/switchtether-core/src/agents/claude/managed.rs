@@ -109,6 +109,64 @@ struct State {
     effort: Option<String>,
     /// `models` from the initialize response (what this Claude Code offers), if any.
     models: Value,
+    /// Slash commands this Claude Code session offers (`commands` of the initialize response,
+    /// plus names from `system`/`init`), normalised by [`normalize_commands`].
+    commands: Vec<Value>,
+}
+
+const COMMAND_NAME_MAX: usize = 80;
+const COMMAND_DESCRIPTION_MAX: usize = 300;
+const COMMAND_HINT_MAX: usize = 120;
+/// More than any real installation offers; bounds what a phone has to hold.
+const COMMANDS_MAX: usize = 500;
+
+fn clip(text: &str, max: usize) -> String {
+    text.trim().chars().take(max).collect()
+}
+
+/// A slash command's name without the leading "/"; `None` for anything that is not one line of
+/// printable text.
+fn command_name(raw: &str) -> Option<String> {
+    let name = clip(raw.trim().trim_start_matches('/'), COMMAND_NAME_MAX);
+    (!name.is_empty() && !name.chars().any(char::is_control)).then_some(name)
+}
+
+/// Claude Code's slash command list as the phone gets it: `{ name, description, argumentHint }`
+/// (strings only, clipped, texts redacted), first occurrence of a name wins, order kept. Entries
+/// may be objects (`{name, description, argumentHint}`, the initialize response) or bare names.
+pub fn normalize_commands(raw: &Value) -> Vec<Value> {
+    let mut out = Vec::new();
+    merge_commands(&mut out, raw);
+    out
+}
+
+/// Adds the commands of `raw` whose names `list` does not hold yet.
+pub fn merge_commands(list: &mut Vec<Value>, raw: &Value) {
+    let text = |c: &Value, keys: &[&str], max: usize| {
+        keys.iter()
+            .find_map(|k| c.get(*k).and_then(Value::as_str))
+            .map(|t| clip(&crate::redact::redact_text(t), max))
+            .unwrap_or_default()
+    };
+    for c in raw.as_array().into_iter().flatten() {
+        if list.len() >= COMMANDS_MAX {
+            break;
+        }
+        let name = match c {
+            Value::String(n) => command_name(n),
+            Value::Object(_) => c.get("name").and_then(Value::as_str).and_then(command_name),
+            _ => None,
+        };
+        let Some(name) = name else { continue };
+        if list.iter().any(|k| k["name"] == name.as_str()) {
+            continue;
+        }
+        list.push(json!({
+            "name": name,
+            "description": text(c, &["description"], COMMAND_DESCRIPTION_MAX),
+            "argumentHint": text(c, &["argumentHint", "argument_hint"], COMMAND_HINT_MAX),
+        }));
+    }
 }
 
 impl ManagedClaude {
@@ -143,6 +201,15 @@ impl ManagedClaude {
     }
     pub fn models(&self) -> Value {
         self.state.lock().models.clone()
+    }
+    /// Slash commands the running process reported; empty when it never did or has exited.
+    pub fn commands(&self) -> Vec<Value> {
+        let st = self.state.lock();
+        if st.liveness == Liveness::Live {
+            st.commands.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Switch the model of the running session the way the official SDK does
@@ -287,6 +354,7 @@ impl ManagedClaude {
                 model_override: None,
                 effort,
                 models: Value::Null,
+                commands: Vec::new(),
             }),
             next_req: std::sync::atomic::AtomicU64::new(1),
             stderr_tail: Mutex::new(Vec::new()),
@@ -388,6 +456,7 @@ impl ManagedClaude {
                 model_override: None,
                 effort: None,
                 models: Value::Null,
+                commands: Vec::new(),
             }),
             next_req: std::sync::atomic::AtomicU64::new(1),
             stderr_tail: Mutex::new(Vec::new()),
@@ -809,6 +878,16 @@ impl ManagedClaude {
         match v.get("type").and_then(|t| t.as_str()) {
             Some("control_response") => {
                 let resp = v.get("response").cloned().unwrap_or(Value::Null);
+                // The initialize response lists the session's slash commands (so does a plugin
+                // reload). In attached mode the IDE sent the request: its answer passes here too.
+                if let Some(c) = resp.pointer("/response/commands").filter(|c| c.is_array()) {
+                    let mut list = normalize_commands(c);
+                    let mut st = self.state.lock();
+                    // Names only known from `system`/`init` stay.
+                    let known = std::mem::take(&mut st.commands);
+                    merge_commands(&mut list, &Value::Array(known));
+                    st.commands = list;
+                }
                 if let Some(rid) = resp.get("request_id").and_then(|r| r.as_str()) {
                     if let Some(tx) = self.replies.lock().remove(rid) {
                         let _ = tx.send(resp);
@@ -845,6 +924,14 @@ impl ManagedClaude {
                     .filter(|m| ty == "system" && !m.is_empty())
                 {
                     *self.permission_mode.lock() = Some(mode.to_string());
+                }
+                // `system`/`init` names the slash commands (names only): add the unknown ones.
+                if let Some(names) = v.get("slash_commands").filter(|n| {
+                    ty == "system"
+                        && n.is_array()
+                        && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
+                }) {
+                    merge_commands(&mut self.state.lock().commands, names);
                 }
                 if let Some(sid) = v
                     .get("session_id")
@@ -1031,5 +1118,119 @@ impl ManagedClaude {
                 None => "process exited".into(),
             }),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attached() -> Arc<ManagedClaude> {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        ManagedClaude::attached(
+            "cc".into(),
+            PathBuf::from("."),
+            Arc::new(Mutex::new(SessionLog::new("cc", None))),
+            tx,
+            "vscode",
+        )
+    }
+
+    async fn out(m: &ManagedClaude, line: Value) {
+        m.on_remote_frame(json!({ "t": "out", "line": line.to_string() }))
+            .await;
+    }
+
+    fn names(list: &[Value]) -> Vec<&str> {
+        list.iter().map(|c| c["name"].as_str().unwrap()).collect()
+    }
+
+    #[test]
+    fn commands_are_normalised_deduplicated_and_clipped() {
+        let long = "x".repeat(1000);
+        let list = normalize_commands(&json!([
+            {"name": "/compact", "description": " Summarise ", "argumentHint": "<instructions>"},
+            {"name": "compact", "description": "again"},
+            "/clear",
+            "clear",
+            {"name": "review", "description": long, "argumentHint": long, "source": "plugin", "path": "C:/secret"},
+            {"name": long},
+            {"name": "  "},
+            {"name": "two\nlines"},
+            {"description": "no name"},
+            42,
+            null
+        ]));
+        assert_eq!(names(&list), ["compact", "clear", "review", &long[..80]]);
+        assert_eq!(
+            list[0],
+            json!({"name": "compact", "description": "Summarise", "argumentHint": "<instructions>"})
+        );
+        assert_eq!(
+            list[1],
+            json!({"name": "clear", "description": "", "argumentHint": ""})
+        );
+        assert_eq!(list[2]["description"].as_str().unwrap().len(), 300);
+        assert_eq!(list[2]["argumentHint"].as_str().unwrap().len(), 120);
+        // Only the three strings, whatever else the agent says about a command.
+        assert!(list.iter().all(|c| c.as_object().unwrap().len() == 3));
+        // Absent or malformed lists are empty, not errors.
+        assert!(normalize_commands(&Value::Null).is_empty());
+        assert!(normalize_commands(&json!({"commands": "x"})).is_empty());
+    }
+
+    #[tokio::test]
+    async fn initialize_response_and_init_message_fill_the_command_list() {
+        let m = attached();
+        assert!(m.commands().is_empty());
+        // An initialize response without `commands` leaves the list empty.
+        out(
+            &m,
+            json!({"type": "control_response", "response": {"subtype": "success", "request_id": "x1",
+                "response": {"models": [{"value": "default"}]}}}),
+        )
+        .await;
+        assert!(m.commands().is_empty());
+        // `system`/`init` only has names.
+        out(
+            &m,
+            json!({"type": "system", "subtype": "init", "session_id": "s1",
+                "slash_commands": ["compact", "/my-skill"]}),
+        )
+        .await;
+        assert_eq!(names(&m.commands()), ["compact", "my-skill"]);
+        assert_eq!(m.commands()[0]["description"], "");
+        // The initialize response has the details; names it does not list are kept after it.
+        out(
+            &m,
+            json!({"type": "control_response", "response": {"subtype": "success", "request_id": "x2",
+                "response": {"commands": [
+                    {"name": "clear", "description": "Start over", "argumentHint": ""},
+                    {"name": "compact", "description": "Summarise", "argumentHint": "<instructions>"}
+                ]}}}),
+        )
+        .await;
+        let list = m.commands();
+        assert_eq!(names(&list), ["clear", "compact", "my-skill"]);
+        assert_eq!(list[1]["description"], "Summarise");
+        // A later `init` adds only unknown names and keeps the descriptions.
+        out(
+            &m,
+            json!({"type": "system", "subtype": "init", "slash_commands": ["compact", "review"]}),
+        )
+        .await;
+        let list = m.commands();
+        assert_eq!(names(&list), ["clear", "compact", "my-skill", "review"]);
+        assert_eq!(list[1]["argumentHint"], "<instructions>");
+        // Other `system` messages never touch the list.
+        out(
+            &m,
+            json!({"type": "system", "subtype": "status", "slash_commands": ["nope"]}),
+        )
+        .await;
+        assert_eq!(m.commands().len(), 4);
+        // Gone with the process.
+        m.on_remote_frame(json!({ "t": "exit" })).await;
+        assert!(m.commands().is_empty());
     }
 }

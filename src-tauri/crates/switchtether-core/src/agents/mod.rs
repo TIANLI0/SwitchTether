@@ -1327,6 +1327,9 @@ impl AgentHub {
                 .unwrap_or(Value::Null)
         };
         match action {
+            // What the process itself reported (initialize response, `system`/`init`): nothing
+            // is sent. A command is run by sending "/name args" as an ordinary message.
+            "commands" => Ok(command_catalog(m.claude_commands())),
             "permission_mode" => {
                 let mode = arg("mode")?;
                 if !matches!(
@@ -1545,6 +1548,11 @@ impl AgentHub {
                 "This Claude Code session was started on the computer and can only be watched. Turn on the takeover hook in Settings → Remote for new VS Code panels, or use \"Continue on phone\".",
             )
         };
+        // Not running, but a message from the phone would resume it under SwitchTether: no list
+        // yet, the phone falls back to its built-in one.
+        if action == "commands" && s.agent == "claude_code" && self.resumable(id).await.is_some() {
+            return Ok(command_catalog(Vec::new()));
+        }
         // Not running: the permission mode is kept for the resume a message starts.
         if action == "permission_mode" && self.resumable(id).await.is_some() {
             let mode = p
@@ -2895,6 +2903,14 @@ fn model_list(reported: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// Answer of the `commands` session tool: the slash commands a Claude Code process reported
+/// (`source: "agent"`), or an empty list with `source: "none"` when there is no such list (the
+/// phone then offers its built-in commands).
+pub fn command_catalog(commands: Vec<Value>) -> Value {
+    let source = if commands.is_empty() { "none" } else { "agent" };
+    json!({ "commands": commands, "source": source })
+}
+
 pub fn model_catalog(agent: &str, reported: &Value) -> Value {
     let mut models: Vec<Value> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -3685,6 +3701,7 @@ mod tests {
             "cancel_message",
             "rename",
             "context_usage",
+            "commands",
         ] {
             let e = hub
                 .claude_tool("claude:observed-1", action, &json!({ "mode": "plan" }))
@@ -4315,6 +4332,83 @@ mod tests {
         let d = hub.detail("claude:old-2").await.unwrap();
         assert_eq!(d["nextStart"]["effort"], Value::Null);
         assert_eq!(d["nextStart"]["model"], "fable");
+    }
+
+    /// The `commands` session tool answers what the process reported, for a session the phone
+    /// controls; no list is `source: "none"` (HTTP 200), never an error.
+    #[tokio::test]
+    async fn commands_tool_lists_what_the_agent_reported() {
+        let hub = AgentHub::new(
+            EventBus::new(64),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(PathBuf::from("/nonexistent"), None),
+        );
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let m = claude::managed::ManagedClaude::attached(
+            "cc".into(),
+            PathBuf::from("."),
+            Arc::new(Mutex::new(SessionLog::new("cc", None))),
+            tx,
+            "vscode",
+        );
+        hub.register_attached("cc".into(), m.clone());
+        // Nothing reported yet.
+        let r = hub.claude_tool("cc", "commands", &json!({})).await.unwrap();
+        assert_eq!(r, json!({ "commands": [], "source": "none" }));
+        // The initialize response as it passes on the process's stdout.
+        let line = json!({"type": "control_response", "response": {
+        "subtype": "success", "request_id": "ide_1", "response": {
+            "commands": [
+                {"name": "compact", "description": "Clear conversation history but keep a summary in context",
+                 "argumentHint": "<optional custom summarization instructions>"},
+                {"name": "/review", "description": "Review a pull request", "argumentHint": ""},
+                {"name": "compact", "description": "duplicate"},
+                "my-plugin:deploy"
+            ],
+            "models": [],
+            "account": {"email": "someone@example.com", "apiKeySource": "user"}
+        }}});
+        m.on_remote_frame(json!({ "t": "out", "line": line.to_string() }))
+            .await;
+        let r = hub.claude_tool("cc", "commands", &json!({})).await.unwrap();
+        let fixture: Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../protocol/fixtures/claude_commands.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(r, fixture);
+        // Only the three strings per command leave the desktop.
+        assert!(!r.to_string().contains("example.com"));
+        // After the process exited there is no list any more.
+        m.on_remote_frame(json!({ "t": "exit" })).await;
+        let r = hub.claude_tool("cc", "commands", &json!({})).await.unwrap();
+        assert_eq!(r["source"], "none");
+    }
+
+    /// A conversation that is not running but would be resumed by a message has no list yet.
+    #[tokio::test]
+    async fn commands_tool_answers_none_for_a_resumable_conversation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects").join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(
+            proj.join("old-3.jsonl"),
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(8),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), Some(PathBuf::from("claude"))),
+        );
+        let r = hub
+            .claude_tool("claude:old-3", "commands", &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(r, json!({ "commands": [], "source": "none" }));
     }
 
     #[test]

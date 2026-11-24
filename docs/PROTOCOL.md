@@ -420,12 +420,29 @@ this change used `managed:<random>` ids that disappeared with the process.
     IDE's Ctrl+B); `cancel_message {messageUuid}` → `{cancelled}`; `side_question {question}` → `{answer}`; `rename
     {title}`; `rewind {userMessageId, dryRun}` → `{dryRun, canRewind, error?, filesChanged (relative), insertions,
     deletions}` (files only; **switched off**: `REWIND_FILES_ENABLED` is `false`, managed processes run without file
-    checkpoints and the action answers `422 capability_unavailable` "Rewinding files is not enabled."); `export` → `{text, filename}`. Other
+    checkpoints and the action answers `422 capability_unavailable` "Rewinding files is not enabled."); `export` → `{text, filename}`;
+    `commands` (body `{}`) → `{ "commands": [ { "name": "compact", "description": "…", "argumentHint": "<optional
+    custom summarization instructions>" } ], "source": "agent" }` — see **Slash commands** below. Other
     sessions → `422 capability_unavailable`, except that a Claude Code session started on the computer
     (observe-only, detail `claudeReadTools: true`) gets the three tools its files can answer, read-only: `task_output`
     (only the file Claude Code named `<taskId>.output` for that task, kept as `outputFile` on the task's row), `plan`
     (the last `ExitPlanMode` plan in the transcript) and `export` (the log as text). `POST …/messages` answers `messageUuid` for these sessions: the user
     message's id in the log, and the handle to cancel it while queued.
+  - **Slash commands** (`POST /v1/sessions/{id}/claude/commands`, fixture `protocol/fixtures/claude_commands.json`): the
+    slash commands the session's own Claude Code process reported — built-in ones, custom commands from
+    `.claude/commands`, skills and plugin commands — taken from its `initialize` control response (`commands`) and, for
+    names it did not list, from `slash_commands` of the stream's `system`/`init` message. No control request is sent.
+    Each entry is exactly three strings: `name` (without the leading `/`, ≤ 80 characters), `description` (≤ 300, `""`
+    when unknown) and `argumentHint` (≤ 120, `""` when none); unique by `name`, in the agent's order; texts redacted,
+    nothing else about a command (source, path, plugin) is sent. `source` is `agent` when the list is not empty.
+    **Fallback rule:** when the process is not running (ended, or a conversation a message would resume) or never
+    reported a list, the answer is `200 { "commands": [], "source": "none" }` and the client offers its built-in list.
+    A session attached through the takeover hook has a list only if SwitchTether saw the IDE's `initialize` response
+    or a `system`/`init` message (names only) pass; otherwise `none`. A session that is running in a window
+    SwitchTether does not control → `422 capability_unavailable` like the other tools. **Running a command needs no
+    endpoint of its own:** send `/name args` as the text of an ordinary message (`POST …/messages`), as the Agent SDK
+    does. In the log the command appears as a `user_message` with that text, and what a local command prints as a
+    `system` event (`subtype: "command"` from a transcript, `local_command_output` from the stream).
   - **Models** (`GET /v1/agents/{agent}/models?session=`): the agent's own list — from the running session, else read by a
     short SwitchTether-owned probe (Claude Code `initialize` with no MCP servers, Codex app-server `model/list`; no
     message, no conversation) and cached 30 min. With an official list the built-in aliases are not added, hidden Codex
@@ -451,7 +468,7 @@ this change used `managed:<random>` ids that disappeared with the process.
 
 | kind | data |
 |---|---|
-| `user_message` | `{ text, images, imageItems?, attachments?: [{name, path}], context?: [{kind: "file"|"selection", path, lines?}], source: "desktop"|"phone"|"unknown", clientId? }` — `attachments` lists files sent from the phone; the path block is removed from `text` — `text` never contains harness/IDE blocks (`<system-reminder>`, `<ide_opened_file>`, `<ide_selection>`, `<browser_instruction>`); what the IDE blocks said is in `context`. Background-task reports (`<task-notification>`) are never user messages — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
+| `user_message` | `{ text, images, imageItems?, attachments?: [{name, path}], context?: [{kind: "file"|"selection", path, lines?}], source: "desktop"|"phone"|"unknown", clientId? }` — `attachments` lists files sent from the phone; the path block is removed from `text` — `text` never contains harness/IDE blocks (`<system-reminder>`, `<ide_opened_file>`, `<ide_selection>`, `<browser_instruction>`) or Claude Code's slash command wrappers (`<command-name>` … become `/name args`; `<local-command-stdout>` / `<local-command-stderr>` are `system` events, never user messages); what the IDE blocks said is in `context`. Background-task reports (`<task-notification>`) are never user messages — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
 | `assistant_message` | `{ text (Markdown), model? }` |
 | `reasoning` | `{ text, summary: bool }` — only when the agent actually exposes it |
 | `tool_call` | `{ callId, name, title, category, input, status, server?, tool?, background?, taskId?, backgroundSummary?, exitCode?, finishedAt? }` — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted`. A background shell (Claude Code `Bash` with `run_in_background`; `background: true`, `taskId` = its `backgroundTaskId`) stays `running` after its "started" `tool_result` and is updated in place by its task notification (`completed`, or `failed` for a non-zero exit code, with `backgroundSummary`/`exitCode`), or set `interrupted` when a `TaskStop`/`KillShell` result names it |

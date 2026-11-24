@@ -94,7 +94,7 @@ async fn subagent_tree(
 
 /// The Claude Code IDE's session tools (`permission_mode`, `context_usage`, `task_output`,
 /// `plan`, `mcp_status`, `mcp_reconnect`, `run_in_background`, `cancel_message`,
-/// `side_question`, `rename`, `rewind`, `export`) for sessions SwitchTether started. The body is
+/// `side_question`, `rename`, `rewind`, `export`, `commands`) for sessions SwitchTether started. The body is
 /// the action's parameters plus an optional `commandId`; every call is audited.
 async fn claude_tool(
     State(ctx): State<Arc<ApiContext>>,

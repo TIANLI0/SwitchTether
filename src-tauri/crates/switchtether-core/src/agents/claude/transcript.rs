@@ -104,6 +104,93 @@ fn xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
     Some(text[start..end].trim()).filter(|t| !t.is_empty())
 }
 
+/// How Claude Code records a slash command: the command the user typed, wrapped in
+/// `<command-name>` / `<command-message>` / `<command-args>`, and what a local command printed,
+/// wrapped in `<local-command-stdout>` / `<local-command-stderr>`.
+#[derive(Debug, PartialEq)]
+enum SlashRecord {
+    /// The command as typed: `/name args`.
+    Command(String),
+    /// A local command's output as plain text (may be empty).
+    Output(String),
+}
+
+fn slash_record(text: &str) -> Option<SlashRecord> {
+    const OUTPUT_TAGS: [&str; 2] = ["local-command-stdout", "local-command-stderr"];
+    let t = text.trim_start();
+    if t.starts_with("<command-name>") || t.starts_with("<command-message>") {
+        let name = xml_tag(t, "command-name").or_else(|| xml_tag(t, "command-message"))?;
+        let mut cmd = format!("/{}", name.trim_start_matches('/'));
+        if let Some(args) = xml_tag(t, "command-args") {
+            cmd.push(' ');
+            cmd.push_str(args);
+        }
+        return Some(SlashRecord::Command(cmd));
+    }
+    if OUTPUT_TAGS
+        .iter()
+        .any(|tag| t.starts_with(&format!("<{tag}>")))
+    {
+        let mut parts = Vec::new();
+        let mut rest = t.to_string();
+        for tag in OUTPUT_TAGS {
+            let (r, blocks) = take_blocks(&rest, tag);
+            rest = r;
+            parts.extend(blocks);
+        }
+        parts.push(rest);
+        let out = parts
+            .iter()
+            .map(|p| strip_ansi(p))
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Some(SlashRecord::Output(out));
+    }
+    None
+}
+
+/// Text without terminal escape sequences (local commands print for a terminal).
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            // CSI: parameters, then one final byte.
+            Some('[') => {
+                chars.next();
+                for n in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            // OSC: up to BEL or ESC \.
+            Some(']') => {
+                chars.next();
+                while let Some(n) = chars.next() {
+                    if n == '\u{7}' {
+                        break;
+                    }
+                    if n == '\u{1b}' {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {
+                chars.next();
+            }
+        }
+    }
+    out
+}
+
 fn is_task_notification(rec: &Value, text: &str) -> bool {
     rec.pointer("/origin/kind").and_then(|k| k.as_str()) == Some("task-notification")
         || text.trim_start().starts_with("<task-notification>")
@@ -568,26 +655,8 @@ impl ClaudeParser {
                     ts,
                     json!({ "state": "interrupted", "detail": text }),
                 ));
-            } else if text.starts_with("<command-name>")
-                || text.starts_with("<local-command-stdout>")
-                || text.starts_with("<command-message>")
-            {
-                let clean = text
-                    .replace("<command-name>", "")
-                    .replace("</command-name>", "")
-                    .replace("<command-message>", "")
-                    .replace("</command-message>", "")
-                    .replace("<command-args>", " ")
-                    .replace("</command-args>", "")
-                    .replace("<local-command-stdout>", "")
-                    .replace("</local-command-stdout>", "");
-                let (p, _) = preview(clean.trim(), PREVIEW_LIMIT);
-                out.push(EventDraft::new(
-                    format!("{uuid}:cmd"),
-                    "system",
-                    ts,
-                    json!({ "subtype": "command", "text": p }),
-                ));
+            } else if let Some(record) = slash_record(&text) {
+                out.extend(self.slash_events(&uuid, record, ts));
             } else {
                 if self.title.is_none()
                     && !is_sidechain(rec)
@@ -617,6 +686,42 @@ impl ClaudeParser {
             }
         }
         out
+    }
+
+    /// A slash command record: the command is what the user typed (a user message that never
+    /// names the conversation), a local command's output is a `system` note.
+    fn slash_events(&mut self, uuid: &str, record: SlashRecord, ts: &str) -> Vec<EventDraft> {
+        match record {
+            SlashRecord::Command(cmd) => {
+                self.current_turn = Some(uuid.to_string());
+                let (p, truncated) = preview(&cmd, PREVIEW_LIMIT);
+                let mut d = EventDraft::new(
+                    uuid.to_string(),
+                    "user_message",
+                    ts,
+                    json!({
+                        "text": p,
+                        "images": 0,
+                        "imageItems": [],
+                        "context": [],
+                        "source": "unknown",
+                        "truncated": truncated
+                    }),
+                );
+                d.turn_id = Some(uuid.to_string());
+                vec![d]
+            }
+            SlashRecord::Output(text) if text.is_empty() => vec![],
+            SlashRecord::Output(text) => {
+                let (p, _) = preview(&text, PREVIEW_LIMIT);
+                vec![EventDraft::new(
+                    format!("{uuid}:cmd"),
+                    "system",
+                    ts,
+                    json!({ "subtype": "command", "text": p }),
+                )]
+            }
+        }
     }
 
     fn tool_result(
@@ -1333,7 +1438,12 @@ impl ClaudeParser {
             // Bookkeeping records (status, thinking_tokens, commands_changed, …)
             // carry no user-visible text: skip them.
             _ => match s(rec, "content").filter(|c| !c.trim().is_empty()) {
-                Some(c) => c,
+                // Transcripts keep local slash commands and their output as `system` records
+                // (`local_command`) in the same wrapper tags as user records.
+                Some(c) => match slash_record(&c) {
+                    Some(record) => return self.slash_events(&uuid, record, ts),
+                    None => strip_ansi(&c),
+                },
                 None => return vec![],
             },
         };
@@ -1566,11 +1676,78 @@ mod tests {
             .feed(&json!({"type":"user","isMeta":true,"message":{"content":"x"}}))
             .is_empty());
         let ev = p.feed(&json!({"type":"user","uuid":"c","message":{"content":"<command-name>/clear</command-name>"}}));
-        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].kind, "user_message");
+        assert_eq!(ev[0].data["text"], "/clear");
+        assert!(p.title.is_none());
         assert!(p.feed(&json!({"type":"garbage"})).is_empty());
         assert!(p.feed(&json!("not an object")).is_empty());
         p.feed(&json!({"type":"ai-title","aiTitle":"My title"}));
         assert_eq!(p.title.as_deref(), Some("My title"));
+    }
+
+    /// A slash command is shown as the user typed it; what a local command printed is a readable
+    /// `system` note. Neither shows wrapper tags, and output is never a user message.
+    #[test]
+    fn slash_commands_and_their_local_output() {
+        let mut p = ClaudeParser::new();
+        // Tag order differs between Claude Code versions.
+        for (uuid, content, want) in [
+            ("a", "<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args>keep the API notes</command-args>", "/compact keep the API notes"),
+            ("b", "<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>42</command-args>", "/review 42"),
+            ("c", "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>", "/clear"),
+            ("d", "<command-message>my-plugin:deploy</command-message>", "/my-plugin:deploy"),
+        ] {
+            let ev = p.feed(&json!({"type":"user","uuid":uuid,"message":{"content":content}}));
+            assert_eq!(ev.len(), 1, "{uuid}");
+            assert_eq!(ev[0].kind, "user_message", "{uuid}");
+            assert_eq!(ev[0].data["text"], want, "{uuid}");
+            assert_eq!(ev[0].turn_id.as_deref(), Some(uuid));
+        }
+        assert!(p.title.is_none());
+        // Text blocks instead of a string.
+        let ev = p.feed(&json!({"type":"user","uuid":"e","message":{"content":[
+            {"type":"text","text":"<command-name>/cost</command-name><command-message>cost</command-message>"}]}}));
+        assert_eq!(ev[0].data["text"], "/cost");
+        // Local output, as a user record (older transcripts, stream replays) ...
+        let ev = p.feed(&json!({"type":"user","uuid":"o1","message":{"content":
+            "<local-command-stdout>\u{1b}[1mTotal cost:\u{1b}[22m $0.12\nDuration: 3m</local-command-stdout>"}}));
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].data["subtype"], "command");
+        assert_eq!(ev[0].data["text"], "Total cost: $0.12\nDuration: 3m");
+        let ev = p.feed(&json!({"type":"user","uuid":"o2","message":{"content":
+            "<local-command-stderr>Error: no such command</local-command-stderr>"}}));
+        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].data["text"], "Error: no such command");
+        // ... and as a `system` record (`local_command`), for the command and for its output.
+        let ev = p.feed(&json!({"type":"system","subtype":"local_command","uuid":"s1","content":
+            "<command-name>/mcp</command-name>\n<command-message>mcp</command-message>\n<command-args></command-args>"}));
+        assert_eq!(ev[0].kind, "user_message");
+        assert_eq!(ev[0].data["text"], "/mcp");
+        let ev = p.feed(
+            &json!({"type":"system","subtype":"local_command","uuid":"s2","content":
+            "<local-command-stdout>No MCP servers configured.</local-command-stdout>"}),
+        );
+        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].data["text"], "No MCP servers configured.");
+        // stream-json reports local output as plain `content`.
+        let ev = p.feed(&json!({"type":"system","subtype":"local_command_output","uuid":"s3","content":"Compacted."}));
+        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].data["text"], "Compacted.");
+        // Empty output is nothing to show.
+        assert!(p
+            .feed(&json!({"type":"user","uuid":"o3","message":{"content":"<local-command-stdout></local-command-stdout>"}}))
+            .is_empty());
+        // The summary a /compact leaves behind and its boundary stay system notes.
+        let ev = p.feed(&json!({"type":"system","subtype":"compact_boundary","uuid":"cb"}));
+        assert_eq!(ev[0].data["text"], "Conversation compacted");
+        let ev = p.feed(&json!({"type":"user","uuid":"cs","isCompactSummary":true,"message":{"content":"Summary of the work"}}));
+        assert_eq!(ev[0].kind, "system");
+        assert_eq!(ev[0].data["subtype"], "compact_summary");
+        // An ordinary message that merely mentions a tag is untouched.
+        let ev = p.feed(&json!({"type":"user","uuid":"u","message":{"content":"what does <command-name> mean?"}}));
+        assert_eq!(ev[0].data["text"], "what does <command-name> mean?");
+        assert_eq!(p.title.as_deref(), Some("what does <command-name> mean?"));
     }
 
     #[test]
