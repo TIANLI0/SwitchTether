@@ -571,6 +571,11 @@ impl AgentHub {
         title
     }
 
+    /// The session index (cached for 15 s), e.g. to name the sessions usage belongs to.
+    pub async fn session_index(&self) -> Arc<Vec<IndexedSession>> {
+        self.index().await
+    }
+
     async fn index(&self) -> Arc<Vec<IndexedSession>> {
         if let Some((at, v)) = self.index_cache.lock().as_ref() {
             if at.elapsed() < Duration::from_secs(15) {

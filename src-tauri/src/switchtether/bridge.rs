@@ -403,6 +403,56 @@ impl CcSwitchBackend for CcSwitchBridge {
         Ok(json!({ "lastSyncMs": ms }))
     }
 
+    async fn usage_sessions(&self, q: UsageQuery) -> BackendResult<Value> {
+        self.blocking(move |s| {
+            let conn = crate::database::lock_recovering(&s.db.conn).map_err(|e| e.to_string())?;
+            // Detail logs only: the daily rollups of older logs carry no session id. Same proxy /
+            // session-log de-duplication as every other usage query.
+            let dedup = crate::services::usage_stats::effective_usage_log_filter_for_range(
+                &conn, "l", q.from, q.to,
+            )
+            .map_err(|e| e.to_string())?;
+            let sql = format!(
+                "SELECT l.app_type, NULLIF(l.session_id, ''), COUNT(*),
+                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0),
+                    COALESCE(SUM(l.input_tokens), 0), COALESCE(SUM(l.output_tokens), 0),
+                    COALESCE(SUM(l.cache_read_tokens), 0), COALESCE(SUM(l.cache_creation_tokens), 0),
+                    MAX(l.created_at)
+                 FROM proxy_request_logs l
+                 WHERE ({dedup}) AND l.created_at >= ?1 AND l.created_at <= ?2
+                    AND (?3 IS NULL OR l.app_type = ?3)
+                 GROUP BY l.app_type, NULLIF(l.session_id, '')"
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(
+                    rusqlite::params![
+                        q.from.unwrap_or(0),
+                        q.to.unwrap_or(i64::MAX / 2),
+                        q.app.as_deref()
+                    ],
+                    |r| {
+                        Ok(json!({
+                            "app": r.get::<_, String>(0)?,
+                            "sessionId": r.get::<_, Option<String>>(1)?,
+                            "requests": r.get::<_, i64>(2)?,
+                            "costUsd": r.get::<_, f64>(3)?,
+                            "inputTokens": r.get::<_, i64>(4)?,
+                            "outputTokens": r.get::<_, i64>(5)?,
+                            "cacheReadTokens": r.get::<_, i64>(6)?,
+                            "cacheCreationTokens": r.get::<_, i64>(7)?,
+                            "lastMs": r.get::<_, Option<i64>>(8)?.map(|t| t.saturating_mul(1000)),
+                        }))
+                    },
+                )
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            Ok(Value::Array(rows))
+        })
+        .await
+    }
+
     async fn quota(&self, tool: &str) -> BackendResult<Value> {
         let q = crate::services::subscription::get_subscription_quota(tool).await?;
         to_json(q)

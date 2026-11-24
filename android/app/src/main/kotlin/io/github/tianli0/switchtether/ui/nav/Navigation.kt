@@ -26,6 +26,8 @@ sealed interface Route {
     data object PickFolder : Route
     data object Providers : Route
     data object Usage : Route
+    /** One project's usage and its sessions (by project name, as the session list shows it). */
+    data class ProjectUsage(val project: String) : Route
     data object Mcp : Route
     data object Skills : Route
     data object Prompts : Route

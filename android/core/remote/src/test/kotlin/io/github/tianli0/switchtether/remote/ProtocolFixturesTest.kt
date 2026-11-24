@@ -38,6 +38,20 @@ class ProtocolFixturesTest {
     }
 
     @Test
+    fun usageProjectsFixture() {
+        val v = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.ProjectUsageView.serializer(), fixture("usage_projects.json"))
+        val p = v.projects.single()
+        assertEquals("SwitchTether", p.project)
+        assertEquals(2, p.sessionCount)
+        assertEquals(3.125, p.costUsd, 1e-9)
+        assertEquals(52000L + 18000L + 2400000L + 96000L, p.totalTokens)
+        assertEquals("claude:0f8e5a2c-7d1b-4c3e-9a6f-1b2c3d4e5f60", p.sessions[0].id)
+        assertNull(p.sessions[1].title)
+        assertNull(v.otherProjects)
+        assertEquals(4L, v.unattributed!!.requests)
+    }
+
+    @Test
     fun hello() {
         val h = ProtocolJson.decodeFromString(Hello.serializer(), fixture("hello.json"))
         assertEquals(1, h.protocolVersion)

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 会话费用面板（docs/ANDROID_UI.md §25） -->
+    <string name="cost_sheet_title">费用与用量</string>
+    <string name="cost_chip_a11y">本会话费用与用量：%1$s</string>
+    <string name="cost_total">本会话费用</string>
+    <string name="cost_total_tokens">本会话 Token</string>
+    <plurals name="cost_turns">
+        <item quantity="other">%d 轮</item>
+    </plurals>
+    <string name="cost_turns_label">轮数</string>
+    <string name="cost_avg_turn">平均每轮 %1$s</string>
+    <string name="cost_per_turn">逐轮趋势</string>
+    <string name="cost_metric_cost">费用</string>
+    <string name="cost_metric_tokens">Token</string>
+    <string name="cost_turn_title">第 %1$d 轮</string>
+    <string name="cost_turn_no_prompt">这一轮的消息未在本机加载</string>
+    <string name="cost_duration">耗时</string>
+    <string name="cost_chart_a11y">逐轮图表，共 %1$d 轮。%2$s</string>
+    <string name="cost_breakdown">Token 构成</string>
+    <string name="cost_cache_hit">缓存命中率</string>
+    <string name="cost_context">最近一次请求的上下文</string>
+    <string name="cost_context_value">≈ %1$s tokens</string>
+    <string name="cost_partial">只统计本机已加载的对话部分。在对话中向上滑动可加载更早的轮次。</string>
+    <string name="cost_running_total">费用取自智能体每次运行的累计值，因此可能包含比已加载部分更早的轮次。</string>
+    <string name="cost_project_usage">项目「%1$s」的用量</string>
+    <string name="cost_project_usage_summary">这台电脑上该项目所有会话的费用</string>
+
+    <!-- 按项目统计 -->
+    <string name="usage_by_project">按项目</string>
+    <string name="usage_project_sessions">%1$s · %2$d 个会话</string>
+    <string name="usage_unattributed">未关联到会话</string>
+    <string name="usage_other_projects">其他项目</string>
+    <string name="usage_projects_note">项目取自每条请求所属的会话。只有近期的请求日志保留这一关联；已压缩的较早日期计入“未关联到会话”。</string>
+    <string name="project_usage_title">项目用量</string>
+    <string name="project_usage_sessions">会话</string>
+    <string name="project_usage_none">该项目在此时间段没有用量。</string>
+    <string name="project_usage_untitled">未命名会话</string>
+    <string name="project_usage_unsupported">电脑上的 SwitchTether 还不支持按项目统计用量，更新后即可查看。</string>
+
+    <!-- 双栏布局 -->
+    <string name="pane_empty_sessions">选择一个会话，在这里查看</string>
+    <string name="pane_empty_workspace">选择一项工具，在这里打开</string>
+    <string name="pane_empty_manage">选择一项，在这里打开</string>
+</resources>

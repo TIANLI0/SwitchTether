@@ -404,6 +404,7 @@ fun SessionDetailScreen(
         } else null,
         onPermissionClick = { showPermission = true },
         onSlashCommand = onSlashCommand,
+        onOpenProjectUsage = { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.ProjectUsage(it)) },
         // Also here, not only on the Claude Code tools page: a Codex session SwitchTether started
         // has no tools page, and its process is just as much ours to end.
         onEndSession = if (state.canStop) {
@@ -529,9 +530,14 @@ fun SessionDetailContent(
     onSlashCommand: ((SlashEntry) -> Unit)? = null,
     /** "End session" in the info sheet (null = not offered: only a live session SwitchTether started). */
     onEndSession: (() -> Unit)? = null,
+    /** "Usage of project …" in the cost sheet (null = not offered). */
+    onOpenProjectUsage: ((String) -> Unit)? = null,
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
+    // Cost and tokens of the loaded turns (§25); the capsule only shows when a turn reported usage.
+    var showCost by rememberSaveable { mutableStateOf(false) }
+    val usageBreakdown = remember(state.log, summary?.agent) { sessionUsageBreakdown(state.log.events, summary?.agent) }
     val hasAgents = summary?.agent in SUBAGENT_AGENTS && state.log.events.any {
         it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT ||
             (it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.TOOL_CALL && it.data.bool("background") == true)
@@ -658,6 +664,8 @@ fun SessionDetailContent(
                         agentsDot = agentsPillState(state),
                         onOpenTools = onOpenTools,
                         onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
+                        costLabel = usageBreakdown?.let { costChipLabel(it) },
+                        onOpenCost = { showCost = true },
                     )
                 }
                 // The composer floats too. Nothing is laid behind it: only its own keys and field
@@ -677,6 +685,15 @@ fun SessionDetailContent(
         // The sheet closes first: the confirmation is a dialog of the page, not of the sheet.
         onEndSession = onEndSession?.let { end -> { showInfo = false; end() } },
     )
+    SessionCostSheet(
+        show = showCost && usageBreakdown != null,
+        breakdown = usageBreakdown,
+        partial = state.hasMoreBefore,
+        project = summary?.let { io.github.tianli0.switchtether.ui.common.sessionProjectName(it) },
+        // The sheet closes first, so back from the project page returns to the conversation.
+        onOpenProjectUsage = onOpenProjectUsage?.let { open -> { p: String -> showCost = false; open(p) } },
+        onDismiss = { showCost = false },
+    )
 }
 
 /**
@@ -695,6 +712,9 @@ private fun StatusChipRow(
     agentsDot: AgentMapState? = null,
     onOpenTools: (() -> Unit)? = null,
     onOpenTerminal: (() -> Unit)? = null,
+    /** Cost capsule label (money, or tokens without a cost); null = no usage reported yet. */
+    costLabel: String? = null,
+    onOpenCost: () -> Unit = {},
 ) {
     val dev = LocalDevColors.current
     val s = state.detail.valueOrNull?.summary ?: return
@@ -733,6 +753,10 @@ private fun StatusChipRow(
                 } else {
                     InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("subagent-tree"), backdrop = bg)
                 }
+            }
+            costLabel?.let { label ->
+                val described = stringResource(R.string.cost_chip_a11y, label)
+                InfoChip(label, icon = AppIcons.Usage, onClick = onOpenCost, modifier = Modifier.semantics { contentDescription = described }.testTag("chip-cost"), backdrop = bg)
             }
             // Extra functions sit in the same row as the sub-agents.
             if (onOpenTools != null) {

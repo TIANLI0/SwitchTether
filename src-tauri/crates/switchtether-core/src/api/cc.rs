@@ -31,6 +31,7 @@ pub fn routes() -> Router<Arc<ApiContext>> {
         .route("/v1/usage/logs/:id", get(usage_log))
         .route("/v1/usage/first-date", get(usage_first_date))
         .route("/v1/usage/last-sync", get(usage_last_sync))
+        .route("/v1/usage/projects", get(usage_projects))
         .route("/v1/usage/quota/:tool", get(quota))
         .route("/v1/mcp/servers", get(mcp_servers))
         .route("/v1/mcp/servers/:id/toggle", post(mcp_toggle))
@@ -248,6 +249,46 @@ usage_route!(usage_summary, usage_summary);
 usage_route!(usage_trends, usage_trends);
 usage_route!(usage_models, usage_models);
 usage_route!(usage_providers, usage_providers);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectParams {
+    from: Option<i64>,
+    to: Option<i64>,
+    app: Option<String>,
+    /// One project only (its name as the session list shows it, or a working directory).
+    project: Option<String>,
+}
+
+/// `GET /v1/usage/projects?from&to&app&project` — usage grouped by project (session index join).
+async fn usage_projects(
+    State(ctx): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(p): Query<ProjectParams>,
+) -> ApiResult<Json<Value>> {
+    if let Some(pr) = p.project.as_deref() {
+        if pr.is_empty() || pr.len() > 4096 || pr.chars().any(char::is_control) {
+            return Err(ApiError::validation("invalid project"));
+        }
+    }
+    let q = UsageQuery {
+        from: p.from,
+        to: p.to,
+        app: p.app,
+        provider: None,
+        model: None,
+    };
+    let raw = ctx
+        .backend
+        .usage_sessions(q)
+        .await
+        .map_err(|e| backend_err(&ctx, e))?;
+    let rows: Vec<crate::usage_projects::SessionUsageRow> =
+        serde_json::from_value(raw).unwrap_or_default();
+    let index = ctx.agents.session_index().await;
+    let view = crate::usage_projects::group_by_project(&rows, &index, p.project.as_deref());
+    Ok(Json(serde_json::to_value(view).unwrap_or(Value::Null)))
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -405,6 +405,17 @@ class RemoteApi(
     suspend fun usageFirstDate(app: String?): JsonElement =
         getJson(url("v1/usage/first-date").newBuilder().apply { app?.let { addQueryParameter("app", it) } }.build())
 
+    /** `GET /v1/usage/projects?from&to&app&project` — usage per project. 404 on older desktops. */
+    suspend fun usageProjects(fromEpochSec: Long?, toEpochSec: Long?, app: String?, project: String? = null): io.github.tianli0.switchtether.remote.protocol.ProjectUsageView {
+        val u = url("v1/usage/projects").newBuilder().apply {
+            fromEpochSec?.let { addQueryParameter("from", it.toString()) }
+            toEpochSec?.let { addQueryParameter("to", it.toString()) }
+            app?.let { addQueryParameter("app", it) }
+            project?.let { addQueryParameter("project", it) }
+        }.build()
+        return get(u)
+    }
+
     /** `GET /v1/usage/last-sync` → `{ lastSyncMs }`. */
     suspend fun usageLastSync(): JsonElement = getJson(url("v1/usage/last-sync"))
 

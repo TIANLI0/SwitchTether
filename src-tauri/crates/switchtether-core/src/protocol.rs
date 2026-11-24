@@ -118,6 +118,66 @@ mod tests {
         })
         .unwrap();
         assert_eq!(view, ours);
+        // Usage per project: the server's serialization matches the fixture exactly.
+        let projects: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("usage_projects.json")).unwrap(),
+        )
+        .unwrap();
+        use crate::usage_projects::{ProjectUsage, ProjectUsageView, SessionUsage, UsageTotals};
+        let t = |requests, cost_usd, i, o, cr, cc, last| UsageTotals {
+            requests,
+            cost_usd,
+            input_tokens: i,
+            output_tokens: o,
+            cache_read_tokens: cr,
+            cache_creation_tokens: cc,
+            last_ms: Some(last),
+        };
+        let cwd = Some("D:/develop/SwitchTether".to_string());
+        let ours = serde_json::to_value(ProjectUsageView {
+            projects: vec![ProjectUsage {
+                project: "SwitchTether".into(),
+                cwd: cwd.clone(),
+                session_count: 2,
+                totals: t(
+                    41,
+                    3.125,
+                    52_000,
+                    18_000,
+                    2_400_000,
+                    96_000,
+                    1_764_000_000_000,
+                ),
+                sessions: vec![
+                    SessionUsage {
+                        id: "claude:0f8e5a2c-7d1b-4c3e-9a6f-1b2c3d4e5f60".into(),
+                        app: "claude".into(),
+                        title: Some("重构设置页的按钮层级".into()),
+                        cwd: cwd.clone(),
+                        totals: t(
+                            30,
+                            2.5,
+                            40_000,
+                            15_000,
+                            2_000_000,
+                            80_000,
+                            1_764_000_000_000,
+                        ),
+                    },
+                    SessionUsage {
+                        id: "codex:019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b".into(),
+                        app: "codex".into(),
+                        title: None,
+                        cwd,
+                        totals: t(11, 0.625, 12_000, 3_000, 400_000, 16_000, 1_763_990_000_000),
+                    },
+                ],
+            }],
+            other_projects: None,
+            unattributed: Some(t(4, 0.05, 900, 120, 0, 0, 1_763_900_000_000)),
+        })
+        .unwrap();
+        assert_eq!(projects, ours);
     }
 
     #[test]

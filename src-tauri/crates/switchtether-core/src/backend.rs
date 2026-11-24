@@ -87,6 +87,13 @@ pub trait CcSwitchBackend: Send + Sync + 'static {
         page_size: u32,
     ) -> BackendResult<Value>;
     async fn quota(&self, tool: &str) -> BackendResult<Value>;
+    /// Usage summed per agent session (request logs that carry a session id, plus one row with
+    /// `sessionId: null` for those without): `[{ app, sessionId, requests, costUsd, inputTokens,
+    /// outputTokens, cacheReadTokens, cacheCreationTokens, lastMs }]`. Grouped by project in
+    /// [`crate::usage_projects`]. Backends without it answer an empty list.
+    async fn usage_sessions(&self, _q: UsageQuery) -> BackendResult<Value> {
+        Ok(json!([]))
+    }
 
     // ---- MCP / skills / prompts ----
     async fn mcp_servers(&self) -> BackendResult<Value>;

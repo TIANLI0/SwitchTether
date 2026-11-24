@@ -202,6 +202,20 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `GET /v1/usage/first-date?app&provider&model` → `{ firstDateMs, firstDate }` (desktop-local
   midnight; both null without data).
 - `GET /v1/usage/last-sync` → `{ lastSyncMs }` (last completed session-log scan, or null).
+- `GET /v1/usage/projects?from&to&app&project` → usage per project (fixture
+  `protocol/fixtures/usage_projects.json`): `{ projects: [ProjectUsage], otherProjects: Totals|null,
+  unattributed: Totals|null }`. The request logs CC Switch reads from session logs carry the agent's
+  session id; the desktop sums them per session (detail logs only — the daily rollups of older logs
+  have no session id) with the same proxy / session-log de-duplication as the other usage queries,
+  joins them with the session index (session id → working directory) and groups them by the
+  project name the session list uses (`project_from_cwd`, worktrees belong to their project).
+  `Totals = { requests, costUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens,
+  lastMs }`; `ProjectUsage = Totals + { project, cwd (the directory most of its cost came from),
+  sessionCount, sessions: [Totals + { id (session list id, e.g. "claude:<uuid>"), app, title, cwd }] }`,
+  most expensive first: 50 projects (the rest summed in `otherProjects`) with their 5 most expensive
+  sessions; with `project` (a project name or an exact directory) that project alone with up to 100
+  sessions. Logs without a session id, or whose session is not in the index, are `unattributed`.
+  Titles go through the redaction helper. 404 on older desktops (the phone hides the section).
 - `GET /v1/settings` includes `usageDisplay` (currency, exchangeRates, rateSource,
   autoExchangeRates, …) and `visibleApps`.
 
