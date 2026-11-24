@@ -3,7 +3,7 @@
 #   docker build -t switchtether-relay relay/
 # Cloudflare Containers builds the same file (relay/cloudflare/wrangler.jsonc).
 
-ARG GO_IMAGE=golang:1.27.3-alpine
+ARG GO_IMAGE=golang:1.27.4-alpine
 
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 WORKDIR /src
