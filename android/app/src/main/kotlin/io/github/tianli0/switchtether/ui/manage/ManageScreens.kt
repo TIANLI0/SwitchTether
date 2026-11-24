@@ -178,10 +178,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
             onDismiss = { credTarget = null },
         ) {
             Text(stringResource(R.string.provider_credential_note, p.name), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
-            io.github.suqi8.coui.kmp.basic.TextField(
-                value = value, onValueChange = { value = it }, label = f.name, singleLine = true, showPasswordToggle = true,
-                backgroundMode = io.github.suqi8.coui.kmp.basic.TextFieldMode.Rectangle,
-            )
+            io.github.tianli0.coui17.patterns.TextInput(value = value, onValueChange = { value = it }, label = f.name, showPasswordToggle = true)
 
         }
     }

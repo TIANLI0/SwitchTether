@@ -36,7 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import io.github.tianli0.coui17.patterns.glassSurface
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -203,9 +203,8 @@ fun BoxScope.NewMessagesPill(listState: LazyListState, follow: FollowState, rows
         val shape = RoundedCornerShape(50)
         Row(
             Modifier
-                .shadow(6.dp, shape)
-                .clip(shape)
-                .background(COUITheme.colorScheme.surfaceContainer)
+                // The same glass and halo as the composer below it (not an elevation shadow).
+                .glassSurface(shape, halo = true)
                 .clickable(role = Role.Button) {
                     follow.following = true
                     scope.launch {
