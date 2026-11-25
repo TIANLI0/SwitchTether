@@ -751,4 +751,7 @@ on this machine, the phone UI on a device.
     Live check (codex 0.167, scratch folder, only the ephemeral thread): `{"title":"设置页登录按钮圆角与深色模式"}`,
     11.4k input / 24 output tokens, no rollout written. `thread/name/set` on a real thread not exercised
     live. With the old CLI 0.137 on PATH the account's models are refused: no title, first prompt stays.
-  - A title is asked for once per conversation, and never replaces one the user set.
+  - A title is asked for once per conversation, as soon as the first prompt is in (both official
+    clients name on submit; asking after the first turn left long first turns unnamed for minutes —
+    live: Claude Code answered `generate_session_title` in 2.7 s while its turn ran until 9.5 s), and
+    never replaces one the user set.

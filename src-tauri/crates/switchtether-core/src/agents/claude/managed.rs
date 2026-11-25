@@ -297,9 +297,10 @@ impl ManagedClaude {
     }
 
     /// Claude Code names a conversation (`ai-title` in the transcript) only in its interactive
-    /// front ends; under stream-json the host asks for it, as the Agent SDK's
-    /// `generateSessionTitle` does. Asked once, after the first turn of a conversation this
-    /// process started (a resumed one already has its name), when nothing named it yet.
+    /// front ends, right when the first prompt is submitted; under stream-json the host asks for
+    /// it, as the Agent SDK's `generateSessionTitle` does. Asked once, as soon as the first prompt
+    /// of a conversation this process started is in the log (a resumed one already has its name),
+    /// when nothing named it yet — a long first turn no longer leaves the session unnamed.
     fn wants_title(&self) -> bool {
         use std::sync::atomic::Ordering;
         if self.remote.is_some() || self.options.resume_from.is_some() {
@@ -308,20 +309,27 @@ impl ManagedClaude {
         if self.parser.lock().named {
             return false;
         }
+        if self.title_requested.load(Ordering::SeqCst) || self.first_prompt().is_none() {
+            return false;
+        }
         !self.title_requested.swap(true, Ordering::SeqCst)
     }
 
     /// `generate_session_title` with `persist: true`: Claude Code generates the title from the
     /// first prompt with its small model and appends `ai-title` to the transcript, where the
     /// session list and history read it. Failure leaves the first-prompt title.
-    async fn generate_title(&self) {
-        let description = self
-            .log
+    /// The conversation's first prompt, once it is in the log.
+    fn first_prompt(&self) -> Option<String> {
+        self.log
             .lock()
             .iter()
             .find(|e| e.kind == "user_message" && e.parent_id.is_none())
-            .and_then(|e| e.data.get("text").and_then(Value::as_str).map(String::from));
-        let Some(description) = description.filter(|d| !d.trim().is_empty()) else {
+            .and_then(|e| e.data.get("text").and_then(Value::as_str).map(String::from))
+            .filter(|d| !d.trim().is_empty())
+    }
+
+    async fn generate_title(&self) {
+        let Some(description) = self.first_prompt() else {
             return;
         };
         let description = crate::agents::model::preview(&description, 1000).0;
@@ -488,9 +496,12 @@ impl ManagedClaude {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                    let ended_turn = v.get("type").and_then(Value::as_str) == Some("result");
+                    // Named as soon as the first prompt is in (its replay), as Claude Code's own
+                    // front ends do on submit; `result` is the fallback.
+                    let kind = v.get("type").and_then(Value::as_str).unwrap_or("");
+                    let trigger = kind == "user" || kind == "result";
                     reader.on_message(v).await;
-                    if ended_turn && reader.wants_title() {
+                    if trigger && reader.wants_title() {
                         let me = reader.clone();
                         tokio::spawn(async move { me.generate_title().await });
                     }

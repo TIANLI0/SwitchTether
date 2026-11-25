@@ -806,11 +806,17 @@ impl ManagedCodex {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                    let ended_turn = s(&v, "method").as_deref() == Some("turn/completed")
-                        && v.pointer("/params/threadId").and_then(Value::as_str)
-                            == reader.state.lock().thread_id.as_deref();
+                    // Named as soon as the first prompt is in (its `userMessage` item), as Codex
+                    // Desktop does on submit; the end of the turn is the fallback.
+                    let own_thread = v.pointer("/params/threadId").and_then(Value::as_str)
+                        == reader.state.lock().thread_id.as_deref();
+                    let trigger = own_thread
+                        && matches!(
+                            s(&v, "method").as_deref(),
+                            Some("item/completed" | "turn/completed")
+                        );
                     reader.on_message(v).await;
-                    if ended_turn && reader.wants_title() {
+                    if trigger && reader.wants_title() {
                         let me = reader.clone();
                         tokio::spawn(async move { me.generate_title().await });
                     }
@@ -1070,6 +1076,13 @@ impl ManagedCodex {
         if self.state.lock().title.is_some() {
             return false;
         }
+        if self
+            .title_requested
+            .load(std::sync::atomic::Ordering::SeqCst)
+            || self.first_prompt().is_none()
+        {
+            return false;
+        }
         !self
             .title_requested
             .swap(true, std::sync::atomic::Ordering::SeqCst)
@@ -1111,15 +1124,19 @@ impl ManagedCodex {
     /// in its session index and announces with `thread/name/updated`. Done once per conversation:
     /// a title the user set meanwhile is kept, and nothing is asked again later. Failure leaves the
     /// first-prompt title.
-    async fn generate_title(&self) {
-        let Ok(own) = self.thread_id() else { return };
-        let prompt = self
-            .log
+    /// The conversation's first prompt, once it is in the log.
+    fn first_prompt(&self) -> Option<String> {
+        self.log
             .lock()
             .iter()
             .find(|e| e.kind == "user_message" && e.parent_id.is_none())
-            .and_then(|e| e.data.get("text").and_then(Value::as_str).map(String::from));
-        let Some(prompt) = prompt.filter(|p| !p.trim().is_empty()) else {
+            .and_then(|e| e.data.get("text").and_then(Value::as_str).map(String::from))
+            .filter(|p| !p.trim().is_empty())
+    }
+
+    async fn generate_title(&self) {
+        let Ok(own) = self.thread_id() else { return };
+        let Some(prompt) = self.first_prompt() else {
             return;
         };
         let request = title_prompt(&crate::agents::model::preview(prompt.trim(), 2000).0);
