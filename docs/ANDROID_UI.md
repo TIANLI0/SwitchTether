@@ -670,9 +670,10 @@ Updates only (no OPPO SDK).
 ### 13.10 Navigation, predictive back, language
 - Per-tab back stacks: switching tabs keeps each tab's place; re-selecting a tab returns to its root.
 - `AnimatedNavHost`: shared X axis for push / pop, fade-through between tabs, each entry's UI state
-  saved while it is in the stack. The system back gesture seeks the pop transition
-  (`PredictiveBackHandler` + `SeekableTransitionState`); release commits, cancel springs back. At
-  Home with nothing to pop no handler is enabled, so the system "back to home" animation runs.
+  saved while it is in the stack. Back (key or gesture) is a plain `BackHandler`: nothing of the
+  app follows the finger, the pop runs once back is committed (custom gesture-driven cards were
+  removed in 0.1.19: they read as messy next to the system's own motion). At Home with nothing to
+  pop no handler is enabled, so the system "back to home" animation runs.
   `enableOnBackInvokedCallback="true"`; edge-to-edge via `enableEdgeToEdge()`.
 - Per-app language: `locales_config` (en, zh-CN) and Settings → 语言 opens the system page
   (Android 13+).
@@ -1606,8 +1607,8 @@ read for the numbers only; no SDK code or resources were copied.
   scrim to 0.5 on COUIEase (0.33, 0, 0.67, 1) — it stays visible. Pop runs back: the top page leaves to
   +100% on (0.25, 0.1, 0.3, 1), the page underneath returns from −30% on (0.3, 0.26, 0.4, 1) and the
   scrim clears. Every page now paints the page colour, so a full-width slide never shows two pages
-  through each other. The predictive back gesture maps its progress linearly onto the pop (an eased
-  seek made the page jump at the start of the drag); release and cancel finish on the same spec.
+  through each other. Back (key or gesture) runs this same pop once committed; the app draws no
+  gesture-driven preview of its own (0.1.19).
 - **Tab switches** are a 150ms cross-fade without the 0.96 scale-in (a Material fade-through mark);
   the tablet list pane's `Crossfade` uses the same 150ms.
 - **Composer rim** (`coui-patterns` `glassSurface`): the 0.5dp solid hairline (dark on the light

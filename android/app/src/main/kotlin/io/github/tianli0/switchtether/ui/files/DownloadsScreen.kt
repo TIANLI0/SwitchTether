@@ -99,7 +99,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
     var confirmClearCache by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
 
-    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(enabled = viewing != null || viewingCached != null || selecting) {
+    androidx.activity.compose.BackHandler(enabled = viewing != null || viewingCached != null || selecting) {
         when {
             viewing != null -> viewing = null
             viewingCached != null -> viewingCached = null
@@ -112,7 +112,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
     viewing?.let { r ->
         val local = remember(r) { store.asLocal(r) }
         PreviewSurface {
-            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().then(back)) {
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
                 LocalFileViewer(local, subtitle = listOf(Formatters.bytes(r.size), stringResource(R.string.viewer_saved_copy)).joinToString(" · "), onBack = { viewing = null })
             }
         }
@@ -121,7 +121,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
     viewingCached?.let { c ->
         val local = remember(c) { store.asLocal(c) }
         PreviewSurface {
-            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().then(back)) {
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
             LocalFileViewer(
                 local,
                 subtitle = listOfNotNull(c.source?.let(::previewFolder), Formatters.bytes(c.size), stringResource(R.string.viewer_temp_copy)).joinToString(" · "),

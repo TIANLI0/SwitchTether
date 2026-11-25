@@ -243,7 +243,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
         }
     }
     viewingFile?.let { ref ->
-        io.github.tianli0.switchtether.ui.common.AppFullScreenDialog(onDismissRequest = { viewingFile = null }) {
+        io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
             Box(
                 Modifier.fillMaxSize()
                     .background(io.github.tianli0.coui17.patterns.pageContainerColor())

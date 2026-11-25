@@ -142,8 +142,8 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
     GitNoticeHost(state, vm)
     val detail = state.gitDiff ?: state.gitShow
     if (detail != null) {
-        val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack { vm.closeGitDetail() }
-        Column(Modifier.fillMaxSize().then(back)) {
+        androidx.activity.compose.BackHandler { vm.closeGitDetail() }
+        Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), vm::closeGitDetail)
                 Text(

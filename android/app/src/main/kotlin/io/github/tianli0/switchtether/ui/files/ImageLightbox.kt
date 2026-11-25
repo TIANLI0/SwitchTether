@@ -120,7 +120,7 @@ fun ImageLightbox(
     loadBytes: (suspend (String) -> ByteArray?)? = null,
 ) {
     if (images.isEmpty()) return
-    io.github.tianli0.switchtether.ui.common.AppFullScreenDialog(onDismissRequest = onDismiss) {
+    io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = onDismiss) {
         LightboxContent(images, startIndex.coerceIn(0, images.lastIndex), onDismiss, loadBytes)
     }
 }
