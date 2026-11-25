@@ -441,7 +441,7 @@ impl ProcessTree {
         }
         let _ = child.start_kill();
         let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
-        drop(self);
+        // `self` (on Windows the job handle, closed by its Drop) goes out of scope here.
     }
 }
 
