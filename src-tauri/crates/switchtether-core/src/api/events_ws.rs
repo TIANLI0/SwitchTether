@@ -16,6 +16,8 @@ use super::{ApiContext, AuthDevice};
 use crate::events::Replay;
 
 pub const PING_TIMEOUT: Duration = Duration::from_secs(60);
+/// How often the server pings the phone (well inside [PING_TIMEOUT] and the relay's idle limit).
+pub const SERVER_PING_INTERVAL: Duration = Duration::from_secs(20);
 pub const CLOSE_REVOKED: u16 = 4403;
 pub const CLOSE_IDLE: u16 = 4408;
 
@@ -90,8 +92,22 @@ async fn run(ctx: Arc<ApiContext>, dev: AuthDevice, q: EventsQuery, mut socket: 
     }
 
     let mut deadline = tokio::time::Instant::now() + PING_TIMEOUT;
+    // Our own keepalive: a phone whose CPU sleeps cannot run its ping timer, but an incoming
+    // packet wakes it long enough for its WebSocket stack to answer a Ping frame with a Pong
+    // (any client does so without application code). That Pong counts as traffic below, so a
+    // healthy socket survives the phone's sleep instead of being closed as idle every minute.
+    let mut keepalive = tokio::time::interval_at(
+        tokio::time::Instant::now() + SERVER_PING_INTERVAL,
+        SERVER_PING_INTERVAL,
+    );
+    keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
+            _ = keepalive.tick() => {
+                if socket.send(Message::Ping(Vec::new())).await.is_err() {
+                    return;
+                }
+            }
             _ = dev.peer.cancel.cancelled() => {
                 let code = if ctx.registry.device_by_fingerprint(&dev.peer.fingerprint).is_none() {
                     CLOSE_REVOKED

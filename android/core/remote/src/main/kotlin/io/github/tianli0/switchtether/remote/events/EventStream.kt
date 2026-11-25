@@ -5,8 +5,10 @@ import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.obj
 import io.github.tianli0.switchtether.remote.protocol.str
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
@@ -119,9 +121,21 @@ class EventStreamClient(
      * announced that much too late. Tear it down so the connection loop reconnects at once.
      */
     private val stallTimeoutMs: Long = 50_000,
-    private val nowMs: () -> Long = System::currentTimeMillis,
+    /** How long one ping may go unanswered once the socket is suspect (silence, network change). */
+    private val probeTimeoutMs: Long = 10_000,
+    /**
+     * Monotonic, and must not run on while the CPU sleeps (Android's `System.nanoTime` is
+     * CLOCK_MONOTONIC): our own ping timer is paused then too, so wall-clock time would read the
+     * phone's sleep as a silent server and drop a healthy socket on every wake-up.
+     */
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
-    fun connect(cursor: StreamCursor): Flow<StreamSignal> = callbackFlow {
+    /**
+     * [checks]: each element asks "is this socket still alive?" (the network changed): one ping,
+     * and the stream fails if nothing arrives within [probeTimeoutMs]. Cheaper and more accurate
+     * than a REST probe, which over the relay would need a tunnel of its own.
+     */
+    fun connect(cursor: StreamCursor, checks: ReceiveChannel<Unit>? = null): Flow<StreamSignal> = callbackFlow {
         val lastRx = java.util.concurrent.atomic.AtomicLong(nowMs())
         val ws = api.openEvents(cursor.lastSeq, cursor.epoch, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -152,13 +166,23 @@ class EventStreamClient(
         })
         val pinger = launch {
             while (isActive) {
-                delay(pingIntervalMs)
-                if (nowMs() - lastRx.get() > stallTimeoutMs) {
+                val asked = if (checks == null) {
+                    delay(pingIntervalMs)
+                    false
+                } else {
+                    withTimeoutOrNull(pingIntervalMs) { checks.receive() } != null
+                }
+                ws.send("""{"type":"ping"}""")
+                if (!asked && nowMs() - lastRx.get() <= stallTimeoutMs) continue
+                // Suspect: confirm with the ping just sent before giving up on the socket (after a
+                // freeze or a long sleep it is usually still fine, and reconnecting costs far more).
+                val sentAt = nowMs()
+                delay(probeTimeoutMs)
+                if (lastRx.get() < sentAt) {
                     trySend(StreamSignal.Failure(java.io.IOException("event stream stalled (no pong)"), null, null))
                     channel.close()
                     break
                 }
-                ws.send("""{"type":"ping"}""")
             }
         }
         awaitClose {

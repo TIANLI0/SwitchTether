@@ -159,7 +159,14 @@ delivered to every device; `command.completed` only to the device that issued th
 - Clients de-duplicate by `seq` and apply in order; out-of-order frames cannot occur on
   one socket, but clients must tolerate duplicates after reconnect.
 - Server closes the socket with code `4401` (unpaired), `4403` (revoked), `4408` (idle
-  timeout, no ping for 60 s).
+  timeout, nothing received for 60 s).
+- The server also sends a WebSocket Ping frame every 20 s. The client's Pong (sent by any
+  WebSocket stack without application code) counts as traffic, so a socket stays up while the
+  phone's CPU sleeps and its own `ping` timer cannot run.
+- Clients should not take silence measured across their own sleep as a dead socket: the
+  Android client measures silence on a clock that pauses during sleep, and confirms a suspected
+  dead socket with one `ping` (10 s to answer) before reconnecting. After a network change it
+  checks the existing socket the same way instead of opening a new connection.
 
 Topics: `session.upserted`, `session.removed`, `session.event`, `approval.requested`,
 `approval.resolved`, `provider.switched`, `usage.updated`, `terminal.created`,

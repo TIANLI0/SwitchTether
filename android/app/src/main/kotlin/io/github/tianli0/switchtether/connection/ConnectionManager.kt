@@ -26,6 +26,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -152,6 +153,7 @@ class ConnectionManager(
         stop()
         cursor = StreamCursor.INITIAL
         clientFor = null
+        lastViaRelay = false
         _state.value = ConnectionState.Unpaired
     }
 
@@ -160,20 +162,26 @@ class ConnectionManager(
         start()
     }
 
-    /** Network became available / changed: skip remaining backoff or verify active socket. */
+    /**
+     * Network became available / changed: skip remaining backoff, or check the live socket. The
+     * check is one ping on the event stream itself (it fails the stream when unanswered): a REST
+     * probe would need a connection of its own, which over the relay means a new tunnel that rarely
+     * fits a short timeout — that used to tear down healthy relay connections on every
+     * mobile-network capability update.
+     */
     fun onNetworkAvailable() {
-        val currentApi = apiOrNull()
-        if (currentApi != null) {
-            scope.launch {
-                val alive = withTimeoutOrNull(3_000) { runCatching { currentApi.hello() }.isSuccess } ?: false
-                // Only the connection that was probed: a reconnect meanwhile has a socket of its own.
-                if (!alive && api === currentApi) {
-                    streamJob?.cancel()
-                }
-            }
+        if (apiOrNull() != null) {
+            streamChecks.trySend(Unit)
+            return
         }
         retryNow()
     }
+
+    /** Liveness checks for the current event stream (conflated: one pending check is enough). */
+    private val streamChecks = Channel<Unit>(Channel.CONFLATED)
+
+    /** The last connection went through the relay: try it right away next time (see [connectOnce]). */
+    @Volatile private var lastViaRelay = false
 
     /** One-shot bounded connection probe for background WorkManager recovery. */
     suspend fun probeOnce(timeoutMs: Long = 15_000L): Boolean {
@@ -285,7 +293,37 @@ class ConnectionManager(
         val ordered = desktop.orderedHosts()
             .let { if (lanAllowed) it else io.github.tianli0.switchtether.remote.pairing.LocalNetwork.withoutLocal(it) }
             .map { Endpoint(it, desktop.port) }
-        val (endpoint, hello) = try {
+        // Relay path, built on demand (null: no relay configured, or its key cannot be opened).
+        val relayClient: OkHttpClient? by lazy {
+            val secret = relaySecrets.open(desktop)
+            io.github.tianli0.switchtether.remote.relay.RelayConfig.parseOrNull(desktop.relayUrl, secret?.token, secret?.key)?.let { relay ->
+                TlsClientFactory.create(
+                    identity,
+                    desktop.fingerprint,
+                    base = io.github.tianli0.switchtether.remote.relay.relayBaseClient(baseClient, relay, desktop.fingerprint, baseClient),
+                    connectTimeoutMs = 15_000,
+                )
+            }
+        }
+        val relayEp = Endpoint(io.github.tianli0.switchtether.remote.relay.RELAY_HOST, 443)
+
+        // Away from home the relay is what worked last time: start it at once next to a short direct
+        // attempt instead of after every direct host and LAN discovery failed (16 s and more). A
+        // direct host that answers quickly still wins, so coming home switches back to the LAN.
+        val early: Pair<Endpoint, Hello>? = if (lastViaRelay && relayClient != null) coroutineScope {
+            val viaRelay = async { runCatching { makeApiFor(relayClient!!)(relayEp).hello() }.getOrNull() }
+            val direct = if (ordered.isEmpty()) null else withTimeoutOrNull(3_000) {
+                runCatching { HostRace.first(ordered, perHostTimeoutMs = 3_000) { ep -> makeApi(ep).hello() } }.getOrNull()
+            }
+            if (direct != null) {
+                viaRelay.cancel()
+                direct
+            } else {
+                viaRelay.await()?.let { h -> pathClient = relayClient!!; relayEp to h }
+            }
+        } else null
+
+        val (endpoint, hello) = if (early != null) early else try {
             if (ordered.isEmpty()) throw NoReachableHostException(emptyList())
             val first = ordered.first()
             val quick = withTimeoutOrNull(3_000) { runCatching { makeApi(first).hello() }.getOrNull() }
@@ -312,18 +350,10 @@ class ConnectionManager(
                 lan
             } else {
                 // No relay key (or it cannot be opened): the relay would refuse us; do not try.
-                val secret = relaySecrets.open(desktop)
-                val relay = io.github.tianli0.switchtether.remote.relay.RelayConfig.parseOrNull(desktop.relayUrl, secret?.token, secret?.key)
-                    ?: return Outcome.Failed(direct)
-                val relayClient = TlsClientFactory.create(
-                    identity,
-                    desktop.fingerprint,
-                    base = io.github.tianli0.switchtether.remote.relay.relayBaseClient(baseClient, relay, desktop.fingerprint, baseClient),
-                    connectTimeoutMs = 15_000,
-                )
-                val ep = Endpoint(io.github.tianli0.switchtether.remote.relay.RELAY_HOST, 443)
+                val viaRelay = relayClient ?: return Outcome.Failed(direct)
+                val ep = relayEp
                 val h = try {
-                    makeApiFor(relayClient)(ep).hello()
+                    makeApiFor(viaRelay)(ep).hello()
                 } catch (re: Exception) {
                     if (re is CancellationException) throw re
                     if (re.causeChain().any { it is io.github.tianli0.switchtether.remote.tls.PinMismatchException }) {
@@ -331,7 +361,7 @@ class ConnectionManager(
                     }
                     return Outcome.Failed("$direct; relay: ${describe(re)}")
                 }
-                pathClient = relayClient
+                pathClient = viaRelay
                 ep to h
             }
         }
@@ -348,6 +378,7 @@ class ConnectionManager(
             null
         }
         val viaRelay = endpoint.host == io.github.tianli0.switchtether.remote.relay.RELAY_HOST
+        lastViaRelay = viaRelay
         pairingStore.current()?.let { cur ->
             val updated = refreshedAddresses(cur, status, if (viaRelay) null else endpoint.host)
             if (updated != cur) pairingStore.save(updated)
@@ -367,9 +398,10 @@ class ConnectionManager(
 
         // Event stream; returns when the socket ends.
         var opened = false
+        streamChecks.tryReceive() // a check meant for the previous socket
         coroutineScope {
             val j = launch {
-        EventStreamClient(remote).connect(cursor).collect { signal ->
+        EventStreamClient(remote).connect(cursor, streamChecks).collect { signal ->
             when (signal) {
                 StreamSignal.Opened -> opened = true
                 is StreamSignal.Frame -> {

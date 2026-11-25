@@ -213,8 +213,13 @@ class AppContainer(private val context: Context) {
         }
     }
 
+    /** Pending "stop the connection" after leaving the app without the monitor service. */
+    private var backgroundStop: kotlinx.coroutines.Job? = null
+
     fun onForeground() {
         isForeground = true
+        backgroundStop?.cancel()
+        backgroundStop = null
         network.start()
         connection.start()
         appScope.launch {
@@ -228,10 +233,18 @@ class AppContainer(private val context: Context) {
 
     fun onBackground() {
         isForeground = false
-        // With the monitor service running the connection stays up; otherwise nothing runs in background.
+        // With the monitor service running the connection stays up; otherwise nothing runs in
+        // background — after a short grace, so a quick look at another app (copying a code, a
+        // glance at a message) does not cost a full reconnect, which via the relay takes seconds.
         if (!serviceRunning) {
-            network.stop()
-            connection.stop()
+            backgroundStop?.cancel()
+            backgroundStop = appScope.launch {
+                kotlinx.coroutines.delay(BACKGROUND_GRACE_MS)
+                if (!isForeground && !serviceRunning) {
+                    network.stop()
+                    connection.stop()
+                }
+            }
         } else {
             appScope.launch {
                 if (!isForeground && !wantsMonitor()) io.github.tianli0.switchtether.notify.MonitorService.stop(context)
@@ -437,4 +450,9 @@ class AppContainer(private val context: Context) {
     fun pairingStoreStepUpEnabled(): Boolean = stepUpEnabledCache
 
     val deviceName: String get() = listOf(Build.MANUFACTURER, Build.MODEL).filter { it.isNotBlank() }.distinct().joinToString(" ").ifEmpty { "Android" }
+
+    private companion object {
+        /** Connection kept after leaving the app when nothing else keeps it (below the desktop's 60 s idle close). */
+        const val BACKGROUND_GRACE_MS = 45_000L
+    }
 }
