@@ -604,3 +604,32 @@ Checks: Android `:core:remote:test testDebugUnitTest :app:assembleDebug` — app
 failures. Emulator (software GPU, animations slowed 5x): push / pop (button and back key), bar show / hide,
 dark page checked. Not verifiable on the emulator: every glass material (rims, inner fades, blur tints);
 needs the user's OPPO phone. Switch size left unchanged until measured on the device.
+
+## Codex / Codex Desktop / Claude Code parity (2026-11-25)
+
+- One permission-mode vocabulary for every agent (`agents::permission`): served as `permissionModes` by
+  `GET /v1/agents/{agent}/models` and the session detail; accepted by `POST /v1/sessions`, `POST …/options`
+  (`permissionMode`) and the `permission_mode` tool. Claude Code: `default`, `acceptEdits`, `plan`, `auto`,
+  `dontAsk`, `bypassPermissions`; Codex: `default`, `plan` (collaboration mode), `auto` (auto review), `readOnly`,
+  `untrusted`, `bypassPermissions` (full access). Bypass needs the terminal step-up; managed Claude Code starts with
+  `--allow-dangerously-skip-permissions` so it can be switched to mid-session.
+- Codex session tools at the Claude paths (`commands`, `permission_mode`, `context_usage`, `mcp_status`, `rename`);
+  `/compact`, `/review`, `/goal`, `/plan`, `/rename`, `/status`, `/mcp` and skills from the phone.
+- Codex 0.171 protocol: streamed reasoning and plan, `dynamicToolCall`, review mode, hook prompts, warnings,
+  model reroutes, goals, auto-review results, `thread/settings/updated`, cache-write tokens; resume with `excludeTurns`.
+- Taken-over VS Code panels and Codex Desktop threads: model / effort / permission mode from the phone, changes in
+  the window followed; a closed window's conversation resumes on the next phone message under the same id.
+- Old Codex / Codex Desktop history: Codex compresses inactive rollouts to `rollout-*.jsonl.zst`; they are now
+  opened, searched, continued and found by thread id (also in `archived_sessions`), not only the recent plain ones.
+  Real-data check (read-only, ignored test `real_codex_history_reads`): 247 rollouts, 240 compressed, 0 failures.
+- Codex model change mid-session verified live (`codex_model_smoke`).
+- Choices made on the computer are shown on the phone: AskUserQuestion answers from transcripts and from the VS Code
+  panel, Codex Desktop approvals and answers.
+- Android: permission modes from the desktop in the launcher and the session (confirmation + fingerprint for bypass),
+  per-agent remembered start mode, Codex slash commands, model change for taken-over sessions.
+
+Evidence: live `codex_smoke` (codex 0.171, real login, scratch folder) — 20/20 checks; live `claude_modes_smoke`
+(Claude Code 2.1.325, haiku) — 8/8 checks incl. switching to `bypassPermissions` mid-session. Unit / integration:
+core 193 + attach 6 + e2e 17, desktop glue 10, Android unit tests, vitest config 1262. Not verified live: Codex
+`auto` / `readOnly` modes, `/goal`, skills; a real VS Code panel / Codex Desktop window behind the shim; the phone UI on
+a device.

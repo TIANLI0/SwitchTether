@@ -17,6 +17,7 @@ pub mod dsh;
 pub mod managed;
 pub mod model;
 pub mod model_probe;
+pub mod permission;
 pub mod search;
 pub mod store;
 
@@ -399,7 +400,7 @@ impl AgentHub {
                     .find(|s| s.provider_id == "codex" && s.session_id == native_id)
                     .and_then(|s| s.source_path.clone())
                     .map(PathBuf::from)
-                    .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+                    .filter(|p| is_rollout_file(p) && p.exists())
             }
             _ => None,
         }?;
@@ -907,7 +908,8 @@ impl AgentHub {
                         .source_path
                         .clone()
                         .map(PathBuf::from)
-                        .filter(|p| p.extension().is_some_and(|e| e == "jsonl")),
+                        .filter(|p| is_rollout_file(p) && p.exists())
+                        .or_else(|| find_codex_rollout(&s.native_id)),
                     "dsh" => dsh_log_path(&s),
                     _ => None,
                 }?;
@@ -1130,11 +1132,16 @@ impl AgentHub {
                     None => None,
                 }
             }
-            "codex" => match s.source_path.clone().map(PathBuf::from) {
-                Some(p) if p.extension().is_some_and(|e| e == "jsonl") => {
-                    Some(load_file(&p, Box::new(CodexParser::new()), &log)?)
-                }
-                _ => None,
+            // Codex compresses older rollouts (`rollout-*.jsonl.zst`): those are history too.
+            "codex" => match s
+                .source_path
+                .clone()
+                .map(PathBuf::from)
+                .filter(|p| is_rollout_file(p) && p.exists())
+                .or_else(|| find_codex_rollout(&s.native_id))
+            {
+                Some(p) => Some(load_file(&p, Box::new(CodexParser::new()), &log)?),
+                None => None,
             },
             "dsh" => match dsh_log_path(s) {
                 Some(p) => Some(load_file(&p, Box::new(DshParser::new()), &log)?),
@@ -1232,12 +1239,22 @@ impl AgentHub {
         v["capabilities"] = json!(self.capabilities_for(&s));
         v["pendingRequests"] = json!(pending);
         v["eventCount"] = json!(log.lock().len());
-        if let Some((_, m)) = self.find_managed(id) {
+        if let Some((_, m)) = self
+            .find_managed(id)
+            .filter(|(_, m)| m.liveness() == Liveness::Live)
+        {
             // Claude Code session tools (permission mode, context, plan, …) for a process
             // SwitchTether started; see `claude_tool`.
             if m.supports_claude_tools() {
                 v["claudeTools"] = json!(true);
+            }
+            // Other agents' session tools (Codex): the actions `claude_tool` answers for them.
+            if !m.session_tools().is_empty() {
+                v["sessionTools"] = json!(m.session_tools());
+            }
+            if m.can_change_permission_mode() {
                 v["permissionMode"] = json!(m.permission_mode());
+                v["permissionModes"] = permission::modes(m.agent());
             }
         }
         if v.get("claudeTools").is_none() && s.agent == "claude_code" {
@@ -1250,6 +1267,10 @@ impl AgentHub {
             let resumable = self.resumable(id).await.is_some();
             v["resumable"] = json!(resumable);
             if resumable {
+                let modes = permission::modes(&s.agent);
+                if modes.as_array().is_some_and(|a| !a.is_empty()) {
+                    v["permissionModes"] = modes;
+                }
                 if let Some(n) = self.next_start.lock().get(id) {
                     v["nextStart"] = json!({
                         "model": n.model, "effort": n.effort, "permissionMode": n.permission_mode,
@@ -1403,6 +1424,18 @@ impl AgentHub {
     /// whitelisted control request; responses are reduced to the fields the phone shows (never
     /// MCP configuration, which can hold secrets) and texts are redacted.
     pub async fn claude_tool(&self, id: &str, action: &str, p: &Value) -> ApiResult<Value> {
+        // Codex (and any other agent with session tools of its own): same paths and replies.
+        if let Some((_, m)) = self.find_managed(id).filter(|(_, m)| {
+            !m.supports_claude_tools()
+                && m.liveness() == Liveness::Live
+                && m.session_tools().contains(&action)
+        }) {
+            let r = m.session_tool(action, p).await?;
+            return Ok(match action {
+                "commands" => command_catalog(claude::managed::normalize_commands(&r)),
+                _ => r,
+            });
+        }
         let live = self
             .find_managed(id)
             .map(|(_, m)| m)
@@ -1435,20 +1468,8 @@ impl AgentHub {
             // is sent. A command is run by sending "/name args" as an ordinary message.
             "commands" => Ok(command_catalog(m.claude_commands())),
             "permission_mode" => {
-                let mode = arg("mode")?;
-                if !matches!(
-                    mode.as_str(),
-                    "default" | "acceptEdits" | "plan" | "bypassPermissions" | "auto" | "dontAsk"
-                ) {
-                    return Err(ApiError::validation("unknown permission mode"));
-                }
-                let r = m
-                    .claude_control(
-                        json!({ "subtype": "set_permission_mode", "mode": mode }),
-                        short,
-                    )
-                    .await?;
-                Ok(json!({ "mode": r.get("mode").cloned().unwrap_or(json!(mode)) }))
+                let mode = m.set_permission_mode(&arg("mode")?).await?;
+                Ok(json!({ "mode": mode }))
             }
             "context_usage" => {
                 let r = m
@@ -1654,7 +1675,10 @@ impl AgentHub {
         };
         // Not running, but a message from the phone would resume it under SwitchTether: no list
         // yet, the phone falls back to its built-in one.
-        if action == "commands" && s.agent == "claude_code" && self.resumable(id).await.is_some() {
+        if action == "commands"
+            && matches!(s.agent.as_str(), "claude_code" | "codex")
+            && self.resumable(id).await.is_some()
+        {
             return Ok(command_catalog(Vec::new()));
         }
         // Not running: the permission mode is kept for the resume a message starts.
@@ -1662,17 +1686,7 @@ impl AgentHub {
             let mode = p
                 .get("mode")
                 .and_then(Value::as_str)
-                .filter(|m| {
-                    matches!(
-                        *m,
-                        "default"
-                            | "acceptEdits"
-                            | "plan"
-                            | "bypassPermissions"
-                            | "auto"
-                            | "dontAsk"
-                    )
-                })
+                .and_then(|m| permission::normalize(&s.agent, m))
                 .ok_or_else(|| ApiError::validation("unknown permission mode"))?;
             self.next_start
                 .lock()
@@ -2088,10 +2102,23 @@ impl AgentHub {
             Some((s, false)) => Some(s.native_id.clone()),
             _ => None,
         });
-        let id = match &known_native {
-            Some(n) => public_id(&req.agent, n),
+        // Continuing (not forking) the conversation of a window that was closed (a VS Code panel
+        // or Codex Desktop attached through the opt-in hook, keyed `attached:…`): the new process
+        // takes over that key, so the page the phone has open keeps following the conversation.
+        let reuse_key = match &continue_from {
+            Some((s, false)) => self
+                .find_managed(&s.id)
+                .filter(|(k, m)| {
+                    k == &s.id && m.origin() != "managed" && self.resumes_on_send(m.as_ref())
+                })
+                .map(|(k, _)| k),
+            _ => None,
+        };
+        let id = match (&reuse_key, &known_native) {
+            (Some(k), _) => k.clone(),
+            (None, Some(n)) => public_id(&req.agent, n),
             // Codex / dsh name a new conversation when it starts; the session is re-keyed then.
-            None => format!("starting:{}", crate::util::new_id()),
+            (None, None) => format!("starting:{}", crate::util::new_id()),
         };
         let log = Arc::new(Mutex::new(SessionLog::new(
             id.clone(),
@@ -2111,7 +2138,7 @@ impl AgentHub {
                     .source_path
                     .clone()
                     .map(PathBuf::from)
-                    .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+                    .filter(|p| is_rollout_file(p) && p.exists())
                     .or_else(|| find_codex_rollout(&s.native_id))
                     .map(|p| (p, Box::new(CodexParser::new()) as Box<dyn LineParser>)),
                 _ => None,
@@ -2144,13 +2171,16 @@ impl AgentHub {
                     ApiError::validation("Claude Code (`claude`) was not found on this computer")
                 })?;
                 let permission_mode = match req.permission_mode.as_deref() {
-                    None | Some("default") => None,
-                    Some(m @ ("acceptEdits" | "plan")) => Some(m.to_string()),
-                    Some(_) => {
-                        return Err(ApiError::validation(
-                            "permissionMode must be default, acceptEdits or plan",
-                        ))
-                    }
+                    None => None,
+                    Some(m) => match permission::normalize("claude_code", m) {
+                        Some("default") => None,
+                        Some(m) => Some(m.to_string()),
+                        None => {
+                            return Err(ApiError::validation(
+                                "unknown permissionMode for Claude Code",
+                            ))
+                        }
+                    },
                 };
                 // Files attached from the phone are readable without a permission prompt.
                 let add_dirs: Vec<PathBuf> = self
@@ -2192,22 +2222,18 @@ impl AgentHub {
                 let bin = self.codex_bin.clone().ok_or_else(|| {
                     ApiError::validation("Codex (`codex`) was not found on this computer")
                 })?;
-                let approval_policy = match req.permission_mode.as_deref() {
-                    None | Some("default") | Some("on-request") => "on-request",
-                    Some("untrusted") => "untrusted",
-                    Some(_) => {
-                        return Err(ApiError::validation(
-                            "permissionMode for codex must be default, on-request or untrusted",
-                        ))
-                    }
-                };
+                let permission_mode = permission::normalize(
+                    "codex",
+                    req.permission_mode.as_deref().unwrap_or("default"),
+                )
+                .ok_or_else(|| ApiError::validation("unknown permissionMode for Codex"))?;
                 ManagedCodex::spawn(
                     id.clone(),
                     ManagedCodexOptions {
                         codex_bin: bin,
                         cwd,
                         model: req.model.clone(),
-                        approval_policy: approval_policy.into(),
+                        permission_mode: permission_mode.into(),
                         resume_thread,
                         effort: req.effort.clone(),
                     },
@@ -2281,7 +2307,7 @@ impl AgentHub {
     /// (`claude --resume <id>`, `thread/resume`, `session/resume`) and keeps its id.
     async fn session_for_send(&self, id: &str) -> ApiResult<Arc<dyn ManagedSession>> {
         if let Some((_, m)) = self.find_managed(id) {
-            if m.liveness() == Liveness::Live || m.origin() != "managed" {
+            if m.liveness() == Liveness::Live || !self.resumes_on_send(m.as_ref()) {
                 return Ok(m);
             }
         }
@@ -2307,6 +2333,16 @@ impl AgentHub {
         self.managed_or_blocked(id)
     }
 
+    /// An ended session whose conversation a message resumes in a process SwitchTether starts:
+    /// its own managed runs, and sessions of a window that was closed (a VS Code panel or Codex
+    /// Desktop attached through the opt-in hook) once the conversation has an id. A mirrored
+    /// terminal is not resumed here: its conversation id may never have been matched.
+    fn resumes_on_send(&self, m: &dyn ManagedSession) -> bool {
+        m.liveness() != Liveness::Live
+            && m.terminal_id().is_none()
+            && m.native_session_id().is_some_and(|n| !n.is_empty())
+    }
+
     /// History of an agent SwitchTether can resume: not running anywhere, agent installed.
     async fn resumable(&self, id: &str) -> Option<SessionSummary> {
         let s = self.summary(id).await?;
@@ -2329,6 +2365,17 @@ impl AgentHub {
         id: &str,
         model: Option<String>,
         effort: Option<String>,
+    ) -> ApiResult<SessionSummary> {
+        self.set_session_options(id, model, effort, None).await
+    }
+
+    /// [`Self::set_options`] with a permission mode too (`crate::agents::permission` ids).
+    pub async fn set_session_options(
+        &self,
+        id: &str,
+        model: Option<String>,
+        effort: Option<String>,
+        permission_mode: Option<String>,
     ) -> ApiResult<SessionSummary> {
         let live = self
             .find_managed(id)
@@ -2366,6 +2413,13 @@ impl AgentHub {
             {
                 return Err(ApiError::validation("invalid effort level for this agent"));
             }
+            let mode = match permission_mode.as_deref() {
+                None => None,
+                Some(m) => Some(
+                    permission::normalize(&s.agent, m)
+                        .ok_or_else(|| ApiError::validation("unknown permission mode"))?,
+                ),
+            };
             let mut pending = self.next_start.lock();
             let entry = pending.entry(id.to_string()).or_default();
             if let Some(m) = model {
@@ -2374,11 +2428,23 @@ impl AgentHub {
             if let Some(e) = effort {
                 entry.effort = e;
             }
+            if let Some(m) = mode {
+                entry.permission_mode = Some(m.to_string()).filter(|m| m != "default");
+            }
             s.model = entry.model.clone().or(s.model);
             s.effort = entry.effort.clone();
             return Ok(s);
         };
-        if !m.can_change_model() {
+        if let Some(mode) = permission_mode.as_deref() {
+            if !m.can_change_permission_mode() {
+                return Err(ApiError::unavailable_capability(
+                    "BLOCKED",
+                    "This session cannot change its permission mode from the phone.",
+                ));
+            }
+            m.set_permission_mode(mode).await?;
+        }
+        if (model.is_some() || effort.is_some()) && !m.can_change_model() {
             return Err(ApiError::unavailable_capability(
                 "BLOCKED",
                 ATTACHED_MODEL_REASON,
@@ -2419,7 +2485,10 @@ impl AgentHub {
             // own list, read by a short probe and cached.
             reported = self.agent_model_list(agent).await;
         }
-        model_catalog(agent, &reported)
+        let mut v = model_catalog(agent, &reported);
+        // The permission modes the launcher offers for this agent (same ids for every agent).
+        v["permissionModes"] = permission::modes(agent);
+        v
     }
 
     /// The agent's official model list (see `model_probe`), cached for 30 minutes; a failed probe
@@ -2459,7 +2528,7 @@ impl AgentHub {
     /// SwitchTether's control, or it is a conversation SwitchTether resumes on the first message.
     pub async fn ensure_can_send(&self, id: &str) -> ApiResult<()> {
         if let Some((_, m)) = self.find_managed(id) {
-            if m.liveness() == Liveness::Live || m.origin() != "managed" {
+            if m.liveness() == Liveness::Live || !self.resumes_on_send(m.as_ref()) {
                 return Ok(());
             }
         }
@@ -3360,10 +3429,37 @@ fn nested_under(lg: &SessionLog, root: &str) -> Vec<model::AgentEvent> {
         .collect()
 }
 
-/// A Codex child thread's own rollout, if Codex wrote one (`rollout-<time>-<thread id>.jsonl`).
+/// A transcript / rollout file SwitchTether can read: plain JSONL, or zstd-compressed (Codex
+/// compresses older rollouts to `.jsonl.zst`; DeepSeek Harness writes `.jsonl.zstd`).
+pub(crate) fn is_rollout_file(p: &Path) -> bool {
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    name.ends_with(".jsonl") || name.ends_with(".jsonl.zst") || name.ends_with(".jsonl.zstd")
+}
+
+/// Whether a log is zstd-compressed (read from its start, frame by frame).
+pub(crate) fn is_zstd_file(p: &Path) -> bool {
+    p.extension().is_some_and(|e| e == "zstd" || e == "zst")
+}
+
+/// A Codex thread's own rollout (`rollout-<time>-<thread id>.jsonl`, or `.jsonl.zst` once Codex
+/// compressed it), searched under `$CODEX_HOME/sessions` and `archived_sessions`.
 fn find_codex_rollout(thread_id: &str) -> Option<PathBuf> {
-    let root = codex::codex_home().join("sessions");
-    let suffix = format!("-{thread_id}.jsonl");
+    if thread_id.is_empty()
+        || !thread_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return None;
+    }
+    let home = codex::codex_home();
+    find_rollout_in(&home.join("sessions"), thread_id)
+        .or_else(|| find_rollout_in(&home.join("archived_sessions"), thread_id))
+}
+
+fn find_rollout_in(root: &Path, thread_id: &str) -> Option<PathBuf> {
+    let root = root.to_path_buf();
+    let plain = format!("-{thread_id}.jsonl");
+    let packed = format!("-{thread_id}.jsonl.zst");
     // sessions/YYYY/MM/DD/: newest days first, bounded walk.
     let mut dirs = vec![root];
     let mut seen = 0;
@@ -3380,11 +3476,9 @@ fn find_codex_rollout(thread_id: &str) -> Option<PathBuf> {
             let p = e.path();
             if p.is_dir() {
                 subdirs.push(p);
-            } else if p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(&suffix))
-            {
+            } else if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                n.starts_with("rollout-") && (n.ends_with(&plain) || n.ends_with(&packed))
+            }) {
                 return Some(p);
             }
         }
@@ -3511,7 +3605,7 @@ fn load_file(
 ) -> ApiResult<Tail> {
     let meta =
         std::fs::metadata(path).map_err(|_| ApiError::not_found("transcript file not found"))?;
-    let zstd = path.extension().is_some_and(|e| e == "zstd");
+    let zstd = is_zstd_file(path);
     // A zstd log can only be read from a frame boundary: always from the start.
     let start = if zstd {
         0
@@ -3539,7 +3633,7 @@ fn load_file(
 impl Tail {
     /// Follows `path` from its start (a zstd log is decoded frame by frame).
     pub(crate) fn new(path: PathBuf, parser: Box<dyn LineParser>) -> Self {
-        let zstd = path.extension().is_some_and(|e| e == "zstd");
+        let zstd = is_zstd_file(&path);
         Self {
             path,
             offset: 0,
@@ -4545,6 +4639,75 @@ mod tests {
         let c = model_catalog("codex", &reported);
         assert_eq!(c["models"][0]["id"], "gpt-5");
         assert_eq!(c["models"][0]["efforts"], json!(["low", "high"]));
+    }
+
+    /// Manual check against the real Codex history of this machine (read-only):
+    /// `cargo test -p switchtether-core --lib real_codex_history -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_codex_history_reads() {
+        let home = codex::codex_home();
+        let mut files = Vec::new();
+        let mut dirs = vec![home.join("sessions"), home.join("archived_sessions")];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if is_rollout_file(&p) {
+                    files.push(p);
+                }
+            }
+        }
+        let (mut ok, mut empty, mut failed, mut zst) = (0, 0, 0, 0);
+        for f in &files {
+            zst += usize::from(is_zstd_file(f));
+            let log = Arc::new(Mutex::new(SessionLog::new("codex:x", None)));
+            match load_file(f, Box::new(CodexParser::new()), &log) {
+                Ok(_) if log.lock().iter().any(|e| e.kind == "user_message") => ok += 1,
+                Ok(_) => empty += 1,
+                Err(e) => {
+                    failed += 1;
+                    println!("FAILED {}: {e}", f.display());
+                }
+            }
+        }
+        println!("rollouts={} (zst={zst}) with messages={ok} without user messages={empty} failed={failed}", files.len());
+        assert_eq!(failed, 0);
+    }
+
+    /// Codex compresses older rollouts (`.jsonl.zst`): they are found by thread id and read like
+    /// plain ones, so old Codex Desktop history opens on the phone too.
+    #[test]
+    fn compressed_codex_rollouts_are_found_and_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("2026").join("05").join("07");
+        std::fs::create_dir_all(&day).unwrap();
+        let id = "019e019e-e16e-7f00-9e83-0cc33caa5dfe";
+        let text = concat!(
+            r#"{"timestamp":"2026-05-07T08:47:30Z","type":"session_meta","payload":{"id":"019e019e-e16e-7f00-9e83-0cc33caa5dfe","cwd":"D:/w"}}"#,
+            "
+",
+            r#"{"timestamp":"2026-05-07T08:47:31Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"old question"}]}}"#,
+            "
+",
+            r#"{"timestamp":"2026-05-07T08:47:35Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"old answer"}]}}"#,
+            "
+",
+        );
+        let path = day.join(format!("rollout-2026-05-07T16-47-30-{id}.jsonl.zst"));
+        std::fs::write(&path, zstd::stream::encode_all(text.as_bytes(), 3).unwrap()).unwrap();
+        assert!(is_rollout_file(&path) && is_zstd_file(&path));
+        assert_eq!(find_rollout_in(dir.path(), id), Some(path.clone()));
+        let log = Arc::new(Mutex::new(SessionLog::new("codex:x", None)));
+        load_file(&path, Box::new(CodexParser::new()), &log).unwrap();
+        let texts: Vec<String> = log
+            .lock()
+            .iter()
+            .filter(|e| e.kind == "user_message" || e.kind == "assistant_message")
+            .map(|e| e.data["text"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(texts, ["old question", "old answer"]);
     }
 
     #[test]

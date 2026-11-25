@@ -222,11 +222,11 @@ async fn claude_stream_session_is_controllable() {
     assert_eq!(env.hub.managed_count(), 0);
 }
 
-/// What a taken-over session advertises about its model and what `POST …/options` does agree:
-/// the IDE owns model and effort, so the capability is BLOCKED, the request is refused with
-/// `capability_unavailable`, and nothing is injected into the user's process.
+/// A taken-over VS Code panel can change model and effort from the phone: the same
+/// `set_model` / `apply_flag_settings` control requests the IDE sends go through the shim, and a
+/// change made in the IDE itself is followed (the phone shows what the window uses).
 #[tokio::test(flavor = "multi_thread")]
-async fn attached_claude_session_capability_matches_model_change() {
+async fn attached_claude_session_changes_model_and_follows_the_ide() {
     let env = setup().await;
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
     let (mut shim, ack) = Shim::connect(
@@ -248,31 +248,108 @@ async fn attached_claude_session_capability_matches_model_change() {
     let id = id.expect("attached session listed");
 
     let detail = env.hub.detail(&id).await.unwrap();
-    let caps = &detail["capabilities"];
-    assert_eq!(caps["sendMessage"], "PARTIAL", "still controllable");
-    assert_eq!(caps["changeModel"], "BLOCKED");
-    let reason = caps["reason"].as_str().expect("a reason is given");
+    assert_eq!(detail["capabilities"]["changeModel"], "PARTIAL");
+    let modes: Vec<&str> = detail["permissionModes"]
+        .as_array()
+        .expect("permission modes offered")
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+    assert!(modes.contains(&"bypassPermissions") && modes.contains(&"auto"));
 
-    for (model, effort) in [
-        (Some("sonnet".to_string()), None),
-        (None, Some("high".to_string())),
+    let out = |v: Value| json!({ "t": "out", "line": v.to_string() });
+    for (model, effort, expect) in [
+        (
+            Some("sonnet".to_string()),
+            None,
+            json!({ "subtype": "set_model", "model": "sonnet" }),
+        ),
+        (
+            None,
+            Some("high".to_string()),
+            json!({ "subtype": "apply_flag_settings", "settings": { "effortLevel": "high" } }),
+        ),
     ] {
-        let err = env.hub.set_options(&id, model, effort).await.unwrap_err();
-        assert_eq!(
-            serde_json::to_value(err.code).unwrap(),
-            "capability_unavailable"
-        );
-        let details = err.details.expect("status and reason");
-        assert_eq!(details["status"], "BLOCKED");
-        assert_eq!(details["reason"], reason, "same reason as advertised");
+        let hub = env.hub.clone();
+        let idc = id.clone();
+        let call = tokio::spawn(async move { hub.set_options(&idc, model, effort).await });
+        let inject = shim.recv().await.expect("control request for the shim");
+        assert_eq!(inject["t"], "inject");
+        let line: Value = serde_json::from_str(inject["line"].as_str().unwrap()).unwrap();
+        assert_eq!(line["type"], "control_request");
+        assert_eq!(line["request"], expect);
+        shim.send(out(json!({ "type": "control_response", "response": {
+            "subtype": "success", "request_id": line["request_id"], "response": {} } })))
+            .await;
+        call.await.unwrap().expect("options applied");
     }
-    // Nothing reached the user's process.
-    let mut l = String::new();
+    let s = env.hub.summary(&id).await.unwrap();
+    assert_eq!(s.model.as_deref(), Some("sonnet"));
+    assert_eq!(s.effort.as_deref(), Some("high"));
+
+    // The IDE switches model, effort and permission mode itself: the phone follows.
+    let host = |v: Value| json!({ "t": "in", "line": v.to_string() });
+    shim.send(host(
+        json!({ "type": "control_request", "request_id": "ide-1",
+        "request": { "subtype": "set_model", "model": "opus" } }),
+    ))
+    .await;
+    shim.send(host(
+        json!({ "type": "control_request", "request_id": "ide-2",
+        "request": { "subtype": "apply_flag_settings", "settings": { "effortLevel": "low" } } }),
+    ))
+    .await;
+    shim.send(host(
+        json!({ "type": "control_request", "request_id": "ide-3",
+        "request": { "subtype": "set_permission_mode", "mode": "acceptEdits" } }),
+    ))
+    .await;
+    let hub = env.hub.clone();
+    let idc = id.clone();
     assert!(
-        tokio::time::timeout(Duration::from_millis(300), shim.rd.read_line(&mut l))
+        wait_for(|| {
+            futures_lite_block(hub.summary(&idc)).is_some_and(|s| {
+                s.model.as_deref() == Some("opus") && s.effort.as_deref() == Some("low")
+            })
+        })
+        .await
+    );
+    let detail = env.hub.detail(&id).await.unwrap();
+    assert_eq!(detail["permissionMode"], "acceptEdits");
+
+    // A question answered in the IDE: the phone's card shows the choice.
+    let q = "Deploy where?";
+    shim.send(out(json!({ "type": "control_request", "request_id": "rq",
+        "request": { "subtype": "can_use_tool", "tool_name": "AskUserQuestion",
+            "input": { "questions": [{ "question": q, "header": "Env", "multiSelect": false,
+                "options": [{ "label": "staging" }, { "label": "prod" }] }] } } })))
+        .await;
+    let hub = env.hub.clone();
+    let idc = id.clone();
+    assert!(
+        wait_for(|| futures_lite_block(hub.summary(&idc)).is_some_and(|s| s.waiting_for.is_some()))
             .await
-            .is_err(),
-        "unexpected frame for the shim: {l}"
+    );
+    shim.send(host(
+        json!({ "type": "control_response", "response": { "subtype": "success",
+        "request_id": "rq", "response": { "behavior": "allow",
+            "updatedInput": { "questions": [], "answers": { q: "prod" } } } } }),
+    ))
+    .await;
+    let hub = env.hub.clone();
+    let idc = id.clone();
+    assert!(
+        wait_for(|| {
+            futures_lite_block(hub.events(&idc, None, None, 500)).is_ok_and(|p| {
+                p["events"].as_array().unwrap().iter().any(|e| {
+                    e["kind"] == "question"
+                        && e["data"]["by"] == "desktop"
+                        && e["data"]["decision"] == "answer"
+                        && e["data"]["answers"][q] == "prod"
+                })
+            })
+        })
+        .await
     );
 }
 

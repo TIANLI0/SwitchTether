@@ -250,22 +250,38 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
   while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
   Session capabilities advertise this as `continueSession: "PARTIAL"`.
+  `permissionMode` (all agents, one vocabulary, `crate::agents::permission`): Claude Code `default | acceptEdits | plan |
+  auto | dontAsk | bypassPermissions` (`--permission-mode`; `manual` is read as `default`); Codex `default | plan | auto |
+  readOnly | untrusted | bypassPermissions` — `default` = workspace-write + `on-request`, `plan` = collaboration mode
+  `plan` on each `turn/start`, `auto` = `approvalsReviewer: "auto_review"`, `readOnly` = read-only sandbox, `untrusted` =
+  approval policy `untrusted`, `bypassPermissions` = `danger-full-access` + `never` ("full access"). Codex also accepts
+  `on-request` / `acceptEdits` (= `default`), `read-only`, `never` / `danger-full-access`. An unknown mode is `422`.
+  **`bypassPermissions` (any spelling) needs the `terminal` step-up grant** (`403 step_up_required`, `details.scope:
+  "terminal"`) here, in `POST …/options` and in the `permission_mode` session tool: it is as powerful as a remote
+  terminal. Managed Claude Code processes start with `--allow-dangerously-skip-permissions` (not as root, which Claude
+  Code refuses) so the mode can be chosen mid-session; nothing is skipped until it is.
 - `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}], attachments?: [attachmentId]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event; fixture `send_message_attachments.json`).
   Feature `resume_on_send`: a Claude Code / Codex / dsh conversation that is **not running anywhere** (history, or a run that
   ended, e.g. with a desktop restart) takes messages too: the desktop first resumes it the official way (`claude --resume <id>`,
   `thread/resume`, `session/resume`) under the same id, then delivers the message. Such sessions advertise
   `sendMessage: "PARTIAL"` with `approve`/`interrupt` `BLOCKED` until they run. A session live in a window on the computer is
   never resumed implicitly (observe-only; `continueSession` explains the explicit way).
-- `POST /v1/sessions/{id}/options` `{commandId, model?, effort?}` (feature `session_options`, fixture `session_options.json`) —
-  changes model and / or effort of a **running** session SwitchTether started; absent = unchanged, `""` or `"default"` = the
-  agent's default. Claude Code: `set_model` and `apply_flag_settings {effortLevel}` control requests (as the Agent SDK);
-  Codex: sent with the next `turn/start`. Answers the updated `SessionSummary` (with `model`, `effort`). `409` when the
-  session is not running anywhere and cannot be resumed, `422 capability_unavailable` (`details.status: "BLOCKED"`) for
-  sessions owned by a window on the computer — observed ones and ones attached through an opt-in takeover hook, whose
-  model and effort stay with that window — and for dsh.
+- `POST /v1/sessions/{id}/options` `{commandId, model?, effort?, permissionMode?}` (feature `session_options`, fixture
+  `session_options.json`) — changes model, effort and / or permission mode of a **running** session the phone controls
+  (started by SwitchTether, or attached through an opt-in takeover hook: VS Code panel, Codex Desktop); absent =
+  unchanged, `""` or `"default"` = the agent's default. Claude Code: `set_model`, `apply_flag_settings {effortLevel}` and
+  `set_permission_mode` control requests (as the Agent SDK and the VS Code extension; in an attached panel they go through
+  switchtether-shim, and changes made in the IDE are followed); Codex: sent with the next `turn/start` (`model`, `effort`,
+  `approvalPolicy`, `sandboxPolicy`, `approvalsReviewer`, `collaborationMode`), which Codex keeps for the following turns;
+  `thread/settings/updated` (also from Codex Desktop) updates what the detail shows. Answers the updated `SessionSummary`.
+  `409` when the session is not running anywhere and cannot be resumed, `422 capability_unavailable` for sessions owned by
+  a window SwitchTether does not control (observed ones, mirrored terminals) and for dsh.
   Advertised per session as `capabilities.changeModel`: `PARTIAL` where this request is accepted, `BLOCKED` (with
-  `capabilities.reason`) for a running attached session, absent otherwise. Capability and endpoint always agree.
-- `GET /v1/agents/{agent}/models?session=` → `{agent, models: [{id, label, description?, efforts?}], efforts, source}`
+  `capabilities.reason`) otherwise for a running attached session, absent otherwise. Capability and endpoint always agree.
+  The session detail lists `permissionModes: [{id, label, description, dangerous}]` and the current `permissionMode`
+  whenever the mode can be changed (running sessions the phone controls, and conversations a message would resume).
+- `GET /v1/agents/{agent}/models?session=` → `{agent, models: [{id, label, description?, efforts?}], efforts, source,
+  permissionModes}` (`permissionModes`: what a new session of this agent can start in, same shape as in the detail)
   (fixture `model_options.json`): with a running `session`, the agent's own list (Claude Code's initialize response, Codex
   `model/list`, `source: "agent"`); otherwise the aliases every installation accepts (`source: "builtin"`).
 - Attachments (feature `attachments`; any file type, ≤ 64 MiB each, ≤ 10 per message; same device and session only): `POST /v1/sessions/{id}/attachments` `{name, size, mediaType?}` → `AttachmentView` `{attachmentId, name, size, received, complete, mediaType}` (fixture `attachment_view.json`), then `PUT /v1/sessions/{id}/attachments/{attachmentId}?offset=` raw chunks ≤ 8 MiB in order (wrong offset → 409 with `details.received`), `DELETE …/{attachmentId}` discards it. Refused for sessions the phone cannot send to. Files are stored under the desktop's data directory (`<data dir>/attachments/<date>/<id>/<name>`, kept 7 days, 2 GiB cap) — never in the project. Every agent receives them the same way: the message text gets a block starting `[SwitchTether attachments: …]` with one absolute path per line; images ≤ 3 MiB are also inlined for agents that accept images (Claude Code, Codex). SwitchTether-started Claude Code sessions get `--add-dir <attachments dir>`; other agents may ask for permission to read the path.
@@ -583,11 +599,23 @@ this change used `managed:<random>` ids that disappeared with the process.
     message, no conversation) and cached 30 min. With an official list the built-in aliases are not added, hidden Codex
     models are left out, and a model without effort levels has `efforts: []`. `source`: `agent` | `builtin`.
   - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
-    when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`); the detail then has
-    `resumable: true` and `nextStart {model, effort, permissionMode}`, and `changeModel` is `PARTIAL`. A session attached
-    through the opt-in hook keeps the model / effort chosen in its window: `changeModel` is `BLOCKED` and `POST …/options`
-    answers `422 capability_unavailable` (its session tools, `permission_mode` included, still work). A session running
-    in a window SwitchTether does not control stays observe-only (`capability_unavailable`).
+    when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`, Codex thread settings);
+    the detail then has `resumable: true` and `nextStart {model, effort, permissionMode}`, and `changeModel` is `PARTIAL`.
+    This includes a session attached through the opt-in hook whose window was closed (VS Code panel, Codex Desktop): the
+    next message resumes the conversation in a process SwitchTether starts, **under the same session id** (the
+    `attached:` key is taken over), so the page the phone has open keeps following it. A session running in a window
+    SwitchTether does not control stays observe-only (`capability_unavailable`).
+  - **Codex session tools** (a Codex thread SwitchTether runs or one attached from Codex Desktop; detail `sessionTools:
+    ["commands", "permission_mode", "context_usage", "mcp_status", "rename"]`): the same `POST …/claude/{action}` paths
+    and reply shapes as Claude Code's. `commands` lists Codex's own commands (`compact`, `review`, `goal`, `plan`,
+    `rename`, `status`, `mcp`) and the folder's enabled skills (`skills/list`); `context_usage` comes from the last
+    `thread/tokenUsage/updated` (`last.totalTokens` of `modelContextWindow`, no categories); `mcp_status` from
+    `mcpServerStatus/list` (names, state, tool count, auth state; never configuration); `rename` is `thread/name/set`.
+    A command is sent as the message `/name args`: `/compact` → `thread/compact/start`, `/review [instructions | branch
+    <name> | commit <sha>]` → `review/start` (inline), `/goal <objective> | clear | pause | resume` → `thread/goal/set` /
+    `thread/goal/clear`, `/plan [prompt]` → plan mode for the next turn, `/rename`, `/status` and `/mcp` answer with a
+    `system` `command` row; a skill becomes a `skill` input item followed by the rest of the text. These leave a
+    `user_message` with the typed text; any other `/…` goes to Codex as plain text.
   - While a foreground sub-agent runs (before its result exists) its `subagent` row is already there with `status:
     "running"`: from the stream's `task_started` (managed) or from its sidecar `agent-<id>.meta.json` `toolUseId` (observed).
   - `GET /v1/sessions/{id}/subagents/{agentId}/events?before&after&limit` → `{ sessionId, agentId, events, hasMore, lastSeq, meta }`:
@@ -612,7 +640,7 @@ this change used `managed:<random>` ids that disappeared with the process.
 | `plan` | `{ items: [{ text, status: "pending"|"in_progress"|"completed" }] }` |
 | `approval_request` | `{ requestId, kind: "command"|"file_change"|"tool"|"network"|"other", title, detail, command?, cwd?, toolName?, input?, options: [{ id, label }] , resolved: false }` |
 | `approval_resolved` | `{ requestId, decision, by: "phone"|"desktop"|"other" }` |
-| `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, required?, allowOther?, isSecret?, options: [{ label, description, value? }] }] }` |
+| `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, required?, allowOther?, isSecret?, options: [{ label, description, value? }] }], resolved, decision?, by?, answers? }` — once answered, `answers` maps question id → the chosen value(s) (secrets masked) wherever it was answered: on the phone, in the VS Code panel (its `updatedInput.answers`), in Codex Desktop (its reply to the request), or — read from a Claude Code transcript — the AskUserQuestion result (`toolUseResult.answers`; id `q:<tool use id>`, `decision: "answer"`, next to the tool row). Approvals answered in Codex Desktop carry its decision (`allow`, `allow_session`, `deny`, `abort`) with `by: "desktop"` |
 | `subagent` | `{ agentId, description, agentType?, model?, background, status: "running"|"completed"|"failed"|"interrupted", callId, summary?, result?, resultTruncated?, tokens?, toolUses?, durationMs?, activity?, agentPath?, finishedAt? }` — id `sa:<callId>` (Claude Code; Codex: `cx-sa-<child thread id>`), `parentId` = the Agent/Task (spawn) call. A sub-agent row exists from the moment the agent starts and is updated in place: live counters and `activity` from stream-json `task_progress`, the end from its task notification (transcript `<task-notification>` or stream-json `system` `task_notification`) or its result. Codex multi-agent v2 rows come from `SubAgentActivity` (rollout `item_completed` / legacy `sub_agent_activity`, app-server `subAgentActivity` items) and take the child's `FINAL_ANSWER` mail as `result`; a child rollout skips the parent history it inherited as a fork. A notification for anything else (unknown task, monitor) is a `system` event with `subtype: "task_notification"`, `{status?, text}`. Task notifications and messages the user typed while the agent was busy are read both from `user` records and from mid-turn `attachment` records (`queued_command`, `commandMode` `task-notification` / `prompt`; the latter becomes a normal `user_message`) |
 | `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail?, backgroundTasks? }` — `backgroundTasks` (managed Claude Code): background agents / shells still running; a session can be `idle` with work still going on |
 | `error` | `{ message }` |

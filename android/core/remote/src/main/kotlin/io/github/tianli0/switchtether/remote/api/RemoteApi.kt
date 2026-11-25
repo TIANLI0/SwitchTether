@@ -56,6 +56,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.serializer
 import okhttp3.Call
 import okhttp3.Callback
@@ -317,8 +318,8 @@ class RemoteApi(
     }
 
     /** `POST /v1/sessions/{id}/options`: model / effort of a running session (`""` = default). */
-    suspend fun setSessionOptions(sessionId: String, commandId: String, model: String?, effort: String?): CommandResponse =
-        command(commandId, url("v1/sessions", sessionId, "options"), io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody(commandId, model, effort))
+    suspend fun setSessionOptions(sessionId: String, commandId: String, model: String?, effort: String?, permissionMode: String? = null): CommandResponse =
+        command(commandId, url("v1/sessions", sessionId, "options"), io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody(commandId, model, effort, permissionMode))
 
     /** `GET /v1/agents/{agent}/models?session=` (404 on older desktops). */
     suspend fun modelOptions(agent: String, sessionId: String? = null): io.github.tianli0.switchtether.remote.protocol.ModelOptions =
@@ -791,6 +792,10 @@ class RemoteApi(
                     ?: (root["nextStart"] as? JsonObject)?.str("permissionMode"),
                 claudeReadTools = root.bool("claudeReadTools") == true,
                 resumable = root.bool("resumable") == true,
+                permissionModes = (root["permissionModes"] as? JsonArray).orEmpty().mapNotNull {
+                    runCatching { ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.protocol.PermissionModeOption.serializer(), it) }.getOrNull()
+                },
+                sessionTools = (root["sessionTools"] as? JsonArray).orEmpty().mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull },
             )
         }
 

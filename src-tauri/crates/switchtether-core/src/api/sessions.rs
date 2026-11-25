@@ -10,9 +10,21 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{idempotent, ApiContext, AuthDevice};
-use crate::agents::{CreateSession, SessionQuery};
+use super::{idempotent, require_step_up, ApiContext, AuthDevice};
+use crate::agents::{permission, CreateSession, SessionQuery};
 use crate::error::ApiResult;
+use crate::stepup::Scope;
+
+/// Running an agent without approvals (`bypassPermissions`, Codex full access) is as powerful as
+/// a remote terminal: it needs the terminal's biometric step-up.
+fn full_access_check(ctx: &ApiContext, dev: &AuthDevice, mode: Option<&str>) -> Option<Response> {
+    if !mode.is_some_and(permission::needs_step_up) {
+        return None;
+    }
+    require_step_up(ctx, dev, Scope::Terminal)
+        .err()
+        .map(axum::response::IntoResponse::into_response)
+}
 
 pub fn routes() -> Router<Arc<ApiContext>> {
     Router::new()
@@ -134,6 +146,11 @@ async fn claude_tool(
     Path((id, action)): Path<(String, String)>,
     Json(body): Json<Value>,
 ) -> Response {
+    if action == "permission_mode" {
+        if let Some(r) = full_access_check(&ctx, &dev, body.get("mode").and_then(Value::as_str)) {
+            return r;
+        }
+    }
     let c = ctx.clone();
     let command_id = body
         .get("commandId")
@@ -231,6 +248,9 @@ async fn create(
     dev: AuthDevice,
     Json(body): Json<CreateBody>,
 ) -> Response {
+    if let Some(r) = full_access_check(&ctx, &dev, body.req.permission_mode.as_deref()) {
+        return r;
+    }
     let c = ctx.clone();
     let req = body.req;
     idempotent(
@@ -411,6 +431,8 @@ struct OptionsBody {
     model: Option<String>,
     /// New effort level; `""` / `"default"` = the default; absent = unchanged.
     effort: Option<String>,
+    /// New permission mode (`crate::agents::permission` ids); absent = unchanged.
+    permission_mode: Option<String>,
 }
 
 /// `POST /v1/sessions/{id}/options`: change model and / or effort of a running session.
@@ -420,16 +442,23 @@ async fn set_options(
     Path(id): Path<String>,
     Json(body): Json<OptionsBody>,
 ) -> Response {
+    if let Some(r) = full_access_check(&ctx, &dev, body.permission_mode.as_deref()) {
+        return r;
+    }
     let c = ctx.clone();
-    let (model, effort) = (body.model, body.effort);
+    let (model, effort, mode) = (body.model, body.effort, body.permission_mode);
     idempotent(
         &ctx,
         dev.id().to_string(),
         body.command_id,
         "session.options",
         || async move {
-            let detail = json!({ "model": model, "effort": effort }).to_string();
-            let r = c.agents.set_options(&id, model, effort).await?;
+            let detail =
+                json!({ "model": model, "effort": effort, "permissionMode": mode }).to_string();
+            let r = c
+                .agents
+                .set_session_options(&id, model, effort, mode)
+                .await?;
             c.registry.audit(
                 Some(dev.id()),
                 "session.options",
@@ -596,6 +625,7 @@ mod tests {
         assert_eq!(body.command_id.as_deref(), Some("c-41d2"));
         assert_eq!(body.model.as_deref(), Some("sonnet"));
         assert_eq!(body.effort.as_deref(), Some("high"));
+        assert_eq!(body.permission_mode.as_deref(), Some("acceptEdits"));
         // What the desktop answers for a Claude Code session that reported its models.
         let fixture: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(root.join("model_options.json")).unwrap(),
@@ -613,5 +643,9 @@ mod tests {
         );
         assert_eq!(built["efforts"], fixture["efforts"]);
         assert_eq!(built["source"], fixture["source"]);
+        assert_eq!(
+            crate::agents::permission::modes("claude_code"),
+            fixture["permissionModes"]
+        );
     }
 }

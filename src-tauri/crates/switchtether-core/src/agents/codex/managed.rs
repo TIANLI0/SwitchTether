@@ -31,8 +31,9 @@ pub struct ManagedCodexOptions {
     pub codex_bin: PathBuf,
     pub cwd: PathBuf,
     pub model: Option<String>,
-    /// `on-request` (default) or `untrusted`.
-    pub approval_policy: String,
+    /// Permission mode (`crate::agents::permission`, canonical Codex id: `default`, `plan`,
+    /// `auto`, `readOnly`, `untrusted`, `bypassPermissions`).
+    pub permission_mode: String,
     /// Continue an existing thread (`thread/resume`) instead of starting one.
     pub resume_thread: Option<String>,
     /// Reasoning effort for turns (`turn/start` `effort`).
@@ -59,6 +60,18 @@ struct State {
     title: Option<String>,
     created_at_ms: i64,
     last_active_at_ms: i64,
+    /// Permission mode in effect (`None`: unknown, an attached thread before its settings were
+    /// seen) and one chosen from the phone, sent with the next `turn/start`.
+    mode: Option<String>,
+    next_mode: Option<String>,
+    /// The thread's workspace-write sandbox policy as Codex reported it (keeps the user's
+    /// configured network access and writable roots when the phone returns to it).
+    workspace_sandbox: Option<Value>,
+    /// Last `thread/tokenUsage/updated`: tokens of the last request and the context window.
+    context_tokens: Option<u64>,
+    context_window: Option<u64>,
+    /// Skills Codex reported for the session's folder (`skills/list`); `None`: not read yet.
+    skills: Option<Vec<Value>>,
 }
 
 pub struct ManagedCodex {
@@ -335,7 +348,7 @@ impl CodexConn {
                         );
                         let threads: Vec<_> = self.threads.lock().values().cloned().collect();
                         for t in threads {
-                            t.resolved_elsewhere(&rid, "desktop");
+                            t.resolved_on_desktop(&rid, &v);
                         }
                     }
                 }
@@ -588,6 +601,12 @@ impl ManagedCodex {
                 title: None,
                 created_at_ms: now,
                 last_active_at_ms: now,
+                mode: Some(options.permission_mode.clone()),
+                next_mode: None,
+                workspace_sandbox: None,
+                context_tokens: None,
+                context_window: None,
+                skills: None,
             }),
             options,
             remote: None,
@@ -618,11 +637,17 @@ impl ManagedCodex {
             anyhow::bail!("codex app-server did not initialize: {e}");
         }
         me.notify("initialized", None).await.ok();
+        let (approval, sandbox, reviewer, _) =
+            crate::agents::permission::codex_settings(&me.options.permission_mode);
         let mut params = json!({
             "cwd": me.options.cwd.to_string_lossy(),
-            "approvalPolicy": me.options.approval_policy,
-            "sandbox": "workspace-write",
+            "approvalPolicy": approval,
+            "sandbox": sandbox,
         });
+        if reviewer != "user" {
+            // Only when chosen: otherwise the user's own `approvals_reviewer` setting applies.
+            params["approvalsReviewer"] = json!(reviewer);
+        }
         if let Some(m) = &me.options.model {
             params["model"] = json!(m);
         }
@@ -630,6 +655,9 @@ impl ManagedCodex {
             Some(t) => {
                 let mut p = params;
                 p["threadId"] = json!(t);
+                // The history comes from the rollout file (preloaded); full-history hydration
+                // is deprecated for paginated threads.
+                p["excludeTurns"] = json!(true);
                 ("thread/resume", p)
             }
             None => ("thread/start", params),
@@ -647,6 +675,15 @@ impl ManagedCodex {
             st.title = started.get("thread").and_then(|t| s(t, "name"));
             if let Some(m) = s(&started, "model") {
                 st.model = Some(m);
+            }
+            if st.effort.is_none() {
+                st.effort = s(&started, "reasoningEffort");
+            }
+            if let Some(sb) = started
+                .get("sandbox")
+                .filter(|x| x.get("type").and_then(Value::as_str) == Some("workspaceWrite"))
+            {
+                st.workspace_sandbox = Some(sb.clone());
             }
         }
         me.system(&format!(
@@ -676,7 +713,7 @@ impl ManagedCodex {
                 codex_bin: PathBuf::new(),
                 cwd,
                 model: None,
-                approval_policy: String::new(),
+                permission_mode: String::new(),
                 resume_thread: None,
                 effort: None,
             },
@@ -699,6 +736,12 @@ impl ManagedCodex {
                 title: None,
                 created_at_ms: now,
                 last_active_at_ms: now,
+                mode: None,
+                next_mode: None,
+                workspace_sandbox: None,
+                context_tokens: None,
+                context_window: None,
+                skills: None,
             }),
             remote: Some(conn),
         })
@@ -708,19 +751,27 @@ impl ManagedCodex {
         self.remote.as_ref().map(|c| c.origin).unwrap_or("managed")
     }
 
-    /// A pending request was answered by another client.
-    fn resolved_elsewhere(&self, rid: &str, by: &str) {
+    /// Codex Desktop answered a request itself: the phone's card shows what was chosen there
+    /// (the decision, the answers), not just that it is gone.
+    fn resolved_on_desktop(&self, rid: &str, reply: &Value) {
         let removed = self.pending.lock().remove(rid);
-        if let Some(pa) = removed {
-            self.resolved.lock().insert(rid.to_string(), by.into());
-            self.log.lock().update(&pa.event_id, true, |e| {
-                e.data["resolved"] = json!(true);
-                e.data["by"] = json!(by);
-            });
-            if self.pending.lock().is_empty() {
-                self.set_status("busy");
-                self.publish_status("running", None);
+        let Some(pa) = removed else { return };
+        self.resolved
+            .lock()
+            .insert(rid.to_string(), "desktop".into());
+        let result = reply.get("result").filter(|_| reply.get("error").is_none());
+        let (decision, answers) = desktop_choice(&pa.method, result);
+        self.log.lock().update(&pa.event_id, true, |e| {
+            e.data["resolved"] = json!(true);
+            e.data["decision"] = json!(decision);
+            e.data["by"] = json!("desktop");
+            if let Some(a) = &answers {
+                crate::agents::model::record_answers(&mut e.data, a);
             }
+        });
+        if self.pending.lock().is_empty() {
+            self.set_status("busy");
+            self.publish_status("running", None);
         }
     }
 
@@ -1073,6 +1124,16 @@ impl ManagedCodex {
                                     image_items.push(json!({ "kind": "local", "path": path }));
                                 }
                             }
+                            Some("skill") => {
+                                if let Some(n) = s(x, "name") {
+                                    text.push(format!("/{n}"));
+                                }
+                            }
+                            Some("mention") => {
+                                if let Some(n) = s(x, "name") {
+                                    text.push(format!("@{n}"));
+                                }
+                            }
                             _ => {
                                 if let Some(t) = s(x, "text") {
                                     text.push(t);
@@ -1128,27 +1189,37 @@ impl ManagedCodex {
                     (content.join("\n\n"), false)
                 };
                 if !text.trim().is_empty() {
-                    push(EventDraft::new(
+                    let mut d = EventDraft::new(
                         eid,
                         "reasoning",
                         ts,
                         json!({ "text": text, "summary": is_summary }),
-                    ));
+                    );
+                    d.streaming = !done;
+                    push(d);
+                } else if done {
+                    // Streamed deltas (if any) stay as they were, no longer streaming.
+                    if let Some(e) = self.log.lock().get(&eid).cloned() {
+                        let mut d = EventDraft::new(eid, "reasoning", e.ts, e.data);
+                        d.streaming = false;
+                        push(d);
+                    }
                 }
             }
+            // Plan mode's proposed plan: Markdown written by the model (the checklist Codex keeps
+            // while it works is `turn/plan/updated`).
             Some("plan") => {
                 let text = s(item, "text").unwrap_or_default();
-                let items: Vec<Value> = text
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .map(|l| json!({ "text": l.trim_start_matches(['-', '*', ' ']).trim(), "status": "pending" }))
-                    .collect();
-                push(EventDraft::new(
-                    eid,
-                    "plan",
-                    ts,
-                    json!({ "items": items, "text": text }),
-                ));
+                if !text.trim().is_empty() {
+                    let mut d = EventDraft::new(
+                        eid,
+                        "assistant_message",
+                        ts,
+                        json!({ "text": text, "proposedPlan": true, "model": self.state.lock().model }),
+                    );
+                    d.streaming = !done;
+                    push(d);
+                }
             }
             Some("commandExecution") => {
                 let status = match item.get("status").and_then(|x| x.as_str()) {
@@ -1461,6 +1532,84 @@ impl ManagedCodex {
                 ts,
                 json!({ "subtype": "compacted", "text": "Conversation compacted" }),
             )),
+            Some("dynamicToolCall") => {
+                let status = match item.get("status").and_then(|x| x.as_str()) {
+                    Some("completed") => "completed",
+                    Some("failed") => "failed",
+                    _ => "running",
+                };
+                let tool = s(item, "tool").unwrap_or_default();
+                let name = match s(item, "namespace") {
+                    Some(ns) => format!("{ns}.{tool}"),
+                    None => tool.clone(),
+                };
+                push(EventDraft::new(
+                    &eid,
+                    "tool_call",
+                    &ts,
+                    json!({
+                        "callId": id, "name": name, "title": tool, "category": "other",
+                        "input": item.get("arguments"), "status": status,
+                    }),
+                ));
+                if done {
+                    let text = item
+                        .get("contentItems")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|c| s(c, "text"))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .unwrap_or_default();
+                    let (p, truncated) = preview(&text, PREVIEW_LIMIT);
+                    push(EventDraft::new(
+                        format!("res:{id}"),
+                        "tool_result",
+                        &ts,
+                        json!({
+                            "callId": id, "isError": status == "failed", "text": p,
+                            "truncated": truncated, "bytes": text.len(),
+                        }),
+                    ));
+                }
+            }
+            Some("enteredReviewMode") => push(EventDraft::new(
+                eid,
+                "system",
+                ts,
+                json!({ "subtype": "review", "text": format!("Review started: {}", s(item, "review").unwrap_or_default()) }),
+            )),
+            // The review's findings, written by the reviewer.
+            Some("exitedReviewMode") => push(EventDraft::new(
+                eid,
+                "assistant_message",
+                ts,
+                json!({ "text": s(item, "review").unwrap_or_default(), "model": self.state.lock().model }),
+            )),
+            Some("hookPrompt") => {
+                let text = item
+                    .get("fragments")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|f| s(f, "text"))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                if !text.trim().is_empty() {
+                    push(EventDraft::new(
+                        eid,
+                        "system",
+                        ts,
+                        json!({ "subtype": "hook", "text": crate::redact::redact_text(&text) }),
+                    ));
+                }
+            }
+            // Output of a call shown by its own row; an idle wait has nothing to show.
+            Some("functionCallOutput" | "sleep") => {}
             Some(other) => push(EventDraft::new(
                 eid,
                 "system",
@@ -1585,6 +1734,75 @@ impl ManagedCodex {
         }
     }
 
+    /// Append streamed text to an event (reasoning), creating it on the first delta.
+    fn append_delta(
+        &self,
+        eid: &str,
+        kind: &'static str,
+        delta: &str,
+        extra: Value,
+        turn_id: Option<String>,
+    ) {
+        let mut log = self.log.lock();
+        let mut data = log
+            .get(eid)
+            .map(|e| e.data.clone())
+            .unwrap_or_else(|| json!({ "text": "" }));
+        let text = format!("{}{delta}", data["text"].as_str().unwrap_or(""));
+        data["text"] = json!(text);
+        if let (Some(d), Some(x)) = (data.as_object_mut(), extra.as_object()) {
+            for (k, v) in x {
+                d.entry(k.clone()).or_insert(v.clone());
+            }
+        }
+        let mut d = EventDraft::new(eid, kind, crate::util::now_rfc3339(), data);
+        d.streaming = true;
+        d.turn_id = turn_id;
+        log.upsert(d, true);
+    }
+
+    /// An informational row (warnings, reroutes): redacted.
+    fn notice(&self, subtype: &str, text: &str) {
+        self.log.lock().upsert(
+            EventDraft::new(
+                format!("sys:{}", crate::util::new_id()),
+                "system",
+                crate::util::now_rfc3339(),
+                json!({ "subtype": subtype, "text": crate::redact::redact_text(text) }),
+            ),
+            true,
+        );
+    }
+
+    /// `thread/settings/updated`: model, effort and permission mode as the thread has them now
+    /// (also when Codex Desktop changed them).
+    fn on_thread_settings(&self, p: &Value) {
+        let Some(t) = p.get("threadSettings") else {
+            return;
+        };
+        let mut st = self.state.lock();
+        if let Some(m) = s(t, "model") {
+            st.model = Some(m);
+        }
+        st.effort = s(t, "effort").or(st.effort.take());
+        if let Some(sb) = t
+            .get("sandboxPolicy")
+            .filter(|x| x.get("type").and_then(Value::as_str) == Some("workspaceWrite"))
+        {
+            st.workspace_sandbox = Some(sb.clone());
+        }
+        let mode = crate::agents::permission::codex_mode_of(
+            t.get("approvalPolicy"),
+            t.get("sandboxPolicy"),
+            t.get("approvalsReviewer").and_then(Value::as_str),
+            t.pointer("/collaborationMode/mode").and_then(Value::as_str),
+        );
+        st.mode = Some(mode.to_string());
+        if st.next_mode.as_deref() == Some(mode) {
+            st.next_mode = None;
+        }
+    }
+
     fn on_thread_metadata(&self, thread: &Value) {
         if let Some(title) =
             s(thread, "name").and_then(|t| crate::agents::claude::transcript::clean_title(Some(t)))
@@ -1681,6 +1899,15 @@ impl ManagedCodex {
             "thread/tokenUsage/updated" => {
                 let usage = p.get("tokenUsage").cloned().unwrap_or(p.clone());
                 let last = usage.get("last").cloned().unwrap_or(Value::Null);
+                {
+                    let mut st = self.state.lock();
+                    if let Some(t) = last.get("totalTokens").and_then(Value::as_u64) {
+                        st.context_tokens = Some(t);
+                    }
+                    if let Some(w) = usage.get("modelContextWindow").and_then(Value::as_u64) {
+                        st.context_window = Some(w);
+                    }
+                }
                 let d = EventDraft::new(
                     format!("usage:{}", turn_id.clone().unwrap_or_default()),
                     "usage",
@@ -1688,10 +1915,133 @@ impl ManagedCodex {
                     json!({
                         "inputTokens": last.get("inputTokens"), "outputTokens": last.get("outputTokens"),
                         "cacheReadTokens": last.get("cachedInputTokens"),
+                        "cacheWriteTokens": last.get("cacheWriteInputTokens"),
                     }),
                 );
                 self.log.lock().upsert(d, true);
             }
+            "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
+                let (Some(item_id), Some(delta)) = (s(&p, "itemId"), s(&p, "delta")) else {
+                    return;
+                };
+                self.append_delta(
+                    &format!("cx-item-{item_id}"),
+                    "reasoning",
+                    &delta,
+                    json!({ "summary": method.ends_with("summaryTextDelta") }),
+                    turn_id,
+                );
+            }
+            "item/reasoning/summaryPartAdded" => {
+                if let Some(item_id) = s(&p, "itemId") {
+                    let eid = format!("cx-item-{item_id}");
+                    let has_text = self
+                        .log
+                        .lock()
+                        .get(&eid)
+                        .and_then(|e| e.data["text"].as_str().map(|t| !t.is_empty()))
+                        .unwrap_or(false);
+                    if has_text {
+                        self.append_delta(
+                            &eid,
+                            "reasoning",
+                            "\n\n",
+                            json!({ "summary": true }),
+                            turn_id,
+                        );
+                    }
+                }
+            }
+            "item/plan/delta" => {
+                let (Some(item_id), Some(delta)) = (s(&p, "itemId"), s(&p, "delta")) else {
+                    return;
+                };
+                let eid = format!("cx-item-{item_id}");
+                let text = format!(
+                    "{}{delta}",
+                    self.log
+                        .lock()
+                        .get(&eid)
+                        .and_then(|e| e.data["text"].as_str().map(String::from))
+                        .unwrap_or_default()
+                );
+                let item = json!({ "type": "plan", "id": item_id, "text": text });
+                let mut log = self.log.lock();
+                for mut d in self.item_events(&item, turn_id.as_deref(), false) {
+                    d.streaming = true;
+                    log.upsert(d, true);
+                }
+            }
+            "thread/settings/updated" => self.on_thread_settings(&p),
+            // Codex reports "cleared" when a thread without a goal is resumed: nothing to say.
+            "thread/goal/cleared" if self.log.lock().get("goal:current").is_none() => {}
+            "thread/goal/updated" | "thread/goal/cleared" => {
+                let text = match p.get("goal") {
+                    Some(g) if method == "thread/goal/updated" => format!(
+                        "Goal ({}): {}",
+                        s(g, "status").unwrap_or_default(),
+                        s(g, "objective").unwrap_or_default()
+                    ),
+                    _ => "Goal cleared".to_string(),
+                };
+                let d = EventDraft::new(
+                    "goal:current",
+                    "system",
+                    crate::util::now_rfc3339(),
+                    json!({ "subtype": "goal", "text": crate::redact::redact_text(&text), "goal": p.get("goal") }),
+                );
+                self.log.lock().upsert(d, true);
+            }
+            "model/rerouted" => {
+                let text = format!(
+                    "Model rerouted: {} → {}",
+                    s(&p, "fromModel").unwrap_or_default(),
+                    s(&p, "toModel").unwrap_or_default()
+                );
+                if let Some(m) = s(&p, "toModel") {
+                    self.state.lock().model = Some(m);
+                }
+                self.notice("model_rerouted", &text);
+            }
+            "warning" | "guardianWarning" => {
+                if let Some(m) = s(&p, "message") {
+                    self.notice("warning", &m);
+                }
+            }
+            "configWarning" | "deprecationNotice" => {
+                let text = [s(&p, "summary"), s(&p, "details")]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !text.is_empty() {
+                    self.notice("warning", &text);
+                }
+            }
+            "item/autoApprovalReview/completed" => {
+                let status = p
+                    .pointer("/review/status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let rationale = p
+                    .pointer("/review/rationale")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let text = match status {
+                    "approved" => format!("Auto review approved. {rationale}"),
+                    "denied" => format!("Auto review denied. {rationale}"),
+                    other => format!("Auto review: {other}. {rationale}"),
+                };
+                let id = s(&p, "reviewId").unwrap_or_else(crate::util::new_id);
+                let d = EventDraft::new(
+                    format!("review:{id}"),
+                    "system",
+                    crate::util::now_rfc3339(),
+                    json!({ "subtype": "auto_review", "text": crate::redact::redact_text(text.trim()), "status": status }),
+                );
+                self.log.lock().upsert(d, true);
+            }
+            "skills/changed" => self.state.lock().skills = None,
             "thread/name/updated" => {
                 self.state.lock().title = s(&p, "name").or(s(&p, "threadName"));
                 self.system("Conversation title updated");
@@ -1798,22 +2148,19 @@ impl ManagedSession for ManagedCodex {
         ManagedCodex::effort(self)
     }
     fn can_change_model(&self) -> bool {
-        self.remote.is_none()
+        // Also a thread of Codex Desktop (opt-in hook): the choice goes with the phone's next
+        // `turn/start`, which Codex applies to that turn and the following ones (Desktop learns
+        // of it through `thread/settings/updated`).
+        true
     }
     async fn models(&self) -> Value {
         self.list_models().await.unwrap_or(Value::Null)
     }
     async fn set_model(&self, model: Option<&str>) -> ApiResult<()> {
-        if self.remote.is_some() {
-            return crate::agents::managed::ManagedSessionDefaults::set_model_blocked();
-        }
         ManagedCodex::set_model(self, model);
         Ok(())
     }
     async fn set_effort(&self, effort: Option<&str>) -> ApiResult<()> {
-        if self.remote.is_some() {
-            return crate::agents::managed::ManagedSessionDefaults::set_model_blocked();
-        }
         ManagedCodex::set_effort(self, effort);
         Ok(())
     }
@@ -1842,8 +2189,197 @@ impl ManagedSession for ManagedCodex {
         if self.liveness() != Liveness::Live {
             return Err(ApiError::conflict("codex app-server has exited"));
         }
-        let thread_id = self.thread_id()?;
         let mut inputs: Vec<Value> = Vec::new();
+        let mut text = text.to_string();
+        match self.slash_command(&text).await {
+            Some(PhoneCommand::Done(r)) => return r,
+            Some(PhoneCommand::Skill { name, path, args }) => {
+                inputs.push(json!({ "type": "skill", "name": name, "path": path }));
+                text = args;
+            }
+            Some(PhoneCommand::Prompt(t)) => text = t,
+            None => {}
+        }
+        self.start_or_steer(&text, inputs, images).await
+    }
+
+    async fn interrupt(&self) -> ApiResult<()> {
+        ManagedCodex::interrupt(self).await
+    }
+
+    async fn respond(
+        &self,
+        request_id: &str,
+        decision: &str,
+        message: Option<String>,
+        updated_input: Option<Value>,
+        answers: Option<Value>,
+        by: &str,
+    ) -> ApiResult<Value> {
+        ManagedCodex::respond(
+            self,
+            request_id,
+            decision,
+            message,
+            updated_input,
+            answers,
+            by,
+        )
+        .await
+    }
+
+    fn kill(&self) {
+        ManagedCodex::kill(self)
+    }
+    fn origin(&self) -> &'static str {
+        self.origin_name()
+    }
+    fn permission_mode(&self) -> Option<String> {
+        let st = self.state.lock();
+        st.next_mode.clone().or_else(|| st.mode.clone())
+    }
+    fn can_change_permission_mode(&self) -> bool {
+        true
+    }
+    async fn set_permission_mode(&self, mode: &str) -> ApiResult<String> {
+        ManagedCodex::set_permission_mode(self, mode)
+    }
+    fn session_tools(&self) -> &'static [&'static str] {
+        &[
+            "commands",
+            "permission_mode",
+            "context_usage",
+            "mcp_status",
+            "rename",
+        ]
+    }
+    async fn session_tool(&self, action: &str, p: &Value) -> ApiResult<Value> {
+        ManagedCodex::session_tool(self, action, p).await
+    }
+}
+
+/// What Codex Desktop chose for one of its server requests (`result` of its reply; `None` for an
+/// error reply): the phone's decision id and, for questions, the answers by question id.
+fn desktop_choice(method: &str, result: Option<&Value>) -> (&'static str, Option<Value>) {
+    let Some(r) = result else {
+        return ("cancel", None);
+    };
+    match method {
+        "item/tool/requestUserInput" => match r.get("answers").and_then(Value::as_object) {
+            Some(m) => (
+                "answer",
+                Some(Value::Object(
+                    m.iter()
+                        .map(|(k, v)| (k.clone(), v.get("answers").cloned().unwrap_or(v.clone())))
+                        .collect(),
+                )),
+            ),
+            None => ("cancel", None),
+        },
+        "mcpServer/elicitation/request" => match r.get("action").and_then(Value::as_str) {
+            Some("accept") => (
+                "answer",
+                r.get("content").filter(|c| c.is_object()).cloned(),
+            ),
+            Some("decline") => ("deny", None),
+            _ => ("cancel", None),
+        },
+        "item/permissions/requestApproval" => {
+            let granted = r
+                .get("permissions")
+                .and_then(Value::as_object)
+                .is_some_and(|m| !m.is_empty());
+            match (granted, r.get("scope").and_then(Value::as_str)) {
+                (false, _) => ("deny", None),
+                (true, Some("session")) => ("allow_session", None),
+                (true, _) => ("allow", None),
+            }
+        }
+        _ => match r.get("decision") {
+            Some(Value::String(d)) => (
+                match d.as_str() {
+                    "accept" => "allow",
+                    "acceptForSession" => "allow_session",
+                    "decline" => "deny",
+                    _ => "abort",
+                },
+                None,
+            ),
+            // Accepted together with a rule (exec policy / network amendment).
+            Some(Value::Object(_)) => ("allow_session", None),
+            _ => ("cancel", None),
+        },
+    }
+}
+
+/// What a phone message starting with `/` turned out to be.
+enum PhoneCommand {
+    /// A Codex command, already run through its own app-server request.
+    Done(ApiResult<()>),
+    /// A skill: sent as a `skill` input item followed by the rest of the message.
+    Skill {
+        name: String,
+        path: String,
+        args: String,
+    },
+    /// Text to send as an ordinary message after the command did its part (`/plan <prompt>`).
+    Prompt(String),
+}
+
+/// The default workspace-write policy for `turn/start`, when Codex has not reported its own.
+fn default_workspace_sandbox() -> Value {
+    json!({
+        "type": "workspaceWrite", "writableRoots": [], "networkAccess": false,
+        "excludeTmpdirEnvVar": false, "excludeSlashTmp": false,
+    })
+}
+
+/// `turn/start` `sandboxPolicy` for a permission mode.
+fn sandbox_policy(mode: &str, workspace: Option<&Value>) -> Value {
+    match crate::agents::permission::codex_settings(mode).1 {
+        "read-only" => json!({ "type": "readOnly", "networkAccess": false }),
+        "danger-full-access" => json!({ "type": "dangerFullAccess" }),
+        _ => workspace.cloned().unwrap_or_else(default_workspace_sandbox),
+    }
+}
+
+/// Codex's own slash commands the phone can run (`/name args`, like the TUI). Skills of the
+/// session's folder are listed after them.
+const CODEX_COMMANDS: &[(&str, &str, &str)] = &[
+    ("compact", "Summarize the conversation to free context.", ""),
+    (
+        "review",
+        "Review the uncommitted changes, or follow your own instructions.",
+        "[instructions | branch <name> | commit <sha>]",
+    ),
+    (
+        "goal",
+        "Set a goal Codex keeps working toward; clear, pause or resume it.",
+        "<objective> | clear | pause | resume",
+    ),
+    (
+        "plan",
+        "Switch to plan mode (and send a prompt).",
+        "[prompt]",
+    ),
+    ("rename", "Rename the conversation.", "<title>"),
+    (
+        "status",
+        "Model, effort, permission mode and context usage.",
+        "",
+    ),
+    ("mcp", "MCP servers and their state.", ""),
+];
+
+impl ManagedCodex {
+    /// Start a turn, or steer the running one with more input.
+    async fn start_or_steer(
+        &self,
+        text: &str,
+        mut inputs: Vec<Value>,
+        images: &[crate::agents::managed::ImageAttachment],
+    ) -> ApiResult<()> {
+        let thread_id = self.thread_id()?;
         if !text.trim().is_empty() {
             inputs.push(json!({ "type": "text", "text": text, "text_elements": [] }));
         }
@@ -1867,21 +2403,62 @@ impl ManagedSession for ManagedCodex {
             }
             None => {
                 let mut params = json!({ "threadId": thread_id, "input": input });
+                let mode_sent = self.turn_overrides(&mut params);
+                if let Err(e) = self
+                    .request("turn/start", params, Duration::from_secs(60))
+                    .await
                 {
-                    let st = self.state.lock();
-                    if let Some(m) = &st.next_model {
-                        params["model"] = json!(m);
+                    // The chosen mode was not applied: keep it for the next turn.
+                    if let Some(m) = mode_sent {
+                        let mut st = self.state.lock();
+                        st.next_mode.get_or_insert(m);
                     }
-                    if let Some(e) = &st.effort {
-                        params["effort"] = json!(e);
-                    }
+                    return Err(e);
                 }
-                self.request("turn/start", params, Duration::from_secs(60))
-                    .await?;
                 self.set_status("busy");
             }
         }
         Ok(())
+    }
+
+    /// What the next `turn/start` carries besides its input: a model / effort / permission mode
+    /// chosen from the phone (Codex keeps them for the following turns too) and plan mode, a
+    /// collaboration mode set per turn. Returns the permission mode it applied, if any.
+    fn turn_overrides(&self, params: &mut Value) -> Option<String> {
+        let mut st = self.state.lock();
+        if let Some(m) = &st.next_model {
+            params["model"] = json!(m);
+        }
+        if let Some(e) = &st.effort {
+            params["effort"] = json!(e);
+        }
+        let before = st.mode.clone();
+        let applied = st.next_mode.take();
+        if let Some(mode) = &applied {
+            let (approval, _, reviewer, _) = crate::agents::permission::codex_settings(mode);
+            params["approvalPolicy"] = json!(approval);
+            params["approvalsReviewer"] = json!(reviewer);
+            params["sandboxPolicy"] = sandbox_policy(mode, st.workspace_sandbox.as_ref());
+            st.mode = Some(mode.clone());
+        }
+        let plan = st.mode.as_deref() == Some("plan");
+        let leaving_plan = applied.is_some() && before.as_deref() == Some("plan") && !plan;
+        if let (true, Some(model)) = (plan || leaving_plan, st.model.clone()) {
+            params["collaborationMode"] = json!({
+                "mode": if plan { "plan" } else { "default" },
+                "settings": { "model": model, "reasoning_effort": st.effort, "developer_instructions": null },
+            });
+        }
+        applied
+    }
+
+    /// Choose the permission mode for the following turns (applied with the next `turn/start`).
+    pub fn set_permission_mode(&self, mode: &str) -> ApiResult<String> {
+        let mode = crate::agents::permission::normalize("codex", mode)
+            .ok_or_else(|| ApiError::validation("unknown permission mode for Codex"))?;
+        let mut st = self.state.lock();
+        st.next_mode = (st.mode.as_deref() != Some(mode)).then(|| mode.to_string());
+        Ok(mode.to_string())
     }
 
     async fn interrupt(&self) -> ApiResult<()> {
@@ -2069,8 +2646,326 @@ impl ManagedSession for ManagedCodex {
             st.last_active_at_ms = crate::util::now_ms();
         }
     }
-    fn origin(&self) -> &'static str {
-        self.origin_name()
+}
+
+impl ManagedCodex {
+    /// Show what the phone typed for a command Codex runs without a turn of its own (it echoes
+    /// no `userMessage` for those): the same bubble a Claude Code slash command leaves.
+    fn echo_command(&self, text: &str) {
+        self.log.lock().upsert(
+            EventDraft::new(
+                format!("cmd:{}", crate::util::new_id()),
+                "user_message",
+                crate::util::now_rfc3339(),
+                json!({ "text": text.trim(), "images": 0, "source": "phone" }),
+            ),
+            true,
+        );
+    }
+
+    fn command_output(&self, text: &str) {
+        self.log.lock().upsert(
+            EventDraft::new(
+                format!("sys:{}", crate::util::new_id()),
+                "system",
+                crate::util::now_rfc3339(),
+                json!({ "subtype": "command", "text": crate::redact::redact_text(text) }),
+            ),
+            true,
+        );
+    }
+
+    /// Run `/name args` typed on the phone the way Codex's own clients do: the commands through
+    /// their app-server requests, a skill as a `skill` input item. `None`: not one of them; the
+    /// text goes to Codex unchanged.
+    async fn slash_command(&self, text: &str) -> Option<PhoneCommand> {
+        let rest = text.trim().strip_prefix('/')?;
+        let (name, args) = match rest.split_once(char::is_whitespace) {
+            Some((n, a)) => (n, a.trim()),
+            None => (rest, ""),
+        };
+        let builtin = CODEX_COMMANDS.iter().any(|(n, _, _)| *n == name);
+        if !builtin {
+            let skill = self
+                .skills()
+                .await
+                .into_iter()
+                .find(|s| s.get("name").and_then(Value::as_str) == Some(name))?;
+            return Some(PhoneCommand::Skill {
+                name: name.to_string(),
+                path: s(&skill, "path").unwrap_or_default(),
+                args: args.to_string(),
+            });
+        }
+        if name == "plan" {
+            if let Err(e) = self.set_permission_mode("plan") {
+                return Some(PhoneCommand::Done(Err(e)));
+            }
+            if args.is_empty() {
+                self.echo_command(text);
+                self.command_output("Plan mode is on for the next turn.");
+                return Some(PhoneCommand::Done(Ok(())));
+            }
+            return Some(PhoneCommand::Prompt(args.to_string()));
+        }
+        let thread_id = match self.thread_id() {
+            Ok(t) => t,
+            Err(e) => return Some(PhoneCommand::Done(Err(e))),
+        };
+        self.echo_command(text);
+        let short = Duration::from_secs(30);
+        let r = match name {
+            "compact" => self
+                .request(
+                    "thread/compact/start",
+                    json!({ "threadId": thread_id }),
+                    short,
+                )
+                .await
+                .map(|_| ()),
+            "review" => {
+                let target = if args.is_empty() {
+                    json!({ "type": "uncommittedChanges" })
+                } else if let Some(b) = args.strip_prefix("branch ") {
+                    json!({ "type": "baseBranch", "branch": b.trim() })
+                } else if let Some(c) = args.strip_prefix("commit ") {
+                    json!({ "type": "commit", "sha": c.trim(), "title": null })
+                } else {
+                    json!({ "type": "custom", "instructions": args })
+                };
+                self.request(
+                    "review/start",
+                    json!({ "threadId": thread_id, "target": target, "delivery": "inline" }),
+                    short,
+                )
+                .await
+                .map(|_| self.set_status("busy"))
+            }
+            "goal" => {
+                let (method, params) = match args {
+                    "" => {
+                        return Some(PhoneCommand::Done(Err(ApiError::validation(
+                            "usage: /goal <objective> | clear | pause | resume",
+                        ))))
+                    }
+                    "clear" => (
+                        "thread/goal/clear",
+                        json!({ "threadId": thread_id, "origin": "user" }),
+                    ),
+                    "pause" => (
+                        "thread/goal/set",
+                        json!({ "threadId": thread_id, "origin": "user", "status": "paused" }),
+                    ),
+                    "resume" => (
+                        "thread/goal/set",
+                        json!({ "threadId": thread_id, "origin": "user", "status": "active" }),
+                    ),
+                    objective => (
+                        "thread/goal/set",
+                        json!({ "threadId": thread_id, "origin": "user", "objective": objective, "status": "active" }),
+                    ),
+                };
+                self.request(method, params, short).await.map(|_| ())
+            }
+            "rename" if args.is_empty() => Err(ApiError::validation("usage: /rename <title>")),
+            "rename" => self.rename(args).await.map(|_| ()),
+            "status" => {
+                let u = self.context_usage();
+                let st = self.state.lock();
+                let mode = st.next_mode.clone().or_else(|| st.mode.clone());
+                let line = |k: &str, v: Option<String>| {
+                    format!("{k}: {}", v.unwrap_or_else(|| "default".into()))
+                };
+                let ctx = match (u["totalTokens"].as_u64(), u["maxTokens"].as_u64()) {
+                    (Some(t), Some(m)) => Some(format!("{t} / {m} tokens")),
+                    (Some(t), None) => Some(format!("{t} tokens")),
+                    _ => None,
+                };
+                let text = [
+                    line("Model", st.model.clone()),
+                    line("Effort", st.effort.clone()),
+                    line("Permission mode", mode),
+                    line("Context", ctx),
+                    line("Thread", st.thread_id.clone()),
+                ]
+                .join("\n");
+                drop(st);
+                self.command_output(&text);
+                Ok(())
+            }
+            "mcp" => match self.mcp_status().await {
+                Ok(v) => {
+                    let servers = v["servers"].as_array().cloned().unwrap_or_default();
+                    let text = if servers.is_empty() {
+                        "No MCP servers.".to_string()
+                    } else {
+                        servers
+                            .iter()
+                            .map(|x| {
+                                format!(
+                                    "{} · {}{}",
+                                    x["name"].as_str().unwrap_or("?"),
+                                    x["status"].as_str().unwrap_or("unknown"),
+                                    x["tools"]
+                                        .as_u64()
+                                        .map(|n| format!(" · {n} tools"))
+                                        .unwrap_or_default()
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    self.command_output(&text);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            },
+            _ => return None,
+        };
+        if let Err(e) = &r {
+            self.command_output(&format!("/{name} failed: {}", e.message));
+        }
+        Some(PhoneCommand::Done(r))
+    }
+
+    /// Skills Codex finds for the session's folder (`skills/list`, cached until Codex reports
+    /// `skills/changed`); enabled ones only.
+    async fn skills(&self) -> Vec<Value> {
+        if let Some(s) = self.state.lock().skills.clone() {
+            return s;
+        }
+        let cwd = self.options.cwd.to_string_lossy().into_owned();
+        let Ok(r) = self
+            .request(
+                "skills/list",
+                json!({ "cwds": [cwd] }),
+                Duration::from_secs(15),
+            )
+            .await
+        else {
+            return Vec::new();
+        };
+        let skills: Vec<Value> = r
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.get("skills").and_then(Value::as_array))
+            .flatten()
+            .filter(|s| s.get("enabled").and_then(Value::as_bool) != Some(false))
+            .cloned()
+            .collect();
+        self.state.lock().skills = Some(skills.clone());
+        skills
+    }
+
+    /// The command list the phone offers (`{name, description, argumentHint}`): Codex's own
+    /// commands, then the folder's skills (a skill named like a command is left out).
+    pub async fn commands(&self) -> Vec<Value> {
+        let mut out: Vec<Value> = CODEX_COMMANDS
+            .iter()
+            .map(|(n, d, a)| json!({ "name": n, "description": d, "argumentHint": a }))
+            .collect();
+        for sk in self.skills().await {
+            let Some(name) = s(&sk, "name") else { continue };
+            if CODEX_COMMANDS.iter().any(|(n, _, _)| *n == name) {
+                continue;
+            }
+            let desc = sk
+                .pointer("/interface/shortDescription")
+                .and_then(Value::as_str)
+                .or_else(|| sk.get("shortDescription").and_then(Value::as_str))
+                .or_else(|| sk.get("description").and_then(Value::as_str))
+                .unwrap_or("");
+            out.push(json!({ "name": name, "description": desc, "argumentHint": "" }));
+        }
+        out
+    }
+
+    /// Context window use from the last `thread/tokenUsage/updated`.
+    fn context_usage(&self) -> Value {
+        let st = self.state.lock();
+        let pct = match (st.context_tokens, st.context_window) {
+            (Some(t), Some(w)) if w > 0 => Some(((t as f64) * 100.0 / (w as f64)).min(100.0)),
+            _ => None,
+        };
+        json!({
+            "totalTokens": st.context_tokens, "maxTokens": st.context_window,
+            "percentage": pct, "categories": [],
+        })
+    }
+
+    /// MCP servers of the session (`mcpServerStatus/list`), reduced like Claude Code's
+    /// `mcp_status`: never their configuration.
+    async fn mcp_status(&self) -> ApiResult<Value> {
+        let thread = self.thread_id().ok();
+        let r = self
+            .request(
+                "mcpServerStatus/list",
+                json!({ "threadId": thread, "detail": "toolsAndAuthOnly" }),
+                Duration::from_secs(20),
+            )
+            .await?;
+        let servers: Vec<Value> = r
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|x| {
+                json!({
+                    "name": x.get("name"),
+                    "status": x.get("runtimeStatus"),
+                    "title": x.pointer("/serverInfo/title"),
+                    "version": x.pointer("/serverInfo/version"),
+                    "tools": x.get("tools").and_then(Value::as_object).map(|t| t.len()),
+                    "auth": x.get("authStatus"),
+                    "error": x.get("toolsError").and_then(Value::as_str).map(crate::redact::redact_text),
+                })
+            })
+            .collect();
+        Ok(json!({ "servers": servers }))
+    }
+
+    async fn rename(&self, title: &str) -> ApiResult<Value> {
+        if title.chars().count() > 200 {
+            return Err(ApiError::validation("title too long"));
+        }
+        let thread_id = self.thread_id()?;
+        self.request(
+            "thread/name/set",
+            json!({ "threadId": thread_id, "name": title }),
+            Duration::from_secs(20),
+        )
+        .await?;
+        self.state.lock().title = Some(title.to_string());
+        Ok(json!({ "title": title }))
+    }
+
+    /// The session tools Codex can answer (same paths and reply shapes as Claude Code's,
+    /// `POST /v1/sessions/{id}/claude/{action}`).
+    pub async fn session_tool(&self, action: &str, p: &Value) -> ApiResult<Value> {
+        let arg = |k: &str| -> ApiResult<String> {
+            p.get(k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty() && v.len() <= 4000)
+                .map(String::from)
+                .ok_or_else(|| ApiError::validation(format!("'{k}' is required")))
+        };
+        match action {
+            "commands" => Ok(json!(self.commands().await)),
+            "permission_mode" => {
+                let mode = self.set_permission_mode(&arg("mode")?)?;
+                Ok(json!({ "mode": mode }))
+            }
+            "context_usage" => Ok(self.context_usage()),
+            "mcp_status" => self.mcp_status().await,
+            "rename" => self.rename(&arg("title")?).await,
+            _ => Err(ApiError::unavailable_capability(
+                "BLOCKED",
+                "Codex does not offer this session tool.",
+            )),
+        }
     }
 }
 
@@ -2499,5 +3394,237 @@ mod version_tests {
         conn.on_frame(json!({ "t": "accepted", "line": inj_v2["line"] }))
             .await;
         assert!(cancel_task.await.unwrap().is_ok());
+    }
+
+    /// Permission modes, slash commands, skills and the 0.171 notifications, against a fake
+    /// app-server behind an attached connection (requests are captured and answered).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn codex_modes_commands_skills_and_streamed_reasoning() {
+        use super::*;
+        use crate::agents::managed::ManagedSession;
+        use crate::agents::store::SessionLog;
+        use parking_lot::Mutex;
+        use std::sync::Arc;
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let conn = CodexConn::new(tx, "desktop_app", PathBuf::from("."));
+        let log = Arc::new(Mutex::new(SessionLog::new("attached:m1", None)));
+        let th = ManagedCodex::attached(
+            "attached:m1".into(),
+            conn.clone(),
+            "th1".into(),
+            PathBuf::from("."),
+            log.clone(),
+        );
+        conn.threads.lock().insert("th1".into(), th.clone());
+
+        // The fake app-server: records every request and answers it.
+        let seen: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        {
+            let (conn, seen) = (conn.clone(), seen.clone());
+            tokio::spawn(async move {
+                while let Some(frame) = rx.recv().await {
+                    let f: Value = serde_json::from_str(&frame).unwrap();
+                    let req: Value = serde_json::from_str(f["line"].as_str().unwrap()).unwrap();
+                    let result = match req["method"].as_str() {
+                        Some("skills/list") => {
+                            json!({ "data": [{ "cwd": ".", "errors": [], "skills": [
+                            { "name": "deploy", "description": "Ship it", "path": "/s/deploy/SKILL.md", "enabled": true, "scope": "user", "pluginId": null },
+                            { "name": "off", "description": "", "path": "/s/off/SKILL.md", "enabled": false, "scope": "user", "pluginId": null }
+                        ] }] })
+                        }
+                        _ => json!({}),
+                    };
+                    seen.lock().push(req.clone());
+                    conn.on_frame(json!({ "t": "out", "line": json!({ "id": req["id"], "result": result }).to_string() }))
+                        .await;
+                }
+            });
+        }
+        let last = |method: &str| {
+            seen.lock()
+                .iter()
+                .rev()
+                .find(|r| r["method"] == method)
+                .cloned()
+                .unwrap_or_else(|| panic!("no {method} request"))
+        };
+
+        // The thread's settings as Codex reports them (also when Desktop changes them).
+        let ws = json!({ "type": "workspaceWrite", "writableRoots": [], "networkAccess": true,
+                         "excludeTmpdirEnvVar": false, "excludeSlashTmp": false });
+        th.on_notification(
+            "thread/settings/updated",
+            json!({ "threadId": "th1", "threadSettings": {
+                "model": "gpt-6", "effort": "medium", "approvalPolicy": "on-request",
+                "approvalsReviewer": "user", "sandboxPolicy": ws,
+                "collaborationMode": { "mode": "default", "settings": { "model": "gpt-6", "reasoning_effort": null, "developer_instructions": null } } } }),
+        );
+        assert_eq!(th.permission_mode().as_deref(), Some("default"));
+        assert_eq!(th.model().as_deref(), Some("gpt-6"));
+
+        // Plan mode: a collaboration mode on the turn; the user's workspace sandbox is kept.
+        ManagedSession::set_permission_mode(th.as_ref(), "plan")
+            .await
+            .unwrap();
+        th.send_message("look around").await.unwrap();
+        let t = last("turn/start");
+        assert_eq!(t["params"]["collaborationMode"]["mode"], "plan");
+        assert_eq!(
+            t["params"]["collaborationMode"]["settings"]["model"],
+            "gpt-6"
+        );
+        assert_eq!(t["params"]["sandboxPolicy"], ws);
+        assert_eq!(t["params"]["approvalPolicy"], "on-request");
+
+        // Full access (the API asks for the step-up): no sandbox, no approvals, plan mode left.
+        ManagedSession::set_permission_mode(th.as_ref(), "danger-full-access")
+            .await
+            .unwrap();
+        assert_eq!(th.permission_mode().as_deref(), Some("bypassPermissions"));
+        th.send_message("go").await.unwrap();
+        let t = last("turn/start");
+        assert_eq!(t["params"]["approvalPolicy"], "never");
+        assert_eq!(t["params"]["sandboxPolicy"]["type"], "dangerFullAccess");
+        assert_eq!(t["params"]["collaborationMode"]["mode"], "default");
+        // Not sent again once applied.
+        th.send_message("again").await.unwrap();
+        assert!(last("turn/start")["params"].get("approvalPolicy").is_none());
+        assert!(ManagedSession::set_permission_mode(th.as_ref(), "dontAsk")
+            .await
+            .is_err());
+
+        // Codex's own commands run through their requests and leave the typed bubble.
+        th.send_message("/compact").await.unwrap();
+        assert_eq!(last("thread/compact/start")["params"]["threadId"], "th1");
+        th.send_message("/review").await.unwrap();
+        assert_eq!(
+            last("review/start")["params"]["target"]["type"],
+            "uncommittedChanges"
+        );
+        th.send_message("/review branch main").await.unwrap();
+        assert_eq!(last("review/start")["params"]["target"]["branch"], "main");
+        th.send_message("/goal ship the login fix").await.unwrap();
+        let g = last("thread/goal/set");
+        assert_eq!(g["params"]["objective"], "ship the login fix");
+        assert_eq!(g["params"]["origin"], "user");
+        th.send_message("/rename Login fix").await.unwrap();
+        assert_eq!(last("thread/name/set")["params"]["name"], "Login fix");
+        assert_eq!(th.title().as_deref(), Some("Login fix"));
+        let bubbles: Vec<String> = log
+            .lock()
+            .iter()
+            .filter(|e| e.kind == "user_message")
+            .map(|e| e.data["text"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(bubbles.contains(&"/compact".to_string()));
+
+        // A skill is a `skill` input item followed by the rest of the message.
+        th.send_message("/deploy to staging").await.unwrap();
+        let t = last("turn/start");
+        assert_eq!(
+            t["params"]["input"][0],
+            json!({ "type": "skill", "name": "deploy", "path": "/s/deploy/SKILL.md" })
+        );
+        assert_eq!(t["params"]["input"][1]["text"], "to staging");
+        // Unknown commands are plain text for Codex.
+        th.send_message("/nope x").await.unwrap();
+        assert_eq!(last("turn/start")["params"]["input"][0]["text"], "/nope x");
+        let cmds = th.commands().await;
+        let names: Vec<&str> = cmds.iter().map(|c| c["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"compact") && names.contains(&"deploy"));
+        assert!(!names.contains(&"off"), "disabled skills are not offered");
+
+        // Reasoning streams, then the completed item closes the row.
+        th.on_notification(
+            "item/reasoning/summaryTextDelta",
+            json!({ "threadId": "th1", "turnId": "t9", "itemId": "r1", "delta": "Think", "summaryIndex": 0 }),
+        );
+        th.on_notification(
+            "item/reasoning/summaryTextDelta",
+            json!({ "threadId": "th1", "turnId": "t9", "itemId": "r1", "delta": "ing", "summaryIndex": 0 }),
+        );
+        let r = log.lock().get("cx-item-r1").cloned().unwrap();
+        assert_eq!(r.kind, "reasoning");
+        assert_eq!(r.data["text"], "Thinking");
+        assert!(r.streaming);
+        th.on_notification(
+            "item/completed",
+            json!({ "threadId": "th1", "turnId": "t9", "item": { "type": "reasoning", "id": "r1", "summary": ["Thinking done"], "content": [] } }),
+        );
+        let r = log.lock().get("cx-item-r1").cloned().unwrap();
+        assert_eq!(r.data["text"], "Thinking done");
+        assert!(!r.streaming);
+
+        // New item kinds of the 0.171 protocol.
+        th.on_notification(
+            "item/completed",
+            json!({ "threadId": "th1", "turnId": "t9", "item": { "type": "exitedReviewMode", "id": "rv", "review": "No issues found." } }),
+        );
+        assert_eq!(
+            log.lock().get("cx-item-rv").unwrap().kind,
+            "assistant_message"
+        );
+        th.on_notification(
+            "item/completed",
+            json!({ "threadId": "th1", "turnId": "t9", "item": { "type": "sleep" } }),
+        );
+        th.on_notification(
+            "model/rerouted",
+            json!({ "threadId": "th1", "turnId": "t9", "fromModel": "gpt-6", "toModel": "gpt-6-mini", "reason": "highRiskCyberActivity" }),
+        );
+        assert_eq!(th.model().as_deref(), Some("gpt-6-mini"));
+
+        // Context use comes from the token usage notification.
+        th.on_notification(
+            "thread/tokenUsage/updated",
+            json!({ "threadId": "th1", "turnId": "t9", "tokenUsage": {
+                "total": { "totalTokens": 9000, "inputTokens": 8000, "cachedInputTokens": 0, "cacheWriteInputTokens": 0, "outputTokens": 1000, "reasoningOutputTokens": 0 },
+                "last": { "totalTokens": 50000, "inputTokens": 49000, "cachedInputTokens": 1000, "cacheWriteInputTokens": 10, "outputTokens": 1000, "reasoningOutputTokens": 0 },
+                "modelContextWindow": 200000 } }),
+        );
+        let u = th.session_tool("context_usage", &json!({})).await.unwrap();
+        assert_eq!(u["totalTokens"], 50000);
+        assert_eq!(u["maxTokens"], 200000);
+        assert_eq!(u["percentage"], 25.0);
+
+        // Desktop switched to full access itself.
+        th.on_notification(
+            "thread/settings/updated",
+            json!({ "threadId": "th1", "threadSettings": {
+                "model": "gpt-6", "effort": null, "approvalPolicy": "never", "approvalsReviewer": "user",
+                "sandboxPolicy": { "type": "dangerFullAccess" },
+                "collaborationMode": { "mode": "default", "settings": { "model": "gpt-6", "reasoning_effort": null, "developer_instructions": null } } } }),
+        );
+        assert_eq!(th.permission_mode().as_deref(), Some("bypassPermissions"));
+
+        // Codex Desktop answers itself: the phone's cards show what was chosen there.
+        th.on_server_request(
+            json!(77),
+            "item/tool/requestUserInput",
+            json!({ "threadId": "th1", "turnId": "t9", "itemId": "i9",
+                    "questions": [{ "id": "env", "header": "Env", "question": "Where?",
+                                    "options": [{ "label": "staging" }, { "label": "prod" }] }] }),
+        )
+        .await;
+        conn.on_frame(json!({ "t": "in", "line": json!({ "id": 77, "result": { "answers": { "env": { "answers": ["staging"] } } } }).to_string() }))
+            .await;
+        let q = log.lock().get("req:cx-77").cloned().unwrap();
+        assert_eq!(q.data["resolved"], true);
+        assert_eq!(q.data["by"], "desktop");
+        assert_eq!(q.data["decision"], "answer");
+        assert_eq!(q.data["answers"]["env"], json!(["staging"]));
+        th.on_server_request(
+            json!(78),
+            "item/commandExecution/requestApproval",
+            json!({ "threadId": "th1", "turnId": "t9", "itemId": "c1", "command": "rm -rf build" }),
+        )
+        .await;
+        conn.on_frame(json!({ "t": "in", "line": json!({ "id": 78, "result": { "decision": "acceptForSession" } }).to_string() }))
+            .await;
+        let a = log.lock().get("req:cx-78").cloned().unwrap();
+        assert_eq!(a.data["decision"], "allow_session");
+        assert_eq!(a.data["by"], "desktop");
+        assert!(!th.has_pending_requests());
     }
 }

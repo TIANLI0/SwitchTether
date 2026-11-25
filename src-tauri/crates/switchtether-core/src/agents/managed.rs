@@ -109,6 +109,28 @@ pub trait ManagedSession: Send + Sync {
     fn permission_mode(&self) -> Option<String> {
         None
     }
+    /// The phone may change the permission mode (ids of `crate::agents::permission`).
+    fn can_change_permission_mode(&self) -> bool {
+        false
+    }
+    /// Change the permission mode; returns the mode in effect (or chosen for the next turn).
+    async fn set_permission_mode(&self, _mode: &str) -> ApiResult<String> {
+        Err(ApiError::unavailable_capability(
+            "BLOCKED",
+            "This session cannot change its permission mode from the phone.",
+        ))
+    }
+    /// Session tools of an agent other than Claude Code, answered by [`Self::session_tool`]
+    /// (`POST /v1/sessions/{id}/claude/{action}`, same reply shapes).
+    fn session_tools(&self) -> &'static [&'static str] {
+        &[]
+    }
+    async fn session_tool(&self, _action: &str, _p: &Value) -> ApiResult<Value> {
+        Err(ApiError::unavailable_capability(
+            "BLOCKED",
+            "This session does not offer session tools.",
+        ))
+    }
     /// `uuid` given to the last message sent from the phone (to cancel it while it is queued).
     fn last_message_uuid(&self) -> Option<String> {
         None
@@ -215,6 +237,23 @@ impl ManagedSession for super::claude::managed::ManagedClaude {
     fn permission_mode(&self) -> Option<String> {
         super::claude::managed::ManagedClaude::permission_mode(self)
     }
+    fn can_change_permission_mode(&self) -> bool {
+        true
+    }
+    async fn set_permission_mode(&self, mode: &str) -> ApiResult<String> {
+        let mode = super::permission::normalize("claude_code", mode)
+            .ok_or_else(|| ApiError::validation("unknown permission mode"))?;
+        let r = super::claude::managed::ManagedClaude::control(
+            self,
+            serde_json::json!({ "subtype": "set_permission_mode", "mode": mode }),
+            std::time::Duration::from_secs(20),
+        )
+        .await?;
+        Ok(r.get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or(mode)
+            .to_string())
+    }
     fn last_message_uuid(&self) -> Option<String> {
         super::claude::managed::ManagedClaude::last_message_uuid(self)
     }
@@ -248,35 +287,20 @@ impl ManagedSession for super::claude::managed::ManagedClaude {
         super::claude::managed::ManagedClaude::effort(self)
     }
     fn can_change_model(&self) -> bool {
-        // Only a process SwitchTether started. In a session attached through the opt-in takeover
-        // hook the IDE owns model and effort (its own picker would not learn of a change made
-        // behind it), so `set_model` / `set_effort` below refuse; this must say the same, since
-        // `capabilities.changeModel` is derived from it.
-        !self.is_attached()
+        // A process SwitchTether started, and a session attached through the opt-in takeover hook
+        // (VS Code panel): `set_model` / `apply_flag_settings` are the same control requests the
+        // IDE sends, injected through switchtether-shim. The IDE's own picker learns of the change
+        // only from the next turn's model; a later change made in the IDE wins again (it is
+        // observed and shown on the phone too). Not a mirrored terminal (no control channel).
+        true
     }
     async fn models(&self) -> Value {
         super::claude::managed::ManagedClaude::models(self)
     }
     async fn set_model(&self, model: Option<&str>) -> ApiResult<()> {
-        if self.is_attached() {
-            return ManagedSessionDefaults::set_model_blocked();
-        }
         super::claude::managed::ManagedClaude::set_model(self, model).await
     }
     async fn set_effort(&self, effort: Option<&str>) -> ApiResult<()> {
-        if self.is_attached() {
-            return ManagedSessionDefaults::set_model_blocked();
-        }
         super::claude::managed::ManagedClaude::set_effort(self, effort).await
-    }
-}
-
-pub(crate) struct ManagedSessionDefaults;
-impl ManagedSessionDefaults {
-    pub(crate) fn set_model_blocked() -> ApiResult<()> {
-        Err(ApiError::unavailable_capability(
-            "BLOCKED",
-            super::ATTACHED_MODEL_REASON,
-        ))
     }
 }

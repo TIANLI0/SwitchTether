@@ -146,7 +146,7 @@ fun SessionDetailScreen(
     onOpenRoute: (io.github.tianli0.switchtether.ui.nav.Route) -> Unit = {},
 ) {
     val container = appContainer()
-    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default) }
+    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }) }
     val state by vm.state.collectAsStateWithLifecycle()
     val pins by container.liveUpdates.pins.collectAsStateWithLifecycle()
     val pinned = sessionId in pins
@@ -259,8 +259,8 @@ fun SessionDetailScreen(
     var showAttach by remember { mutableStateOf(false) }
     var showModels by rememberSaveable { mutableStateOf(false) }
     val switchLabel = stringResource(R.string.model_switch_label)
-    // A session taken over from VS Code: the desktop refuses a model change (422); permission mode still works.
-    val modelChangeable = state.canChangeModel && state.detail.valueOrNull?.summary?.isAttached != true
+    // The desktop's capability decides (sessions taken over from VS Code / Codex Desktop can change it too).
+    val modelChangeable = state.canChangeModel
     ModelEffortSheet(
         show = showModels,
         agent = state.detail.valueOrNull?.summary?.agent.orEmpty(),
@@ -276,15 +276,17 @@ fun SessionDetailScreen(
             vm.clearPermissionError()
         },
         extra = {
-            // Claude Code's permission mode belongs with the run settings (one sheet, one chip).
-            val claude = state.detail.valueOrNull?.summary?.agent == "claude_code"
-            if (claude && (state.claudeTools || state.resumable)) {
+            // The permission mode belongs with the run settings (one sheet, one chip), for every agent
+            // the desktop offers modes for (Claude Code, Codex).
+            if (state.hasPermissionModes) {
                 SmallTitle(stringResource(R.string.tools_permission))
                 PermissionModeOptions(
                     current = state.detail.valueOrNull?.permissionMode,
                     pending = state.permissionPending,
-                    enabled = state.canUseClaudeTools || (state.resumable && state.online),
+                    enabled = state.canPickPermission,
                     onSelect = vm::setPermissionMode,
+                    modes = state.permissionModes,
+                    agent = state.detail.valueOrNull?.summary?.agent,
                 )
                 state.permissionError?.let {
                     Text(stringResource(R.string.tools_permission_failed, it), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 8.dp))
@@ -295,23 +297,26 @@ fun SessionDetailScreen(
 
     var showPermission by rememberSaveable { mutableStateOf(false) }
     PermissionModeSheet(
-        show = showPermission && state.claudeTools,
+        show = showPermission && state.hasPermissionModes,
         current = state.detail.valueOrNull?.permissionMode,
         pending = state.permissionPending,
         error = state.permissionError,
-        enabled = state.canUseClaudeTools,
+        enabled = state.canPickPermission,
         onSelect = vm::setPermissionMode,
         onDismiss = {
             showPermission = false
             vm.clearPermissionError()
         },
+        modes = state.permissionModes,
+        agent = state.detail.valueOrNull?.summary?.agent,
     )
     RewindDialog(state.rewind, onConfirm = vm::confirmRewind, onDismiss = vm::dismissRewind)
     // Slash commands: what the phone does itself opens here; the rest is a message (view model).
     var showSlashHelp by rememberSaveable { mutableStateOf(false) }
     var showSlashRename by rememberSaveable { mutableStateOf(false) }
     // Hidden while the tools are gone (offline, process ended): it must not pop up again by itself later.
-    LaunchedEffect(state.claudeTools) { if (!state.claudeTools) showSlashRename = false }
+    val canRename = state.hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.RENAME)
+    LaunchedEffect(canRename) { if (!canRename) showSlashRename = false }
     val onSlashCommand: (SlashEntry) -> Unit = { entry ->
         when (vm.pickSlashCommand(entry)) {
             SlashAction.SEND, SlashAction.INSERT -> Unit
@@ -337,7 +342,7 @@ fun SessionDetailScreen(
         onDismiss = { showSlashHelp = false },
     )
     SlashRenameDialog(
-        show = showSlashRename && state.claudeTools,
+        show = showSlashRename && canRename,
         current = state.detail.valueOrNull?.summary?.title.orEmpty(),
         onRename = vm::renameSession,
         onDismiss = { showSlashRename = false },
@@ -1075,7 +1080,7 @@ private fun Composer(
                 }
             }
         }
-        val showPermission = state.claudeTools && onPermissionClick != null
+        val showPermission = state.hasPermissionModes && onPermissionClick != null
         val showModel = (state.canChangeModel || showPermission) && s != null
         val showInterrupt = state.canInterrupt && s != null && s.isLive && s.status != "idle"
         if (showModel || showInterrupt) {
@@ -1100,7 +1105,7 @@ private fun Composer(
                         Spacer(Modifier.size(5.dp))
                         val mode = state.detail.valueOrNull?.permissionMode?.takeIf { it != "default" }
                         Text(
-                            listOfNotNull(modelEffortSummary(s.model, s.effort).ifBlank { null }, mode?.let { permissionModeLabel(it) })
+                            listOfNotNull(modelEffortSummary(s.model, s.effort).ifBlank { null }, mode?.let { permissionModeLabel(it, s.agent) })
                                 .joinToString(" · "),
                             style = COUITheme.textStyles.footnote1,
                             fontWeight = FontWeight.Medium,

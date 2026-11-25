@@ -147,6 +147,28 @@ fn command_name(raw: &str) -> Option<String> {
 /// aliases?, builtin?, plugin?}`, as the VS Code extension 2.1.331 validates it) or bare names.
 /// `aliases` (other names of the command, at most 5) is only present when there are any;
 /// `builtin` and `plugin` are not passed on.
+/// Whether SwitchTether runs as root (Claude Code refuses the skip-permissions flags then).
+fn running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        unsafe { libc::geteuid() == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+/// The running process asks its questions through `can_use_tool`, which already makes the
+/// question card (answered there): the parser's card for the same AskUserQuestion result would
+/// show it twice.
+fn own_card_only(d: &EventDraft) -> bool {
+    !(d.kind == "question"
+        && d.id
+            .starts_with(super::transcript::ANSWERED_QUESTION_PREFIX))
+}
+
 pub fn normalize_commands(raw: &Value) -> Vec<Value> {
     let mut out = Vec::new();
     merge_commands(&mut out, raw);
@@ -311,6 +333,13 @@ impl ManagedClaude {
         }
         if let Some(pm) = &options.permission_mode {
             cmd.args(["--permission-mode", pm]);
+        }
+        // Lets the phone switch this session to `bypassPermissions` later (`set_permission_mode`,
+        // the VS Code extension's "allow dangerously skip permissions"); nothing is skipped until
+        // that mode is chosen, which the API gates behind the terminal step-up. Claude Code refuses
+        // the flag for root, so it is left out there (bypass then only works from the start).
+        if !running_as_root() {
+            cmd.arg("--allow-dangerously-skip-permissions");
         }
         if let Some(r) = &options.resume_from {
             // Same conversation by default ("恢复会话"); the hub refuses that while the
@@ -547,6 +576,12 @@ impl ManagedClaude {
                     self.publish_status("running", None);
                     return;
                 }
+                // The IDE changed model / effort / permission mode itself: what the phone shows
+                // follows the window (a later change from the phone goes the same way).
+                if v.get("type").and_then(|t| t.as_str()) == Some("control_request") {
+                    self.observe_host_control(v.get("request").unwrap_or(&Value::Null));
+                    return;
+                }
                 // The IDE answered a permission request itself.
                 if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
                     let rid = v
@@ -563,10 +598,31 @@ impl ManagedClaude {
                                 .and_then(|b| b.as_str())
                                 .unwrap_or("answered")
                                 .to_string();
+                            // What was chosen in the IDE: AskUserQuestion answers come back in
+                            // the allowed input (`updatedInput.answers`), an elicitation's in
+                            // `content`.
+                            let answers = v
+                                .pointer("/response/response/updatedInput/answers")
+                                .or_else(|| v.pointer("/response/response/content"))
+                                .filter(|a| a.is_object())
+                                .cloned();
+                            let elicitation_action = v
+                                .pointer("/response/response/action")
+                                .and_then(Value::as_str)
+                                .map(String::from);
                             self.log.lock().update(&p.event_id, true, |e| {
                                 e.data["resolved"] = json!(true);
-                                e.data["decision"] = json!(behavior);
+                                e.data["decision"] = json!(match (&answers, &elicitation_action) {
+                                    (Some(_), _) if behavior != "deny" => "answer",
+                                    (_, Some(a)) if a == "accept" => "answer",
+                                    (_, Some(a)) if a == "decline" => "deny",
+                                    (_, Some(_)) => "cancel",
+                                    _ => behavior.as_str(),
+                                });
                                 e.data["by"] = json!("desktop");
+                                if let Some(a) = &answers {
+                                    crate::agents::model::record_answers(&mut e.data, a);
+                                }
                             });
                             if self.pending.lock().is_empty() {
                                 self.set_status("busy");
@@ -588,6 +644,31 @@ impl ManagedClaude {
                 }
             }
             Some("exit") => self.on_exit().await,
+            _ => {}
+        }
+    }
+
+    /// A control request the IDE sent to the attached process: keep model, effort and
+    /// permission mode in step with the window's own picker.
+    fn observe_host_control(&self, req: &Value) {
+        match req.get("subtype").and_then(Value::as_str) {
+            Some("set_model") => {
+                self.state.lock().model_override = req
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .filter(|m| !m.is_empty() && *m != "default")
+                    .map(String::from);
+            }
+            Some("apply_flag_settings") => {
+                if let Some(e) = req.pointer("/settings/effortLevel") {
+                    self.state.lock().effort = e.as_str().map(String::from);
+                }
+            }
+            Some("set_permission_mode") => {
+                if let Some(m) = req.get("mode").and_then(Value::as_str) {
+                    *self.permission_mode.lock() = Some(m.to_string());
+                }
+            }
             _ => {}
         }
     }
@@ -662,7 +743,7 @@ impl ManagedClaude {
         rec["timestamp"] = json!(crate::util::now_rfc3339());
         let drafts = self.parser.lock().feed(&rec);
         let mut log = self.log.lock();
-        for mut d in drafts {
+        for mut d in drafts.into_iter().filter(own_card_only) {
             if let Some(src) = source {
                 if d.kind == "user_message" {
                     d.data["source"] = json!(src);
@@ -1064,7 +1145,7 @@ impl ManagedClaude {
                 }
                 let drafts = self.parser.lock().feed(&v);
                 let mut log = self.log.lock();
-                for mut d in drafts {
+                for mut d in drafts.into_iter().filter(own_card_only) {
                     if d.kind == "user_message" {
                         let text = d.data["text"].as_str().unwrap_or("").trim().to_string();
                         if self.sent_texts.lock().remove(&text) {

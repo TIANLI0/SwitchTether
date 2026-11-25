@@ -151,6 +151,21 @@ data class SessionDetailState(
     /** Tools that act on the running process also need the connection. */
     val canUseClaudeTools: Boolean get() = online && claudeTools
 
+    /** Permission modes the desktop offers for this session (Claude Code and Codex alike). */
+    val permissionModes: List<io.github.tianli0.switchtether.remote.protocol.PermissionModeOption>
+        get() = detail.valueOrNull?.permissionModes.orEmpty()
+
+    /** The mode is shown and can be picked: a running session the phone controls, or a conversation
+     *  that is not running (the mode then applies when a message resumes it). Older desktops send
+     *  no list: a Claude Code session with its tools still gets Claude Code's modes. */
+    val hasPermissionModes: Boolean get() = permissionModes.isNotEmpty() || claudeTools
+    val canPickPermission: Boolean get() = online && hasPermissionModes &&
+        (detail.valueOrNull?.summary?.isLive == true || resumable)
+
+    /** One session tool is offered (Claude Code's all of them; Codex those in `sessionTools`). */
+    fun hasSessionTool(action: String): Boolean = claudeTools ||
+        detail.valueOrNull?.let { it.summary.isLive && action in it.sessionTools } == true
+
     /**
      * "Continue on phone": offered only when the desktop advertises `capabilities.continueSession`
      * (external Claude Code / Codex sessions) and the phone cannot already drive the session.
@@ -213,6 +228,8 @@ class SessionDetailViewModel(
      * streamed event and made opening a busy session an ANR. Null (tests) applies each event at once.
      */
     private val liveDispatcher: kotlinx.coroutines.CoroutineDispatcher? = null,
+    /** Biometric step-up for a scope (true = granted); null (tests) leaves it to the desktop. */
+    private val stepUp: (suspend (String) -> Boolean)? = null,
 ) : ViewModel() {
     /** Streamed events waiting for the next batch (see [liveDispatcher]). */
     private val liveInbox = kotlinx.coroutines.channels.Channel<AgentEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
@@ -824,11 +841,18 @@ class SessionDetailViewModel(
     private suspend fun claudeTool(action: String, params: JsonObject = JsonObject(emptyMap())): Result<kotlinx.serialization.json.JsonElement> =
         repo.runClaudeTool(sessionId, action, params)
 
-    /** Switch the permission mode of the running Claude Code process (like Shift+Tab). */
+    /** Switch the permission mode of the running session (Claude Code: like Shift+Tab; Codex: from the
+     *  next turn). A mode that runs without asking needs the terminal step-up first. */
     fun setPermissionMode(mode: String) {
         if (_state.value.permissionPending != null) return
         _state.update { it.copy(permissionPending = mode, permissionError = null) }
         viewModelScope.launch {
+            if (isDangerousPermissionMode(mode, _state.value.permissionModes) &&
+                stepUp?.invoke(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.TERMINAL) == false
+            ) {
+                _state.update { it.copy(permissionPending = null) }
+                return@launch
+            }
             val r = claudeTool(ClaudeTools.PERMISSION_MODE, jsonOf("mode" to mode))
             _state.update { st ->
                 val d = st.detail.valueOrNull
@@ -1017,7 +1041,7 @@ class SessionDetailViewModel(
         // reconnect or a resume (the condition turns false and true again).
         viewModelScope.launch {
             _state
-                .map { st -> st.canUseClaudeTools && st.canSend && supportsSlashCommands(st.detail.valueOrNull?.summary?.agent) }
+                .map { st -> st.online && st.hasSessionTool(ClaudeTools.COMMANDS) && st.canSend && supportsSlashCommands(st.detail.valueOrNull?.summary?.agent) }
                 .distinctUntilChanged()
                 .collect { ready -> if (ready) loadSlashCommands() }
         }

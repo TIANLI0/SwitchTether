@@ -103,8 +103,16 @@ import kotlinx.coroutines.launch
 /** Agents that support SwitchTether-managed sessions (desktop: `create_managed`). */
 val MANAGED_AGENTS = listOf("claude_code", "codex", "dsh")
 
-/** Claude Code permission modes offered from the phone (bypassPermissions is deliberately not offered). */
+/** Claude Code permission modes an older desktop accepts at start (a current one sends its own list). */
 val CLAUDE_PERMISSION_MODES = listOf("default", "acceptEdits", "plan")
+
+/** The modes a new session of [agent] can start in: the desktop's list, else what older desktops accepted. */
+fun startPermissionModes(agent: String, options: io.github.tianli0.switchtether.remote.protocol.ModelOptions?): List<String> =
+    options?.permissionModes?.map { it.id }?.takeIf { it.isNotEmpty() } ?: when (agent) {
+        "claude_code" -> CLAUDE_PERMISSION_MODES
+        "codex" -> listOf("default", "untrusted")
+        else -> emptyList()
+    }
 
 /** A folder an agent was recently used in (from the session list), newest first. */
 data class RecentProject(val path: String, val name: String)
@@ -163,6 +171,10 @@ data class NewSessionState(
     /** Where the session will run: a continued conversation stays in its own folder. */
     val effectiveCwd: String? get() = resume?.cwd?.takeIf { it.isNotBlank() } ?: cwd
     val canStart: Boolean get() = effectiveCwd != null && connection is ConnectionState.Online
+
+    /** Permission modes offered for [agent]; [permissionMode] counts only when it is one of them. */
+    val permissionModes: List<String> get() = startPermissionModes(agent, modelOptions)
+    val effectivePermissionMode: String? get() = permissionMode.takeIf { it in permissionModes && it != "default" }
 }
 
 /** The last launcher choices (agent, model per agent, permission mode), so a new session starts where the last one did. */
@@ -171,6 +183,11 @@ interface NewSessionPrefs {
     /** Working directory of the last session started from the phone. */
     var cwd: String?
     var permissionMode: String?
+    /** The mode last chosen for [agent] (each agent keeps its own; Claude Code falls back to the old shared one). */
+    fun permissionMode(agent: String): String? = permissionMode
+    fun setPermissionMode(agent: String, mode: String) {
+        permissionMode = mode
+    }
     fun model(agent: String): String
     fun setModel(agent: String, model: String)
     /** Models used before with [agent], newest first. */
@@ -183,6 +200,11 @@ interface NewSessionPrefs {
         override var agent: String? = null
         override var cwd: String? = null
         override var permissionMode: String? = null
+        private val modes = mutableMapOf<String, String>()
+        override fun permissionMode(agent: String) = modes[agent]
+        override fun setPermissionMode(agent: String, mode: String) {
+            modes[agent] = mode
+        }
         private val models = mutableMapOf<String, String>()
         private val recents = mutableMapOf<String, List<String>>()
         override fun model(agent: String) = models[agent].orEmpty()
@@ -209,6 +231,11 @@ class SharedNewSessionPrefs(context: android.content.Context) : NewSessionPrefs 
     override var permissionMode: String?
         get() = p.getString("permission_mode", null)
         set(v) = p.edit().putString("permission_mode", v).apply()
+    override fun permissionMode(agent: String): String? =
+        p.getString("permission_mode.$agent", null) ?: if (agent == "claude_code") permissionMode else null
+    override fun setPermissionMode(agent: String, mode: String) {
+        p.edit().putString("permission_mode.$agent", mode).apply()
+    }
     override fun model(agent: String): String = p.getString("model.$agent", "").orEmpty()
     override fun setModel(agent: String, model: String) {
         val recent = if (model.isBlank()) recentModels(agent) else (listOf(model) + recentModels(agent).filter { it != model }).take(5)
@@ -226,6 +253,8 @@ class NewSessionViewModel(
     private val conn: ConnectionController,
     private val repo: SessionRepository,
     private val prefs: NewSessionPrefs = NewSessionPrefs.Memory(),
+    /** Biometric step-up for a scope (true = granted); null (tests) leaves it to the desktop. */
+    private val stepUp: (suspend (String) -> Boolean)? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow(
         (prefs.agent?.takeIf { it in MANAGED_AGENTS } ?: MANAGED_AGENTS.first()).let { agent ->
@@ -237,7 +266,7 @@ class NewSessionViewModel(
                 model = prefs.model(agent),
                 effort = prefs.effort(agent),
                 recentModels = prefs.recentModels(agent),
-                permissionMode = prefs.permissionMode?.takeIf { it in CLAUDE_PERMISSION_MODES } ?: "default",
+                permissionMode = prefs.permissionMode(agent) ?: "default",
             )
         },
     )
@@ -308,7 +337,7 @@ class NewSessionViewModel(
     fun setAgent(a: String) {
         prefs.agent = a
         _state.update {
-            it.copy(agent = a, model = prefs.model(a), effort = prefs.effort(a), recentModels = prefs.recentModels(a), modelOptions = null, resume = if (a == it.agent) it.resume else null)
+            it.copy(agent = a, model = prefs.model(a), effort = prefs.effort(a), recentModels = prefs.recentModels(a), modelOptions = null, resume = if (a == it.agent) it.resume else null, permissionMode = prefs.permissionMode(a) ?: "default")
         }
         if (_state.value.connection is ConnectionState.Online) loadModelOptions()
     }
@@ -316,7 +345,7 @@ class NewSessionViewModel(
     fun setModel(t: String) = _state.update { it.copy(model = t) }
     fun setEffort(e: String) = _state.update { it.copy(effort = e) }
     fun setPermissionMode(m: String) {
-        prefs.permissionMode = m
+        prefs.setPermissionMode(_state.value.agent, m)
         _state.update { it.copy(permissionMode = m) }
     }
 
@@ -330,7 +359,7 @@ class NewSessionViewModel(
             cwd = cwd,
             prompt = s.prompt,
             model = s.model,
-            permissionMode = if (s.agent == "claude_code") s.permissionMode else null,
+            permissionMode = s.effectivePermissionMode,
             effort = s.effort.takeIf { it.isNotBlank() && supportsEffort(s.agent) },
             // Same history, as a session SwitchTether runs; forking is offered on the session's own page.
             resumeFrom = s.resume?.id,
@@ -341,14 +370,19 @@ class NewSessionViewModel(
         prefs.setEffort(s.agent, s.effort)
         prefs.cwd = cwd
         _state.update { it.copy(recentModels = prefs.recentModels(s.agent)) }
-        commands.run(label, onSuccess = { out -> _state.update { it.copy(created = out.createdSession()) } }) { id -> repo.createSession(req, id) }
+        val dangerous = req.permissionMode?.let { m -> isDangerousPermissionMode(m, s.modelOptions?.permissionModes.orEmpty()) } == true
+        viewModelScope.launch {
+            // Starting without approvals is as powerful as a remote terminal: same biometric step-up.
+            if (dangerous && stepUp?.invoke(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.TERMINAL) == false) return@launch
+            commands.run(label, onSuccess = { out -> _state.update { it.copy(created = out.createdSession()) } }) { id -> repo.createSession(req, id) }
+        }
     }
 }
 
 /** One launcher state for the sheet, the page and the folder picker (a picked folder must reach the launcher). */
 @Composable
 fun newSessionViewModel(): NewSessionViewModel =
-    containerViewModel(key = "new-session-sheet") { NewSessionViewModel(it.connection, it.sessions, it.newSessionPrefs) }
+    containerViewModel(key = "new-session-sheet") { NewSessionViewModel(it.connection, it.sessions, it.newSessionPrefs, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }) }
 
 private fun folderName(path: String) = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifBlank { path }
 
@@ -483,11 +517,7 @@ fun NewSessionContent(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
         )
         // Model and permission mode: rarely changed, so folded into one summary row.
-        val permLabel = when (state.permissionMode) {
-            "acceptEdits" -> stringResource(R.string.perm_accept_edits_short)
-            "plan" -> stringResource(R.string.perm_plan_short)
-            else -> stringResource(R.string.perm_default_short)
-        }
+        val permLabel = permissionModeLabel(state.effectivePermissionMode ?: "default", state.agent)
         val expanded = stringResource(R.string.state_expanded)
         val collapsed = stringResource(R.string.state_collapsed)
         val turn by androidx.compose.animation.core.animateFloatAsState(if (options) 180f else 0f, label = "options-chevron")
@@ -495,7 +525,7 @@ fun NewSessionContent(
             BasicComponent(
                 title = stringResource(R.string.new_session_options),
                 summary = listOfNotNull(
-                    if (state.agent == "claude_code") permLabel else null,
+                    if (state.permissionModes.isNotEmpty()) permLabel else null,
                     modelEffortSummary(state.model, state.effort.takeIf { supportsEffort(state.agent) }),
                 ).joinToString(" · "),
                 endActions = {
@@ -512,19 +542,17 @@ fun NewSessionContent(
             )
         }
         ExpandBody(options) {
-            if (state.agent == "claude_code") {
+            if (state.permissionModes.isNotEmpty()) {
+                // Same list, words and "run without asking?" confirmation as inside a session.
                 SmallTitle(stringResource(R.string.tools_permission))
-                TabRowWithContour(
-                    tabs = CLAUDE_PERMISSION_MODES.map {
-                        when (it) {
-                            "acceptEdits" -> stringResource(R.string.perm_accept_edits_short)
-                            "plan" -> stringResource(R.string.perm_plan_short)
-                            else -> stringResource(R.string.perm_default_short)
-                        }
-                    },
-                    selectedTabIndex = CLAUDE_PERMISSION_MODES.indexOf(state.permissionMode).coerceAtLeast(0),
-                    onTabSelected = { onPermissionMode(CLAUDE_PERMISSION_MODES[it]) },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                PermissionModeOptions(
+                    current = state.effectivePermissionMode ?: "default",
+                    pending = null,
+                    enabled = true,
+                    onSelect = onPermissionMode,
+                    modes = state.modelOptions?.permissionModes?.takeIf { it.isNotEmpty() }
+                        ?: state.permissionModes.map { io.github.tianli0.switchtether.remote.protocol.PermissionModeOption(it) },
+                    agent = state.agent,
                 )
             }
             ModelEffortChooser(

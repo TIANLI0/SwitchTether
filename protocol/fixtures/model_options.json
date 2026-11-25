@@ -6,5 +6,13 @@
     { "id": "haiku", "label": "Haiku" }
   ],
   "efforts": ["low", "medium", "high", "xhigh", "max"],
-  "source": "agent"
+  "source": "agent",
+  "permissionModes": [
+    {"id": "default", "label": "Ask before edits", "description": "Asks before editing files and running commands.", "dangerous": false},
+    {"id": "acceptEdits", "label": "Accept edits", "description": "Edits files without asking; asks before running commands.", "dangerous": false},
+    {"id": "plan", "label": "Plan", "description": "Explores and plans without changing anything.", "dangerous": false},
+    {"id": "auto", "label": "Auto", "description": "A classifier approves safe actions; risky ones still ask.", "dangerous": false},
+    {"id": "dontAsk", "label": "Don't ask", "description": "Never asks; anything not allowed beforehand is refused.", "dangerous": false},
+    {"id": "bypassPermissions", "label": "Bypass permissions", "description": "Runs everything without asking. Like a remote terminal.", "dangerous": true}
+  ]
 }

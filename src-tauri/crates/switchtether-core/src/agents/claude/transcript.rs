@@ -872,6 +872,17 @@ impl ClaudeParser {
         d.turn_id = turn.clone();
         out.push(d);
 
+        // AskUserQuestion answered (on the computer, or anywhere for a transcript): the same
+        // question card a live session shows, resolved, with what was chosen. A process
+        // SwitchTether runs shows its own card from the permission request instead.
+        if name == "AskUserQuestion" {
+            if let Some(q) = answered_question(call_id, structured, ts) {
+                let mut q = q;
+                q.turn_id = turn.clone();
+                out.push(q);
+            }
+        }
+
         // File changes from Edit / Write / MultiEdit structured results.
         if let Some(st) = structured.filter(|v| v.is_object()) {
             if let (Some(path), Some(patch)) = (s(st, "filePath"), st.get("structuredPatch")) {
@@ -1645,6 +1656,43 @@ impl ClaudeParser {
     }
 }
 
+/// Id prefix of the question cards [`answered_question`] makes from transcripts.
+pub const ANSWERED_QUESTION_PREFIX: &str = "q:";
+
+/// A resolved `question` event for an AskUserQuestion result (`toolUseResult` `{questions,
+/// answers: {<question text>: <answer>}}`), in the shape of a live question card: ids are the
+/// question texts, so `answers` matches them. `None` when the result has no answers (declined).
+fn answered_question(call_id: &str, structured: Option<&Value>, ts: &str) -> Option<EventDraft> {
+    let st = structured?;
+    let answers = st.get("answers").filter(|a| a.is_object())?;
+    let questions: Vec<Value> = st
+        .get("questions")
+        .and_then(Value::as_array)?
+        .iter()
+        .enumerate()
+        .map(|(i, q)| {
+            json!({
+                "id": q.get("question").cloned().unwrap_or(json!(i.to_string())),
+                "header": q.get("header"), "question": q.get("question"),
+                "multiSelect": q.get("multiSelect").cloned().unwrap_or(json!(false)),
+                "allowOther": true,
+                "options": q.get("options").cloned().unwrap_or(json!([])),
+            })
+        })
+        .collect();
+    let mut data = json!({
+        "requestId": format!("{ANSWERED_QUESTION_PREFIX}{call_id}"), "questions": questions,
+        "resolved": true, "decision": "answer", "callId": call_id,
+    });
+    crate::agents::model::record_answers(&mut data, answers);
+    Some(EventDraft::new(
+        format!("{ANSWERED_QUESTION_PREFIX}{call_id}"),
+        "question",
+        ts,
+        data,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2313,5 +2361,36 @@ mod tests {
             clean_tool_output("ok\n<system-reminder>noise</system-reminder>"),
             "ok"
         );
+    }
+
+    /// An AskUserQuestion answered on the computer is a resolved question card with the choice,
+    /// keyed like a live card (question text), next to the tool row.
+    #[test]
+    fn ask_user_question_answered_on_the_computer_shows_the_choice() {
+        let mut p = ClaudeParser::new();
+        let q = "Which release flow?";
+        p.feed(&json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-25T10:00:00Z",
+            "message":{"role":"assistant","content":[{"type":"tool_use","id":"tq","name":"AskUserQuestion",
+            "input":{"questions":[{"question":q,"header":"Release","multiSelect":false,
+            "options":[{"label":"Nightly","description":"n"},{"label":"Stable","description":"s"}]}]}}]}}));
+        let out = p.feed(&json!({"type":"user","uuid":"u2","timestamp":"2026-11-25T10:00:05Z",
+            "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tq",
+            "content":"User has answered your questions: \"Which release flow?\"=\"Stable\"."}]},
+            "toolUseResult":{"questions":[{"question":q,"header":"Release","multiSelect":false,
+            "options":[{"label":"Nightly","description":"n"},{"label":"Stable","description":"s"}]}],
+            "answers":{q:"Stable"}}}));
+        let card = out
+            .iter()
+            .find(|d| d.kind == "question")
+            .expect("question card");
+        assert_eq!(card.id, "q:tq");
+        assert_eq!(card.data["resolved"], true);
+        assert_eq!(card.data["questions"][0]["id"], q);
+        assert_eq!(card.data["answers"][q], "Stable");
+        // Declined (no answers): no card, the tool row says so.
+        let out = p.feed(&json!({"type":"user","uuid":"u3","timestamp":"2026-11-25T10:00:06Z",
+            "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tq2","is_error":true,
+            "content":"The user doesn't want to proceed"}]}}));
+        assert!(out.iter().all(|d| d.kind != "question"));
     }
 }

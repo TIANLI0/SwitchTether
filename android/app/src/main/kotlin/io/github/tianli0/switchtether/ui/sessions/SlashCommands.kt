@@ -27,6 +27,8 @@ data class SlashEntry(
     @param:StringRes val descriptionRes: Int? = null,
     /** Other names the agent accepts for it (`cost` for `usage`); typing one finds the entry. */
     val aliases: List<String> = emptyList(),
+    /** What a tap does when it is not decided by the name (Codex: its own commands are messages). */
+    val action: SlashAction? = null,
 )
 
 /** What tapping a command does. */
@@ -49,7 +51,22 @@ enum class SlashAction {
 }
 
 /** Agents the phone knows slash commands for. Nothing is invented for the others. */
-fun supportsSlashCommands(agent: String?): Boolean = agent == "claude_code" || agent == "claude"
+fun supportsSlashCommands(agent: String?): Boolean = agent == "claude_code" || agent == "claude" || agent == "codex"
+
+/**
+ * Codex: the phone's own screens only (model, permission mode, rename, help). Its commands —
+ * `/compact`, `/review`, `/goal`, `/plan`, `/status`, `/mcp` and the folder's skills — come from the
+ * desktop (`claude/commands` of a Codex session), which runs them through Codex's app-server.
+ */
+private val CODEX_BUILTINS: List<SlashEntry> = listOf(
+    SlashEntry("model", descriptionRes = R.string.slash_model),
+    SlashEntry("permissions", descriptionRes = R.string.slash_permissions),
+    SlashEntry("rename", descriptionRes = R.string.slash_rename),
+    SlashEntry("help", descriptionRes = R.string.slash_help),
+)
+
+/** Names that are the phone's own screen for a Codex session; every other Codex command is a message. */
+private val CODEX_PHONE_SIDE = setOf("model", "permissions", "rename", "help")
 
 /**
  * The phone's list. Commands that are messages here are only those Claude Code runs headless:
@@ -74,8 +91,18 @@ private val CLAUDE_BUILTINS: List<SlashEntry> = listOf(
     SlashEntry("help", descriptionRes = R.string.slash_help),
 )
 
-/** The phone's own list for [agent]: Claude Code only, empty for every other agent. */
-fun builtinSlashCommands(agent: String?): List<SlashEntry> = if (supportsSlashCommands(agent)) CLAUDE_BUILTINS else emptyList()
+/** The phone's own list for [agent]: Claude Code's commands, Codex's phone screens, empty for every other agent. */
+fun builtinSlashCommands(agent: String?): List<SlashEntry> = when (agent) {
+    "claude_code", "claude" -> CLAUDE_BUILTINS
+    "codex" -> CODEX_BUILTINS
+    else -> emptyList()
+}
+
+/** Codex's commands from the desktop are messages (a skill named `plan` is not Claude Code's plan viewer). */
+fun forAgent(entries: List<SlashEntry>, agent: String?): List<SlashEntry> = if (agent != "codex") entries else entries.map { e ->
+    if (e.action != null || e.name.lowercase() in CODEX_PHONE_SIDE) e
+    else e.copy(action = if (e.argumentHint.isNotBlank()) SlashAction.INSERT else SlashAction.SEND)
+}
 
 /** Whether tapping [action] is the phone's own screen rather than a message to the agent. */
 fun SlashAction.isPhoneSide(): Boolean = this != SlashAction.SEND && this != SlashAction.INSERT
@@ -130,7 +157,7 @@ fun slashActionFor(name: String, hasArgumentHint: Boolean): SlashAction = when (
     else -> if (hasArgumentHint) SlashAction.INSERT else SlashAction.SEND
 }
 
-fun slashActionFor(entry: SlashEntry): SlashAction = slashActionFor(entry.name, entry.argumentHint.isNotBlank())
+fun slashActionFor(entry: SlashEntry): SlashAction = entry.action ?: slashActionFor(entry.name, entry.argumentHint.isNotBlank())
 
 /**
  * Whether the phone can do [action] for this session now: sending and the list itself always;
@@ -170,8 +197,11 @@ val SessionDetailState.slashCommands: List<SlashEntry>
     get() {
         val agent = detail.valueOrNull?.summary?.agent
         if (!supportsSlashCommands(agent) || !(canSend || canQueue)) return emptyList()
-        return mergeSlashCommands(builtinSlashCommands(agent), desktopSlashCommands)
-            .filter { slashActionAvailable(slashActionFor(it), claudeTools, canChangeModel) }
+        // Codex: nothing to offer until its own list arrived (it holds every command it runs).
+        if (agent == "codex" && desktopSlashCommands.isEmpty()) return emptyList()
+        val tools = claudeTools || hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.COMMANDS)
+        return forAgent(mergeSlashCommands(builtinSlashCommands(agent), desktopSlashCommands), agent)
+            .filter { slashActionAvailable(slashActionFor(it), tools, canChangeModel) }
     }
 
 /** Rows of the panel over the composer for the current draft (empty = no panel). */

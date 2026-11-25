@@ -1,5 +1,6 @@
 {
   "commandId": "c-41d2",
   "model": "sonnet",
-  "effort": "high"
+  "effort": "high",
+  "permissionMode": "acceptEdits"
 }

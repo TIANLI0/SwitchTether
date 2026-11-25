@@ -155,7 +155,7 @@ pub(crate) fn search_lines(
 pub fn file_lines(path: &Path) -> std::io::Result<Box<dyn Iterator<Item = String>>> {
     let mut f = std::fs::File::open(path)?;
     let len = f.metadata()?.len();
-    if path.extension().is_some_and(|e| e == "zstd") {
+    if super::is_zstd_file(path) {
         let mut buf = Vec::new();
         f.take(MAX_FILE_BYTES).read_to_end(&mut buf)?;
         let (decoded, _) = super::dsh::decode_frames(&buf);

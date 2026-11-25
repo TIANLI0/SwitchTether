@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,6 +55,7 @@ import io.github.tianli0.switchtether.connection.ConnectionManager
 import io.github.tianli0.switchtether.connection.NotConnectedException
 import io.github.tianli0.switchtether.domain.SessionRepository
 import io.github.tianli0.switchtether.remote.command.CommandOutcome
+import io.github.tianli0.switchtether.remote.protocol.PermissionModeOption
 import io.github.tianli0.switchtether.remote.session.ClaudeTools
 import io.github.tianli0.switchtether.remote.session.ContextUsage
 import io.github.tianli0.switchtether.remote.session.ExportedConversation
@@ -247,7 +249,7 @@ class SessionToolsViewModel(private val sessionId: String, private val repo: Ses
  */
 @Composable
 fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
-    val detailVm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default) }
+    val detailVm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }) }
     val vm = containerViewModel(key = "session-tools:$sessionId") { SessionToolsViewModel(sessionId, it.sessions) }
     val detail by detailVm.state.collectAsStateWithLifecycle()
     val st by vm.state.collectAsStateWithLifecycle()
@@ -294,8 +296,10 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
                 PermissionModeOptions(
                     current = detail.detail.valueOrNull?.permissionMode,
                     pending = detail.permissionPending,
-                    enabled = detail.canUseClaudeTools || (detail.resumable && detail.online),
+                    enabled = detail.canPickPermission,
                     onSelect = detailVm::setPermissionMode,
+                    modes = detail.permissionModes,
+                    agent = detail.detail.valueOrNull?.summary?.agent,
                 )
                 detail.permissionError?.let { ToolsNote(stringResource(R.string.tools_permission_failed, it), LocalDevColors.current.danger) }
                 ToolsNote(stringResource(R.string.tools_permission_hint))
@@ -436,55 +440,116 @@ private fun <T> ToolLoadable(state: Loadable<T>, onRetry: () -> Unit, content: @
     }
 }
 
+/** Short name of a permission mode; the ids are the same for every agent, the words follow the agent. */
 @Composable
-fun permissionModeLabel(mode: String?): String = when (mode) {
+fun permissionModeLabel(mode: String?, agent: String? = null): String = when (mode) {
     "acceptEdits" -> stringResource(R.string.perm_accept_edits_short)
     "plan" -> stringResource(R.string.perm_plan_short)
-    "auto" -> stringResource(R.string.perm_auto_short)
+    "auto" -> stringResource(if (isCodex(agent)) R.string.perm_codex_auto_short else R.string.perm_auto_short)
     "dontAsk" -> stringResource(R.string.perm_dont_ask_short)
-    "bypassPermissions" -> stringResource(R.string.perm_bypass_short)
+    "bypassPermissions" -> stringResource(if (isCodex(agent)) R.string.perm_full_access_short else R.string.perm_bypass_short)
+    "readOnly" -> stringResource(R.string.perm_read_only_short)
+    "untrusted" -> stringResource(R.string.perm_untrusted_short)
     "default", null -> stringResource(R.string.perm_default_short)
     else -> stringResource(R.string.perm_unknown, mode)
 }
 
+private fun isCodex(agent: String?) = agent == "codex"
+
 @Composable
-private fun permissionModeSummary(mode: String): String = when (mode) {
-    "acceptEdits" -> stringResource(R.string.perm_accept_edits)
-    "plan" -> stringResource(R.string.perm_plan)
-    "auto" -> stringResource(R.string.perm_auto)
-    "dontAsk" -> stringResource(R.string.perm_dont_ask)
-    "bypassPermissions" -> stringResource(R.string.perm_bypass)
-    else -> stringResource(R.string.perm_default)
+private fun permissionModeSummary(mode: String, agent: String?, fallback: String?): String = when {
+    isCodex(agent) -> when (mode) {
+        "plan" -> stringResource(R.string.perm_codex_plan)
+        "auto" -> stringResource(R.string.perm_codex_auto)
+        "bypassPermissions" -> stringResource(R.string.perm_full_access)
+        "readOnly" -> stringResource(R.string.perm_read_only)
+        "untrusted" -> stringResource(R.string.perm_untrusted)
+        "default" -> stringResource(R.string.perm_codex_default)
+        else -> fallback ?: mode
+    }
+    else -> when (mode) {
+        "acceptEdits" -> stringResource(R.string.perm_accept_edits)
+        "plan" -> stringResource(R.string.perm_plan)
+        "auto" -> stringResource(R.string.perm_auto)
+        "dontAsk" -> stringResource(R.string.perm_dont_ask)
+        "bypassPermissions" -> stringResource(R.string.perm_bypass)
+        "default" -> stringResource(R.string.perm_default)
+        else -> fallback ?: mode
+    }
 }
 
-/** The modes the phone offers in a session, the current one selected; a switch in flight shows a spinner. */
+/** A mode that runs without asking: confirmed first, and the desktop wants the terminal step-up. */
+fun isDangerousPermissionMode(mode: String, modes: List<PermissionModeOption>): Boolean =
+    mode == "bypassPermissions" || modes.any { it.id == mode && it.dangerous }
+
+/**
+ * The modes the desktop offers for this session ([modes]; an older desktop sends none: Claude Code's
+ * list), the current one selected; a switch in flight shows a spinner. A dangerous mode asks first.
+ */
 @Composable
-fun PermissionModeOptions(current: String?, pending: String?, enabled: Boolean, onSelect: (String) -> Unit) {
-    val modes = ClaudeTools.PERMISSION_MODES
+fun PermissionModeOptions(
+    current: String?,
+    pending: String?,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+    modes: List<PermissionModeOption> = emptyList(),
+    agent: String? = null,
+) {
+    val ids = modes.map { it.id }.ifEmpty { ClaudeTools.PERMISSION_MODES }
+    var confirm by remember { mutableStateOf<String?>(null) }
     GroupCard {
-        modes.forEachIndexed { i, mode ->
+        ids.forEachIndexed { i, mode ->
             io.github.suqi8.coui.kmp.preference.RadioButtonPreference(
-                title = permissionModeLabel(mode),
-                summary = permissionModeSummary(mode),
+                title = permissionModeLabel(mode, agent),
+                summary = permissionModeSummary(mode, agent, modes.firstOrNull { it.id == mode }?.description),
                 selected = (current ?: "default") == mode,
-                onClick = { if (pending == null && mode != (current ?: "default")) onSelect(mode) },
+                onClick = {
+                    if (pending == null && mode != (current ?: "default")) {
+                        if (isDangerousPermissionMode(mode, modes)) confirm = mode else onSelect(mode)
+                    }
+                },
                 enabled = enabled && pending == null,
                 startAction = if (pending == mode) {
                     { RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp, modifier = Modifier.padding(end = 10.dp)) }
                 } else null,
-                cardListPosition = cardListPositionOf(i, modes.size),
+                cardListPosition = cardListPositionOf(i, ids.size),
                 modifier = Modifier.testTag("perm-$mode"),
             )
         }
     }
+    DangerousModeDialog(confirm, onConfirm = { m -> confirm = null; onSelect(m) }, onDismiss = { confirm = null })
+}
+
+/** "Run without asking?" before a mode that skips every approval. */
+@Composable
+fun DangerousModeDialog(mode: String?, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    ConfirmDialog(
+        show = mode != null,
+        title = stringResource(R.string.perm_dangerous_title),
+        message = stringResource(R.string.perm_dangerous_body),
+        confirmText = stringResource(R.string.perm_dangerous_confirm),
+        cancelText = stringResource(R.string.action_cancel),
+        onConfirm = { mode?.let(onConfirm) },
+        onDismiss = onDismiss,
+    )
 }
 
 /** Quick switch from the composer's mode capsule. */
 @Composable
-fun PermissionModeSheet(show: Boolean, current: String?, pending: String?, error: String?, enabled: Boolean, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
+fun PermissionModeSheet(
+    show: Boolean,
+    current: String?,
+    pending: String?,
+    error: String?,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+    modes: List<PermissionModeOption> = emptyList(),
+    agent: String? = null,
+) {
     PanelSheet(show = show, title = stringResource(R.string.tools_permission), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-            PermissionModeOptions(current, pending, enabled, onSelect)
+            PermissionModeOptions(current, pending, enabled, onSelect, modes, agent)
             error?.let { ToolsNote(stringResource(R.string.tools_permission_failed, it), LocalDevColors.current.danger) }
             ToolsNote(stringResource(R.string.tools_permission_hint))
         }

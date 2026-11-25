@@ -302,6 +302,26 @@ data class SessionDetail(
     /** Not running anywhere: a message resumes it under SwitchTether, with the model, effort and
      *  permission mode chosen beforehand ([permissionMode] then is that pending choice). */
     val resumable: Boolean = false,
+    /** Permission modes the phone may pick for this session (desktop's list, same ids for every
+     *  agent); empty when the mode cannot be changed from the phone. */
+    val permissionModes: List<PermissionModeOption> = emptyList(),
+    /** Session tools of an agent other than Claude Code (Codex: `commands`, `permission_mode`,
+     *  `context_usage`, `mcp_status`, `rename`), answered at the same `…/claude/{action}` paths. */
+    val sessionTools: List<String> = emptyList(),
+)
+
+/**
+ * One permission mode (`GET /v1/agents/{agent}/models` `permissionModes`, session detail). Ids are
+ * Claude Code's (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`) plus
+ * Codex's `readOnly` / `untrusted`; [dangerous] (bypass / Codex full access) needs the terminal
+ * step-up and a confirmation.
+ */
+@Serializable
+data class PermissionModeOption(
+    val id: String,
+    val label: String = "",
+    val description: String = "",
+    val dangerous: Boolean = false,
 )
 
 @Serializable
@@ -432,6 +452,8 @@ data class SessionOptionsBody(
     val commandId: String,
     val model: String? = null,
     val effort: String? = null,
+    /** A [PermissionModeOption] id; absent = unchanged. */
+    val permissionMode: String? = null,
 )
 
 /** One model offered by `GET /v1/agents/{agent}/models`. */
@@ -452,6 +474,8 @@ data class ModelOptions(
     val efforts: List<String> = emptyList(),
     /** `agent` (reported by the running agent) or `builtin` (aliases every install accepts). */
     val source: String = "builtin",
+    /** The permission modes a new session of this agent can start in (empty: older desktop). */
+    val permissionModes: List<PermissionModeOption> = emptyList(),
 )
 
 // ---------------------------------------------------------------------------------------------

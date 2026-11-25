@@ -159,7 +159,7 @@ class ProtocolFixturesTest {
 
     @Test
     fun sessionOptionsAndModelOptionsFixtures() {
-        val body = io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody("c-41d2", model = "sonnet", effort = "high")
+        val body = io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody("c-41d2", model = "sonnet", effort = "high", permissionMode = "acceptEdits")
         assertEquals(ProtocolJson.parseToJsonElement(fixture("session_options.json")).jsonObject, ProtocolJson.encodeToJsonElement(io.github.tianli0.switchtether.remote.protocol.SessionOptionsBody.serializer(), body))
         val o = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.ModelOptions.serializer(), fixture("model_options.json"))
         assertEquals("agent", o.source)
@@ -167,5 +167,7 @@ class ProtocolFixturesTest {
         assertEquals(listOf("low", "medium", "high"), o.models[1].efforts)
         assertEquals(null, o.models[2].efforts)
         assertEquals(5, o.efforts.size)
+        assertEquals(listOf("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"), o.permissionModes.map { it.id })
+        assertEquals(listOf("bypassPermissions"), o.permissionModes.filter { it.dangerous }.map { it.id })
     }
 }

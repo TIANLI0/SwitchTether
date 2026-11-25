@@ -24,10 +24,15 @@ TODO list. Each item says what the user experiences.
 3. **Transcript formats are internal to Claude Code and Codex** and may change in any release;
    the parsers are defensive (unknown records are ignored) but rendering may degrade until
    SwitchTether is updated.
-4. **Codex managed sessions** were verified only up to the model call (isolated home without
-   credentials). Approvals/interrupt for Codex are implemented against the published app-server
-   schema but not yet exercised live. The installed Codex CLI version determines behaviour;
-   very old/new CLIs may differ.
+4. **Codex managed sessions** are verified live with the codex 0.171 bundled with Codex Desktop
+   (messages, approvals, interrupt, permission modes, `/compact`, `/review`, resume). `auto`
+   (auto review) and `readOnly` modes, `/goal` and skills are covered by unit tests only. Very
+   old Codex CLIs may ignore newer request fields (collaboration mode, approvals reviewer).
+4a. **`bypassPermissions` / Codex full access** runs everything without asking; choosing it from
+   the phone needs the terminal fingerprint step-up. In a VS Code panel taken over with the hook,
+   Claude Code accepts it mid-session only if the extension started the process with "allow
+   dangerously skip permissions". When SwitchTether runs as root (Linux), managed Claude Code
+   sessions can use it only from the start.
 5. **A managed session cannot be shown on the desktop's Claude Code/Codex UI.** It is visible
    in SwitchTether (phone) and its transcript appears in the normal history afterwards.
 6. Codex allows one writer per thread: while a thread is open elsewhere (Codex Desktop, another
