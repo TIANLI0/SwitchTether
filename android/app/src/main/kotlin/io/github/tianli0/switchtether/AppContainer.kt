@@ -275,14 +275,25 @@ class AppContainer(private val context: Context) {
         runCatching { baseClient.connectionPool.evictAll() }
     }
 
+    /** Wake locks while reconnecting and a periodic liveness alarm, while the monitor service runs. */
+    private val keepAlive by lazy { io.github.tianli0.switchtether.connection.KeepAlive(context, appScope, connection.state) }
+
     fun onServiceKeepAlive() {
         serviceRunning = true
         network.start()
         connection.start()
+        keepAlive.start()
+    }
+
+    /** The keep-alive alarm fired (see [io.github.tianli0.switchtether.connection.KeepAlive]). */
+    fun keepAliveTick() {
+        if (serviceRunning) keepAlive.tick(connection)
+        else io.github.tianli0.switchtether.connection.KeepAlive.cancel(context)
     }
 
     fun onServiceStopped() {
         serviceRunning = false
+        keepAlive.stop()
         if (!isForeground) {
             network.stop()
             connection.stop()

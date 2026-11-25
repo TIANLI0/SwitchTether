@@ -99,7 +99,7 @@ otherwise keep replacing each other). Then, on the control connection:
 |---|---|---|
 | R → D | `INCOMING <conn> <token>` | a phone wants to connect; `<conn>` = 16 random bytes base64url; `<token>` = what the phone sent (`-` if none) |
 | D → R | `REJECT <conn>` | refuse (bad token, limits); the phone gets `ERR rejected` |
-| R → D / D → R | `PING` / `PONG` | keepalive, every 30 s from the relay; a desktop silent for 90 s is dropped |
+| R → D / D → R | `PING` / `PONG` | keepalive, every 30 s from the relay; a desktop silent for 90 s is dropped. The SwitchTether desktop also pings every 20 s and treats 45 s without any line as a dead link (reconnects at once, backoff at most 10 s) |
 
 `PING` is answered with `PONG` in both directions. A `REJECT` for an unknown or expired
 `<conn>` is ignored. Any other line from the desktop is `ERR bad_request` and closes the

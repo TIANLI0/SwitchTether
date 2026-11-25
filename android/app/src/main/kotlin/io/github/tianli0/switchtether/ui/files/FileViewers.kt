@@ -200,7 +200,7 @@ private fun MediaFileViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDown
             if (ready != null) {
                 ToolbarIcon(AppIcons.Share, stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(ready), noApp) })
                 ToolbarIcon(AppIcons.OpenWith, stringResource(R.string.viewer_open_with), { startSafely(context, store.viewIntent(ready), noApp) })
-                if (!ready.fromDownload) ToolbarIcon(AppIcons.Refresh, stringResource(R.string.viewer_refresh), { reload++ })
+                if (!ready.fromDownload) io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(contentDescription = stringResource(R.string.viewer_refresh), onClick = { reload++ })
             }
             ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), save::start, enabled = !save.state.running && ready?.fromDownload != true)
         }
@@ -365,7 +365,7 @@ private fun RemoteTextFileViewer(
             ).joinToString(" · "),
             onBack = onBack,
         ) {
-            ToolbarIcon(AppIcons.Refresh, stringResource(R.string.viewer_refresh), { reload++ })
+            io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(contentDescription = stringResource(R.string.viewer_refresh), onClick = { reload++ })
             ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), save::start, enabled = !save.state.running)
         }
         io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.state.running || save.state.error != null || save.state.record != null) {

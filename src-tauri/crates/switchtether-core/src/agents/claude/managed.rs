@@ -97,6 +97,8 @@ pub struct ManagedClaude {
     permission_mode: Mutex<Option<String>>,
     /// `uuid` of the last message sent from the phone (`cancel_async_message` while queued).
     last_uuid: Mutex<Option<String>>,
+    /// A title has been asked for (`generate_session_title`, once per process).
+    title_requested: std::sync::atomic::AtomicBool,
     pub origin: &'static str,
     /// Tests: lines for the agent's stdin go here instead of a process.
     #[cfg(test)]
@@ -293,6 +295,56 @@ impl ManagedClaude {
     pub fn title(&self) -> Option<String> {
         self.parser.lock().title.clone()
     }
+
+    /// Claude Code names a conversation (`ai-title` in the transcript) only in its interactive
+    /// front ends; under stream-json the host asks for it, as the Agent SDK's
+    /// `generateSessionTitle` does. Asked once, after the first turn of a conversation this
+    /// process started (a resumed one already has its name), when nothing named it yet.
+    fn wants_title(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.remote.is_some() || self.options.resume_from.is_some() {
+            return false;
+        }
+        if self.parser.lock().named {
+            return false;
+        }
+        !self.title_requested.swap(true, Ordering::SeqCst)
+    }
+
+    /// `generate_session_title` with `persist: true`: Claude Code generates the title from the
+    /// first prompt with its small model and appends `ai-title` to the transcript, where the
+    /// session list and history read it. Failure leaves the first-prompt title.
+    async fn generate_title(&self) {
+        let description = self
+            .log
+            .lock()
+            .iter()
+            .find(|e| e.kind == "user_message" && e.parent_id.is_none())
+            .and_then(|e| e.data.get("text").and_then(Value::as_str).map(String::from));
+        let Some(description) = description.filter(|d| !d.trim().is_empty()) else {
+            return;
+        };
+        let description = crate::agents::model::preview(&description, 1000).0;
+        let r = self
+            .control_request(
+                json!({ "subtype": "generate_session_title", "description": description, "persist": true }),
+                Duration::from_secs(60),
+            )
+            .await;
+        let title = r.ok().and_then(|v| {
+            v.pointer("/response/title")
+                .or_else(|| v.get("title"))
+                .and_then(Value::as_str)
+                .and_then(|t| super::transcript::clean_title(Some(t.to_string())))
+        });
+        if let Some(t) = title {
+            let mut p = self.parser.lock();
+            if !p.named {
+                p.title = Some(t);
+                p.named = true;
+            }
+        }
+    }
     pub fn pending_request_ids(&self) -> Vec<String> {
         self.pending.lock().keys().cloned().collect()
     }
@@ -425,6 +477,7 @@ impl ManagedClaude {
             echoed: Mutex::new(HashSet::new()),
             permission_mode: Mutex::new(initial_mode),
             last_uuid: Mutex::new(None),
+            title_requested: std::sync::atomic::AtomicBool::new(false),
             origin: "managed",
             #[cfg(test)]
             test_out: None,
@@ -435,7 +488,12 @@ impl ManagedClaude {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                    let ended_turn = v.get("type").and_then(Value::as_str) == Some("result");
                     reader.on_message(v).await;
+                    if ended_turn && reader.wants_title() {
+                        let me = reader.clone();
+                        tokio::spawn(async move { me.generate_title().await });
+                    }
                 }
             }
             reader.on_exit().await;
@@ -544,6 +602,7 @@ impl ManagedClaude {
             echoed: Mutex::new(HashSet::new()),
             permission_mode: Mutex::new(None),
             last_uuid: Mutex::new(None),
+            title_requested: std::sync::atomic::AtomicBool::new(false),
             origin,
             #[cfg(test)]
             test_out: None,
@@ -893,7 +952,9 @@ impl ManagedClaude {
             }
             "rename_session" => {
                 if let Some(t) = request.get("title").and_then(Value::as_str) {
-                    self.parser.lock().title = Some(t.to_string());
+                    let mut p = self.parser.lock();
+                    p.title = Some(t.to_string());
+                    p.named = true;
                 }
             }
             _ => {}
@@ -1550,6 +1611,44 @@ mod tests {
         assert_eq!(ev.kind, "question");
         assert_eq!(ev.data["resolved"], false);
         ev.data
+    }
+
+    #[tokio::test]
+    async fn first_turn_asks_claude_code_for_a_title_once() {
+        let (m, mut rx) = fake();
+        m.on_message(
+            json!({"type": "user", "message": {"role": "user", "content": "Rename the login button
+in settings"}}),
+        )
+        .await;
+        m.on_message(json!({"type": "result", "subtype": "success", "session_id": "s1"}))
+            .await;
+        assert!(m.wants_title());
+        assert!(!m.wants_title(), "asked once per process");
+        let gen = {
+            let m = m.clone();
+            tokio::spawn(async move { m.generate_title().await })
+        };
+        let req = loop {
+            if let Ok(line) = rx.try_recv() {
+                break serde_json::from_str::<Value>(&line).unwrap();
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(req["request"]["subtype"], "generate_session_title");
+        assert_eq!(req["request"]["persist"], true);
+        assert!(req["request"]["description"]
+            .as_str()
+            .unwrap()
+            .starts_with("Rename the login button"));
+        let rid = req["request_id"].as_str().unwrap();
+        m.on_message(
+            json!({"type": "control_response", "response": {"subtype": "success",
+            "request_id": rid, "response": {"title": "Settings login button"}}}),
+        )
+        .await;
+        gen.await.unwrap();
+        assert_eq!(m.title().as_deref(), Some("Settings login button"));
     }
 
     #[tokio::test]

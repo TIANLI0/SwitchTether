@@ -126,7 +126,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
     Page(
         title = stringResource(R.string.tab_workspace),
         actions = {
-            ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), {
+            io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon({
                 termVm.refresh()
                 filesVm.loadRoots()
             })
@@ -202,6 +202,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
             item { SmallTitle(stringResource(R.string.forward_title)) }
             item {
                 val forwards by container.portForwards.active.collectAsStateWithLifecycle()
+                val dshWeb = rememberDshWebAvailable()
                 GroupCard {
                     ArrowPreference(
                         title = if (forwards.isEmpty()) stringResource(R.string.forward_title)
@@ -210,8 +211,9 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                         else androidx.compose.ui.res.pluralStringResource(R.plurals.forward_ws_active, forwards.size, forwards.size),
                         startAction = { RowIcon(AppIcons.PortForward) },
                         onClick = { onOpen(Route.PortForward) },
-                        cardListPosition = CardListPosition.Full,
+                        cardListPosition = if (dshWeb) CardListPosition.Head else CardListPosition.Full,
                     )
+                    if (dshWeb) DshWebWorkspaceRow(onOpen = { onOpen(Route.DshWeb) }, position = CardListPosition.Tail)
                 }
             }
             item { SmallTitle(stringResource(R.string.ws_git)) }

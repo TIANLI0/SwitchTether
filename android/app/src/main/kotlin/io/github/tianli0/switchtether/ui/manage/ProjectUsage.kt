@@ -181,7 +181,7 @@ fun ProjectUsageScreen(project: String, onBack: () -> Unit, onOpen: (Route) -> U
         subtitle = stringResource(R.string.project_usage_title),
         onBack = onBack,
         large = false,
-        actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::load) },
+        actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) },
     ) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         ProjectUsageContent(state, onPreset = vm::setPreset, onRetry = vm::load, onOpenSession = { id, title -> onOpen(Route.SessionDetail(id, title)) })

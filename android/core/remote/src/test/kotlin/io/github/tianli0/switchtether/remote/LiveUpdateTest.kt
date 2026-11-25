@@ -164,6 +164,11 @@ echo done"}"""))
         assertEquals(Step(StepKind.WEB_FETCH, "example.com"), step("WebFetch", """{"url":"https://example.com/docs"}"""))
         assertEquals(Step(StepKind.OTHER), step("mcp__weird__tool"))
         assertEquals("Working…", t.step(Step(StepKind.OTHER)))
+        // Codex reads and searches through its shell; the desktop marks them like Claude Code's tools.
+        val cmd = kotlinx.serialization.json.Json.parseToJsonElement("""{"command":"sed -n '1,9p' src/lib.rs"}""") as kotlinx.serialization.json.JsonObject
+        assertEquals(Step(StepKind.READ, "lib.rs"), LiveReducer.classifyStep("shell", "/repo/src/lib.rs", "read", cmd))
+        assertEquals(Step(StepKind.SEARCH), LiveReducer.classifyStep("exec_command", "rg -n x", "search", cmd))
+        assertEquals(Step(StepKind.COMMAND, "cargo test"), LiveReducer.classifyStep("shell", "cargo test", "shell", null))
     }
 
     @Test

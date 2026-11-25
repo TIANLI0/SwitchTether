@@ -121,6 +121,10 @@
         <receiver
             android:name=".notify.NotifyActionReceiver"
             android:exported="false" />
+        <!-- Keep-alive alarm of the monitor service (checks / restores the connection while asleep). -->
+        <receiver
+            android:name=".connection.KeepAlive$Receiver"
+            android:exported="false" />
         <!-- Buttons / swipe-away of pinned tasks' Live Updates (PendingIntents only). -->
         <receiver
             android:name=".notify.LiveUpdateActionReceiver"

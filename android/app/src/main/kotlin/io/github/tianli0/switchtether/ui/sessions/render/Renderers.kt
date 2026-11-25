@@ -485,9 +485,10 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
     val status = toolStatus(item)
     val result = item.attachedResult
     val command = io.github.tianli0.switchtether.remote.session.ToolCommands.raw(d)
-    // Read / Edit / Write: the step is about one file, shown by name and opened from the card.
-    val filePath = remember(item.event) { io.github.tianli0.switchtether.remote.session.ToolFiles.path(d) }
-    val fileRange = remember(item.event) { if (filePath != null) io.github.tianli0.switchtether.remote.session.ToolFiles.range(d) else null }
+    // Read / Edit / Write (or a Codex command that reads files): the files are shown by name and opened from the card.
+    val files = remember(item.event) { io.github.tianli0.switchtether.remote.session.ToolFiles.files(d) }
+    val filePath = files.singleOrNull()?.path
+    val fileRange = files.singleOrNull()?.range
     Column(Modifier.fillMaxWidth()) {
         CollapsibleRow(
             icon = categoryIcon(d.str("category")),
@@ -517,12 +518,16 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
             Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
                 val input = d["input"]
                 val isRead = d.str("category") == "read"
-                if (filePath != null) {
-                    SectionLabel(stringResource(R.string.render_file))
-                    FileTarget(filePath, fileRange, ctx)
+                if (files.isNotEmpty()) {
+                    SectionLabel(stringResource(if (files.size > 1) R.string.render_files else R.string.render_file))
+                    files.forEachIndexed { i, f ->
+                        if (i > 0) Spacer(Modifier.size(6.dp))
+                        FileTarget(f.path, f.range, ctx)
+                    }
                 }
-                // A read's input is only the path (and the range) the row above already shows.
-                if (input != null && input.toString() != "{}" && !(filePath != null && isRead)) {
+                // A Read tool's input is only the path (and the range) the row above already shows;
+                // a command that read the file is still shown.
+                if (input != null && input.toString() != "{}" && !(filePath != null && isRead && command == null)) {
                     SectionLabel(stringResource(R.string.render_input))
                     if (command != null) {
                         // Wrap / copy are small icons in the block's own header, not buttons above it.
@@ -649,7 +654,7 @@ fun ToolResultStandalone(item: RenderItem, ctx: RenderContext) {
 }
 
 @Composable
-fun FileChange(item: RenderItem) {
+fun FileChange(item: RenderItem, ctx: RenderContext? = null) {
     val d = item.event.data
     val dev = LocalDevColors.current
     var open by rememberSaveable(item.key) { mutableStateOf(true) }
@@ -692,6 +697,11 @@ fun FileChange(item: RenderItem) {
         ExpandBody(open) {
             val diff = d.str("diff").orEmpty()
             Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
+                // The file as it is now, like the Edit / Write step's own file row.
+                if (ctx?.onOpenFile != null && change != "delete" && path.isNotBlank()) {
+                    FileTarget(path, null, ctx)
+                    Spacer(Modifier.size(6.dp))
+                }
                 if (diff.isNotBlank()) {
                     val moreFmt = stringResource(R.string.render_show_more_lines)
                     DiffView(diff, showMoreLabel = { n -> moreFmt.format(n) })
@@ -726,7 +736,7 @@ fun Plan(item: RenderItem) {
                         "completed" -> Box(Modifier.size(18.dp).clip(CircleShape).background(dev.ok), contentAlignment = Alignment.Center) {
                             Icon(AppIcons.Done, contentDescription = stringResource(R.string.step_completed), tint = Color.White, modifier = Modifier.size(14.dp))
                         }
-                        "in_progress" -> {
+                        "in_progress", "inProgress" -> {
                             val runningLabel = stringResource(R.string.step_running)
                             RotatingProgressIndicator(color = accent, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp, modifier = Modifier.semantics { contentDescription = runningLabel })
                         }
@@ -738,7 +748,7 @@ fun Plan(item: RenderItem) {
                     it.str("text", "content").orEmpty(),
                     style = COUITheme.textStyles.body2,
                     color = if (st == "completed") COUITheme.colorScheme.onSurfaceVariantSummary else COUITheme.colorScheme.onSurface,
-                    fontWeight = if (st == "in_progress") FontWeight.Medium else null,
+                    fontWeight = if (st == "in_progress" || st == "inProgress") FontWeight.Medium else null,
                 )
             }
         }

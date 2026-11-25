@@ -40,13 +40,32 @@ class MonitorService : Service() {
     private var watching = false
     private var wakeLock: android.os.PowerManager.WakeLock? = null
 
-    /** Held only while a task is running or waiting for the user, so its completion is announced on time without draining the battery all day. */
+    private var renew: kotlinx.coroutines.Job? = null
+
+    /**
+     * Held only while a task is running or waiting for the user, so its completion is announced on
+     * time without draining the battery all day. Each acquire is bounded ([WAKE_MAX_MS]) and renewed
+     * while tasks keep running: a single timed acquire used to lapse after 15 minutes, and a longer
+     * task then finished unnoticed until something else woke the phone. Renewal stops after
+     * [WAKE_RENEW_MAX_MS] (a question left unanswered for hours must not keep the CPU up); the
+     * keep-alive alarm and the desktop's pings still wake the phone after that.
+     */
     private fun setAwake(awake: Boolean) {
+        renew?.cancel()
+        renew = null
         runCatching {
             if (awake) {
                 val lock = wakeLock ?: getSystemService(android.os.PowerManager::class.java)
                     .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "switchtether:monitor").also { it.setReferenceCounted(false); wakeLock = it }
                 lock.acquire(WAKE_MAX_MS)
+                renew = scope.launch {
+                    var held = 0L
+                    while (held < WAKE_RENEW_MAX_MS) {
+                        kotlinx.coroutines.delay(WAKE_MAX_MS - 60_000L)
+                        held += WAKE_MAX_MS - 60_000L
+                        runCatching { lock.acquire(WAKE_MAX_MS) }
+                    }
+                }
             } else {
                 wakeLock?.takeIf { it.isHeld }?.release()
             }
@@ -130,6 +149,7 @@ class MonitorService : Service() {
     companion object {
         const val NOTIFICATION_ID = 7
         private const val WAKE_MAX_MS = 15 * 60_000L
+        private const val WAKE_RENEW_MAX_MS = 2 * 60 * 60_000L
         const val ACTION_STOP = "io.github.tianli0.switchtether.STOP_MONITOR"
         const val ACTION_STOP_FORWARDS = "io.github.tianli0.switchtether.STOP_FORWARDS"
 

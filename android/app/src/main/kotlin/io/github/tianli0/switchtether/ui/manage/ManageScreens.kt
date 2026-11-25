@@ -132,7 +132,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
     Page(
         title = stringResource(R.string.manage_providers),
         onBack = onBack,
-        actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::load) },
+        actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) },
     ) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         AppTabs(state.apps, state.app, vm::selectApp)
@@ -247,7 +247,7 @@ fun UsageScreen(onBack: () -> Unit, onOpen: (io.github.tianli0.switchtether.ui.n
     // The desktop's currency may have changed since we connected: re-read it with the numbers.
     androidx.compose.runtime.LaunchedEffect(Unit) { container.money.refresh() }
     val refresh = { vm.load(); scope.launch { container.money.refresh() }; Unit }
-    Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), refresh) }) {
+    Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(refresh) }) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         val presets = io.github.tianli0.switchtether.remote.usage.UsageRangePreset.entries
         io.github.suqi8.coui.kmp.basic.ChipTabGroup(
@@ -300,6 +300,13 @@ fun UsageContent(
     LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
         item { GroupCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
         item { SyncNote(state.lastSyncMs, state.zone) }
+        // Remaining quota right under the totals: it is what one checks first, not after every table.
+        if (state.quotas.isNotEmpty()) {
+            item { SectionHeader(stringResource(R.string.usage_quota)) }
+            items(state.quotas, key = { it.first }) { (_, q) ->
+                Box(Modifier.animateItem()) { GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } } }
+            }
+        }
         item { SectionHeader(stringResource(if (state.hourly) R.string.usage_trend_hourly else R.string.usage_trend_daily)) }
         item {
             GroupCard {
@@ -311,10 +318,6 @@ fun UsageContent(
         item { SectionHeader(stringResource(R.string.usage_by_model)) }
         item { GroupCard { SmallLoadable(state.models, onRetry) { BreakdownTable(it, showAvgCost = true) } } }
         projectUsageSection(state.projects, onRetry, onOpenProject)
-        item { SectionHeader(stringResource(R.string.usage_quota)) }
-        items(state.quotas, key = { it.first }) { (_, q) ->
-            Box(Modifier.animateItem()) { GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } } }
-        }
         // Request log (newer desktops; an older one without the API hides the section).
         state.logs?.let { logs ->
             item { SectionHeader(stringResource(R.string.usage_logs)) }
@@ -596,7 +599,7 @@ private fun BreakdownTable(rows: List<UsageBreakdownRow>, showAvgCost: Boolean) 
 
 /** Desktop tier ids (`five_hour`, `seven_day_opus`, …) as readable window names. */
 @Composable
-private fun quotaTierLabel(name: String): String {
+internal fun quotaTierLabel(name: String): String {
     val model = name.substringAfter("seven_day_", "").takeIf { it.isNotEmpty() }
         ?.replaceFirstChar { it.uppercase() }
     return when {
@@ -612,7 +615,7 @@ private fun quotaTierLabel(name: String): String {
 
 /** "Resets today 18:00 · in 3 h 20 min", in the device's time zone; null when unknown. */
 @Composable
-private fun quotaResetText(raw: String?): String? {
+internal fun quotaResetText(raw: String?): String? {
     val at = Formatters.parseInstant(raw) ?: return raw?.takeIf { it.isNotBlank() }?.let { stringResource(R.string.quota_resets, it) }
     val now = java.time.Instant.now()
     val (days, clock) = Formatters.localDayAndTime(at, now)
@@ -686,7 +689,7 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
             ToggleListKind.PROMPTS -> R.string.manage_prompts
         },
     )
-    Page(title = title, onBack = onBack, actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::load) }) {
+    Page(title = title, onBack = onBack, actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) }) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         AppTabs(DEFAULT_APPS, state.app, vm::selectApp)
         if (kind == ToggleListKind.PROMPTS) {

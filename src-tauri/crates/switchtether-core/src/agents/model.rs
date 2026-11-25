@@ -171,7 +171,8 @@ pub fn tool_category(name: &str) -> &'static str {
     }
     match name {
         "Bash" | "BashOutput" | "KillShell" | "KillBash" | "shell" | "local_shell"
-        | "exec_command" | "PowerShell" | "unified_exec" | "write_stdin" => "shell",
+        | "exec_command" | "shell_command" | "exec" | "PowerShell" | "unified_exec"
+        | "write_stdin" => "shell",
         "Edit" | "MultiEdit" | "NotebookEdit" | "apply_patch" => "edit",
         "Write" => "write",
         "Read" | "view_image" => "read",
@@ -180,7 +181,7 @@ pub fn tool_category(name: &str) -> &'static str {
         "Task" | "Agent" | "spawn_agent" | "send_input" | "resume_agent" | "wait"
         | "close_agent" => "task",
         "TodoWrite" | "update_plan" => "todo",
-        "AskUserQuestion" | "request_user_input" => "question",
+        "AskUserQuestion" | "request_user_input" | "request_user_input_async" => "question",
         "ExitPlanMode" | "EnterPlanMode" => "plan",
         _ => "other",
     }
@@ -256,7 +257,7 @@ pub fn tool_title(name: &str, input: &Value) -> String {
             .filter(|m| !is_encrypted_blob(m))
             .or_else(|| s("id")),
         "resume_agent" | "close_agent" => s("id"),
-        "shell" | "exec_command" | "local_shell" => input
+        "shell" | "exec_command" | "shell_command" | "local_shell" => input
             .get("command")
             .map(|c| match c {
                 Value::Array(a) => a

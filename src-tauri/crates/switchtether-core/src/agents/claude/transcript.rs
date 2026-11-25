@@ -39,6 +39,9 @@ pub struct ClaudeParser {
     pub title: Option<String>,
     /// `/rename` title (`custom-title`); always wins over the generated `ai-title`.
     custom_title: Option<String>,
+    /// [`Self::title`] is a real name (`ai-title`, `custom-title`, a host-generated title), not
+    /// the first-prompt fallback.
+    pub named: bool,
     pub model: Option<String>,
     pub cwd: Option<String>,
     pub git_branch: Option<String>,
@@ -548,6 +551,7 @@ impl ClaudeParser {
                     if let Some(t) = clean_title(s(rec, "aiTitle")) {
                         if self.custom_title.is_none() {
                             self.title = Some(t);
+                            self.named = true;
                         }
                     }
                 }
@@ -558,6 +562,7 @@ impl ClaudeParser {
                     if let Some(t) = clean_title(s(rec, "customTitle")) {
                         self.custom_title = Some(t.clone());
                         self.title = Some(t);
+                        self.named = true;
                     }
                 }
                 vec![]

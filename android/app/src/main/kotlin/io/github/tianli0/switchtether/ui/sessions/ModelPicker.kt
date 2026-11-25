@@ -2,6 +2,11 @@ package io.github.tianli0.switchtether.ui.sessions
 
 import io.github.tianli0.coui17.patterns.PageDefaults
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.tianli0.coui17.patterns.LinkButton
 import androidx.compose.foundation.rememberScrollState
@@ -152,7 +157,8 @@ private fun isPinnedVersion(id: String): Boolean = id.startsWith("claude-")
 /**
  * Effort as a horizontal stepped slider: the agent's default at the left end, then each level
  * from lowest to highest. The level is committed when the finger lifts, so dragging across the
- * stops does not change a running session several times.
+ * stops does not change a running session several times. A tap on the track or on a level's name
+ * picks that level directly.
  */
 @Composable
 fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Unit, enabled: Boolean = true) {
@@ -160,6 +166,10 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
     val committed = stops.indexOf(effort).coerceAtLeast(0)
     var pos by remember(stops, committed) { mutableFloatStateOf(committed.toFloat()) }
     val index = pos.roundToInt().coerceIn(0, stops.lastIndex)
+    val pick: (Int) -> Unit = { i ->
+        pos = i.toFloat()
+        if (stops[i] != effort) onEffort(stops[i])
+    }
     GroupCard {
       Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -179,7 +189,22 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
             showKeyPoints = true,
             keyPoints = stops.indices.map { it.toFloat() },
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("effort-slider"),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp)
+                // The slider itself only follows a drag: a tap lands on the nearest stop.
+                .pointerInput(stops, enabled) {
+                    if (!enabled) return@pointerInput
+                    detectTapGestures { offset ->
+                        val w = size.width.toFloat()
+                        if (w <= 0f || stops.size < 2) return@detectTapGestures
+                        // The stops sit inside the track's rounded ends (half the track height).
+                        val inset = (size.height / 2f).coerceAtMost(w / 4f)
+                        val f = ((offset.x - inset) / (w - 2 * inset)).coerceIn(0f, 1f)
+                        pick((f * stops.lastIndex).roundToInt().coerceIn(0, stops.lastIndex))
+                    }
+                }
+                .testTag("effort-slider"),
         )
         Row(Modifier.fillMaxWidth()) {
             stops.forEachIndexed { i, e ->
@@ -193,7 +218,12 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
                         else -> TextAlign.Center
                     },
                     maxLines = 1,
-                    modifier = Modifier.weight(1f).testTag("effort-${e.ifEmpty { "default" }}"),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(enabled = enabled) { pick(i) }
+                        .padding(vertical = 4.dp)
+                        .testTag("effort-${e.ifEmpty { "default" }}"),
                 )
             }
         }

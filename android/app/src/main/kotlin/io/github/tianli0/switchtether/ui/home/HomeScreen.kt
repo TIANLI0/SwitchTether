@@ -105,17 +105,26 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                     item(key = "live") {
                         Box(Modifier.animateItem()) {
                             if (state.running.isEmpty()) {
+                                // One row, like a settings entry: what to do, and why the group is empty.
+                                val c = io.github.tianli0.switchtether.ui.appContainer()
                                 GroupCard {
-                                    BasicComponent(
-                                        title = stringResource(R.string.home_no_live),
-                                        endActions = { val c = io.github.tianli0.switchtether.ui.appContainer(); SmallButton(stringResource(R.string.new_session_title), { c.newSessionReopen.value = true }) },
+                                    ArrowPreference(
+                                        title = stringResource(R.string.new_session_title),
+                                        summary = stringResource(R.string.home_no_live),
+                                        startAction = { RowIcon(AppIcons.Add) },
+                                        onClick = { c.newSessionReopen.value = true },
                                         cardListPosition = CardListPosition.Full,
+                                        modifier = Modifier.testTag("home-new-session"),
                                     )
                                 }
                             } else {
                                 SessionGroup(state.running.take(MAX_ROWS), onOpen)
                             }
                         }
+                    }
+                    if (state.quotas.isNotEmpty()) {
+                        item(key = "quota-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_quota_title)) } }
+                        item(key = "quota") { Box(Modifier.animateItem()) { QuotaGlance(state.quotas) { onOpen(Route.Usage) } } }
                     }
                     if (state.idle.isNotEmpty()) {
                         item(key = "idle-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_idle, state.idle.size)) } }

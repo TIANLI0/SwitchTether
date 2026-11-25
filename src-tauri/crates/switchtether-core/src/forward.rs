@@ -585,10 +585,16 @@ const SYSTEM_PROCESSES: &[&str] = &[
     "csrss.exe",
 ];
 
+/// Every listener the OS reports on loopback or the any-address, unfiltered (common development
+/// ports probed where the OS listing is unavailable).
+pub fn all_listening_ports() -> Vec<ListeningPort> {
+    os_listening_ports().unwrap_or_else(probe_common_ports)
+}
+
 /// Listening TCP ports reachable on loopback, excluding `exclude` (the Remote server itself),
 /// system services and the dynamic range (≥ 49152, where Windows RPC listeners live).
 pub fn listening_ports(exclude: &[u16]) -> Vec<ListeningPort> {
-    let mut v = os_listening_ports().unwrap_or_else(probe_common_ports);
+    let mut v = all_listening_ports();
     // On Windows a process name is known for everything the user runs; a nameless listener is
     // a protected system service (DNS, RPC, …). Below 1024 those are never development servers.
     let os_named = cfg!(windows);

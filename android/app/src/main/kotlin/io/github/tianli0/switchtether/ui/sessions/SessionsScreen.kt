@@ -116,7 +116,7 @@ fun SessionsContent(
                             searchExpanded = false
                         },
                         gradientColor = Color.Transparent,
-                        extraActions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), onReload) },
+                        extraActions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(onReload, refreshing = refreshing) },
                     )
                 },
             )

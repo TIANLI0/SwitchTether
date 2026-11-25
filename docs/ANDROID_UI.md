@@ -2,8 +2,9 @@
 
 Native Android client (Kotlin, Jetpack Compose, Coroutines/Flow, Jetpack ViewModel/Lifecycle/
 DataStore). It pairs with **one** desktop running SwitchTether and talks to the real Remote API
-(docs/PROTOCOL.md). No WebView anywhere — markdown, diffs, code, charts and the QR preview are
-native (the camera preview is CameraX's `PreviewView`).
+(docs/PROTOCOL.md). The app's own UI uses no WebView — markdown, diffs, code, charts and the QR
+preview are native (the camera preview is CameraX's `PreviewView`). The one WebView shows a web UI
+that runs on the computer: DeepSeek Harness Web (§31).
 
 Source: `android/`. Build: see `android/DEV_NOTES.md`.
 
@@ -1627,3 +1628,56 @@ read for the numbers only; no SDK code or resources were copied.
 
 Not seen on a device: the transitions on real hardware, the material rims (they need runtime
 shaders with a GPU), the predictive back feel.
+
+## 31. DeepSeek Harness Web (2026-11-25)
+
+DeepSeek Harness's official UI is `dsh web`, a web app served on the computer. The phone opens it
+in a WebView over a port forward (protocol: PROTOCOL.md §7.14; security: SECURITY.md §7a) instead
+of re-implementing it natively.
+
+**Entries.**
+- Workspace → 端口转发 group: a second row "DeepSeek Harness Web" (when the computer offers the
+  `dsh_web` feature).
+- New session with DeepSeek Harness selected: a row "改用 DeepSeek Harness Web" above the folder.
+  A managed dsh session (ACP) and dsh web are both offered; the web UI has dsh's full feature set
+  (all sessions, settings, its own approval cards).
+- Not yet in the session page of a dsh session (the header capsules are being reworked elsewhere;
+  `Route.DshWeb` is all such an entry needs).
+
+**Flow** (`forward/DshWeb.kt` `DshWebViewModel`, `ui/workspace/DshWebScreen.kt`).
+1. `GET /v1/dsh-web`: not installed → a state page that says where to install it. Already forwarded
+   on this phone → opens without a prompt.
+2. Otherwise it opens at once: biometric step-up `port_forward` → `POST /v1/dsh-web/open`. A
+   `dsh web` that runs is reused; else the computer starts one and the page shows
+   "正在电脑上启动 dsh web…" (with what is run) while it polls once a second (up to 150 s).
+3. The lease is served by `PortForwards` like any forward (so it is listed on the forwarding page, the
+   monitor service keeps the connection, expiry / revocation end it) on a fixed phone port — 3080, or
+   the first free of 3081…3089 — because dsh binds its 30-day sign-in cookie to `localhost:<port>`.
+4. The WebView loads `http://localhost:<port>/?token=…` (dsh's sign-in link) for an instance
+   SwitchTether started, else `/`. A `401` on the page (a `dsh web` the user started, no cookie yet)
+   shows "登录 dsh web": paste the line dsh printed in its terminal; the token is taken out of it.
+
+**Page.**
+- A compact COUI title bar (back, title, `localhost:3080 → 电脑 :52166 · 经中继`, reload, ⋯ menu:
+  全屏 · 在浏览器中打开 · 复制地址 (never with a token) · 登录 dsh web · 停止 dsh web — the last only
+  for an instance SwitchTether started, with a confirmation), a 2dp progress line, the WebView, and
+  a spacer for the gesture bar / keyboard (the window is edge-to-edge; `adjustResize` + IME insets).
+- **Full screen**: the bar goes away; the status bar strip and the gesture area are painted in the
+  page's own colour (`<meta name="theme-color">`, else the first painted background at the top,
+  read after each load and in-page navigation), and the status / navigation bar icons switch to dark
+  or light by that colour's luminance. Leaving full screen restores the theme's icon colours.
+- **Back**: the page's history first, then out of full screen, then off the page.
+- `<input type="file">`: the system picker (multiple when the page allows it); the callback is
+  always answered, also when the picker fails or the page goes away. Downloads: a toast (not
+  supported). Camera / microphone / location: denied.
+- **Restrictions**: navigation only within `http://localhost:<port>` (scheme, host and port); other
+  http(s) links open in the phone's browser, other schemes are dropped; no file / content URLs,
+  no universal access, no extra windows, no mixed content, third-party cookies off, no JavaScript
+  interface. `network_security_config` allows cleartext only to `localhost`.
+- Load errors of the page itself show an error state with retry; while the computer is unreachable
+  the forward serves its own self-reloading page.
+
+**Tests.** `DshWebUrlsTest` (start URL, origin check, pasted token, CSS colour parsing, icon
+contrast), `DshWebModelsTest` (fixtures). Not seen on a device: the WebView, the full-screen colours,
+the file picker, the keyboard insets, dsh web's own UI on a phone screen.
+

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -110,10 +111,11 @@ fun UpdateSheet(
                 style = COUITheme.textStyles.footnote1,
                 color = COUITheme.colorScheme.onSurfaceVariantSummary,
             )
-            Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
-                MarkdownView(r.notes.ifBlank { stringResource(R.string.update_no_notes) })
+            val chinese = androidx.compose.ui.platform.LocalConfiguration.current.locales[0].language == "zh"
+            val notes = remember(r.notes, chinese) { io.github.tianli0.switchtether.update.ReleaseNotes.forDisplay(r.notes, chinese) }
+            Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                MarkdownView(notes.ifBlank { stringResource(R.string.update_no_notes) })
             }
-            Text(stringResource(R.string.update_checks_note), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
             when (state) {
                 is UpdateState.Downloading -> {
                     LinearProgressIndicator(

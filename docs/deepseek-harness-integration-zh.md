@@ -15,6 +15,14 @@ DeepSeek Harness 的应用 ID 为 `dsh`，命令为 `dsh`，npm 包为 `@deepsee
 
 安装后在终端运行 `dsh web` 打开官方 Web 界面。
 
+## 在手机上打开 DeepSeek Harness Web
+
+手机端「工作区 → 端口转发」和新建会话（选中 DeepSeek Harness 时）有「DeepSeek Harness Web」入口，在 App 内的 WebView 中打开电脑上的 `dsh web`（协议见 PROTOCOL.md §7.14）：
+
+- 电脑上已有 `dsh web` 在运行（默认 3080 端口，或其他 node / bun / dsh 监听端口上能认出 dsh 的 `401` 回应）时直接复用；没有时，SwitchTether 以 `dsh web --no-open --host 127.0.0.1 --port 0` 启动一个属于自己的子进程，与用户自己在终端里运行的命令相同，使用现有 `web` profile，SwitchTether 不改写 profile。
+- 打开、启动、停止都需要手机上的生物识别确认（与端口转发同一 `port_forward` 范围），之后经普通端口转发访问。
+- SwitchTether 启动的实例：手机拿到 dsh 打印的一次性登录链接自动登录；在手机上可停止，SwitchTether 退出时也会停止（Windows 上连同 `node` 子进程一起结束）。用户自己启动的实例从不停止；首次需要把终端里 `dsh web: http://127.0.0.1:…/?token=…` 那一行粘贴到手机上登录，之后 30 天内有效。
+
 ## 供应商与模型
 
 在侧栏选择 DeepSeek Harness，添加供应商时可以选择已有的厂商、第三方平台、云服务商、本地服务预设，也可手动配置。预设复用已维护的 Pi 厂商信息，并转成 DeepSeek Harness 的原生协议、模型、请求头和兼容参数；仅提供原生适配器支持的三种协议：

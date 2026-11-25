@@ -633,3 +633,122 @@ Evidence: live `codex_smoke` (codex 0.171, real login, scratch folder) — 20/20
 core 193 + attach 6 + e2e 17, desktop glue 10, Android unit tests, vitest config 1262. Not verified live: Codex
 `auto` / `readOnly` modes, `/goal`, skills; a real VS Code panel / Codex Desktop window behind the shim; the phone UI on
 a device.
+
+## Android polish, managed Claude Code titles (2026-11-25)
+
+- Managed Claude Code sessions are named: Claude Code writes `ai-title` only from its interactive front ends,
+  never under stream-json, so phone-started sessions kept their first prompt as the title. After the first
+  turn SwitchTether sends `generate_session_title` (`description` = first prompt, `persist: true`), as the
+  Agent SDK's `generateSessionTitle` does; Claude Code generates the title and appends `ai-title` to the
+  transcript, which the 4 s title poll already publishes. Not asked for resumed / forked / attached sessions,
+  nor when the parser saw a real title. Evidence: live probe with Claude Code 2.1.325 (haiku, scratch folder)
+  returned `{"title": "Settings page login button"}` and the transcript gained the `ai-title` line; unit test
+  `first_turn_asks_claude_code_for_a_title_once`.
+- Android: refresh keys turn a full circle per tap (and keep turning while a list refresh runs); the effort
+  slider takes taps on the track and on the level names; changing model / effort / permission mode no longer
+  disables and redraws every card of the conversation or greys the sheet while the desktop applies it;
+  predictive back is back as Settings → Appearance switch (on by default; off = plain pop); update sheet shows
+  only the release notes in the app language without the download list / checksum notes; About is its own
+  page (icon, version, update, licences); licences are one compact card; MCP servers in session tools are
+  folded under a summary row; the usage heatmap no longer scrolls sideways (squares shrink to fit, a too-wide
+  range keeps its latest weeks, a narrow one is centred); subscription quota sits on Home under the running
+  sessions and at the top of Usage; the stop and run-settings capsules above the composer are glass with COUI
+  touch motion and press spotlight.
+- Not verified on a device: blur / press light, the heatmap layout at real widths, predictive back motion.
+
+## Background connection, relay especially (2026-11-25, second pass)
+
+- Phone (monitor service running): a partial wake lock while the connection is down, at most 3 min per
+  outage (`connection/KeepAlive.kt`). Coroutine timers stop while the CPU sleeps, so a drop with the
+  screen off used to sit in its backoff until something else woke the phone. An allow-while-idle alarm
+  every 5 min (Doze stretches it) pings the live event stream, or restarts a long outage with a fresh
+  60 s window — a relay path that died silently sends nothing that would wake the phone.
+- The "task running / waiting" wake lock was one 15 min acquire; it is now renewed while tasks run,
+  for at most 2 h.
+- Desktop relay control connection: pings the relay every 20 s and drops the link after 45 s of
+  silence (was: noticed after 90 s); reconnect backoff at most 10 s (was 60 s). Unit test
+  `control_link_is_pinged_and_dropped_when_silent`.
+- Not verified: behaviour on the user's phone in Doze over the Cloudflare relay; battery cost of the
+  5 min alarm.
+
+## Codex file reads / edits like Claude Code on the phone (2026-11-25)
+
+- Codex reads, lists and searches through its shell; Claude Code has Read / LS / Grep. The core now classifies
+  every Codex shell step (`agents::codex::commands`): from Codex's own parse (`commandActions` on app-server items,
+  `parsed_cmd` on rollout `CommandExecution` items) and, where Codex says `unknown` (most PowerShell) or gives
+  none, from the command text (`cat`, `head`, `sed -n 'A,Bp'`, `nl`, `Get-Content` with `-TotalCount` /
+  `| Select-Object -Skip -First`, `ls`/`Get-ChildItem`/`rg --files`, `rg`/`grep`/`Select-String`; shell wrappers
+  `bash -lc` / `pwsh -Command` unwrapped; anything with a write, redirection, here-string or variable is not a read).
+  Only reads → `category: "read"` titled by the file; only listings/searches → `search`; else `shell`. The files read
+  (and their line range) go in `tool_call.data.files` (docs/PROTOCOL.md §10); a mixed shell step still lists them.
+- Rollouts: `exec_command` / `shell` / `shell_command` / `local_shell` classified; code-mode `exec` shows the commands
+  its script runs (`tools.exec_command({cmd})`) and is refined by the following `CommandExecution` item; `apply_patch`
+  and app-server `fileChange` name their files (`files`, title = the file or "N files"); `sleep` hidden like in a
+  managed thread.
+- Codex plan steps normalized to Claude Code's `in_progress` (app-server sends `inProgress`; the phone also accepts it);
+  MCP results show their text content instead of raw JSON.
+- Android: a step's files (`ToolFiles.files`) each get an openable file row; a Codex read keeps its command visible;
+  every `file_change` card has an open-file row (both agents); live-update step text says "reading <file>" for Codex.
+
+Evidence: core unit tests (classifier, managed items, rollout incl. code-mode `exec`); the classifier was also run
+read-only over 248 `CommandExecution` items of real local Codex rollouts (43 read, 44 search, 11 mixed with files,
+rest shell; no write classified as a read on inspection). Android: app 334 / core:remote 190 unit tests, incl. a
+Robolectric test that taps a Codex read's file row. Not verified live: a running Codex app-server's `commandActions`
+on this machine, the phone UI on a device.
+
+## DeepSeek Harness Web on the phone (2026-11-25)
+
+- Core `dsh_web` + `api/dsh_web.rs` (PROTOCOL §7.14, feature `dsh_web`): `GET /v1/dsh-web`,
+  `POST /v1/dsh-web/open` (step-up `port_forward`; reuse or start `dsh web --no-open --host 127.0.0.1
+  --port 0`, then a normal forward lease + the launch path for an instance SwitchTether started),
+  `POST /v1/dsh-web/stop` (only SwitchTether's own). Discovery probes 3080 and node / bun / dsh
+  listeners for dsh's `401` "dsh web authentication required". The child runs in a Windows job object
+  (kills `dsh.exe` and its `node`, also when SwitchTether dies) / its own Unix process group; it is
+  stopped on app exit (`shutdown_for_exit`). Fixtures `dsh_web_status.json`, `dsh_web_open.json`.
+- Android: `Route.DshWeb` — state page (checking / confirming / starting / not installed / sign in),
+  then a WebView over the forward (fixed phone port 3080…3089 for dsh's host-bound cookie), compact
+  COUI bar with reload and menu, full screen with page-coloured status bar and matching icon colours,
+  back through the page history, file chooser, external links to the browser. Entries: Workspace →
+  port forwarding group, new session with DeepSeek Harness. Strings in en and zh-CN.
+- Evidence: core unit tests `dsh_web::tests::*` (URL line, probe against fake servers, fixture,
+  start → running → stop with a stand-in program, early exit and missing binary); e2e
+  `dsh_web_open_starts_forwards_and_stops` (step-up required, starting → running, lease, launch path
+  only in `open`, stop, 409 for a second stop). **Real dsh** (0.2.2-rc.1, sandbox `DSH_HOME`, ignored
+  test `real_dsh_web_in_a_sandbox`): started, port read from its output, recognised by the probe and by
+  discovery on an ephemeral port, launch path present, stopped — and no `dsh.exe` / `node` left.
+  Manually against the same build: `GET /?token=…` with `Host: localhost:40000` (as the phone sends it)
+  answers `303` with dsh's cookie for that authority. Android: `DshWebUrlsTest` (4), `DshWebModelsTest`
+  (2), the app builds.
+- Not verified: the WebView page on a device (layout, full-screen colours, file upload, keyboard),
+  dsh web's UI working through the forward end to end (WebSocket / streaming over the tunnel, sign-in
+  cookie in the WebView), the relay path, macOS / Linux process-group stop, reuse of a `dsh web` the
+  user started with the paste-the-link sign-in. The user's real `~/.dsh` was not used.
+
+
+## Codex: injected context hidden, phone-started threads named (2026-11-25)
+
+- Rollout `user` messages that Codex writes itself are no longer shown as the user's: besides
+  `<environment_context>` / AGENTS.md / permissions, also `<turn_aborted>`, `<recommended_plugins>`,
+  `<external_codex_apps_open_page>`, `<send_user_message_question_reply>`, `<heartbeat>`,
+  `<realtime_delegation>`, image wrappers, and any message that is one whole `<snake_case …>…</…>` block.
+  Codex Desktop's "# Files mentioned by the user:" / `<in-app-browser-context>` wrappers are reduced to the
+  text after "## My request for Codex:" (mentioned files listed under it); the same applies to live
+  `userMessage` items. Real-data check (read-only, 240 compressed rollouts): 505 injected messages hidden;
+  what remains starting with `<`/`#` is typed text or a Desktop wrapper that is now unwrapped. Unit tests
+  `injected_context_is_not_a_user_message`, `desktop_context_around_the_request_is_dropped`.
+- Titles, following the official implementations (checked in the shipped code, 2026-11-25):
+  - Claude Code: `generate_session_title` (persist) once after the first turn. Claude Code answers it
+    with its small fast model (`ANTHROPIC_SMALL_FAST_MODEL`, Haiku by default), thinking off, no
+    tools, JSON-schema output, and appends `ai-title` to the transcript.
+  - Codex: `codex app-server` names nothing; Codex Desktop 26.1117 (`ThreadMetadataGenerationService`)
+    runs one structured-output turn on an ephemeral read-only thread with environment context,
+    AGENTS.md, apps, skills, memories and tools switched off, on its `ephemeralGenerationModel`
+    (`gpt-6-luna`) at low effort, with its title instructions (up to 36 characters, 60 max), once per
+    thread and never over a title set meanwhile. SwitchTether does the same for threads it started
+    (not resumed / attached): `title_model` picks `gpt-6-luna` from `model/list` (hidden included),
+    else a small listed model taking `low`, else the default; then `thread/name/set`. Ephemeral-thread
+    events never reach the session log; the desktop's title poll publishes Codex title changes too.
+    Live check (codex 0.167, scratch folder, only the ephemeral thread): `{"title":"设置页登录按钮圆角与深色模式"}`,
+    11.4k input / 24 output tokens, no rollout written. `thread/name/set` on a real thread not exercised
+    live. With the old CLI 0.137 on PATH the account's models are refused: no title, first prompt stays.
+  - A title is asked for once per conversation, and never replaces one the user set.

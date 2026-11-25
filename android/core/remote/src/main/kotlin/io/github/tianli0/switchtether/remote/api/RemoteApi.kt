@@ -474,6 +474,18 @@ class RemoteApi(
     suspend fun stopForward(id: String): JsonElement =
         executeJson(Request.Builder().url(url("v1/forwards", id)).delete().tagged().build())
 
+    // §7.14 DeepSeek Harness Web -----------------------------------------------------------------
+
+    suspend fun dshWebStatus(): io.github.tianli0.switchtether.remote.protocol.DshWebStatus = get("v1/dsh-web")
+
+    /** Step-up `port_forward`: reuse or start `dsh web`, then a forward lease to it once it runs. */
+    suspend fun openDshWeb(start: Boolean = true, ttlMinutes: Int? = null): io.github.tianli0.switchtether.remote.protocol.DshWebOpen =
+        post("v1/dsh-web/open", io.github.tianli0.switchtether.remote.protocol.DshWebOpenBody(start, ttlMinutes))
+
+    /** Step-up `port_forward`; only an instance SwitchTether started (409 otherwise). */
+    suspend fun stopDshWeb(): io.github.tianli0.switchtether.remote.protocol.DshWebStop =
+        post("v1/dsh-web/stop", kotlinx.serialization.json.JsonObject(emptyMap()))
+
     // ---- §7.13 session search ------------------------------------------------------------------------
 
     /** Full-text search over what was said in sessions (newest first, bounded on the desktop). */

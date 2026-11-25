@@ -12,7 +12,6 @@
     <string name="update_channel">App updates</string>
     <string name="update_sheet_title">New version %1$s</string>
     <string name="update_no_notes">No release notes.</string>
-    <string name="update_checks_note">Before installing, SwitchTether checks the download against the release\'s SHA256SUMS.txt and makes sure it is signed with the same certificate as this app.</string>
     <string name="update_download">Download and install</string>
     <string name="update_downloading">Downloading…</string>
     <string name="update_progress">%1$s of %2$s</string>

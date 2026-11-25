@@ -34,4 +34,20 @@ class ToolFilesTest {
         assertEquals("p. 3-5", ToolFiles.range(data("""{"input":{"file_path":"a.pdf","pages":"3-5"}}""")))
         assertNull(ToolFiles.range(data("""{"input":{"file_path":"a"}}""")))
     }
+
+    /** Codex reads files with shell commands: the desktop names them in `data.files`. */
+    @Test fun codexShellReadsAndPatchesNameTheirFiles() {
+        val read = data("""{"category":"read","name":"shell","title":"/repo/src/lib.rs","input":{"command":"sed -n '10,19p' src/lib.rs","cwd":"/repo"},"files":[{"path":"/repo/src/lib.rs","offset":10,"limit":10}]}""")
+        assertEquals("/repo/src/lib.rs", ToolFiles.path(read))
+        assertEquals("L10–19", ToolFiles.range(read))
+        val two = data("""{"category":"read","name":"exec","input":{"command":"cat a b"},"files":[{"path":"/r/a"},{"path":"/r/b","offset":3,"limit":1}]}""")
+        assertNull(ToolFiles.path(two))
+        assertEquals(listOf(ToolFiles.FileRef("/r/a", null), ToolFiles.FileRef("/r/b", "L3")), ToolFiles.files(two))
+        // A shell step that also read a file still offers it.
+        val mixed = data("""{"category":"shell","name":"shell","input":{"command":"cat a; make"},"files":[{"path":"/r/a"}]}""")
+        assertEquals("/r/a", ToolFiles.path(mixed))
+        val patch = data("""{"category":"edit","name":"apply_patch","input":{"files":["/r/x.rs","/r/y.rs"]},"files":[{"path":"/r/x.rs"},{"path":"/r/y.rs"}]}""")
+        assertEquals(2, ToolFiles.files(patch).size)
+        assertNull(ToolFiles.path(data("""{"category":"shell","name":"shell","input":{"command":"make","path":"/r"}}""")))
+    }
 }

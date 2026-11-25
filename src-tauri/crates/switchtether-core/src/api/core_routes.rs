@@ -200,7 +200,7 @@ async fn capabilities(State(ctx): State<Arc<ApiContext>>, _dev: AuthDevice) -> J
         "features": [
             "providers", "usage", "mcp", "skills", "prompts", "settings", "proxy",
             "sessions", "managed_sessions", "terminal", "files", "git", "step_up", "attachments", "port_forward",
-            "session_options", "resume_on_send", "git_write", "push_wake", "session_search"
+            "session_options", "resume_on_send", "git_write", "push_wake", "session_search", "dsh_web"
         ],
         "terminalShells": crate::terminal::available_shells(),
     }))

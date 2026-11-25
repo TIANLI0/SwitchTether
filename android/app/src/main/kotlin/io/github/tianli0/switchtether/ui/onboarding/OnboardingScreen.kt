@@ -102,8 +102,8 @@ fun OnboardingScreen(revokedReason: Pair<String, String?>?) {
     }
     val scope = rememberCoroutineScope()
     val shown = pending?.let { PairingUiState.Done(it) } ?: state
-    androidx.activity.compose.BackHandler(enabled = shown !is PairingUiState.Intro && shown !is PairingUiState.Done) { vm.backToIntro() }
-    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(enabled = shown !is PairingUiState.Intro && shown !is PairingUiState.Done) { vm.backToIntro() }
+    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().then(back)) {
     OnboardingContent(
         state = shown,
         linkText = linkText,

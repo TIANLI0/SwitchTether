@@ -334,16 +334,39 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
                         if (servers.isEmpty()) {
                             Text(stringResource(R.string.tools_mcp_none), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp))
                         }
+                        // Folded by default: one summary row (how many, how many connected / failing),
+                        // the servers under it. A failing server is what one comes here for, so the
+                        // summary names that first.
+                        var mcpOpen by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+                        if (servers.isNotEmpty()) {
+                            val dev = LocalDevColors.current
+                            val connected = servers.count { it.status == "connected" }
+                            val failing = servers.count { it.status == "failed" || it.status == "needs-auth" || it.status == "needs_auth" }
+                            BasicComponent(
+                                title = pluralStringResource(R.plurals.tools_mcp_servers, servers.size, servers.size),
+                                summary = listOfNotNull(
+                                    stringResource(R.string.tools_mcp_connected_count, connected),
+                                    failing.takeIf { it > 0 }?.let { stringResource(R.string.tools_mcp_failing_count, it) },
+                                ).joinToString(" · "),
+                                startAction = { StatusDot(if (failing > 0) dev.danger else if (connected == servers.size) dev.ok else dev.warn, Modifier.padding(end = 12.dp)) },
+                                endActions = { io.github.suqi8.coui.kmp.basic.ExpandArrow(expanded = mcpOpen) },
+                                onClick = { mcpOpen = !mcpOpen },
+                                cardListPosition = if (mcpOpen) io.github.suqi8.coui.kmp.basic.CardListPosition.Head else io.github.suqi8.coui.kmp.basic.CardListPosition.Full,
+                                modifier = Modifier.testTag("tools-mcp-toggle"),
+                            )
+                        }
+                        io.github.tianli0.coui17.patterns.ExpandBody(expanded = mcpOpen) {
                         servers.forEachIndexed { i, s ->
                             McpRow(
                                 s,
-                                position = cardListPositionOf(i, servers.size),
+                                position = if (i == servers.lastIndex) io.github.suqi8.coui.kmp.basic.CardListPosition.Tail else io.github.suqi8.coui.kmp.basic.CardListPosition.Middle,
                                 reconnecting = s.name in st.reconnecting,
                                 reconnected = s.name in st.reconnected,
                                 error = st.mcpErrors[s.name],
                                 enabled = detail.canUseClaudeTools,
                                 onReconnect = { vm.reconnect(s.name) },
                             )
+                        }
                         }
                     }
                 }

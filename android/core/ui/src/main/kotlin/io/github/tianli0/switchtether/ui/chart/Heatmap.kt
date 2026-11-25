@@ -3,7 +3,6 @@ package io.github.tianli0.switchtether.ui.chart
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -15,13 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -40,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.ui.theme.DevType
-import kotlinx.coroutines.flow.first
 
 /** One square of the heatmap: grid position and the value that picks its shade. */
 data class HeatCell(val column: Int, val row: Int, val value: Double)
@@ -67,10 +62,11 @@ fun heatLevels(values: List<Double>): List<Int> {
 
 /**
  * GitHub-style contribution heatmap drawn on a Canvas: [rows] × [columns] squares, row labels on
- * the start edge (kept in place), column labels on top, a "less … more" legend. Wide grids scroll
- * horizontally and open at the latest column. Tapping a square selects it (long-press and drag to
- * scrub); the caller shows the selected cell's details. Cells missing from [cells] are not drawn
- * (outside the range, like GitHub's future days).
+ * the start edge, column labels on top, a "less … more" legend. It never scrolls sideways: the
+ * squares shrink to fit down to [minPitch]; a grid still too wide shows its latest columns (the
+ * most recent weeks), and a narrow one is centred instead of hugging the start edge. Tapping a
+ * square selects it (long-press and drag to scrub); the caller shows the selected cell's
+ * details. Cells missing from [cells] are not drawn (outside the range, like GitHub's future days).
  */
 @Composable
 fun ContributionHeatmap(
@@ -86,7 +82,7 @@ fun ContributionHeatmap(
     rowLabels: List<String?> = emptyList(),
     columnLabels: Map<Int, String> = emptyMap(),
     rowLabelWidth: Dp = 28.dp,
-    minPitch: Dp = 13.dp,
+    minPitch: Dp = 10.dp,
     maxPitch: Dp = 30.dp,
     accent: Color = COUITheme.colorScheme.primary,
 ) {
@@ -106,11 +102,14 @@ fun ContributionHeatmap(
     Column(modifier.fillMaxWidth().semantics { contentDescription = summary }) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val avail = maxWidth - labelW
-            val pitch = (avail / columns.coerceAtLeast(1)).coerceIn(minPitch, maxPitch)
-            val gridW = pitch * columns
+            // Columns that fit at the smallest pitch; older ones are left out, newest kept.
+            val fit = (avail / minPitch).toInt().coerceAtLeast(1)
+            val firstColumn = (columns - fit).coerceAtLeast(0)
+            val shown = (columns - firstColumn).coerceAtLeast(1)
+            val pitch = (avail / shown).coerceAtMost(maxPitch)
+            val gridW = pitch * shown
             val gridH = pitch * rows
-            Row {
-                // Row labels stay put while the grid scrolls.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 Column(Modifier.width(labelW).padding(top = headerH)) {
                     for (r in 0 until rows) {
                         Box(Modifier.height(pitch).width(labelW), contentAlignment = Alignment.CenterStart) {
@@ -118,53 +117,48 @@ fun ContributionHeatmap(
                         }
                     }
                 }
-                val scroll = rememberScrollState()
-                LaunchedEffect(columns, rows) {
-                    snapshotFlow { scroll.maxValue }.first { it > 0 }
-                    scroll.scrollTo(scroll.maxValue)
-                }
                 val pitchPx = with(density) { pitch.toPx() }
                 val topPx = with(density) { headerH.toPx() }
                 fun hit(o: Offset) {
-                    val c = (o.x / pitchPx).toInt()
+                    val c = (o.x / pitchPx).toInt() + firstColumn
                     val r = ((o.y - topPx) / pitchPx).toInt()
-                    if (o.y < topPx || c !in 0 until columns || r !in 0 until rows) return
+                    if (o.y < topPx || o.x < 0 || c !in firstColumn until columns || r !in 0 until rows) return
                     index[c to r]?.let(select)
                 }
-                Box(Modifier.horizontalScroll(scroll)) {
-                    Canvas(
-                        Modifier
-                            .size(gridW, headerH + gridH)
-                            .pointerInput(cells, columns, rows, pitch) { detectTapGestures(onTap = { hit(it) }) }
-                            .pointerInput(cells, columns, rows, pitch) {
-                                detectDragGesturesAfterLongPress(onDragStart = { hit(it) }) { change, _ -> hit(change.position) }
-                            },
-                    ) {
-                        val p = pitch.toPx()
-                        val top = headerH.toPx()
-                        val gap = (p * 0.16f).coerceAtLeast(2f)
-                        val side = p - gap
-                        val radius = CornerRadius(side * 0.22f)
-                        columnLabels.forEach { (c, text) ->
-                            val layout = measurer.measure(text, labelStyle)
-                            // Keep the last label inside the grid.
-                            val x = (c * p).coerceAtMost(size.width - layout.size.width).coerceAtLeast(0f)
-                            drawText(layout, topLeft = Offset(x, 0f))
-                        }
-                        cells.forEachIndexed { i, cell ->
-                            val origin = Offset(cell.column * p + gap / 2, top + cell.row * p + gap / 2)
-                            drawRoundRect(shades[levels[i]], topLeft = origin, size = Size(side, side), cornerRadius = radius)
-                        }
-                        selected?.let(cells::getOrNull)?.let { cell ->
-                            val stroke = 1.5.dp.toPx()
-                            drawRoundRect(
-                                outline,
-                                topLeft = Offset(cell.column * p + gap / 2 - stroke / 2, top + cell.row * p + gap / 2 - stroke / 2),
-                                size = Size(side + stroke, side + stroke),
-                                cornerRadius = CornerRadius(radius.x + stroke / 2),
-                                style = Stroke(stroke),
-                            )
-                        }
+                Canvas(
+                    Modifier
+                        .size(gridW, headerH + gridH)
+                        .pointerInput(cells, columns, rows, pitch, firstColumn) { detectTapGestures(onTap = { hit(it) }) }
+                        .pointerInput(cells, columns, rows, pitch, firstColumn) {
+                            detectDragGesturesAfterLongPress(onDragStart = { hit(it) }) { change, _ -> hit(change.position) }
+                        },
+                ) {
+                    val p = pitch.toPx()
+                    val top = headerH.toPx()
+                    val gap = (p * 0.18f).coerceAtLeast(2f)
+                    val side = p - gap
+                    val radius = CornerRadius(side * 0.26f)
+                    columnLabels.forEach { (c, text) ->
+                        if (c < firstColumn) return@forEach
+                        val layout = measurer.measure(text, labelStyle)
+                        // Keep the last label inside the grid.
+                        val x = ((c - firstColumn) * p).coerceAtMost(size.width - layout.size.width).coerceAtLeast(0f)
+                        drawText(layout, topLeft = Offset(x, 0f))
+                    }
+                    cells.forEachIndexed { i, cell ->
+                        if (cell.column < firstColumn) return@forEachIndexed
+                        val origin = Offset((cell.column - firstColumn) * p + gap / 2, top + cell.row * p + gap / 2)
+                        drawRoundRect(shades[levels[i]], topLeft = origin, size = Size(side, side), cornerRadius = radius)
+                    }
+                    selected?.let(cells::getOrNull)?.takeIf { it.column >= firstColumn }?.let { cell ->
+                        val stroke = 1.5.dp.toPx()
+                        drawRoundRect(
+                            outline,
+                            topLeft = Offset((cell.column - firstColumn) * p + gap / 2 - stroke / 2, top + cell.row * p + gap / 2 - stroke / 2),
+                            size = Size(side + stroke, side + stroke),
+                            cornerRadius = CornerRadius(radius.x + stroke / 2),
+                            style = Stroke(stroke),
+                        )
                     }
                 }
             }

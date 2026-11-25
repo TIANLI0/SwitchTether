@@ -1,0 +1,13 @@
+{
+  "running": {
+    "state": "running",
+    "port": 52166,
+    "owned": true,
+    "startedAtMs": 1763452800000
+  },
+  "stopped": {
+    "state": "stopped",
+    "owned": false,
+    "error": "dsh web exited before it was ready (exit code 1)"
+  }
+}

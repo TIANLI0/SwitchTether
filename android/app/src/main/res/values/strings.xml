@@ -97,7 +97,7 @@
     <string name="home_live_sessions">Live sessions</string>
     <string name="home_waiting">Waiting for you</string>
     <string name="home_usage">Usage</string>
-    <string name="home_no_live">No agent is running right now.</string>
+    <string name="home_no_live">Nothing is running</string>
     <string name="home_recent">Recent sessions</string>
     <string name="home_quick_links">Quick links</string>
 
@@ -269,6 +269,8 @@
     <string name="settings_connection">Connection</string>
     <string name="settings_background">Stay connected in background</string>
     <string name="settings_background_summary">Stays connected to the computer while in the background so approvals and task changes are notified (ongoing notification).</string>
+    <string name="settings_predictive_back">Predictive back gesture</string>
+    <string name="settings_predictive_back_summary">While you swipe back, the page shrinks and shows the one underneath.</string>
     <string name="companion_title">Bind computer (Bluetooth)</string>
     <string name="companion_summary_none">Lets Android keep SwitchTether running in the background and wake it when the computer is nearby.</string>
     <string name="companion_summary_bound">Bound: %1$s</string>
@@ -294,6 +296,8 @@
     <string name="settings_clear_cache_summary">Drop cached session data and unsent drafts</string>
     <string name="settings_clear_cache_confirm">Cached data in memory and unsent drafts on this phone will be deleted.</string>
     <string name="settings_about">About</string>
+    <string name="about_title">About SwitchTether</string>
+    <string name="about_version">Version %1$s (%2$d)</string>
     <string name="settings_version">Version</string>
     <string name="settings_protocol">Protocol</string>
     <string name="settings_licenses">Open source licenses</string>
@@ -417,6 +421,13 @@
     <string name="perm_accept_edits_short">Auto-edit</string>
     <string name="perm_plan_short">Plan only</string>
     <string name="quota_tier_5h">5-hour window</string>
+    <string name="home_quota_title">Quota left</string>
+    <string name="home_tier_5h">5 h</string>
+    <string name="home_tier_week">Week</string>
+    <string name="home_tier_month">Month</string>
+    <string name="home_reset_days">resets in %1$d d</string>
+    <string name="home_reset_hours">resets in %1$d h</string>
+    <string name="home_reset_minutes">resets in %1$d min</string>
     <string name="quota_tier_week">Weekly</string>
     <string name="quota_tier_month">Monthly</string>
     <string name="quota_tier_credits">Credits</string>

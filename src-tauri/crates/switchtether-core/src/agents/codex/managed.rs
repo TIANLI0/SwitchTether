@@ -89,6 +89,152 @@ pub struct ManagedCodex {
     /// Attached mode: the thread lives in a Codex process the user started
     /// (Codex Desktop via switchtether-shim); requests go through `conn`.
     remote: Option<Arc<CodexConn>>,
+    /// The ephemeral thread generating this conversation's title, while it runs.
+    title_job: Mutex<Option<TitleJob>>,
+    /// A title has been asked for (once per process).
+    title_requested: std::sync::atomic::AtomicBool,
+}
+
+/// Collects the answer of the ephemeral title thread (see [`ManagedCodex::generate_title`]).
+struct TitleJob {
+    thread_id: Option<String>,
+    text: String,
+    done: Option<oneshot::Sender<String>>,
+}
+
+/// Codex Desktop's title model (`ephemeralGenerationModel`, a server-side setting whose default in
+/// Codex Desktop 26.1117 is `gpt-6-luna`).
+const TITLE_MODEL: &str = "gpt-6-luna";
+
+/// The model for a title, from `model/list`: Desktop's title model when this account has it;
+/// otherwise, as Desktop falls back, a listed general model that takes `low` effort — a small one
+/// (`mini`, `nano`, `luna`) first, then the default. `None`: keep the session's model.
+pub(crate) fn title_model(list: &Value) -> Option<String> {
+    let models: Vec<&Value> = list
+        .get("data")
+        .or_else(|| list.get("models"))
+        .and_then(Value::as_array)?
+        .iter()
+        .collect();
+    let id = |m: &Value| s(m, "model").or_else(|| s(m, "id"));
+    if models.iter().any(|m| id(m).as_deref() == Some(TITLE_MODEL)) {
+        return Some(TITLE_MODEL.to_string());
+    }
+    let usable: Vec<&Value> = models
+        .into_iter()
+        .filter(|m| m.get("hidden").and_then(Value::as_bool) != Some(true))
+        .filter(|m| m.get("modelSpecialty").is_none_or(Value::is_null))
+        .filter(|m| {
+            m.get("supportedReasoningEfforts")
+                .and_then(Value::as_array)
+                .is_none_or(|e| {
+                    e.iter().any(|x| {
+                        s(x, "reasoningEffort").as_deref() == Some("low")
+                            || x.as_str() == Some("low")
+                    })
+                })
+        })
+        .collect();
+    let small = |m: &Value| {
+        id(m).is_some_and(|i| {
+            let i = i.to_ascii_lowercase();
+            i.contains("mini") || i.contains("nano") || i.contains("luna")
+        })
+    };
+    usable
+        .iter()
+        .find(|m| small(m))
+        .or_else(|| {
+            usable
+                .iter()
+                .find(|m| m.get("isDefault").and_then(Value::as_bool) == Some(true))
+        })
+        .or(usable.first())
+        .and_then(|m| id(m))
+}
+
+/// Codex Desktop's switches for its one-shot generation threads: no environment context,
+/// AGENTS.md, apps, plugins, skills, memories or tools — the turn reads the prompt and answers.
+fn title_thread_config() -> Value {
+    json!({
+        "include_permissions_instructions": false,
+        "include_apps_instructions": false,
+        "include_environment_context": false,
+        "project_doc_max_bytes": 0,
+        "apps": { "_default": { "enabled": false, "destructive_enabled": false, "open_world_enabled": false } },
+        "skills": { "bundled": { "enabled": false }, "config": [] },
+        "memories": { "use_memories": false, "generate_memories": false },
+        "features.apps": false,
+        "features.plugins": false,
+        "features.tool_suggest": false,
+        "features.shell_tool": false,
+        "features.unified_exec": false,
+        "features.js_repl": false,
+        "features.code_mode": false,
+        "features.multi_agent": false,
+        "features.memories": false,
+        "features.image_generation": false,
+        "model_reasoning_effort": "low",
+    })
+}
+
+/// Longest title Codex Desktop asks for (`MJuY.f`'s default), and the cap it enforces.
+const TITLE_CHARS: usize = 36;
+const TITLE_MAX_CHARS: usize = 60;
+
+/// Codex Desktop's title instructions (26.1117, without the parts about app tools), then the
+/// user's first prompt.
+fn title_prompt(first_prompt: &str) -> String {
+    format!(
+        "You are a helpful assistant. You will be presented with a user prompt, and your job is to \
+provide a short title for a task that will be created from that prompt.\n\
+The tasks typically have to do with coding-related tasks, for example requests for bug fixes or \
+questions about a codebase. The title you generate will be shown in the UI to represent the prompt.\n\
+Generate a concise UI title (up to {TITLE_CHARS} characters) for this task.\n\
+Fill the structured title field with plain text.\n\
+Do not include quotes, markdown, formatting characters, or trailing punctuation.\n\
+If the task includes a ticket reference (e.g. ABC-123), include it verbatim.\n\n\
+How to write a good title:\n\
+Generate a single-line title that captures the question or core change requested.\n\
+- Use an imperative verb first: \"Add\", \"Fix\", \"Update\", \"Refactor\", \"Remove\", \"Locate\", \"Find\", etc.\n\
+- Keep it under {TITLE_CHARS} characters and under 5 words where possible.\n\
+- If the user's prompt is already a short clear title, reuse it verbatim.\n\
+- Capitalize only the first word (unless locale requires otherwise).\n\
+- Write the title in the user's locale.\n\
+- Do not use punctuation at the end.\n\
+- Leave code terms in English unless a widely adopted translation exists.\n\
+- If the user provides a title explicitly, reuse it and skip generation logic.\n\
+- Make it clear when the user is requesting changes (\"Fix\", \"Add\") vs asking a question (\"Find\", \"Locate\").\n\
+- Make 0 tool calls.\n\n\
+User prompt:\n{first_prompt}"
+    )
+}
+
+/// The title from the turn's answer: the structured `{"title": …}` (or the plain text an older
+/// app-server returns), one line, without quotes or trailing punctuation, at most
+/// [`TITLE_MAX_CHARS`].
+pub(crate) fn parse_title(answer: &str) -> Option<String> {
+    let raw = serde_json::from_str::<Value>(answer.trim())
+        .ok()
+        .and_then(|v| s(&v, "title"))
+        .unwrap_or_else(|| answer.to_string());
+    let line = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let t = line
+        .trim_matches(|c| {
+            matches!(
+                c,
+                '"' | '\'' | '`' | '\u{201c}' | '\u{201d}' | '\u{300c}' | '\u{300d}'
+            )
+        })
+        .trim_end_matches(|c: char| {
+            matches!(
+                c,
+                '.' | '\u{3002}' | '!' | '\u{ff01}' | '?' | '\u{ff1f}' | ':' | '\u{ff1a}'
+            )
+        })
+        .trim();
+    let t: String = t.chars().take(TITLE_MAX_CHARS).collect();
+    crate::agents::claude::transcript::clean_title(Some(t))
 }
 
 /// Canonical JSON-RPC id key (numbers and strings never collide).
@@ -541,6 +687,48 @@ pub(crate) fn build_elicitation_content(params: &Value, answers: Option<&Value>)
     Value::Object(out)
 }
 
+/// Title of an edit step: the file, or how many files.
+pub(crate) fn edit_title(paths: &[String]) -> String {
+    match paths {
+        [one] => one.clone(),
+        many => format!("{} files", many.len()),
+    }
+}
+
+/// Plan step status as Claude Code spells it (`in_progress`; app-server v2 says `inProgress`).
+pub(crate) fn plan_status(v: Option<&Value>) -> Value {
+    match v.and_then(Value::as_str) {
+        Some("inProgress" | "in_progress") => json!("in_progress"),
+        Some("completed") => json!("completed"),
+        _ => json!("pending"),
+    }
+}
+
+/// What an MCP tool returned, as text: its text content (like Claude Code shows it), else JSON.
+fn mcp_result_text(item: &Value) -> String {
+    if let Some(e) = item.get("error").filter(|e| !e.is_null()) {
+        return s(e, "message").unwrap_or_else(|| e.to_string());
+    }
+    let Some(r) = item.get("result").filter(|r| !r.is_null()) else {
+        return String::new();
+    };
+    let texts: Vec<String> = r
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|c| s(c, "text")).collect())
+        .unwrap_or_default();
+    if !texts.is_empty() {
+        return texts.join(
+            "
+",
+        );
+    }
+    match r.get("structuredContent").filter(|v| !v.is_null()) {
+        Some(sc) => serde_json::to_string_pretty(sc).unwrap_or_default(),
+        None => r.to_string(),
+    }
+}
+
 fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string())
 }
@@ -610,13 +798,22 @@ impl ManagedCodex {
             }),
             options,
             remote: None,
+            title_job: Mutex::new(None),
+            title_requested: std::sync::atomic::AtomicBool::new(false),
         });
         let reader = me.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                    let ended_turn = s(&v, "method").as_deref() == Some("turn/completed")
+                        && v.pointer("/params/threadId").and_then(Value::as_str)
+                            == reader.state.lock().thread_id.as_deref();
                     reader.on_message(v).await;
+                    if ended_turn && reader.wants_title() {
+                        let me = reader.clone();
+                        tokio::spawn(async move { me.generate_title().await });
+                    }
                 }
             }
             reader.on_exit();
@@ -744,6 +941,8 @@ impl ManagedCodex {
                 skills: None,
             }),
             remote: Some(conn),
+            title_job: Mutex::new(None),
+            title_requested: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -859,6 +1058,181 @@ impl ManagedCodex {
         }
     }
 
+    /// Codex names threads only from its own front ends (the TUI's and Codex Desktop's title
+    /// suggestion); `codex app-server` started by SwitchTether leaves them unnamed, so a session
+    /// started from the phone kept its first prompt as the title. Asked once, after the first turn
+    /// of a thread this process started (a resumed one already has its name, attached ones are
+    /// named by Codex Desktop), when Codex has not named it.
+    fn wants_title(&self) -> bool {
+        if self.remote.is_some() || self.options.resume_thread.is_some() {
+            return false;
+        }
+        if self.state.lock().title.is_some() {
+            return false;
+        }
+        !self
+            .title_requested
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Events of the ephemeral title thread: the answer is collected, nothing reaches the log.
+    fn on_title_thread(&self, thread_id: &str, method: &str, p: &Value) -> bool {
+        let mut job = self.title_job.lock();
+        let Some(j) = job.as_mut() else { return false };
+        if j.thread_id.as_deref() != Some(thread_id) {
+            return false;
+        }
+        match method {
+            "item/completed" => {
+                if let Some(item) = p
+                    .get("item")
+                    .filter(|i| s(i, "type").as_deref() == Some("agentMessage"))
+                {
+                    if let Some(t) = s(item, "text") {
+                        j.text = t;
+                    }
+                }
+            }
+            "turn/completed" => {
+                if let Some(tx) = j.done.take() {
+                    let _ = tx.send(std::mem::take(&mut j.text));
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Generates the title the way Codex Desktop does (its `ThreadMetadataGenerationService`): one
+    /// structured-output turn on an ephemeral, read-only thread without approvals, with the
+    /// environment context, AGENTS.md, apps, skills, memories and tools switched off, on a small
+    /// model ([`title_model`]) at low effort, from the first prompt (at most 2000 characters),
+    /// with Desktop's title instructions. The result goes to `thread/name/set`, which Codex records
+    /// in its session index and announces with `thread/name/updated`. Done once per conversation:
+    /// a title the user set meanwhile is kept, and nothing is asked again later. Failure leaves the
+    /// first-prompt title.
+    async fn generate_title(&self) {
+        let Ok(own) = self.thread_id() else { return };
+        let prompt = self
+            .log
+            .lock()
+            .iter()
+            .find(|e| e.kind == "user_message" && e.parent_id.is_none())
+            .and_then(|e| e.data.get("text").and_then(Value::as_str).map(String::from));
+        let Some(prompt) = prompt.filter(|p| !p.trim().is_empty()) else {
+            return;
+        };
+        let request = title_prompt(&crate::agents::model::preview(prompt.trim(), 2000).0);
+        let listed = self
+            .request(
+                "model/list",
+                json!({ "includeHidden": true }),
+                Duration::from_secs(15),
+            )
+            .await
+            .ok();
+        let session_model = self.state.lock().model.clone();
+        let model = listed.as_ref().and_then(title_model).or(session_model);
+        let (tx, rx) = oneshot::channel();
+        *self.title_job.lock() = Some(TitleJob {
+            thread_id: None,
+            text: String::new(),
+            done: Some(tx),
+        });
+        let mut params = json!({
+            "cwd": self.options.cwd.to_string_lossy(),
+            "approvalPolicy": "never",
+            "sandbox": "read-only",
+            "ephemeral": true,
+            "config": title_thread_config(),
+        });
+        if let Some(m) = &model {
+            params["model"] = json!(m);
+        }
+        let mut started = self
+            .request("thread/start", params.clone(), Duration::from_secs(30))
+            .await;
+        if started.is_err() {
+            // An app-server that does not know one of the switches: start it plainly.
+            if let Some(o) = params.as_object_mut() {
+                o.remove("config");
+            }
+            started = self
+                .request("thread/start", params, Duration::from_secs(30))
+                .await;
+        }
+        let Some(tid) = started
+            .ok()
+            .and_then(|v| v.get("thread").and_then(|t| s(t, "id")))
+        else {
+            *self.title_job.lock() = None;
+            return;
+        };
+        if let Some(j) = self.title_job.lock().as_mut() {
+            j.thread_id = Some(tid.clone());
+        }
+        let input = json!([{ "type": "text", "text": request, "text_elements": [] }]);
+        let mut turn = json!({
+            "threadId": tid,
+            "input": input,
+            "effort": "low",
+            "outputSchema": {
+                "type": "object",
+                "properties": { "title": { "type": "string" } },
+                "required": ["title"],
+                "additionalProperties": false,
+            },
+        });
+        let mut sent = self
+            .request("turn/start", turn.clone(), Duration::from_secs(30))
+            .await
+            .is_ok();
+        if !sent {
+            // Older app-servers: no structured output / no such effort level.
+            if let Some(o) = turn.as_object_mut() {
+                o.remove("outputSchema");
+                o.remove("effort");
+            }
+            sent = self
+                .request("turn/start", turn, Duration::from_secs(30))
+                .await
+                .is_ok();
+        }
+        let text = if sent {
+            tokio::time::timeout(Duration::from_secs(60), rx)
+                .await
+                .ok()
+                .and_then(Result::ok)
+        } else {
+            None
+        };
+        *self.title_job.lock() = None;
+        let _ = self
+            .request(
+                "thread/unsubscribe",
+                json!({ "threadId": tid }),
+                Duration::from_secs(10),
+            )
+            .await;
+        let Some(title) = text.as_deref().and_then(parse_title) else {
+            return;
+        };
+        if self.state.lock().title.is_some() {
+            return; // named meanwhile (/rename from the phone, or by Codex)
+        }
+        if self
+            .request(
+                "thread/name/set",
+                json!({ "threadId": own, "name": title }),
+                Duration::from_secs(20),
+            )
+            .await
+            .is_ok()
+        {
+            self.state.lock().title = Some(title);
+        }
+    }
+
     pub fn effort(&self) -> Option<String> {
         self.state.lock().effort.clone()
     }
@@ -894,6 +1268,15 @@ impl ManagedCodex {
     async fn on_message(&self, v: Value) {
         let has_id = v.get("id").is_some();
         let method = s(&v, "method");
+        // The ephemeral title thread shares this process: its events are not this conversation's.
+        if let (Some(m), Some(tid)) = (
+            method.as_deref(),
+            v.pointer("/params/threadId").and_then(Value::as_str),
+        ) {
+            if self.on_title_thread(tid, m, v.get("params").unwrap_or(&Value::Null)) {
+                return;
+            }
+        }
         match (has_id, method) {
             (true, None) => {
                 let id = v.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
@@ -1142,12 +1525,19 @@ impl ManagedCodex {
                         }
                     }
                 }
+                // Context Codex Desktop wraps around the request (mentioned files, IDE state)
+                // and injected records are not what the user typed.
+                let joined = text.join("\n");
+                let shown = super::rollout::user_display_text(&joined);
+                if shown.is_none() && image_items.is_empty() {
+                    return Vec::new();
+                }
                 push(EventDraft::new(
                     eid,
                     "user_message",
                     ts,
                     json!({
-                        "text": text.join("\n"),
+                        "text": shown.unwrap_or_default(),
                         "images": image_items.len(),
                         "imageItems": image_items,
                         "source": "phone"
@@ -1229,15 +1619,20 @@ impl ManagedCodex {
                     _ => "running",
                 };
                 let cmd = s(item, "command").unwrap_or_default();
-                push(EventDraft::new(
-                    &eid,
-                    "tool_call",
-                    &ts,
-                    json!({
-                        "callId": id, "name": "shell", "title": preview(cmd.lines().next().unwrap_or(""), 200).0,
-                        "category": "shell", "input": { "command": cmd, "cwd": item.get("cwd") }, "status": status,
-                    }),
-                ));
+                let mut data = json!({
+                    "callId": id, "name": "shell", "title": preview(cmd.lines().next().unwrap_or(""), 200).0,
+                    "category": "shell", "input": { "command": cmd, "cwd": item.get("cwd") }, "status": status,
+                });
+                // A read / listing / search runs through the shell: shown like Claude Code's
+                // Read / LS / Grep, with the files it read openable.
+                if let Some(c) = super::commands::classify(
+                    item.get("commandActions"),
+                    &cmd,
+                    s(item, "cwd").as_deref(),
+                ) {
+                    c.apply(&mut data);
+                }
+                push(EventDraft::new(&eid, "tool_call", &ts, data));
                 let streamed = self.output.lock().get(&id).cloned();
                 let text = s(item, "aggregatedOutput").or(streamed).unwrap_or_default();
                 if done || !text.is_empty() {
@@ -1270,14 +1665,16 @@ impl ManagedCodex {
                     .and_then(|c| c.as_array())
                     .cloned()
                     .unwrap_or_default();
+                let paths: Vec<String> = changes.iter().filter_map(|c| s(c, "path")).collect();
                 push(EventDraft::new(
                     &eid,
                     "tool_call",
                     &ts,
                     json!({
                         "callId": id, "name": "apply_patch",
-                        "title": format!("{} file(s)", changes.len()), "category": "edit",
-                        "input": { "files": changes.iter().filter_map(|c| s(c, "path")).collect::<Vec<_>>() },
+                        "title": edit_title(&paths), "category": "edit",
+                        "input": { "files": paths },
+                        "files": paths.iter().map(|p| json!({ "path": p })).collect::<Vec<_>>(),
                         "status": status,
                     }),
                 ));
@@ -1323,11 +1720,7 @@ impl ManagedCodex {
                     }),
                 ));
                 if done {
-                    let text = item
-                        .get("result")
-                        .or(item.get("error"))
-                        .map(|r| r.to_string())
-                        .unwrap_or_default();
+                    let text = mcp_result_text(item);
                     let (p, truncated) = preview(&text, PREVIEW_LIMIT);
                     push(EventDraft::new(
                         format!("res:{id}"),
@@ -1883,7 +2276,7 @@ impl ManagedCodex {
                     .and_then(|x| x.as_array())
                     .map(|a| {
                         a.iter()
-                            .map(|i| json!({ "text": i.get("step"), "status": i.get("status") }))
+                            .map(|i| json!({ "text": i.get("step"), "status": plan_status(i.get("status")) }))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -3072,6 +3465,64 @@ fn desktop_bundled_codex() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
+mod title_tests {
+    use super::{parse_title, title_model};
+    use serde_json::json;
+
+    fn m(id: &str, low: bool, extra: serde_json::Value) -> serde_json::Value {
+        let mut v = json!({ "id": id, "model": id, "hidden": false, "modelSpecialty": null, "isDefault": false,
+            "supportedReasoningEfforts": if low { json!([{ "reasoningEffort": "low" }, { "reasoningEffort": "high" }]) } else { json!([{ "reasoningEffort": "high" }]) } });
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        v
+    }
+
+    #[test]
+    fn title_model_prefers_desktops_then_a_small_one() {
+        // The account's list from codex 0.167 (2026-11-25): no luna, a mini.
+        let list = json!({ "data": [
+            m("gpt-5.5", true, json!({ "isDefault": true })),
+            m("gpt-5.4", true, json!({})),
+            m("gpt-5.4-mini", true, json!({})),
+            m("gpt-5.3-codex", true, json!({})),
+        ] });
+        assert_eq!(title_model(&list).as_deref(), Some("gpt-5.4-mini"));
+        // Desktop's own title model wins, even hidden.
+        let with_luna = json!({ "data": [m("gpt-5.5", true, json!({})), m("gpt-6-luna", true, json!({ "hidden": true }))] });
+        assert_eq!(title_model(&with_luna).as_deref(), Some("gpt-6-luna"));
+        // No small model: the default among those that take `low`; hidden / specialty / no-low skipped.
+        let plain = json!({ "data": [
+            m("gpt-x-mini", true, json!({ "hidden": true })),
+            m("gpt-y-mini", true, json!({ "modelSpecialty": "review" })),
+            m("gpt-z-nano", false, json!({})),
+            m("gpt-a", true, json!({})),
+            m("gpt-b", true, json!({ "isDefault": true })),
+        ] });
+        assert_eq!(title_model(&plain).as_deref(), Some("gpt-b"));
+        assert_eq!(title_model(&json!({})), None);
+    }
+
+    #[test]
+    fn titles_are_one_clean_line() {
+        assert_eq!(
+            parse_title(r#"{"title":"设置页登录按钮改为圆角"}"#).as_deref(),
+            Some("设置页登录按钮改为圆角")
+        );
+        assert_eq!(
+            parse_title("\"Fix login button.\"\nsecond line").as_deref(),
+            Some("Fix login button")
+        );
+        assert_eq!(parse_title("修复登录。").as_deref(), Some("修复登录"));
+        assert_eq!(
+            parse_title(&"x".repeat(100)).map(|t| t.chars().count()),
+            Some(60)
+        );
+        assert_eq!(parse_title("  "), None);
+    }
+}
+
+#[cfg(test)]
 mod version_tests {
     #[test]
     fn versions_compare_numerically() {
@@ -3626,5 +4077,91 @@ mod version_tests {
         assert_eq!(a.data["decision"], "allow_session");
         assert_eq!(a.data["by"], "desktop");
         assert!(!th.has_pending_requests());
+    }
+
+    /// Reads, edits, MCP results and plans of a Codex thread look like Claude Code's on the
+    /// phone: a read is a `read` step with its file openable, an edit names its file.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn items_map_like_claude_code_tools() {
+        use super::*;
+        use crate::agents::store::SessionLog;
+        use parking_lot::Mutex;
+        use std::sync::Arc;
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let conn = CodexConn::new(tx, "desktop_app", PathBuf::from("."));
+        let log = Arc::new(Mutex::new(SessionLog::new("attached:m2", None)));
+        let th = ManagedCodex::attached(
+            "attached:m2".into(),
+            conn.clone(),
+            "th2".into(),
+            PathBuf::from("."),
+            log.clone(),
+        );
+        let item = |item: Value| json!({ "threadId": "th2", "turnId": "t1", "item": item });
+        th.on_notification(
+            "item/completed",
+            item(json!({ "type": "commandExecution", "id": "c1", "status": "completed",
+                "command": "/bin/zsh -lc \"sed -n '10,19p' src/lib.rs\"", "cwd": "/repo",
+                "commandActions": [{ "type": "read", "command": "sed -n '10,19p' src/lib.rs", "name": "lib.rs", "path": "/repo/src/lib.rs" }],
+                "aggregatedOutput": "fn a() {}\n", "exitCode": 0 })),
+        );
+        let tc = log.lock().get("cx-item-c1").cloned().unwrap();
+        assert_eq!(tc.data["category"], "read");
+        assert_eq!(tc.data["title"], "/repo/src/lib.rs");
+        assert_eq!(
+            tc.data["files"],
+            json!([{ "path": "/repo/src/lib.rs", "offset": 10, "limit": 10 }])
+        );
+        assert_eq!(
+            tc.data["input"]["command"],
+            "/bin/zsh -lc \"sed -n '10,19p' src/lib.rs\""
+        );
+
+        // Codex leaves PowerShell reads `unknown`; they are recognized here.
+        th.on_notification(
+            "item/completed",
+            item(json!({ "type": "commandExecution", "id": "c2", "status": "completed",
+                "command": "pwsh.exe -Command 'Get-Content -LiteralPath a.md; cargo build'", "cwd": "C:\\w",
+                "commandActions": [{ "type": "unknown", "command": "Get-Content -LiteralPath a.md; cargo build" }] })),
+        );
+        let tc = log.lock().get("cx-item-c2").cloned().unwrap();
+        assert_eq!(tc.data["category"], "shell");
+        assert_eq!(tc.data["files"], json!([{ "path": "C:\\w\\a.md" }]));
+
+        th.on_notification(
+            "item/completed",
+            item(json!({ "type": "commandExecution", "id": "c3", "status": "completed",
+                "command": "rg -n foo", "cwd": "/repo",
+                "commandActions": [{ "type": "search", "command": "rg -n foo", "query": "foo", "path": null }] })),
+        );
+        assert_eq!(
+            log.lock().get("cx-item-c3").unwrap().data["category"],
+            "search"
+        );
+
+        th.on_notification(
+            "item/completed",
+            item(json!({ "type": "fileChange", "id": "f1", "status": "completed",
+                "changes": [{ "path": "/repo/src/lib.rs", "kind": { "type": "update" }, "diff": "@@ -1 +1 @@\n-a\n+b\n" }] })),
+        );
+        let tc = log.lock().get("cx-item-f1").cloned().unwrap();
+        assert_eq!(tc.data["title"], "/repo/src/lib.rs");
+        assert_eq!(tc.data["files"], json!([{ "path": "/repo/src/lib.rs" }]));
+
+        th.on_notification(
+            "item/completed",
+            item(json!({ "type": "mcpToolCall", "id": "m1", "status": "completed", "server": "gh", "tool": "issue",
+                "arguments": {}, "result": { "content": [{ "type": "text", "text": "Issue #1" }], "structuredContent": null } })),
+        );
+        assert_eq!(log.lock().get("res:m1").unwrap().data["text"], "Issue #1");
+
+        th.on_notification(
+            "turn/plan/updated",
+            json!({ "threadId": "th2", "turnId": "t1", "plan": [
+                { "step": "a", "status": "completed" }, { "step": "b", "status": "inProgress" }, { "step": "c", "status": "pending" }] }),
+        );
+        let plan = log.lock().get("plan:t1").cloned().unwrap();
+        assert_eq!(plan.data["items"][1]["status"], "in_progress");
     }
 }

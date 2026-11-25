@@ -74,7 +74,7 @@ object AgentEventRegistry {
         EventKinds.REASONING to { i, _ -> Reasoning(i) },
         EventKinds.TOOL_CALL to { i, c -> ToolCall(i, c) },
         EventKinds.TOOL_RESULT to { i, c -> ToolResultStandalone(i, c) },
-        EventKinds.FILE_CHANGE to { i, _ -> FileChange(i) },
+        EventKinds.FILE_CHANGE to { i, c -> FileChange(i, c) },
         EventKinds.PLAN to { i, _ -> Plan(i) },
         EventKinds.APPROVAL_REQUEST to { i, c -> ApprovalRequest(i, c) },
         EventKinds.APPROVAL_RESOLVED to { i, _ -> ApprovalResolved(i) },

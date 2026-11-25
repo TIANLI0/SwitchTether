@@ -245,7 +245,7 @@ fun PortForwardScreen(onBack: () -> Unit) {
         title = stringResource(R.string.forward_title),
         onBack = onBack,
         large = false,
-        actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), vm::refresh) },
+        actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::refresh) },
         immersive = true,
     ) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {

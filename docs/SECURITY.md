@@ -145,6 +145,20 @@ A forward (PROTOCOL.md §7.11) lets the phone reach one TCP port on the desktop'
   screen says so; the ongoing notification names the forwarded ports and has a stop action.
   Compared with the remote shell this exposes less (one port, not a shell), which is why it is
   a separate, narrower scope.
+- **DeepSeek Harness Web** (PROTOCOL.md §7.14) is a forward to the `dsh web` port with the same
+  step-up and lease. Starting / stopping `dsh web` needs the same `port_forward` grant; only an
+  instance SwitchTether started can be stopped. The `open` answer carries dsh's per-process launch
+  token to that confirmed device so its WebView can sign in once (dsh prints the same link on the
+  user's own terminal); it is not part of the status, events, the audit log or the desktop log, and
+  the phone does not store it (after dsh's redirect the page address has no token; "copy address"
+  strips it). The token grants the dsh web UI, which runs agent tools on the desktop: comparable to
+  the remote shell, which the same paired device can open with the same kind of confirmation. Other
+  apps on the phone can reach the forwarded port while it runs (see above) but get dsh's `401`: the
+  sign-in cookie is `HttpOnly`, bound to the `localhost:<port>` authority and kept in this app's
+  WebView cookie store. The phone's WebView is limited to
+  `http://localhost:<forward port>` (other links go to the browser), with no file / content access,
+  no extra windows and camera / microphone / location requests denied; cleartext is allowed only to
+  `localhost` (network_security_config).
 
 ### 7b. Push wake
 

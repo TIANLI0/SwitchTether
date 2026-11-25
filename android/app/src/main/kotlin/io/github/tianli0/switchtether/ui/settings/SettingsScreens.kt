@@ -2,6 +2,7 @@ package io.github.tianli0.switchtether.ui.settings
 
 import io.github.tianli0.coui17.patterns.PageDefaults
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
@@ -135,6 +136,18 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
                     }
                 }
             }
+            item {
+                val predictive by container.settingsStore.predictiveBack.collectAsStateWithLifecycle(true)
+                GroupCard {
+                    SwitchPreference(
+                        checked = predictive,
+                        onCheckedChange = { v -> scope.launch { container.settingsStore.setPredictiveBack(v) } },
+                        title = stringResource(R.string.settings_predictive_back),
+                        summary = stringResource(R.string.settings_predictive_back_summary),
+                        cardListPosition = CardListPosition.Full,
+                    )
+                }
+            }
             // Android 13+: the system's per-app language page (locales_config lists en / zh-CN).
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 item {
@@ -214,32 +227,13 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
             item { SectionHeader(stringResource(R.string.settings_about)) }
             item {
                 GroupCard {
-                    KeyValueRow(stringResource(R.string.settings_version), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", cardListPosition = CardListPosition.Head)
                     val updState by container.updates.state.collectAsStateWithLifecycle()
-                    var beta by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(container.updates.includePrerelease) }
                     ArrowPreference(
-                        title = stringResource(R.string.update_check),
+                        title = stringResource(R.string.about_title),
                         summary = updateSummary(updState, BuildConfig.VERSION_NAME),
-                        cardListPosition = CardListPosition.Middle,
-                        onClick = {
-                            scope.launch {
-                                if (container.updates.check() is io.github.tianli0.switchtether.update.UpdateState.Available) container.showUpdateRequest.value = true
-                            }
-                        },
-                        modifier = Modifier.testTag("update-check"),
-                    )
-                    SwitchPreference(
-                        checked = beta,
-                        onCheckedChange = { v -> beta = v; container.updates.includePrerelease = v },
-                        title = stringResource(R.string.update_beta),
-                        summary = stringResource(R.string.update_beta_summary),
-                        cardListPosition = CardListPosition.Middle,
-                    )
-                    KeyValueRow(stringResource(R.string.settings_protocol), "v${io.github.tianli0.switchtether.remote.protocol.CLIENT_PROTOCOL_VERSION}", cardListPosition = CardListPosition.Middle)
-                    ArrowPreference(
-                        title = stringResource(R.string.settings_licenses),
-                        onClick = { onOpen(Route.Licenses) },
-                        cardListPosition = CardListPosition.Tail,
+                        onClick = { onOpen(Route.About) },
+                        cardListPosition = CardListPosition.Full,
+                        modifier = Modifier.testTag("about"),
                     )
                 }
             }
@@ -499,12 +493,18 @@ fun LicensesScreen(onBack: () -> Unit) {
     Page(title = stringResource(R.string.settings_licenses), onBack = onBack, immersive = true) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
-            items(LICENSES) { l ->
+            item {
                 GroupCard {
-                    Column(Modifier.padding(14.dp)) {
-                        Text(l.name, style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface)
-                        Text(l.license, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.primary)
-                        Text(l.note, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                    LICENSES.forEachIndexed { i, l ->
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Text(l.name, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                                Spacer(Modifier.size(8.dp))
+                                Text(l.license, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary)
+                            }
+                            Text(l.note, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                        if (i < LICENSES.lastIndex) io.github.suqi8.coui.kmp.basic.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     }
                 }
             }

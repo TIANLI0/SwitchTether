@@ -26,6 +26,8 @@ data class HomeState(
     val sessions: Loadable<List<SessionSummary>> = Loadable.Loading,
     val usageToday: Loadable<UsageSummary> = Loadable.Loading,
     val usageMonth: Loadable<UsageSummary> = Loadable.Loading,
+    /** Subscription quotas the desktop could read (Claude, Codex); unavailable ones are left out. */
+    val quotas: List<io.github.tianli0.switchtether.remote.protocol.QuotaView> = emptyList(),
     /** A pull-to-refresh is in flight (the list stays visible). */
     val refreshing: Boolean = false,
 ) {
@@ -43,6 +45,8 @@ data class HomeState(
 
 /** Most recently active first; the id breaks ties so a live update never reshuffles equal rows. */
 private val RECENT_FIRST: Comparator<SessionSummary> = compareByDescending<SessionSummary> { it.lastActiveAtMs ?: 0L }.thenBy { it.id }
+
+private val QUOTA_TOOLS = listOf("claude", "codex")
 
 private val SessionSummary.isIdle: Boolean get() = status == "idle" || status == "completed"
 
@@ -145,6 +149,18 @@ class HomeViewModel(
             val t = loadable { management.usageSummary(startToday, now) }
             val m = loadable { management.usageSummary(startMonth, now) }
             _state.update { it.copy(usageToday = t, usageMonth = m) }
+        }
+        viewModelScope.launch {
+            val q = QUOTA_TOOLS.mapNotNull { tool ->
+                try {
+                    management.quota(tool).takeIf { it.available && it.tiers.isNotEmpty() }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            _state.update { it.copy(quotas = q) }
         }
     }
 

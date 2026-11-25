@@ -1066,3 +1066,79 @@ async fn push_wake_reaches_the_endpoint_while_the_phone_is_away() {
     assert!(!f.handle.ctx.push.has_subscribers());
     f.handle.shutdown().await;
 }
+
+/// `dsh web` for the phone (§7.14): status without step-up; open = start (a stand-in program
+/// printing dsh's URL line) + a forward lease + the launch path; stop only what SwitchTether started.
+#[tokio::test]
+async fn dsh_web_open_starts_forwards_and_stops() {
+    use switchtether_core::dsh_web::Launcher;
+
+    let web = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = web.local_addr().unwrap().port();
+    let line = format!("dsh web: http://127.0.0.1:{port}/?token=EXAMPLE_tok-2");
+    let (prog, args): (&str, Vec<String>) = if cfg!(windows) {
+        (
+            "cmd",
+            vec![
+                "/C".into(),
+                format!("echo {line}& ping -n 60 127.0.0.1 >NUL"),
+            ],
+        )
+    } else {
+        ("sh", vec!["-c".into(), format!("echo '{line}'; sleep 60")])
+    };
+    let path = switchtether_core::util::which(prog).unwrap_or_else(|| PathBuf::from(prog));
+
+    let f = start().await;
+    f.handle.ctx.dsh_web.set_launcher(Launcher {
+        resolve: Arc::new(move || Some(path.clone())),
+        args,
+        env: Vec::new(),
+        discover: false,
+        start_timeout: Duration::from_secs(20),
+    });
+    let c = Client::new(&f);
+    let (kp, spki) = step_up_key();
+    let device_id = pair(&f, &c, Some(&spki)).await;
+
+    let (s, v) = c.get("/v1/dsh-web").await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["state"], "stopped");
+    let (s, v) = c.post("/v1/dsh-web/open", json!({})).await;
+    assert_eq!(s, 403, "{v}");
+    assert_eq!(v["error"]["details"]["scope"], "port_forward");
+    grant(&c, &device_id, &kp, "port_forward").await;
+
+    let mut opened = Value::Null;
+    for _ in 0..200 {
+        let (s, v) = c.post("/v1/dsh-web/open", json!({})).await;
+        assert_eq!(s, 200, "{v}");
+        if v["forward"].is_object() {
+            opened = v;
+            break;
+        }
+        assert_eq!(v["status"]["state"], "starting", "{v}");
+        assert!(v.get("launchPath").is_none());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(opened["status"]["state"], "running", "{opened}");
+    assert_eq!(opened["status"]["owned"], true);
+    assert_eq!(opened["status"]["port"], port);
+    assert_eq!(opened["forward"]["port"], port);
+    assert_eq!(opened["forward"]["listening"], true);
+    assert_eq!(opened["launchPath"], "/?token=EXAMPLE_tok-2");
+    // The lease is an ordinary forward; status never carries the token.
+    let (_, v) = c.get("/v1/forwards").await;
+    assert_eq!(v["forwards"][0]["port"], port);
+    let (_, v) = c.get("/v1/dsh-web").await;
+    assert_eq!(v["state"], "running");
+    assert!(!v.to_string().contains("EXAMPLE_tok-2"));
+
+    let (s, v) = c.post("/v1/dsh-web/stop", json!({})).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["status"]["state"], "stopped");
+    let (s, v) = c.post("/v1/dsh-web/stop", json!({})).await;
+    assert_eq!(s, 409, "{v}");
+    drop(web);
+    f.handle.shutdown().await;
+}

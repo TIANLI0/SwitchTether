@@ -117,4 +117,26 @@ class TaskInteractionTest {
     }
     @Test fun commandLight() = command(ThemeMode.LIGHT)
     @Test fun commandDark() = command(ThemeMode.DARK)
+
+    /** A Codex command that read a file is a read step whose file opens in the viewer, like Claude Code's Read. */
+    @Test fun codexReadOpensTheFile() {
+        val opened = mutableListOf<String>()
+        val data = """{"callId":"c2","name":"shell","title":"/repo/src/lib.rs","category":"read","status":"completed","input":{"command":"sed -n '10,19p' src/lib.rs","cwd":"/repo"},"files":[{"path":"/repo/src/lib.rs","offset":10,"limit":10}]}"""
+        val item = AgentEventLog.of(listOf(event("rd", 1, "tool_call", data))).renderItems().single()
+        rule.setContent { SwitchTetherTheme(ThemeMode.LIGHT) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                io.github.tianli0.switchtether.ui.code.LocalCodeCopyLabel provides "Copy",
+                io.github.tianli0.switchtether.ui.code.LocalCodeWrapLabels provides ("Wrap lines" to "Horizontal scroll"),
+            ) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                    ToolCall(item, context().copy(onOpenFile = { opened += it }))
+                }
+            }
+        } }
+        // Titled by the file like a Read step; expanded it offers the file and still shows the command.
+        rule.onNodeWithText("lib.rs").performClick()
+        rule.onNodeWithText("sed -n '10,19p' src/lib.rs").assertExists()
+        rule.onNode(androidx.compose.ui.test.hasTestTag("tool-file")).performClick()
+        assertEquals(listOf("/repo/src/lib.rs"), opened)
+    }
 }

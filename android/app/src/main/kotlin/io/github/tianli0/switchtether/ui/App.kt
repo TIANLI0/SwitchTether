@@ -99,6 +99,7 @@ inline fun <reified VM : ViewModel> containerViewModel(key: String? = null, cros
 fun SwitchTetherRoot() {
     val container = appContainer()
     val theme by container.settingsStore.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
+    val predictiveBack by container.settingsStore.predictiveBack.collectAsStateWithLifecycle(true)
     SwitchTetherTheme(theme) {
       // coui's default sheet close capsule label (patch 0002) follows the app locale.
       CompositionLocalProvider(
@@ -109,6 +110,7 @@ fun SwitchTetherRoot() {
         io.github.tianli0.switchtether.ui.code.LocalCodeCopyLabel provides stringResource(R.string.action_copy),
         io.github.tianli0.switchtether.ui.code.LocalCodeWrapLabels provides (stringResource(R.string.command_wrap) to stringResource(R.string.command_scroll)),
         io.github.tianli0.switchtether.domain.LocalMoney provides container.money.display.collectAsState().value,
+        io.github.tianli0.switchtether.ui.common.LocalPredictiveBack provides predictiveBack,
       ) {
         io.github.tianli0.switchtether.ui.common.LocalNetworkPermissionHost()
         val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = LOADING_SENTINEL)
@@ -182,6 +184,10 @@ fun MainShell() {
             onPickFolder = {
                 showNewSession = false
                 nav.push(Route.PickFolder)
+            },
+            onOpenDshWeb = {
+                showNewSession = false
+                nav.push(Route.DshWeb)
             },
             onCreated = { id, title ->
                 // "从手机发起的任务自动钉住": the phone started it, so following it is user-initiated.
@@ -388,6 +394,7 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         Route.Git -> io.github.tianli0.switchtether.ui.workspace.GitPage(onBack)
         is Route.GitReview -> io.github.tianli0.switchtether.ui.workspace.GitReviewPage(top.cwd, top.turnFiles, onBack)
         Route.PortForward -> io.github.tianli0.switchtether.ui.workspace.PortForwardScreen(onBack)
+        Route.DshWeb -> io.github.tianli0.switchtether.ui.workspace.DshWebScreen(onBack)
         Route.PickFolder -> io.github.tianli0.switchtether.ui.sessions.PickFolderScreen(onBack)
         Route.Providers -> ProvidersScreen(onBack)
         Route.Usage -> UsageScreen(onBack, onOpen = nav::push)
@@ -397,6 +404,7 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         Route.Prompts -> ToggleListScreen(ToggleListKind.PROMPTS, onBack)
         Route.NotificationPrefs -> NotificationPrefsScreen(onBack)
         Route.Licenses -> LicensesScreen(onBack)
+        Route.About -> io.github.tianli0.switchtether.ui.settings.AboutScreen(onBack, onOpen = nav::push)
         Route.DesktopInfo -> DesktopInfoScreen(onBack)
         null -> when (entry.tab) {
             Tab.HOME -> HomeScreen(onOpen = onOpenRoot, onSelectTab = nav::select)

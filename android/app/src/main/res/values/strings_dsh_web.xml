@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- DeepSeek Harness Web (docs/PROTOCOL.md §7.14, docs/ANDROID_UI.md §31) -->
+    <string name="dsh_web_title">DeepSeek Harness Web</string>
+    <string name="dsh_web_entry_summary">DeepSeek Harness\'s own web UI, opened on this phone</string>
+    <string name="dsh_web_entry_new_session">Open DeepSeek Harness Web instead</string>
+    <string name="dsh_web_entry_new_session_summary">The full dsh web UI on the computer: all its sessions, settings and tools</string>
+    <string name="dsh_web_checking">Checking DeepSeek Harness on the computer…</string>
+    <string name="dsh_web_confirming">Confirm on the phone to open DeepSeek Harness Web</string>
+    <string name="dsh_web_starting">Starting dsh web on the computer…</string>
+    <string name="dsh_web_starting_detail">SwitchTether runs dsh web --no-open with your existing web profile. The first start can take a minute.</string>
+    <string name="dsh_web_not_installed">DeepSeek Harness is not installed on the computer</string>
+    <string name="dsh_web_not_installed_detail">Install it in SwitchTether on the computer (Apps → DeepSeek Harness), then try again.</string>
+    <string name="dsh_web_idle">DeepSeek Harness Web is not open</string>
+    <string name="dsh_web_idle_running">dsh web is running on the computer (port %1$d).</string>
+    <string name="dsh_web_idle_stopped">dsh web is not running. Opening it starts dsh web on the computer; SwitchTether stops it again when it quits.</string>
+    <string name="dsh_web_open">Open</string>
+    <string name="dsh_web_offline">Not connected to the computer</string>
+    <string name="dsh_web_failed">Could not open DeepSeek Harness Web</string>
+    <string name="dsh_web_no_stepup">Opening DeepSeek Harness Web needs biometric confirmation, which this pairing does not have. Pair again on a phone with a screen lock.</string>
+    <string name="dsh_web_subtitle">localhost:%1$d → computer :%2$d</string>
+    <string name="dsh_web_subtitle_relay">localhost:%1$d → computer :%2$d · via relay</string>
+    <string name="dsh_web_reload">Reload</string>
+    <string name="dsh_web_more">More</string>
+    <string name="dsh_web_full_screen">Full screen</string>
+    <string name="dsh_web_open_in_browser">Open in browser</string>
+    <string name="dsh_web_copy_link">Copy address</string>
+    <string name="dsh_web_stop">Stop dsh web</string>
+    <string name="dsh_web_stop_confirm">Stop the dsh web that SwitchTether started on the computer? Running work in it ends.</string>
+    <string name="dsh_web_external_hint">Started outside SwitchTether: it keeps running when you leave.</string>
+    <string name="dsh_web_load_error">The page could not be loaded</string>
+    <string name="dsh_web_sign_in">Sign in to dsh web</string>
+    <string name="dsh_web_sign_in_detail">This dsh web was started on the computer outside SwitchTether, so its sign-in link is only in the terminal where it runs (the line “dsh web: http://127.0.0.1:…/?token=…”). Paste that line or the link here. After that, this phone stays signed in for 30 days.</string>
+    <string name="dsh_web_sign_in_field">Link printed by dsh web</string>
+    <string name="dsh_web_sign_in_invalid">No sign-in token found in that text</string>
+    <string name="dsh_web_sign_in_action">Sign in</string>
+    <string name="dsh_web_no_downloads">Downloads are not available in this view</string>
+    <string name="dsh_web_no_app">No app can open this link</string>
+    <string name="dsh_web_exit_full_screen">Back again leaves full screen</string>
+    <string name="dsh_web_chip">Web UI</string>
+</resources>

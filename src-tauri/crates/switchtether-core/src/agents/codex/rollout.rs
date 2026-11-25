@@ -8,9 +8,21 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
+use super::commands::{self, Classified};
 use crate::agents::model::{
     diff_stats, is_encrypted_blob, preview, tool_category, tool_title, EventDraft, PREVIEW_LIMIT,
 };
+
+/// Tools that run a shell command (their `CommandExecution` items follow them).
+const SHELL_TOOLS: &[&str] = &[
+    "shell",
+    "shell_command",
+    "exec_command",
+    "local_shell",
+    "unified_exec",
+    "container.exec",
+    "exec",
+];
 
 /// Longest sub-agent answer kept on its row.
 const SUBAGENT_RESULT_LIMIT: usize = 4000;
@@ -29,6 +41,11 @@ struct PathAgent {
 pub struct CodexParser {
     n: u64,
     calls: HashMap<String, (String, Value, String)>,
+    /// Shell calls still running, oldest first, and what their commands do so far.
+    open_shell: Vec<String>,
+    classified: HashMap<String, Classified>,
+    /// `sleep` calls: an idle wait has nothing to show (a managed thread hides it too).
+    hidden_calls: std::collections::HashSet<String>,
     last_user_text: Option<String>,
     subagents: HashMap<String, (String, Value)>,
     /// v2 children by agent path.
@@ -69,13 +86,97 @@ fn message_text(content: &Value) -> String {
     }
 }
 
-fn is_injected_context(text: &str) -> bool {
+/// Context Codex writes into the history as a `user` message although the user never typed it:
+/// the environment, AGENTS.md, permission and plugin notes, a Desktop page or automation
+/// heartbeat, the marker of an interrupted turn, the reply record of a question card. Codex's
+/// own front ends show none of it. Besides the known prefixes, any message that is one whole
+/// `<tag>…</tag>` block is such a record (Codex adds new ones over time).
+pub(crate) fn is_injected_context(text: &str) -> bool {
+    let t = text.trim();
+    const PREFIXES: &[&str] = &[
+        "<environment_context>",
+        "<user_instructions>",
+        "# AGENTS.md instructions",
+        "<permissions instructions>",
+        "<developer_instructions>",
+        "<turn_aborted>",
+        "<user_shell_command>",
+        "<subagent_notification>",
+        "<recommended_plugins>",
+        "<external_codex_apps_open_page>",
+        "<send_user_message_question_reply>",
+        "<heartbeat>",
+        "<realtime_delegation>",
+        "<skill>",
+    ];
+    if PREFIXES.iter().any(|p| t.starts_with(p)) {
+        return true;
+    }
+    // Image wrappers around an attached picture carry no text of their own.
+    if t == "<image>"
+        || t == "</image>"
+        || (t.starts_with("<image name=") && t.ends_with('>') && !t.contains('\n'))
+    {
+        return true;
+    }
+    whole_tag_block(t)
+}
+
+/// `<name …>…</name>` spanning the whole message, with a tag name Codex uses for records
+/// (lowercase letters, digits, `_`, `-`).
+fn whole_tag_block(t: &str) -> bool {
+    let Some(rest) = t.strip_prefix('<') else {
+        return false;
+    };
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '-')
+        .collect();
+    if name.len() < 3 || !name.contains('_') {
+        return false;
+    }
+    let after = &rest[name.len()..];
+    (after.starts_with('>') || after.starts_with(' ')) && t.ends_with(&format!("</{name}>"))
+}
+
+/// What the user typed, from a message Codex Desktop / the IDE extension wrapped with context
+/// ("# Files mentioned by the user:" …, "# Context from my IDE setup:" … then
+/// "## My request for Codex:"): the request, with the mentioned files listed after it.
+pub(crate) fn strip_ide_context(text: &str) -> String {
+    // Also an `<in-app-browser-context …>` block of Codex Desktop's browser before the request.
+    const MARK: &str = "## My request for Codex:";
     let t = text.trim_start();
-    t.starts_with("<environment_context>")
-        || t.starts_with("<user_instructions>")
-        || t.starts_with("# AGENTS.md instructions")
-        || t.starts_with("<permissions instructions>")
-        || t.starts_with("<developer_instructions>")
+    if !(t.starts_with('#') || t.starts_with('<')) {
+        return text.to_string();
+    }
+    let Some(at) = t.rfind(MARK) else {
+        return text.to_string();
+    };
+    let request = t[at + MARK.len()..].trim();
+    if !t.starts_with("# Files mentioned by the user") {
+        return request.to_string();
+    }
+    let files: Vec<&str> = t[..at]
+        .lines()
+        .filter_map(|l| l.strip_prefix("## "))
+        .filter_map(|l| l.split_once(": ").map(|(_, path)| path.trim()))
+        .filter(|p| !p.is_empty())
+        .collect();
+    if files.is_empty() {
+        request.to_string()
+    } else {
+        format!("{request}\n\n{}", files.join("\n"))
+    }
+}
+
+/// The text to show for a user message, or `None` when it is injected context.
+pub(crate) fn user_display_text(text: &str) -> Option<String> {
+    if is_injected_context(text) {
+        return None;
+    }
+    let t = strip_ide_context(text);
+    let t = t.trim();
+    (!t.is_empty()).then(|| t.to_string())
 }
 
 /// Convert an `apply_patch` envelope into per-file unified diffs.
@@ -400,10 +501,9 @@ impl CodexParser {
     }
 
     fn user_message(&mut self, text: String, ts: &str) -> Vec<EventDraft> {
-        let text = text.trim().to_string();
-        if text.is_empty() || is_injected_context(&text) {
+        let Some(text) = user_display_text(&text) else {
             return vec![];
-        }
+        };
         if self.last_user_text.as_deref() == Some(text.as_str()) {
             return vec![];
         }
@@ -530,12 +630,29 @@ impl CodexParser {
                 (s(p, "name").unwrap_or_default(), parsed)
             }
         };
+        if name == "sleep" {
+            self.hidden_calls.insert(call_id);
+            return vec![];
+        }
         let mut out = Vec::new();
         let event_id = format!("cx-tc-{call_id}");
-        let data = json!({
+        let mut input = input;
+        let mut data = json!({
             "callId": call_id, "name": name, "title": tool_title(&name, &input),
             "category": tool_category(&name), "input": input, "status": "running",
         });
+        if SHELL_TOOLS.contains(&name.as_str()) {
+            let c = self.classify_call(&name, &mut input);
+            data["input"] = input.clone();
+            if name == "exec" {
+                if let Some(cmd) = input.get("command").and_then(Value::as_str) {
+                    data["title"] = json!(preview(cmd.lines().next().unwrap_or(""), 200).0);
+                }
+            }
+            c.apply(&mut data);
+            self.classified.insert(call_id.clone(), c);
+            self.open_shell.push(call_id.clone());
+        }
         self.calls.insert(
             call_id.clone(),
             (event_id.clone(), data.clone(), ts.to_string()),
@@ -549,7 +666,7 @@ impl CodexParser {
             if let Some(items) = input.get("plan").and_then(|v| v.as_array()) {
                 let items: Vec<Value> = items
                     .iter()
-                    .map(|i| json!({ "text": i.get("step"), "status": i.get("status").cloned().unwrap_or(json!("pending")) }))
+                    .map(|i| json!({ "text": i.get("step"), "status": super::managed::plan_status(i.get("status")) }))
                     .collect();
                 out.push(EventDraft::new(
                     format!("cx-plan-{call_id}"),
@@ -565,7 +682,24 @@ impl CodexParser {
                 .and_then(|v| v.as_str())
                 .or_else(|| input.get("patch").and_then(|v| v.as_str()))
                 .unwrap_or("");
-            for (i, (path, kind, diff)) in apply_patch_to_diffs(patch).into_iter().enumerate() {
+            let diffs = apply_patch_to_diffs(patch);
+            let paths: Vec<String> = diffs.iter().map(|d| d.0.clone()).collect();
+            if !paths.is_empty() {
+                let files: Vec<Value> = paths
+                    .iter()
+                    .map(|p| json!({ "path": commands::resolve(p, self.cwd.as_deref()) }))
+                    .collect();
+                let title = super::managed::edit_title(&paths);
+                if let Some((_, data, _)) = self.calls.get_mut(&call_id) {
+                    data["files"] = json!(files);
+                    data["title"] = json!(title);
+                }
+                if let Some(tc) = out.first_mut() {
+                    tc.data["files"] = json!(files);
+                    tc.data["title"] = json!(title);
+                }
+            }
+            for (i, (path, kind, diff)) in diffs.into_iter().enumerate() {
                 let (a, d) = diff_stats(&diff);
                 let (dp, trunc) = preview(&diff, 256 * 1024);
                 out.push(EventDraft::new(
@@ -582,8 +716,104 @@ impl CodexParser {
         out
     }
 
+    /// What a shell call's command does. A code-mode `exec` script gets the commands it runs
+    /// as its `command` (and `cwd`), so the phone shows them like any shell step.
+    fn classify_call(&self, name: &str, input: &mut Value) -> Classified {
+        let shell = Classified {
+            category: "shell",
+            files: vec![],
+        };
+        let workdir = s(input, "workdir")
+            .or_else(|| s(input, "working_directory"))
+            .or_else(|| self.cwd.clone());
+        let found = if name == "exec" {
+            let script = input.get("input").and_then(Value::as_str).unwrap_or("");
+            let Some(cmds) = commands::exec_script_commands(script) else {
+                return shell;
+            };
+            let joined = cmds
+                .iter()
+                .map(|c| c.0.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            input["command"] = json!(joined);
+            let cwd = cmds[0].1.clone().or(workdir);
+            if let Some(c) = &cwd {
+                input["cwd"] = json!(c);
+            }
+            let mut all: Option<Classified> = None;
+            for (cmd, dir) in &cmds {
+                let c = commands::classify(None, cmd, dir.as_deref().or(cwd.as_deref()))
+                    .unwrap_or_else(|| shell.clone());
+                match all.as_mut() {
+                    Some(a) => a.merge(c),
+                    None => all = Some(c),
+                }
+            }
+            all
+        } else {
+            match input.get("command").or_else(|| input.get("cmd")) {
+                Some(Value::Array(a)) => {
+                    let argv: Vec<String> = a
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect();
+                    commands::classify_argv(None, &argv, workdir.as_deref())
+                }
+                Some(Value::String(c)) => commands::classify(None, c, workdir.as_deref()),
+                _ => None,
+            }
+        };
+        found.unwrap_or(shell)
+    }
+
+    /// `event_msg/item_completed` with a `CommandExecution`: Codex's own parse of a command the
+    /// running shell call made. Refines that call's step (category, files read).
+    fn command_execution(&mut self, item: &Value) -> Vec<EventDraft> {
+        let Some(call_id) = self.open_shell.last().cloned() else {
+            return vec![];
+        };
+        let cwd = s(item, "cwd").map(|c| commands::file_url_to_path(&c));
+        let argv: Vec<String> = match item.get("command") {
+            Some(Value::Array(a)) => a
+                .iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect(),
+            Some(Value::String(c)) => vec![c.clone()],
+            _ => vec![],
+        };
+        let Some(c) = commands::classify_argv(
+            item.get("parsed_cmd"),
+            &argv,
+            cwd.as_deref().or(self.cwd.as_deref()),
+        ) else {
+            return vec![];
+        };
+        let Some(m) = self.classified.get_mut(&call_id) else {
+            return vec![];
+        };
+        let before = m.clone();
+        m.merge(c);
+        if *m == before {
+            return vec![];
+        }
+        let merged = m.clone();
+        let Some((eid, data, cts)) = self.calls.get_mut(&call_id) else {
+            return vec![];
+        };
+        merged.apply(data);
+        let mut d = EventDraft::new(eid.clone(), "tool_call", cts.clone(), data.clone());
+        d.turn_id = self.current_turn.clone();
+        vec![d]
+    }
+
     fn tool_output(&mut self, p: &Value, ts: &str) -> Vec<EventDraft> {
         let call_id = s(p, "call_id").unwrap_or_default();
+        self.open_shell.retain(|c| c != &call_id);
+        self.classified.remove(&call_id);
+        if self.hidden_calls.remove(&call_id) {
+            return vec![];
+        }
         let raw = p.get("output").cloned().unwrap_or(Value::Null);
         // Shell outputs are often a JSON string {output, metadata:{exit_code}}.
         let (text, exit_code, success) = match &raw {
@@ -682,6 +912,12 @@ impl CodexParser {
         match p.get("type").and_then(|t| t.as_str()) {
             Some("user_message") => self.user_message(s(p, "message").unwrap_or_default(), ts),
             Some("item_completed")
+                if p.pointer("/item/type").and_then(Value::as_str) == Some("CommandExecution") =>
+            {
+                let item = p.get("item").cloned().unwrap_or(Value::Null);
+                self.command_execution(&item)
+            }
+            Some("item_completed")
                 if p.pointer("/item/type").and_then(Value::as_str) == Some("SubAgentActivity") =>
             {
                 let item = p.get("item").cloned().unwrap_or(Value::Null);
@@ -746,6 +982,49 @@ impl CodexParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shapes taken from real Codex / Codex Desktop rollouts (texts shortened).
+    #[test]
+    fn injected_context_is_not_a_user_message() {
+        for t in [
+            "<environment_context>\n  <cwd>D:\\p</cwd>\n</environment_context>",
+            "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>",
+            "<send_user_message_question_reply>\n[{\"questionItemId\":\"x\"}]\n</send_user_message_question_reply>",
+            "<recommended_plugins>\nHere is a list of plugins\n</recommended_plugins>",
+            "<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>",
+            "<heartbeat>\r\n  <automation_id>a</automation_id>\r\n</heartbeat>",
+            "<codex_internal_context kind=\"x\">y</codex_internal_context>",
+            "# AGENTS.md instructions for D:\\p\n\n<INSTRUCTIONS>\nx\n</INSTRUCTIONS>",
+            "<image>",
+            "</image>",
+            "<image name=[Image #1] path=\"C:/a.png\">",
+        ] {
+            assert!(user_display_text(t).is_none(), "{t}");
+        }
+        // What people type stays, markup included.
+        for t in [
+            "<b>bold</b> please",
+            "<div>",
+            "# Plan\nstep one",
+            "fix <some_tag> handling",
+        ] {
+            assert_eq!(user_display_text(t).as_deref(), Some(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn desktop_context_around_the_request_is_dropped() {
+        let files = "\n# Files mentioned by the user:\n\n## shot.png: C:/Users/u/shot.png\n\n## My request for Codex:\nmake the UI\n";
+        assert_eq!(
+            user_display_text(files).as_deref(),
+            Some("make the UI\n\nC:/Users/u/shot.png")
+        );
+        let browser = "\n<in-app-browser-context source=\"ambient-ui-state\">\nThis block is automatically supplied\n</in-app-browser-context>\n\n## My request for Codex:\nwhy is postchat slow\n";
+        assert_eq!(
+            user_display_text(browser).as_deref(),
+            Some("why is postchat slow")
+        );
+    }
 
     #[test]
     fn parses_basic_rollout() {
@@ -963,5 +1242,72 @@ mod tests {
         q.feed(&json!({"type":"session_meta","payload":{"id":"c2","agent_path":"/root/x"}}));
         let n = q.feed(&mail("/root", "/root/x", "NEW_TASK", None));
         assert_eq!(n[0].kind, "system");
+    }
+
+    /// Rollout shell calls that only read files are `read` steps with openable files, like
+    /// Claude Code's Read; a code-mode `exec` shows the commands it runs and takes Codex's
+    /// `CommandExecution` parse; an `apply_patch` names its files.
+    #[test]
+    fn reads_and_edits_like_claude_code() {
+        let mut p = CodexParser::new();
+        p.feed(&json!({"type":"session_meta","payload":{"id":"th","cwd":"/repo"}}));
+        let ev = p.feed(&json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command",
+            "call_id":"r1","arguments":"{\"cmd\":\"sed -n '1,40p' src/main.rs\",\"workdir\":\"/repo\"}"}}));
+        assert_eq!(ev[0].data["category"], "read");
+        assert_eq!(ev[0].data["title"], "/repo/src/main.rs");
+        assert_eq!(
+            ev[0].data["files"],
+            json!([{ "path": "/repo/src/main.rs", "offset": 1, "limit": 40 }])
+        );
+        let out = p.feed(&json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"r1","output":"fn main() {}"}}));
+        let tc = out.iter().find(|e| e.kind == "tool_call").unwrap();
+        assert_eq!(tc.data["category"], "read");
+        assert_eq!(tc.data["status"], "completed");
+
+        let ev = p.feed(
+            &json!({"type":"response_item","payload":{"type":"function_call","name":"shell",
+            "call_id":"r2","arguments":"{\"command\":[\"bash\",\"-lc\",\"rg -n todo src\"]}"}}),
+        );
+        assert_eq!(ev[0].data["category"], "search");
+        let ev = p.feed(
+            &json!({"type":"response_item","payload":{"type":"function_call","name":"shell",
+            "call_id":"r3","arguments":"{\"command\":[\"bash\",\"-lc\",\"cargo test\"]}"}}),
+        );
+        assert_eq!(ev[0].data["category"], "shell");
+        assert!(ev[0].data.get("files").is_none());
+
+        // Code mode: the script's command, then Codex's parse of what ran.
+        let script = "text(await tools.exec_command({cmd:\"python x.py\"}))";
+        let ev = p.feed(&json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"x1","input":script}}));
+        assert_eq!(ev[0].data["category"], "shell");
+        assert_eq!(ev[0].data["title"], "python x.py");
+        assert_eq!(ev[0].data["input"]["command"], "python x.py");
+        let script = "text(await tools.exec_command({cmd:\"Get-Content -LiteralPath README.md\"}))";
+        p.feed(&json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"x2","input":script}}));
+        let up = p.feed(&json!({"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-1",
+            "command":["pwsh.exe","-Command","Get-Content -LiteralPath README.md"],"cwd":"file:///C:/proj",
+            "parsed_cmd":[{"type":"read","cmd":"Get-Content -LiteralPath README.md","name":"README.md","path":"C:/proj/README.md"}]}}}));
+        assert_eq!(up.len(), 1);
+        assert_eq!(up[0].id, "cx-tc-x2");
+        assert_eq!(up[0].data["category"], "read");
+        assert!(up[0].data["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == "C:/proj/README.md"));
+
+        // An idle wait shows nothing, neither the call nor its output.
+        assert!(p
+            .feed(&json!({"type":"response_item","payload":{"type":"function_call","name":"sleep","call_id":"z","arguments":"{\"seconds\":5}"}}))
+            .is_empty());
+        assert!(p
+            .feed(&json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"z","output":"slept"}}))
+            .is_empty());
+
+        let patch = "*** Begin Patch\n*** Update File: src/a.rs\n@@\n-old\n+new\n*** End Patch";
+        let ev = p.feed(&json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","call_id":"e1","input":patch}}));
+        assert_eq!(ev[0].data["title"], "src/a.rs");
+        assert_eq!(ev[0].data["files"], json!([{ "path": "/repo/src/a.rs" }]));
+        assert_eq!(ev[0].data["category"], "edit");
     }
 }

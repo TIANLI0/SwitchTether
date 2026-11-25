@@ -89,7 +89,7 @@
     <string name="home_live_sessions">运行中的会话</string>
     <string name="home_waiting">等待你处理</string>
     <string name="home_usage">用量</string>
-    <string name="home_no_live">当前没有正在运行的智能体。</string>
+    <string name="home_no_live">暂无运行中的会话</string>
     <string name="home_recent">最近会话</string>
     <string name="home_quick_links">快捷入口</string>
 
@@ -256,6 +256,8 @@
     <string name="settings_connection">连接</string>
     <string name="settings_background">后台保持连接</string>
     <string name="settings_background_summary">应用在后台时保持与电脑的连接，以便及时通知审批和任务状态（常驻通知）。</string>
+    <string name="settings_predictive_back">预测性返回手势</string>
+    <string name="settings_predictive_back_summary">侧滑返回时页面随手势缩小，提前看到上一页。</string>
     <string name="companion_title">通过蓝牙绑定电脑</string>
     <string name="companion_summary_none">绑定后系统会为 SwitchTether 解除后台限制，并在电脑靠近时唤醒它。</string>
     <string name="companion_summary_bound">已绑定：%1$s</string>
@@ -281,6 +283,8 @@
     <string name="settings_clear_cache_summary">清除缓存的会话数据和未发送的草稿</string>
     <string name="settings_clear_cache_confirm">将删除内存中的缓存数据和本机上未发送的草稿。</string>
     <string name="settings_about">关于</string>
+    <string name="about_title">关于 SwitchTether</string>
+    <string name="about_version">版本 %1$s（%2$d）</string>
     <string name="settings_version">版本</string>
     <string name="settings_protocol">协议</string>
     <string name="settings_licenses">开源许可</string>
@@ -402,6 +406,13 @@
     <string name="perm_accept_edits_short">自动编辑</string>
     <string name="perm_plan_short">仅规划</string>
     <string name="quota_tier_5h">5 小时额度</string>
+    <string name="home_quota_title">剩余额度</string>
+    <string name="home_tier_5h">5 小时</string>
+    <string name="home_tier_week">本周</string>
+    <string name="home_tier_month">本月</string>
+    <string name="home_reset_days">%1$d 天后重置</string>
+    <string name="home_reset_hours">%1$d 小时后重置</string>
+    <string name="home_reset_minutes">%1$d 分钟后重置</string>
     <string name="quota_tier_week">每周额度</string>
     <string name="quota_tier_month">每月额度</string>
     <string name="quota_tier_credits">点数</string>

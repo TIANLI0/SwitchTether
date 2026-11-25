@@ -65,6 +65,10 @@ interface SettingsStore {
     suspend fun setThemeMode(mode: ThemeMode)
     suspend fun setBackgroundConnection(enabled: Boolean)
     suspend fun updateNotifyPrefs(transform: (NotifyPrefs) -> NotifyPrefs)
+
+    /** Pages follow the finger during the back gesture (Android's predictive back). Default on. */
+    val predictiveBack: Flow<Boolean> get() = kotlinx.coroutines.flow.flowOf(true)
+    suspend fun setPredictiveBack(enabled: Boolean) {}
 }
 
 /** Unsent message drafts (local only; never sent automatically). */
@@ -80,6 +84,7 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
     private val keyDesktop = stringPreferencesKey("paired_desktop_v1")
     private val keyTheme = stringPreferencesKey("theme_mode")
     private val keyBackground = booleanPreferencesKey("background_connection")
+    private val keyPredictiveBack = booleanPreferencesKey("predictive_back")
     private val keyNotifyOn = stringSetPreferencesKey("notify_enabled_types")
     /** Types that existed when [keyNotifyOn] was written: types added later get their default. */
     private val keyNotifyKnown = stringSetPreferencesKey("notify_known_types")
@@ -132,6 +137,12 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
 
     override suspend fun setBackgroundConnection(enabled: Boolean) {
         store.edit { it[keyBackground] = enabled }
+    }
+
+    override val predictiveBack: Flow<Boolean> = store.data.map { it[keyPredictiveBack] ?: true }
+
+    override suspend fun setPredictiveBack(enabled: Boolean) {
+        store.edit { it[keyPredictiveBack] = enabled }
     }
 
     override suspend fun updateNotifyPrefs(transform: (NotifyPrefs) -> NotifyPrefs) {

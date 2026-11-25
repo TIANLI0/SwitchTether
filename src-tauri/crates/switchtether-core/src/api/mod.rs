@@ -3,6 +3,7 @@
 
 mod cc;
 mod core_routes;
+mod dsh_web;
 mod events_ws;
 mod files;
 mod forward;
@@ -59,6 +60,8 @@ pub struct ApiContext {
     pub files: FileService,
     /// Port forwarding leases (docs/PROTOCOL.md §7.11).
     pub forwards: crate::forward::ForwardManager,
+    /// DeepSeek Harness Web started / found for the phone (docs/PROTOCOL.md §7.14).
+    pub dsh_web: Arc<crate::dsh_web::DshWeb>,
     /// Push wake subscriptions and sending (docs/PROTOCOL.md §7.12).
     pub push: Arc<crate::push::PushWaker>,
     limiter: RateLimiter,
@@ -100,6 +103,7 @@ impl ApiContext {
             agents,
             files: FileService::new(),
             forwards: Default::default(),
+            dsh_web: Default::default(),
             push,
             limiter: RateLimiter::default(),
         })
@@ -369,6 +373,7 @@ pub fn router(ctx: Arc<ApiContext>) -> Router {
         .merge(terminals::routes())
         .merge(files::routes())
         .merge(forward::routes())
+        .merge(dsh_web::routes())
         .merge(push::routes())
         .layer(axum::extract::DefaultBodyLimit::max(MAX_JSON_BODY))
         .layer(axum::middleware::from_fn(request_id_layer))

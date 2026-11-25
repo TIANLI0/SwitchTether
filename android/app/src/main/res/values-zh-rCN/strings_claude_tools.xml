@@ -53,6 +53,11 @@
     <string name="tools_mcp_reconnect">重新连接</string>
     <string name="tools_mcp_reconnecting">正在重新连接…</string>
     <string name="tools_mcp_reconnected">已重新连接</string>
+    <plurals name="tools_mcp_servers">
+        <item quantity="other">%d 个服务器</item>
+    </plurals>
+    <string name="tools_mcp_connected_count">%d 个已连接</string>
+    <string name="tools_mcp_failing_count">%d 个需处理</string>
     <plurals name="tools_mcp_tools">
         <item quantity="other">%d 个工具</item>
     </plurals>

@@ -21,8 +21,16 @@ use crate::identity::ServerIdentity;
 pub const PROTOCOL: &str = "ST-RELAY/1";
 const MAX_LINE: usize = 8 * 1024;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// The relay pings every 30 s; silence for this long means the link is dead.
-const CONTROL_IDLE: Duration = Duration::from_secs(90);
+/// Silence on the control connection for this long means the link is dead. The relay pings every
+/// 30 s and the desktop every [CONTROL_PING] (answered with `PONG`), so a healthy link is never
+/// quiet this long; a link that died without a FIN (network switch, sleep, NAT) is noticed within
+/// it instead of after the relay's 90 s, and phones stop getting `ERR offline` that much sooner.
+const CONTROL_IDLE: Duration = Duration::from_secs(45);
+/// How often the desktop pings the relay on its control connection (RELAY.md §2.1: both directions).
+const CONTROL_PING: Duration = Duration::from_secs(20);
+/// Longest wait between control reconnect attempts. The desktop is plugged in and phones wait
+/// for it: a relay restart must not leave it away for a minute.
+const CONTROL_MAX_BACKOFF: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelayConfig {
@@ -221,7 +229,20 @@ async fn control_session(
     on_tunnel: &OnTunnel,
     cancel: &CancellationToken,
 ) -> anyhow::Result<()> {
-    let (mut s, _) = open(url).await?;
+    let (s, _) = open(url).await?;
+    control_on(s, url, cfg, identity, status, on_tunnel, cancel).await
+}
+
+/// The control protocol on an open connection to the relay (handshake, then the line loop).
+async fn control_on(
+    mut s: BoxStream,
+    url: &RelayUrl,
+    cfg: &RelayConfig,
+    identity: &ServerIdentity,
+    status: &Mutex<RelayStatus>,
+    on_tunnel: &OnTunnel,
+    cancel: &CancellationToken,
+) -> anyhow::Result<()> {
     let fp = &identity.fingerprint;
     tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
         write_line(&mut s, &format!("{PROTOCOL} LISTEN {fp}")).await?;
@@ -249,11 +270,44 @@ async fn control_session(
         st.error = None;
     }
     log::info!("[relay] connected to {}", cfg.url);
+    // Lines are read by their own task: `read_line` is not cancel-safe, and the loop below also
+    // wakes for its own pings.
+    let (mut rd, mut s) = tokio::io::split(s);
+    let (line_tx, mut lines) = tokio::sync::mpsc::channel::<anyhow::Result<String>>(16);
+    let reader = tokio::spawn(async move {
+        loop {
+            let l = read_line(&mut rd).await;
+            let end = l.is_err();
+            if line_tx.send(l).await.is_err() || end {
+                break;
+            }
+        }
+    });
+    struct AbortOnDrop(tokio::task::JoinHandle<()>);
+    impl Drop for AbortOnDrop {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _reader = AbortOnDrop(reader);
+    let mut ping =
+        tokio::time::interval_at(tokio::time::Instant::now() + CONTROL_PING, CONTROL_PING);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last_rx = tokio::time::Instant::now();
     loop {
         let line = tokio::select! {
             _ = cancel.cancelled() => return Ok(()),
-            l = tokio::time::timeout(CONTROL_IDLE, read_line(&mut s)) => l??,
+            _ = ping.tick() => {
+                anyhow::ensure!(last_rx.elapsed() < CONTROL_IDLE, "relay control connection silent for {}s", CONTROL_IDLE.as_secs());
+                write_line(&mut s, "PING").await?;
+                continue;
+            }
+            l = lines.recv() => match l {
+                Some(l) => l?,
+                None => anyhow::bail!("relay closed the connection"),
+            },
         };
+        last_rx = tokio::time::Instant::now();
         let mut parts = line.split(' ');
         match parts.next() {
             Some("PING") => write_line(&mut s, "PONG").await?,
@@ -334,7 +388,7 @@ pub fn spawn(
                 _ = cancel.cancelled() => break,
                 _ = tokio::time::sleep(backoff) => {}
             }
-            backoff = (backoff * 2).min(Duration::from_secs(60));
+            backoff = (backoff * 2).min(CONTROL_MAX_BACKOFF);
         }
         status.lock().state = "off".into();
     });
@@ -418,6 +472,92 @@ mod tests {
         let pk =
             ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_ASN1, cert);
         pk.verify(&msg, &sig).unwrap();
+    }
+
+    /// A relay that answers the desktop's first ping and then goes silent without closing (a link
+    /// that died without a FIN): the desktop pings on its own and gives up within the idle limit.
+    #[tokio::test(start_paused = true)]
+    async fn control_link_is_pinged_and_dropped_when_silent() {
+        use tokio::io::AsyncBufReadExt;
+        let (desktop_end, relay_end) = tokio::io::duplex(4096);
+        let relay = tokio::spawn(async move {
+            let (rd, mut wr) = tokio::io::split(relay_end);
+            let mut lines = tokio::io::BufReader::new(rd).lines();
+            assert!(lines
+                .next_line()
+                .await
+                .unwrap()
+                .unwrap()
+                .contains(" LISTEN "));
+            wr.write_all(
+                b"CHALLENGE bm9uY2U
+",
+            )
+            .await
+            .unwrap();
+            assert!(lines
+                .next_line()
+                .await
+                .unwrap()
+                .unwrap()
+                .starts_with("AUTH "));
+            wr.write_all(
+                b"OK
+",
+            )
+            .await
+            .unwrap();
+            let mut pings = 0;
+            while let Ok(Some(l)) = lines.next_line().await {
+                if l == "PING" {
+                    pings += 1;
+                    if pings == 1 {
+                        wr.write_all(
+                            b"PONG
+",
+                        )
+                        .await
+                        .unwrap();
+                    }
+                }
+            }
+            pings
+        });
+        let cfg = RelayConfig {
+            url: "tcp://127.0.0.1:9".into(),
+            token: "t".into(),
+            key: b64(&[7u8; 32]),
+        };
+        let identity = ServerIdentity::generate("t").unwrap();
+        let status = Mutex::new(RelayStatus::default());
+        let on_tunnel: OnTunnel = Arc::new(|_, _| {});
+        let cancel = CancellationToken::new();
+        let started = tokio::time::Instant::now();
+        let err = control_on(
+            Box::pin(desktop_end),
+            &parse_url(&cfg.url).unwrap(),
+            &cfg,
+            &identity,
+            &status,
+            &on_tunnel,
+            &cancel,
+        )
+        .await
+        .unwrap_err();
+        let took = started.elapsed();
+        assert!(err.to_string().contains("silent"), "{err}");
+        assert_eq!(status.lock().state, "connected");
+        assert!(
+            took >= CONTROL_IDLE && took <= CONTROL_IDLE + CONTROL_PING * 2,
+            "{took:?}"
+        );
+        drop(err);
+        // The desktop pinged more than once before giving up.
+        let pings = tokio::time::timeout(Duration::from_secs(5), relay)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(pings >= 2, "{pings}");
     }
 
     /// Extract the uncompressed P-256 point from a certificate (test helper):

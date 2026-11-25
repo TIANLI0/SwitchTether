@@ -25,6 +25,8 @@ sealed interface Route {
     /** "本轮改动": the Git review of a session's folder, [turnFiles] = what its latest turn edited. */
     data class GitReview(val cwd: String, val turnFiles: List<String>) : Route
     data object PortForward : Route
+    /** DeepSeek Harness Web in a WebView over a port forward (docs/ANDROID_UI.md §31). */
+    data object DshWeb : Route
     data object PickFolder : Route
     data object Providers : Route
     data object Usage : Route
@@ -35,6 +37,7 @@ sealed interface Route {
     data object Prompts : Route
     data object NotificationPrefs : Route
     data object Licenses : Route
+    data object About : Route
     data object DesktopInfo : Route
 }
 

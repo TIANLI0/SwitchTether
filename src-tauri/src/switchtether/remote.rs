@@ -449,6 +449,8 @@ impl RemoteRuntime {
     pub async fn shutdown_for_exit(&self) {
         let n = self.ctx.terminals.kill_all();
         self.ctx.agents.shutdown();
+        // Only a `dsh web` SwitchTether started for the phone; one the user started is untouched.
+        self.ctx.dsh_web.shutdown();
         self.ctx
             .events
             .publish("server.shutdown", json!({ "reason": "desktop_exit" }));

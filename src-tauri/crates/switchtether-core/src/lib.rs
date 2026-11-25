@@ -25,6 +25,7 @@ pub mod api;
 pub mod attach;
 pub mod backend;
 pub mod discovery;
+pub mod dsh_web;
 pub mod error;
 pub mod events;
 pub mod files;

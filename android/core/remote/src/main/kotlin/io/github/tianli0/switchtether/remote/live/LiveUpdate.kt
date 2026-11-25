@@ -144,7 +144,7 @@ object LiveReducer {
                 ?.let { line -> s.copy(note = if (line.length > 90) line.take(89) + "…" else line) } ?: s
             EventKinds.PLAN -> {
                 val list = (d["items"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { it as? kotlinx.serialization.json.JsonObject }
-                val current = list.firstOrNull { it.str("status") == "in_progress" }?.str("text", "content")?.lineSequence()?.firstOrNull()?.trim()
+                val current = list.firstOrNull { it.str("status") == "in_progress" || it.str("status") == "inProgress" }?.str("text", "content")?.lineSequence()?.firstOrNull()?.trim()
                     ?.let { if (it.length > 60) it.take(59) + "…" else it }
                 s.copy(planDone = list.count { it.str("status") == "completed" }, planTotal = list.size, planCurrent = current)
             }
@@ -278,7 +278,10 @@ object LiveReducer {
         fun file(vararg keys: String) = arg(*keys)?.trimEnd('/', '\\')?.substringAfterLast('/')?.substringAfterLast('\\')
         fun short(v: String?) = v?.lineSequence()?.firstOrNull()?.trim()?.let { if (it.length > 40) it.take(39) + "…" else it }
         return when {
-            n in setOf("bash", "shell", "local_shell", "exec", "exec_command", "run_command", "powershell") || category == "shell" ->
+            // A Codex shell command the desktop recognized as a read / listing / search.
+            category == "read" -> Step(StepKind.READ, file("file_path", "path") ?: title?.let { io.github.tianli0.switchtether.remote.session.ToolFiles.name(it) })
+            category == "search" -> Step(StepKind.SEARCH, null)
+            n in setOf("bash", "shell", "local_shell", "exec", "exec_command", "shell_command", "run_command", "powershell") || category == "shell" ->
                 Step(StepKind.COMMAND, short(arg("command", "cmd") ?: title))
             n in setOf("edit", "write", "multiedit", "notebookedit", "apply_patch", "str_replace", "create_file") || category == "edit" ->
                 Step(StepKind.EDIT, file("file_path", "path", "notebook_path"))

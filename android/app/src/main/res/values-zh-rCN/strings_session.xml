@@ -15,6 +15,7 @@
     <string name="render_input">输入</string>
     <string name="render_output">输出</string>
     <string name="render_file">文件</string>
+    <string name="render_files">文件</string>
     <string name="render_file_content">读取的内容</string>
     <string name="render_open_file">查看</string>
     <string name="render_exit_code">退出码 %1$d</string>
@@ -169,6 +170,9 @@
     <plurals name="background_task_chip_running">
         <item quantity="other">后台运行 %1$d 个</item>
     </plurals>
+    <plurals name="subagent_chip_running">
+        <item quantity="other">%1$d 个子 agent 运行中</item>
+    </plurals>
     <plurals name="subagent_chip">
         <item quantity="other">%1$d 个子 agent</item>
     </plurals>
@@ -176,7 +180,7 @@
     <string name="model_title">模型</string>
     <string name="effort_title">思考强度</string>
     <string name="model_default">默认</string>
-    <string name="effort_short">强度 %1$s</string>
+    <string name="effort_short">思考 %1$s</string>
     <string name="effort_none">无</string>
     <string name="effort_minimal">最低</string>
     <string name="effort_low">低</string>

@@ -452,6 +452,8 @@ fun NewSessionContent(
     onPermissionMode: (String) -> Unit,
     onEffort: (String) -> Unit = {},
     onResume: (SessionSummary?) -> Unit = {},
+    /** DeepSeek Harness: its own web UI instead of a SwitchTether-managed session (null = not offered). */
+    onOpenDshWeb: (() -> Unit)? = null,
 ) {
     val dev = LocalDevColors.current
     var options by rememberSaveable { mutableStateOf(false) }
@@ -462,6 +464,7 @@ fun NewSessionContent(
             onTabSelected = { onAgent(MANAGED_AGENTS[it]) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
         )
+        if (state.agent == "dsh" && onOpenDshWeb != null) io.github.tianli0.switchtether.ui.workspace.DshWebNewSessionRow(onOpenDshWeb)
         SmallTitle(stringResource(R.string.new_session_cwd))
         val shownCwd = state.effectiveCwd
         val others = state.recent.filter { it.path != shownCwd }
@@ -615,8 +618,9 @@ fun PickFolderScreen(onBack: () -> Unit) {
             else -> done()
         }
     }
-    androidx.activity.compose.BackHandler(onBack = goBack)
+    val back = io.github.tianli0.switchtether.ui.common.rememberPredictiveBack(onBack = goBack)
     Page(
+        modifier = back,
         // Inside a folder the page is named after it, and the title bar's action picks that folder:
         // no full-width button under the list (and no disabled one while browsing the locations).
         title = listing?.path?.let(::folderName) ?: stringResource(R.string.new_session_cwd),
@@ -737,7 +741,7 @@ private fun FolderRow(name: String, path: String?, sensitive: Boolean, position:
 
 /** "New SwitchTether-managed session" as a coui bottom sheet (opened from the capsule "+"). */
 @Composable
-fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Unit, onCreated: (String, String?) -> Unit) {
+fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Unit, onCreated: (String, String?) -> Unit, onOpenDshWeb: (() -> Unit)? = null) {
     val vm = newSessionViewModel()
     val state by vm.state.collectAsStateWithLifecycle()
     val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
@@ -774,6 +778,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
                     onPermissionMode = vm::setPermissionMode,
                     onEffort = vm::setEffort,
                 onResume = vm::setResume,
+                    onOpenDshWeb = onOpenDshWeb,
                 )
             }
         }

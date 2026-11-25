@@ -177,7 +177,11 @@ fun SessionDetailScreen(
     val claudeTools = state.claudeTools
     val permissionLabel = stringResource(R.string.tools_permission)
     val backgrounding = state.backgrounding
-    val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent, summary?.cwd, busy, claudeTools, backgrounding) {
+    // Changing model / effort / permission mode is a run setting: it must not disable (and redraw)
+    // every card of the conversation while the desktop applies it.
+    val switchLabelForBusy = stringResource(R.string.model_switch_label)
+    val cardsBusy = busy != null && busy != switchLabelForBusy && busy != permissionLabel
+    val ctx = remember(state.detail.valueOrNull?.capabilities, state.online, agent, summary?.cwd, cardsBusy, claudeTools, backgrounding) {
         val caps = state.detail.valueOrNull?.capabilities
         RenderContext(
             agent = agent,
@@ -186,7 +190,7 @@ fun SessionDetailScreen(
             answer = caps?.status(Capability.ANSWER_QUESTION) ?: CapStatus.UNKNOWN,
             capabilityReason = caps?.reason,
             online = state.online,
-            requestBusy = busy != null,
+            requestBusy = cardsBusy,
             // The card already shows exactly what is being approved, so a plain allow / deny is one
             // tap. Broader decisions (allow for the whole session, stop the agent) still confirm.
             onApprove = { rid, decision, label ->
@@ -267,7 +271,9 @@ fun SessionDetailScreen(
         options = state.modelOptions,
         model = state.detail.valueOrNull?.summary?.model,
         effort = state.detail.valueOrNull?.summary?.effort,
-        busy = busy != null,
+        // Only another command in flight (an approval, a continue) locks the chooser; a model or
+        // effort change still being applied does not grey the sheet out and back.
+        busy = busy != null && busy != switchLabel && busy != permissionLabel,
         onModel = { vm.setModel(it, switchLabel) },
         onEffort = { vm.setEffort(it, switchLabel) },
         modelNote = if (modelChangeable) null else stringResource(R.string.model_attached_note),
@@ -408,6 +414,10 @@ fun SessionDetailScreen(
         onOpenTools = if (state.claudeTools || state.claudeReadTools) {
             { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId)) }
         } else null,
+        // DeepSeek Harness sessions: its own web UI, through the desktop (feature dsh_web).
+        onOpenDshWeb = if (agent == "dsh" && io.github.tianli0.switchtether.ui.workspace.rememberDshWebAvailable()) {
+            { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.DshWeb) }
+        } else null,
         // "本轮改动": the session folder's Git review with the latest turn's files first. For a folder
         // the desktop reported a branch for, or once the latest turn edited files (observed sessions
         // often carry no branch; the review says so itself when the folder is not a repository).
@@ -502,7 +512,7 @@ fun SessionDetailScreen(
         ImageViewerDialog(preview = img, onLoadBytes = vm::loadImageBytes, onDismiss = { viewingImage = null })
     }
     viewingFile?.let { ref ->
-        io.github.tianli0.coui17.patterns.FullScreenDialog(onDismissRequest = { viewingFile = null }) {
+        io.github.tianli0.switchtether.ui.common.AppFullScreenDialog(onDismissRequest = { viewingFile = null }) {
             // The page colour runs under the status and gesture bars; the viewer sits between them.
             Box(Modifier.fillMaxSize().background(pageContainerColor()).statusBarsPadding().navigationBarsPadding()) {
                 io.github.tianli0.switchtether.ui.files.RemoteFileViewer(ref, onBack = { viewingFile = null }, onManageDownloads = null)
@@ -540,6 +550,7 @@ fun SessionDetailContent(
     onWithdrawOutgoing: ((String) -> Unit)? = null,
     /** Claude Code session tools page (null = not offered for this session). */
     onOpenTools: (() -> Unit)? = null,
+    onOpenDshWeb: (() -> Unit)? = null,
     /** Git review of the session's folder ("本轮改动"; null = not a repository). */
     onOpenChanges: (() -> Unit)? = null,
     onPermissionClick: (() -> Unit)? = null,
@@ -563,8 +574,14 @@ fun SessionDetailContent(
         }
     }
     val agentsDot = remember(state.log, summary?.waitingFor) { agentsPillState(state) }
-    val backgroundTasks = remember(state.log) { backgroundTaskCounts(state) }
+    // What runs right now: nothing does once the session has ended (a row left "running" by an
+    // interrupted turn or a closed process is not shown as running).
+    val sessionLive = summary?.isLive == true
+    val backgroundTasks = remember(state.log, sessionLive) { backgroundTaskCounts(state).let { (all, running) -> all to if (sessionLive) running else 0 } }
     val subagentCount = remember(state.log) { state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT } }
+    val subagentRunning = remember(state.log, sessionLive) {
+        if (!sessionLive) 0 else state.log.events.count { it.kind == io.github.tianli0.switchtether.remote.protocol.EventKinds.SUBAGENT && it.data.str("status") == "running" }
+    }
     // The read-only tip explains once; the read-only composer bar keeps saying it afterwards.
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val hints = remember(appCtx) { (appCtx as? io.github.tianli0.switchtether.SwitchTetherApp)?.container?.hintPrefs }
@@ -686,9 +703,11 @@ fun SessionDetailContent(
                         onInfo = { showInfo = true },
                         onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
                         subagentCount = subagentCount,
+                        subagentRunning = subagentRunning,
                         agentsDot = agentsDot,
                         backgroundTasks = backgroundTasks,
                         onOpenTools = onOpenTools,
+                        onOpenDshWeb = onOpenDshWeb,
                         onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
                         onOpenChanges = onOpenChanges,
                         costLabel = usageBreakdown?.let { costChipLabel(it) },
@@ -746,8 +765,10 @@ private fun StatusChipRow(
     modifier: Modifier = Modifier,
     onOpenSubagents: (() -> Unit)? = null,
     subagentCount: Int = 0,
+    subagentRunning: Int = 0,
     agentsDot: AgentMapState? = null,
     onOpenTools: (() -> Unit)? = null,
+    onOpenDshWeb: (() -> Unit)? = null,
     onOpenTerminal: (() -> Unit)? = null,
     /** Background shells of the session: (all, still running). */
     backgroundTasks: Pair<Int, Int> = 0 to 0,
@@ -790,8 +811,10 @@ private fun StatusChipRow(
             if (onOpenTerminal != null) {
                 InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel }, backdrop = bg)
             }
-            if (onOpenSubagents != null) {
-                val label = pluralStringResource(R.plurals.subagent_chip, subagentCount, subagentCount)
+            if (onOpenSubagents != null && subagentCount > 0) {
+                // The ones running now; once none runs, how many there were.
+                val label = if (subagentRunning > 0) pluralStringResource(R.plurals.subagent_chip_running, subagentRunning, subagentRunning)
+                else pluralStringResource(R.plurals.subagent_chip, subagentCount, subagentCount)
                 // Like Claude Code's agents pill: a dot while an agent waits, works or failed.
                 val dot = when (agentsDot) {
                     AgentMapState.Waiting -> dev.warn
@@ -810,7 +833,8 @@ private fun StatusChipRow(
             // long build or dev server is visible without opening the agent map. Opens the map,
             // whose "background tasks" section lists them with their output.
             val (bgAll, bgRunning) = backgroundTasks
-            if (bgAll > 0 && onOpenSubagents != null) {
+            // Shown while some run; with no sub-agents it also stays as the way into the agent map.
+            if (onOpenSubagents != null && (bgRunning > 0 || (bgAll > 0 && subagentCount == 0))) {
                 val label = if (bgRunning > 0) pluralStringResource(R.plurals.background_task_chip_running, bgRunning, bgRunning)
                 else pluralStringResource(R.plurals.background_task_chip, bgAll, bgAll)
                 if (bgRunning > 0) {
@@ -826,6 +850,10 @@ private fun StatusChipRow(
             // Extra functions sit in the same row as the sub-agents.
             if (onOpenTools != null) {
                 InfoChip(toolsLabel, icon = AppIcons.SessionTools, onClick = onOpenTools, modifier = Modifier.semantics { contentDescription = toolsLabel }.testTag("chip-tools"), backdrop = bg)
+            }
+            if (onOpenDshWeb != null) {
+                val webLabel = stringResource(R.string.dsh_web_chip)
+                InfoChip(webLabel, icon = AppIcons.Web, onClick = onOpenDshWeb, modifier = Modifier.semantics { contentDescription = webLabel }.testTag("chip-dsh-web"), backdrop = bg)
             }
         }
     }
@@ -1091,15 +1119,9 @@ private fun Composer(
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 if (showModel && s != null) {
                     // Model and effort of the running session, one tap away (like the IDE's model picker).
-                    Row(
-                        Modifier
-                            .weight(1f, fill = false)
-                            .heightIn(min = 30.dp)
-                            .glassSurface(RoundedCornerShape(50))
-                            .clickable(role = Role.Button, onClick = onModelClick)
-                            .padding(horizontal = 11.dp)
-                            .testTag("model-chip"),
-                        verticalAlignment = Alignment.CenterVertically,
+                    io.github.tianli0.switchtether.ui.common.GlassCapsule(
+                        onClick = onModelClick,
+                        modifier = Modifier.weight(1f, fill = false).testTag("model-chip"),
                     ) {
                         Icon(AppIcons.Settings, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.size(5.dp))
@@ -1119,14 +1141,15 @@ private fun Composer(
                 if (showInterrupt) {
                     val stopLabel = stringResource(R.string.session_interrupt)
                     Spacer(Modifier.size(8.dp))
-                    InfoChip(
-                        stopLabel,
-                        icon = AppIcons.Interrupt,
+                    // Glass like the settings capsule beside it (it floats over the conversation).
+                    io.github.tianli0.switchtether.ui.common.GlassCapsule(
                         onClick = onInterrupt,
-                        backdrop = COUITheme.colorScheme.background,
-                        accent = LocalDevColors.current.danger,
                         modifier = Modifier.semantics { contentDescription = stopLabel }.testTag("interrupt"),
-                    )
+                    ) {
+                        Icon(AppIcons.Interrupt, contentDescription = null, tint = LocalDevColors.current.danger, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.size(5.dp))
+                        Text(stopLabel, style = COUITheme.textStyles.footnote1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, maxLines = 1)
+                    }
                 }
             }
         } else if (state.resumesOnSend) {

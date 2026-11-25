@@ -473,6 +473,50 @@ collapsed, `…` where cut, passed through the secret redactor; `matchCount` cou
 searched messages (capped at 999). Desktops without the feature answer `404` (the path is read as a
 session id).
 
+### 7.14 DeepSeek Harness Web (step-up `port_forward`, feature `dsh_web`)
+
+The phone opens `dsh web` — DeepSeek Harness's own browser UI on the desktop — over an ordinary
+port forward (§7.11). The desktop finds a running `dsh web` or starts one; the phone serves the
+lease on its loopback and shows it in a WebView (docs/ANDROID_UI.md §31).
+
+- `GET /v1/dsh-web` → `DshWebStatus` (no step-up; never contains the launch token).
+- `POST /v1/dsh-web/open` *(port_forward)* `{ "start": true, "ttlMinutes": 120 }` (both optional) →
+  `{ "status": DshWebStatus, "forward"?: ForwardView + "listening", "launchPath"?: "/?token=…" }`.
+  With `start` (default) a `dsh web` is started when none runs. While it starts the answer has only
+  `status` (`starting`): poll `GET /v1/dsh-web`, then post again (with `"start": false` or not;
+  starting is idempotent). Once it runs, the answer carries a lease to its port, exactly as
+  `POST /v1/forwards` would (renewed when this device already forwards that port; counts towards the
+  8 leases). `launchPath` only for an instance SwitchTether started (`owned`).
+- `POST /v1/dsh-web/stop` *(port_forward)* `{}` → `{ "stopped": true, "status": DshWebStatus }`;
+  `409 conflict` when SwitchTether did not start the running instance (one the user started is never
+  stopped).
+
+`DshWebStatus` (fixture `protocol/fixtures/dsh_web_status.json`):
+`{ state, port?, owned, startedAtMs?, error? }` — `state` is `not_installed` (no `dsh` executable),
+`stopped`, `starting` or `running`; `port` is the desktop loopback port of the running instance;
+`error` says why the last start failed. Fixture of the open answer: `dsh_web_open.json`.
+
+**Discovery.** dsh answers an unauthenticated `GET /` with `401` and the body
+`dsh web authentication required; …`. The desktop sends that request to port 3080 (dsh's default)
+and to the listeners the OS reports (on Windows only `node` / `bun` / `dsh` processes; elsewhere
+ports below 49152), 800 ms each, in parallel; the first that answers so is the running instance.
+
+**Start.** `dsh web --no-open --host 127.0.0.1 --port 0` in the user's home folder with the
+user's environment — what the user would type; dsh uses (and on first use initialises) the existing
+`web` profile, SwitchTether writes nothing to it. The child prints
+`dsh web: http://127.0.0.1:<port>/?token=<token>`; the port and token come from that line (up to
+120 s). It stops on `POST /v1/dsh-web/stop`, when SwitchTether exits, and — Windows job object —
+when SwitchTether's process dies.
+
+**Sign-in.** dsh requires its per-process launch token once per browser: `GET /?token=…` sets a
+cookie bound to the request's `Host` (signed with a secret in `DSH_HOME`, 30 days) and redirects to
+`/`. dsh's `/api` fence accepts any loopback `Host` (`localhost:<phone port>` included) and requires
+`Origin` to match `Host`, so the phone keeps one fixed local port (3080, then 3081…3089) and the page
+keeps working across restarts of `dsh web`. The token is handed only to a device that passed step-up
+`port_forward`, only in the `open` answer; it is never logged, audited or sent in events. For a
+`dsh web` the user started the desktop does not know the token: the phone asks the user to paste the
+line dsh printed (or works directly when the WebView still holds a valid cookie).
+
 ## 8. Capability negotiation
 
 `GET /v1/capabilities`:
@@ -486,7 +530,7 @@ session id).
   "features": ["terminal", "files", "git", "providers", "usage", "mcp", "skills", "prompts", "managed_sessions"] }
 ```
 
-Further features: `push_wake` (§7.12), `session_search` (§7.13).
+Further features: `push_wake` (§7.12), `session_search` (§7.13), `dsh_web` (§7.14).
 
 Session-level `capabilities` override the agent defaults (e.g. a managed session has
 `sendMessage: "VERIFIED"`).
@@ -634,7 +678,7 @@ this change used `managed:<random>` ids that disappeared with the process.
 | `user_message` | `{ text, images, imageItems?, attachments?: [{name, path}], context?: [{kind: "file"|"selection", path, lines?}], source: "desktop"|"phone"|"unknown", clientId? }` — `attachments` lists files sent from the phone; the path block is removed from `text` — `text` never contains harness/IDE blocks (`<system-reminder>`, `<ide_opened_file>`, `<ide_selection>`, `<browser_instruction>`) or Claude Code's slash command wrappers (`<command-name>` … become `/name args`; `<local-command-stdout>` / `<local-command-stderr>` are `system` events, never user messages); what the IDE blocks said is in `context`. Background-task reports (`<task-notification>`) are never user messages — `clientId` echoes the `commandId` of the phone's `POST …/messages` that produced it (optimistic UI: replace the local bubble exactly) |
 | `assistant_message` | `{ text (Markdown), model? }` |
 | `reasoning` | `{ text, summary: bool }` — only when the agent actually exposes it |
-| `tool_call` | `{ callId, name, title, category, input, status, server?, tool?, background?, taskId?, backgroundSummary?, exitCode?, finishedAt? }` — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted`. A background shell (Claude Code `Bash` with `run_in_background`; `background: true`, `taskId` = its `backgroundTaskId`) stays `running` after its "started" `tool_result` and is updated in place by its task notification (`completed`, or `failed` for a non-zero exit code, with `backgroundSummary`/`exitCode`), or set `interrupted` when a `TaskStop`/`KillShell` result names it |
+| `tool_call` | `{ callId, name, title, category, input, status, server?, tool?, files?, background?, taskId?, backgroundSummary?, exitCode?, finishedAt? }` — `files`: `[{ path, offset?, limit? }]`, the files the step is about when `input` does not name them the Claude Code way (`input.file_path`): a Codex shell command that reads files (from Codex's `commandActions` / `parsed_cmd`, its `unknown` entries — most PowerShell — parsed again by the core) is `category: "read"` titled by the file, one that only lists or searches is `search`, anything else stays `shell` and still lists the files it clearly read; a Codex patch (`fileChange`, `apply_patch`) lists the files it changes. `offset` is 1-based, `limit` a line count, as in Claude Code's Read. Plan steps (`plan` items) use Claude Code's `pending` / `in_progress` / `completed` for every agent. — `category`: `shell`,`edit`,`write`,`read`,`search`,`web`,`mcp`,`task`,`todo`,`question`,`plan`,`other`; `status`: `pending`,`running`,`completed`,`failed`,`denied`,`interrupted`. A background shell (Claude Code `Bash` with `run_in_background`; `background: true`, `taskId` = its `backgroundTaskId`) stays `running` after its "started" `tool_result` and is updated in place by its task notification (`completed`, or `failed` for a non-zero exit code, with `backgroundSummary`/`exitCode`), or set `interrupted` when a `TaskStop`/`KillShell` result names it |
 | `tool_result` | `{ callId, isError, text, truncated, bytes, exitCode? }` (`text` ≤ 8 KiB; full output via `…/payload`) |
 | `file_change` | `{ callId?, path, change: "add"|"modify"|"delete"|"rename", diff, additions, deletions, truncated }` |
 | `plan` | `{ items: [{ text, status: "pending"|"in_progress"|"completed" }] }` |

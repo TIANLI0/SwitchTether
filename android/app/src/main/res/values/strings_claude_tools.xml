@@ -53,6 +53,12 @@
     <string name="tools_mcp_reconnect">Reconnect</string>
     <string name="tools_mcp_reconnecting">Reconnecting…</string>
     <string name="tools_mcp_reconnected">Reconnected</string>
+    <plurals name="tools_mcp_servers">
+        <item quantity="one">%d server</item>
+        <item quantity="other">%d servers</item>
+    </plurals>
+    <string name="tools_mcp_connected_count">%d connected</string>
+    <string name="tools_mcp_failing_count">%d need attention</string>
     <plurals name="tools_mcp_tools">
         <item quantity="one">%d tool</item>
         <item quantity="other">%d tools</item>

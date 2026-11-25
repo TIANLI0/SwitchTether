@@ -233,7 +233,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
                 }
             }
             ToolbarIcon(AppIcons.Edit, stringResource(R.string.git_repo), { showRepoDialog = true })
-            ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), { vm.loadGit() })
+            io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon({ vm.loadGit() })
         }
         val git = state.git
         if (git == null) {

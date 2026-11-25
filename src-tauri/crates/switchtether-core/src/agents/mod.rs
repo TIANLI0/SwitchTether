@@ -612,6 +612,13 @@ impl AgentHub {
             title: transcript_title
                 .or_else(|| m.title())
                 .or_else(|| {
+                    // Codex Desktop names its threads in its session index.
+                    (m.agent() == "codex")
+                        .then(|| m.native_session_id())
+                        .flatten()
+                        .and_then(|t| codex::indexed_thread_name(&t))
+                })
+                .or_else(|| {
                     self.index_cache.lock().as_ref().and_then(|(_, items)| {
                         items
                             .iter()
@@ -2811,7 +2818,7 @@ impl AgentHub {
                     .managed
                     .read()
                     .iter()
-                    .filter(|(_, m)| m.agent() == "claude_code")
+                    .filter(|(_, m)| matches!(m.agent(), "claude_code" | "codex"))
                     .map(|(k, m)| (k.clone(), m.clone()))
                     .collect();
                 managed_titles.retain(|id, _| claude_managed.iter().any(|(k, _)| k == id));

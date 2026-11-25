@@ -12,7 +12,6 @@
     <string name="update_channel">应用更新</string>
     <string name="update_sheet_title">新版本 %1$s</string>
     <string name="update_no_notes">没有更新说明。</string>
-    <string name="update_checks_note">安装前，SwitchTether 会用该版本的 SHA256SUMS.txt 校验下载文件，并确认它与本应用使用同一签名证书。</string>
     <string name="update_download">下载并安装</string>
     <string name="update_downloading">正在下载…</string>
     <string name="update_progress">%1$s / %2$s</string>
