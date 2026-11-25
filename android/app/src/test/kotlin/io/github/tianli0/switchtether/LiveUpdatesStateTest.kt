@@ -118,6 +118,34 @@ class LiveUpdatesStateTest {
     }
 
     @Test
+    fun oneConversationKeepsOneCardTheControllableOne() {
+        // The same VS Code conversation, first seen as observed, then taken over under another id
+        // (or re-keyed after the desktop restarted): it had two cards taking turns at the top.
+        val live = live()
+        val observed = summary(id = "claude:conv-1", control = "observe", status = "busy").copy(nativeId = "conv-1")
+        live.pin(observed, manual = false)
+        assertTrue(live.isPinned(observed.id))
+        val attached = summary(id = "attached:abc", control = "full", status = "busy").copy(nativeId = "conv-1")
+        live.onStreamUpsert(attached)
+        assertFalse("the observed twin's card is withdrawn", live.isPinned(observed.id))
+        assertTrue("the taken-over session carries the card", live.isPinned(attached.id))
+
+        // The observed id keeps streaming: it must not take a card back.
+        live.onStreamUpsert(observed)
+        assertFalse(live.isPinned(observed.id))
+        assertTrue(live.isPinned(attached.id))
+    }
+
+    @Test
+    fun anObservedTwinNeverPinsNextToTheTakenOverSession() {
+        val live = live()
+        val attached = summary(id = "attached:abc", control = "full", status = "busy").copy(nativeId = "conv-2")
+        live.pin(attached, manual = false)
+        live.onStreamUpsert(summary(id = "claude:conv-2", control = "observe", status = "busy").copy(nativeId = "conv-2"))
+        assertEquals(setOf(attached.id), live.pins.value)
+    }
+
+    @Test
     fun nothingIsKeptForARemovedSession() {
         val live = live()
         val s = summary(id = "managed:gone", control = "full", status = "busy")

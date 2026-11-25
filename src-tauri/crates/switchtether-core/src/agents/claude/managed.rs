@@ -459,6 +459,21 @@ impl ManagedClaude {
         tx: tokio::sync::mpsc::UnboundedSender<String>,
         origin: &'static str,
     ) -> Arc<Self> {
+        Self::attached_known(id, cwd, log, tx, origin, None, None)
+    }
+
+    /// [`Self::attached`] with what the shim's hello already tells: the Claude Code process's pid
+    /// and the conversation it continues. Both identify the process in Claude Code's live registry,
+    /// so it is not listed a second time as an observed session while it has not spoken yet.
+    pub fn attached_known(
+        id: String,
+        cwd: PathBuf,
+        log: Arc<Mutex<SessionLog>>,
+        tx: tokio::sync::mpsc::UnboundedSender<String>,
+        origin: &'static str,
+        pid: Option<u32>,
+        native_session_id: Option<String>,
+    ) -> Arc<Self> {
         let now = crate::util::now_ms();
         Arc::new(Self {
             id,
@@ -477,7 +492,7 @@ impl ManagedClaude {
             parser: Mutex::new(ClaudeParser::new()),
             stdin: tokio::sync::Mutex::new(None),
             child: Mutex::new(None),
-            pid: None,
+            pid,
             pending: Mutex::new(HashMap::new()),
             resolved: Mutex::new(HashMap::new()),
             replies: Mutex::new(HashMap::new()),
@@ -485,7 +500,7 @@ impl ManagedClaude {
             state: Mutex::new(State {
                 status: "idle",
                 liveness: Liveness::Live,
-                native_session_id: None,
+                native_session_id,
                 created_at_ms: now,
                 last_active_at_ms: now,
                 model_override: None,

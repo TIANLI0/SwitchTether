@@ -403,7 +403,13 @@ private fun GitStatusList(
                                     ToolbarIcon(AppIcons.Add, stringResource(R.string.git_stage), { vm.stage(listOf(e.path)) }, enabled = busy == null)
                                 }
                             },
-                            onClick = { vm.gitDiff(e.path, staged = false) },
+                            // An untracked folder has nothing to show; an untracked file has no diff yet,
+                            // so it opens as the file itself.
+                            onClick = when {
+                                e.path.endsWith("/") -> null
+                                e.untracked -> ({ vm.openPath(st.root.trimEnd('/', '\\') + "/" + e.path) })
+                                else -> ({ vm.gitDiff(e.path, staged = false) })
+                            },
                             cardListPosition = cardListPositionOf(i, model.unstaged.size),
                         )
                     }
@@ -449,7 +455,9 @@ private fun GitStatusList(
             item(key = "log-title") { SmallTitle(stringResource(R.string.git_log)) }
             item(key = "log") {
                 GroupCard {
-                    val targetPath = openFileRel ?: st.entries.firstOrNull()?.path
+                    // A commit shows one file as it was then: a tracked file, never an untracked one or a
+                    // folder (git refused "exists on disk, but not in <commit>").
+                    val targetPath = openFileRel ?: st.entries.firstOrNull { !it.untracked && !it.path.endsWith("/") }?.path
                     val showFileLabel = stringResource(R.string.git_show_file_at)
                     commits.take(50).forEachIndexed { i, c ->
                         BasicComponent(

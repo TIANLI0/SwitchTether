@@ -186,13 +186,29 @@ async fn serve(
 
     match (kind, hello.get("dialect").and_then(|d| d.as_str())) {
         ("stream", Some("claude")) => {
-            let id = format!("attached:{}", crate::util::new_id());
+            // The shim names the Claude Code process and, when the IDE continues a conversation
+            // (or the shim reconnects after the desktop restarted), the conversation itself. A known
+            // conversation is keyed by its own id, as SwitchTether's managed sessions are: the id
+            // survives a desktop restart, and the phone's card and page keep following it instead
+            // of a fresh `attached:` id appearing next to a dead one. With the pid it is also never
+            // listed a second time as an observed `claude:` session before it speaks.
+            let pid = hello.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
+            let resume = hello
+                .get("resume")
+                .and_then(|r| r.as_str())
+                .filter(|r| is_conversation_id(r))
+                .map(String::from);
+            let id = match &resume {
+                Some(r) => format!("claude:{r}"),
+                None => format!("attached:{}", crate::util::new_id()),
+            };
             let log = new_log(&id);
-            if let Some(resume) = hello.get("resume").and_then(|r| r.as_str()) {
+            if let Some(resume) = resume.as_deref() {
                 hub.preload_history("claude_code", resume, Some(&cwd.to_string_lossy()), &log)
                     .await;
             }
-            let session = ManagedClaude::attached(id.clone(), cwd, log, tx, origin);
+            let session =
+                ManagedClaude::attached_known(id.clone(), cwd, log, tx, origin, pid, resume);
             hub.register_attached(id.clone(), session.clone());
             loop {
                 let frame = tokio::select! {
@@ -390,5 +406,34 @@ mod tests {
         assert_eq!(origin_name(Some("vscode")), "vscode");
         assert_eq!(origin_name(Some("managed")), "unknown");
         assert_eq!(origin_name(None), "unknown");
+    }
+}
+
+/// A Claude Code conversation id as the shim reports it (a UUID); anything else keeps a random id.
+fn is_conversation_id(s: &str) -> bool {
+    s.len() == 36
+        && s.chars().enumerate().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                c == '-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
+}
+
+#[cfg(test)]
+mod conversation_id_tests {
+    #[test]
+    fn only_uuids_name_a_session() {
+        assert!(super::is_conversation_id(
+            "4e6686ef-1228-49df-beba-fa2d9cb3d47d"
+        ));
+        assert!(!super::is_conversation_id("abc"));
+        assert!(!super::is_conversation_id(
+            "../../etc/passwd-00000000-0000-0000"
+        ));
+        assert!(!super::is_conversation_id(
+            "4e6686ef-1228-49df-beba-fa2d9cb3d47dx"
+        ));
     }
 }

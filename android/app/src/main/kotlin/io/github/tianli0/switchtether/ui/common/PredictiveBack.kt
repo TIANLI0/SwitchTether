@@ -52,7 +52,7 @@ fun rememberPredictiveBack(enabled: Boolean = true, onBack: () -> Unit): Modifie
         }
     }
     return Modifier.graphicsLayer {
-        val p = progress.value
+        val p = io.github.tianli0.switchtether.ui.nav.backEase(progress.value)
         if (p <= 0f) return@graphicsLayer
         val scale = 1f - MAX_SHRINK * p
         scaleX = scale

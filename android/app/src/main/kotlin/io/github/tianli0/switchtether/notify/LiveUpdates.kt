@@ -107,6 +107,14 @@ class LiveUpdates(
 
     /** Running tasks that currently have no slot, newest activity first when a slot frees. */
     private val liveSeen = ConcurrentHashMap<String, SessionSummary>()
+
+    /**
+     * The conversation (agent + native id) and control rank of each followed session. One
+     * conversation can reach the phone under two ids — the observed `claude:<uuid>` and a taken-over
+     * `attached:<id>` before the desktop could tell they are one, or a pin from before a desktop
+     * restart — and each id had its own card: two cards for one task, taking turns at the top.
+     */
+    private val conversations = ConcurrentHashMap<String, Pair<String, Int>>()
     private val knownLive = ConcurrentHashMap.newKeySet<String>()
     /** Last seen run state per session (this app run), to notice a task starting again. */
     private val runState = ConcurrentHashMap<String, AutoFollow.Run>()
@@ -279,6 +287,7 @@ class LiveUpdates(
         // Kept current for followed sessions too: [fillSlots] reads it when a slot frees, and the
         // `busy` summary a session was pinned with would pin it again right after its turn settled.
         if (s.isLive) liveSeen[s.id] = s else liveSeen.remove(s.id)
+        if (s.isLive && resolveTwin(s)) return
         if (s.id !in _pins.value) {
             maybeAutoPin(s)
             return
@@ -286,6 +295,37 @@ class LiveUpdates(
         runState[s.id] = AutoFollow.runOf(s)
         if (!s.isLive) return ended(s.id)
         mutate(s.id) { LiveReducer.onUpsert(it, s, clock(), fromRest) }
+    }
+
+    /**
+     * One card per conversation: [s] and an already followed session of the same conversation are
+     * twins. The one with more control stays (taken over / started here beats observed), the
+     * existing card on a tie; the other card is withdrawn. True when [s] itself must not be shown.
+     */
+    private fun resolveTwin(s: SessionSummary): Boolean {
+        val key = conversationKey(s) ?: return false
+        val rank = controlRank(s)
+        if (s.id in _pins.value) conversations[s.id] = key to rank
+        val twin = _pins.value.firstOrNull { it != s.id && conversations[it]?.first == key } ?: return false
+        val twinRank = conversations[twin]?.second ?: 0
+        val keepNew = rank > twinRank
+        if (keepNew) {
+            unpin(twin, userInitiated = false, refill = false)
+            // The conversation keeps its card, now under the id that can be controlled.
+            if (s.id !in _pins.value) pin(s, manual = false)
+            return false
+        }
+        if (s.id in _pins.value) unpin(s.id, userInitiated = false, refill = false)
+        return true
+    }
+
+    private fun conversationKey(s: SessionSummary): String? =
+        s.nativeId.takeIf { it.isNotBlank() }?.let { "${s.agent}:$it" }
+
+    private fun controlRank(s: SessionSummary): Int = when (s.control) {
+        "full" -> 2
+        "observe" -> 1
+        else -> 0
     }
 
     /** The session's process exited: the card settles at once (its outcome, or "会话已结束"). */
@@ -409,6 +449,7 @@ class LiveUpdates(
             persistSet(manualKey(currentServerId), manualPins)
         }
         pinnedAt[summary.id] = clock()
+        conversationKey(summary)?.let { conversations[summary.id] = it to controlRank(summary) }
         setPins(_pins.value + summary.id)
         states[summary.id] = LiveReducer.onUpsert(
             PinnedSessionState(summary.id, summary.title ?: context.getString(R.string.app_name), summary.agent, phase = LivePhase.DONE, phaseSinceMs = 0),
@@ -430,6 +471,7 @@ class LiveUpdates(
             persistSet(unpinnedKey(currentServerId), unpinned)
         }
         setPins(_pins.value - sessionId)
+        conversations.remove(sessionId)
         // No longer "restored, waiting for its name": pinned again, it is a new pin that shows at once.
         restoredPins.remove(sessionId)
         // Only meaningful for the state just dropped (a later pin starts a new turn and posts at once).

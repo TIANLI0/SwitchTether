@@ -428,3 +428,36 @@ async fn dsh_bridge_plugin_sessions_are_controllable() {
         .await
     );
 }
+
+/// A shim that names the conversation it continues (the IDE's `--resume`, or a reconnect after the
+/// desktop restarted) is keyed by that conversation, `claude:<uuid>`: the same id before and after a
+/// desktop restart, so a phone's card keeps following it, and no `attached:` twin is listed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resumed_claude_conversation_is_keyed_by_its_own_id() {
+    let env = setup().await;
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    let conversation = "4e6686ef-1228-49df-beba-fa2d9cb3d47d";
+    let (_shim, ack) = Shim::connect(
+        env.port,
+        json!({ "t": "hello", "v": 1, "token": env.token, "kind": "stream", "dialect": "claude",
+                "agent": "claude_code", "origin": "vscode", "cwd": cwd, "pid": 424242,
+                "resume": conversation, "reattached": true }),
+    )
+    .await;
+    assert_eq!(ack.unwrap()["t"], "welcome");
+    let want = format!("claude:{conversation}");
+    let mut ids = Vec::new();
+    for _ in 0..100 {
+        let (items, _) = env.hub.list(&SessionQuery::default()).await;
+        ids = items.into_iter().map(|s| s.id).collect::<Vec<_>>();
+        if ids.contains(&want) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(ids.contains(&want), "listed: {ids:?}");
+    assert!(
+        !ids.iter().any(|i| i.starts_with("attached:")),
+        "listed: {ids:?}"
+    );
+}
