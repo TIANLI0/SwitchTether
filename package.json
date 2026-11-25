@@ -1,6 +1,6 @@
 {
   "name": "switchtether",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "SwitchTether: native Android remote control for AI coding agents, built on CC Switch",
   "type": "module",
   "scripts": {
