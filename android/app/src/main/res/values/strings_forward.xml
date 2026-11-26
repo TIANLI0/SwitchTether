@@ -52,4 +52,7 @@
         <item quantity="one">Forwarding %d port from your computer</item>
         <item quantity="other">Forwarding %d ports from your computer</item>
     </plurals>
+    <string name="forward_unknown_process">Unknown process</string>
+    <string name="forward_show_other_ports">Show %1$d other ports</string>
+    <string name="forward_hide_other_ports">Show dev servers only</string>
 </resources>

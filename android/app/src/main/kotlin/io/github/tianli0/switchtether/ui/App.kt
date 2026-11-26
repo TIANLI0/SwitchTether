@@ -167,6 +167,11 @@ fun MainShell() {
     val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
     val ctx = LocalContext.current
     androidx.compose.runtime.LaunchedEffect(Unit) {
+        // Pairing saves the computer a moment before it hands over the 6-digit code to compare, so
+        // the main shell is composed for a frame in between: without this pause the system prompt
+        // opened over the code. If the code step takes over, this shell leaves and the wait is
+        // cancelled; the prompt then comes once the user has compared the codes.
+        kotlinx.coroutines.delay(800)
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)

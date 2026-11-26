@@ -214,8 +214,11 @@ fun BoxScope.NewMessagesPill(listState: LazyListState, follow: FollowState, rows
         val shape = RoundedCornerShape(50)
         Row(
             Modifier
-                // The same glass and halo as the composer below it (not an elevation shadow).
-                .glassSurface(shape, halo = true)
+                // The composer's glass and halo, but denser: it sits over moving text (bubbles,
+                // code) and with the plain glass that text read through its label. Tinted with the
+                // page colour, so it is a dark capsule in the dark theme (the card colour, 10 %
+                // white, turned it into a light grey blob there).
+                .glassSurface(shape, tint = io.github.tianli0.coui17.patterns.pageContainerColor().copy(alpha = 0.85f), halo = true)
                 .clickable(role = Role.Button) {
                     follow.following = true
                     scope.launch {

@@ -20,7 +20,7 @@
     <string name="cost_breakdown">Token 构成</string>
     <string name="cost_cache_hit">缓存命中率</string>
     <string name="cost_context">最近一次请求的上下文</string>
-    <string name="cost_context_value">≈ %1$s tokens</string>
+    <string name="cost_context_value">≈ %1$s Token</string>
     <string name="cost_partial">只统计本机已加载的对话部分。在对话中向上滑动可加载更早的轮次。</string>
     <string name="cost_running_total">费用取自智能体每次运行的累计值，因此可能包含比已加载部分更早的轮次。</string>
     <string name="cost_project_usage">项目「%1$s」的用量</string>
@@ -42,4 +42,5 @@
     <string name="pane_empty_sessions">选择一个会话，在这里查看</string>
     <string name="pane_empty_workspace">选择一项工具，在这里打开</string>
     <string name="pane_empty_manage">选择一项，在这里打开</string>
+    <string name="cost_chip_tokens">%1$s Token</string>
 </resources>

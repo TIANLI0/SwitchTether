@@ -48,4 +48,7 @@
     <plurals name="service_title_forwarding">
         <item quantity="other">正在转发电脑上的 %d 个端口</item>
     </plurals>
+    <string name="forward_unknown_process">未知进程</string>
+    <string name="forward_show_other_ports">显示其他 %1$d 个端口</string>
+    <string name="forward_hide_other_ports">只看开发服务</string>
 </resources>

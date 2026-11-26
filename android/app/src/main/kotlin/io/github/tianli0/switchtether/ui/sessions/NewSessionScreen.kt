@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,7 +92,6 @@ import io.github.tianli0.coui17.patterns.NoticeBanner
 import io.github.tianli0.coui17.patterns.SectionHeader
 import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.containerViewModel
-import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -474,7 +474,9 @@ fun NewSessionContent(
             onTabSelected = { onAgent(MANAGED_AGENTS[it]) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
         )
-        if (state.agent == "dsh" && onOpenDshWeb != null) io.github.tianli0.switchtether.ui.workspace.DshWebNewSessionRow(onOpenDshWeb)
+        if (state.agent == "dsh" && onOpenDshWeb != null) {
+            Box(Modifier.padding(top = 12.dp)) { io.github.tianli0.switchtether.ui.workspace.DshWebNewSessionRow(onOpenDshWeb) }
+        }
         SmallTitle(stringResource(R.string.new_session_cwd))
         val shownCwd = state.effectiveCwd
         val others = state.recent.filter { it.path != shownCwd }
@@ -677,8 +679,11 @@ fun PickFolderScreen(onBack: () -> Unit) {
                                 }
                                 item(key = "roots-h") { SmallTitle(stringResource(R.string.new_session_all_locations)) }
                             }
-                            itemsIndexed(roots.value, key = { _, r -> "root:" + r.path }) { i, r ->
-                                FolderRow(r.name.ifBlank { r.path }, r.path.takeIf { it != r.name }, false, cardListPositionOf(i, roots.value.size)) { vm.browse(r.path) }
+                            val rootsShown = roots.value.filter { r -> recent.none { samePath(it.path, r.path) } }
+                            itemsIndexed(rootsShown, key = { _, r -> "root:" + r.path }) { i, r ->
+                                val title = wellKnownFolderLabel(r.name)
+                                    ?: if (r.name.isBlank() || r.name == r.path) io.github.tianli0.switchtether.ui.workspace.folderLabel(r.path) else r.name
+                                FolderRow(title, r.path.takeIf { it != title }, false, cardListPositionOf(i, rootsShown.size)) { vm.browse(r.path) }
                             }
                         }
                     }
@@ -699,7 +704,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
                         val dirs = if (q.isEmpty()) all else all.filter { it.name.contains(q, ignoreCase = true) }
                         item(key = "path") {
                             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(l.value.path, style = DevType.codeSmall, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+                                Text(l.value.path, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
                                 LinkButton(stringResource(R.string.new_session_all_locations), vm::closeBrowser)
                             }
                         }
@@ -709,6 +714,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
                                     value = filter,
                                     onValueChange = { filter = it },
                                     label = stringResource(R.string.new_session_filter),
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri, autoCorrectEnabled = false),
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
                                 )
                             }
@@ -719,7 +725,11 @@ fun PickFolderScreen(onBack: () -> Unit) {
                         if (total == 0) {
                             item(key = "none") { GroupCard { BasicComponent(title = stringResource(R.string.new_session_no_subdirs), cardListPosition = CardListPosition.Full) } }
                         }
-                        if (parent != null) item(key = "..") { FolderRow("..", null, false, cardListPositionOf(0, total)) { vm.browse(parent) } }
+                        if (parent != null) {
+                            item(key = "..") {
+                                FolderRow(stringResource(R.string.new_session_parent_folder), parent, false, cardListPositionOf(0, total), icon = AppIcons.Back) { vm.browse(parent) }
+                            }
+                        }
                         itemsIndexed(dirs, key = { _, d -> d.path }) { i, d ->
                             FolderRow(d.name, null, d.sensitive, cardListPositionOf(i + offset, total)) { vm.browse(d.path) }
                         }
@@ -745,13 +755,13 @@ fun PickFolderScreen(onBack: () -> Unit) {
  * group's outer edges (large folders stay smooth instead of composing every row at once).
  */
 @Composable
-private fun FolderRow(name: String, path: String?, sensitive: Boolean, position: CardListPosition, onClick: () -> Unit) {
+private fun FolderRow(name: String, path: String?, sensitive: Boolean, position: CardListPosition, icon: androidx.compose.ui.graphics.vector.ImageVector = AppIcons.Files, onClick: () -> Unit) {
     val dev = LocalDevColors.current
     LazyGroupRow(position) {
         BasicComponent(
             title = name,
             summary = path,
-            startAction = { RowIcon(AppIcons.Files) },
+            startAction = { RowIcon(icon) },
             endActions = if (sensitive) ({ StatusPill(stringResource(R.string.new_session_sensitive), dev.warn) }) else null,
             onClick = onClick,
             cardListPosition = position,
@@ -785,7 +795,22 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
             onClick = { vm.start(startLabel) },
         ),
     ) {
-        Box(Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
+        // A fling that runs back up to the top of the options ends there: its leftover must not reach
+        // the sheet, which took it as a drag down and closed (losing the typed prompt). A finger
+        // dragging down from the top still closes the sheet as before.
+        val keepFlingInside = remember {
+            object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+                override fun onPostScroll(
+                    consumed: androidx.compose.ui.geometry.Offset,
+                    available: androidx.compose.ui.geometry.Offset,
+                    source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+                ): androidx.compose.ui.geometry.Offset =
+                    if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.SideEffect) available else androidx.compose.ui.geometry.Offset.Zero
+
+                override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity, available: androidx.compose.ui.unit.Velocity) = available
+            }
+        }
+        Box(Modifier.fillMaxWidth().heightIn(max = 620.dp).nestedScroll(keepFlingInside)) {
             Column(Modifier.pageScroll().verticalScroll(rememberPageScrollState())) {
                 NewSessionContent(
                     state = state,
@@ -805,4 +830,18 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
         }
     }
     CommandPromptDialog(prompt, vm.commands::checkStatus, vm.commands::retry, vm.commands::dismiss)
+}
+
+/**
+ * The desktop names a few folders under the user's home with fixed English labels
+ * (switchtether-core `files::roots`: "Home", "Desktop", "Documents", "Downloads"); shown in the
+ * app's language. Other labels (project folders, drives) are names, not words, and stay as they are.
+ */
+@Composable
+internal fun wellKnownFolderLabel(name: String): String? = when (name) {
+    "Home" -> stringResource(R.string.folder_home)
+    "Desktop" -> stringResource(R.string.folder_desktop)
+    "Documents" -> stringResource(R.string.folder_documents)
+    "Downloads" -> stringResource(R.string.folder_downloads)
+    else -> null
 }

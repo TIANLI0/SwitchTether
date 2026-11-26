@@ -29,4 +29,5 @@
     <string name="update_err_signature">The APK is not signed with this app\'s certificate: it was deleted and not installed</string>
     <string name="update_err_not_apk">The download is not a valid APK</string>
     <string name="update_err_install">Installation did not complete</string>
+    <string name="update_idle">Look for a newer release</string>
 </resources>

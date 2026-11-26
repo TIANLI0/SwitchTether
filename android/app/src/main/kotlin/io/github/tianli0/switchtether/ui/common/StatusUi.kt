@@ -22,6 +22,21 @@ import io.github.tianli0.switchtether.remote.protocol.CapStatus
 import io.github.tianli0.switchtether.remote.protocol.ControlLevel
 import io.github.tianli0.switchtether.remote.protocol.Hello
 import io.github.tianli0.coui17.patterns.NoticeBanner
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import io.github.suqi8.coui.kmp.basic.Text
+import io.github.suqi8.coui.kmp.basic.TopTips
+import io.github.suqi8.coui.kmp.basic.TopTipsDefaults
+import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.switchtether.ui.theme.DevColors
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.delay
@@ -166,3 +181,23 @@ fun sessionStatusColor(status: String, dev: DevColors = LocalDevColors.current):
 
 /** Host part of a relay URL for display ("relay.example.com"). */
 fun relayHostOf(url: String?): String = url?.let { runCatching { java.net.URI(it.trim()).host }.getOrNull() } ?: "—"
+
+/**
+ * A notice the user has to read in full (security warnings while pairing): the same COUI17 top
+ * tip and status dot as [NoticeBanner], but the message wraps instead of scrolling as a one-line
+ * marquee, which cut "no secure lock screen …" off mid-sentence on a phone.
+ */
+@Composable
+fun WrapNotice(text: String, color: Color, modifier: Modifier = Modifier) {
+    TopTips(
+        text = text,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = PageDefaults.CardGutter, vertical = 4.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        startIcon = { Box(Modifier.size(8.dp).clip(CircleShape).background(color)) },
+        content = {
+            Text(text, style = TopTipsDefaults.textStyle(), color = TopTipsDefaults.topTipsColors().contentColor)
+        },
+    )
+}

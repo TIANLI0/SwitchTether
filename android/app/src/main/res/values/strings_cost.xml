@@ -43,4 +43,5 @@
     <string name="pane_empty_sessions">Choose a session to see it here</string>
     <string name="pane_empty_workspace">Choose a tool to open it here</string>
     <string name="pane_empty_manage">Choose an item to open it here</string>
+    <string name="cost_chip_tokens">%1$s tokens</string>
 </resources>

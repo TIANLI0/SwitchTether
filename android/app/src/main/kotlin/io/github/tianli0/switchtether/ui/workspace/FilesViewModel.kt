@@ -122,6 +122,16 @@ data class FilesUiState(
     val gitNotice: GitNotice? = null,
     val gitBranches: Loadable<io.github.tianli0.switchtether.remote.protocol.GitBranches>? = null,
     val commitMessage: String = "",
+    /** The next commit replaces the last one (`--amend`). */
+    val amend: Boolean = false,
+    /** The desktop offers commit details, branch delete, merge and stash (feature `git_manage`). */
+    val gitManage: Boolean = false,
+    /** A commit opened from the history: its hash and its message / changed files. */
+    val gitCommit: Pair<String, Loadable<io.github.tianli0.switchtether.remote.protocol.GitCommitDetail>>? = null,
+    /** The history may have older commits than the ones loaded; a page is being loaded. */
+    val gitLogMore: Boolean = false,
+    val gitLogLoadingMore: Boolean = false,
+    val gitStashes: Loadable<List<io.github.tianli0.switchtether.remote.protocol.GitStash>>? = null,
     /** "本轮改动": files the session's latest turn edited (as the agent wrote them) and its folder. */
     val turnFiles: List<String> = emptyList(),
     val turnCwd: String? = null,
@@ -148,7 +158,10 @@ data class GitNotice(val op: String, val ok: Boolean, val text: String? = null)
  * overwriting anything.
  */
 /** Writes after which the commit list changes. */
-private val HISTORY_OPS = setOf(GitOps.COMMIT, GitOps.PULL, GitOps.CHECKOUT, GitOps.PUSH, GitOps.FETCH)
+private val HISTORY_OPS = setOf(GitOps.COMMIT, GitOps.PULL, GitOps.CHECKOUT, GitOps.PUSH, GitOps.FETCH, GitOps.MERGE, GitOps.MERGE_ABORT)
+
+/** Commits per history page. */
+private const val LOG_PAGE = 50
 
 class FilesViewModel(
     private val conn: ConnectionController,
@@ -603,9 +616,10 @@ class FilesViewModel(
     fun setRepo(path: String) {
         _state.update {
             // Another repository: the session's "latest turn" no longer applies.
-            val sameRepo = it.repo == path
+            val sameRepo = samePath(it.repo, path)
             it.copy(
                 repo = path, git = null, gitLog = null, gitDiff = null, gitShow = null, gitBranches = null,
+                gitCommit = null, gitStashes = null, gitLogMore = false,
                 turnFiles = if (sameRepo) it.turnFiles else emptyList(),
                 turnCwd = if (sameRepo) it.turnCwd else null,
                 onlyTurn = sameRepo && it.onlyTurn,
@@ -619,6 +633,7 @@ class FilesViewModel(
         _state.update {
             it.copy(
                 repo = cwd, git = null, gitLog = null, gitDiff = null, gitShow = null, gitBranches = null,
+                gitCommit = null, gitStashes = null, gitLogMore = false,
                 turnFiles = turnFiles, turnCwd = cwd, onlyTurn = turnFiles.isNotEmpty(), commitMessage = "",
             )
         }
@@ -631,9 +646,95 @@ class FilesViewModel(
         _state.update { it.copy(git = Loadable.Loading) }
         viewModelScope.launch {
             val st = loadable { api.gitStatus(repo) }
-            val log = loadable { api.gitLog(repo).commits }
-            val writable = runCatching { "git_write" in api.features() }.getOrDefault(false)
-            _state.update { if (it.repo == repo) it.copy(git = st, gitLog = log, gitWritable = writable) else it }
+            val log = loadable { api.gitLog(repo, limit = LOG_PAGE).commits }
+            val features = runCatching { api.features() }.getOrDefault(emptySet())
+            val manage = "git_manage" in features
+            val stashes = if (manage) loadable { api.gitStashes(repo).stashes } else null
+            _state.update {
+                if (it.repo != repo) return@update it
+                // A folder inside a repository opens that repository: one entry per repository,
+                // not one per subfolder that was browsed (the same status under another name).
+                val root = (st as? Loadable.Ready)?.value?.root?.takeIf { r -> r.isNotBlank() && !samePath(r, repo) }
+                it.copy(
+                    repo = root ?: repo,
+                    git = st,
+                    gitLog = log,
+                    gitLogMore = (log as? Loadable.Ready)?.value?.size == LOG_PAGE,
+                    gitWritable = "git_write" in features,
+                    gitManage = manage,
+                    gitStashes = stashes,
+                )
+            }
+        }
+    }
+
+    /** The next page of the history (older commits). */
+    fun loadMoreLog() {
+        val api = api() ?: return
+        val s0 = _state.value
+        val repo = s0.repo ?: return
+        val have = (s0.gitLog as? Loadable.Ready)?.value ?: return
+        if (!s0.gitLogMore || s0.gitLogLoadingMore) return
+        _state.update { it.copy(gitLogLoadingMore = true) }
+        viewModelScope.launch {
+            val page = runCatching { api.gitLog(repo, limit = LOG_PAGE, skip = have.size).commits }.getOrNull()
+            _state.update {
+                if (it.repo != repo) return@update it
+                val cur = (it.gitLog as? Loadable.Ready)?.value.orEmpty()
+                if (page == null) {
+                    it.copy(gitLogLoadingMore = false)
+                } else {
+                    it.copy(gitLog = Loadable.Ready(cur + page), gitLogMore = page.size == LOG_PAGE, gitLogLoadingMore = false)
+                }
+            }
+        }
+    }
+
+    fun loadStashes() {
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        if (!_state.value.gitManage) return
+        viewModelScope.launch {
+            val st = loadable { api.gitStashes(repo).stashes }
+            _state.update { if (it.repo == repo) it.copy(gitStashes = st) else it }
+        }
+    }
+
+    /** Opens a commit of the history: its message and changed files (feature `git_manage`). */
+    fun openCommit(hash: String) {
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        _state.update { it.copy(gitCommit = hash to Loadable.Loading) }
+        viewModelScope.launch {
+            val d = loadable { api.gitCommit(repo, hash) }
+            _state.update { if (it.gitCommit?.first == hash) it.copy(gitCommit = hash to d) else it }
+        }
+    }
+
+    fun retryCommit() {
+        _state.value.gitCommit?.first?.let(::openCommit)
+    }
+
+    fun closeCommit() = _state.update { it.copy(gitCommit = null) }
+
+    /** What commit [rev] changed in [path] ([origPath]: its name before a rename). */
+    fun commitFileDiff(rev: String, path: String, origPath: String? = null) {
+        lastGitDetail = { commitFileDiff(rev, path, origPath) }
+        val api = api() ?: return
+        val repo = _state.value.repo ?: return
+        val key = "${rev.take(8)}:$path"
+        _state.update { it.copy(gitDiff = key to Loadable.Loading) }
+        viewModelScope.launch {
+            val d = loadable { api.gitDiff(repo, path, rev = rev, origPath = origPath).diff }
+            _state.update { if (it.gitDiff?.first == key) it.copy(gitDiff = key to d) else it }
+        }
+    }
+
+    fun setAmend(on: Boolean) {
+        _state.update { st ->
+            // Amending starts from the last commit's message, as `git commit --amend` does.
+            val last = (st.gitLog as? Loadable.Ready)?.value?.firstOrNull()?.subject
+            st.copy(amend = on, commitMessage = if (on && st.commitMessage.isBlank() && last != null) last else st.commitMessage)
         }
     }
 
@@ -665,8 +766,28 @@ class FilesViewModel(
     fun commit() {
         val msg = _state.value.commitMessage.trim()
         if (msg.isEmpty()) return
-        gitWrite(GitOps.COMMIT, after = { _state.update { it.copy(commitMessage = "") } }) { id, repo -> GitWriteBody(id, repo, message = msg) }
+        val amend = _state.value.amend
+        gitWrite(GitOps.COMMIT, after = { _state.update { it.copy(commitMessage = "", amend = false) } }) { id, repo ->
+            GitWriteBody(id, repo, message = msg, amend = amend)
+        }
     }
+
+    /** Deletes a local branch (never the current one); [force] also an unmerged one. */
+    fun deleteBranch(branch: String, force: Boolean) =
+        gitWrite(GitOps.BRANCH_DELETE, after = { loadBranches() }) { id, repo -> GitWriteBody(id, repo, branch = branch, force = force) }
+
+    /** Merges [branch] into the current branch; conflicts leave the repository merging (abort or resolve). */
+    fun merge(branch: String) =
+        gitWrite(GitOps.MERGE, after = { loadBranches() }) { id, repo -> GitWriteBody(id, repo, branch = branch) }
+
+    fun mergeAbort() = gitWrite(GitOps.MERGE_ABORT) { id, repo -> GitWriteBody(id, repo) }
+
+    /** Puts every change (untracked files included) aside. */
+    fun stashPush(message: String?) =
+        gitWrite(GitOps.STASH_PUSH, after = { loadStashes() }) { id, repo -> GitWriteBody(id, repo, message = message?.trim()?.ifEmpty { null }) }
+
+    fun stashPop(index: Int) =
+        gitWrite(GitOps.STASH_POP, after = { loadStashes() }) { id, repo -> GitWriteBody(id, repo, index = index) }
 
     /** Pushes the current branch; a branch without upstream is published to origin (`-u`). */
     fun push() {

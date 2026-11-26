@@ -83,7 +83,6 @@ import kotlinx.coroutines.withContext
 import me.saket.telephoto.flick.FlickToDismiss
 import me.saket.telephoto.flick.FlickToDismissState
 import me.saket.telephoto.flick.rememberFlickToDismissState
-import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.ZoomableContentLocation
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.zoomable
@@ -300,10 +299,13 @@ private fun LightboxPage(
             }
         }
     }
-    val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 6f))
+    val zoom = rememberZoomableState(zoomSpec = PictureZoomSpec)
     val bmp = bitmap?.getOrNull()
+    // The same rule as the Image's ContentScale.Fit. It was "scaled inside" (never up): a picture
+    // smaller than the screen (a 720px screenshot on a 1440px phone) was drawn 2x by the Image while
+    // the zoom state measured it at 1x, so it opened looking zoomed and cropped, and panned wrongly.
     LaunchedEffect(bmp) {
-        if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
+        if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledToFitAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
     }
     LaunchedEffect(zoom) {
         snapshotFlow { (zoom.zoomFraction ?: 0f) > 0.01f }.collect(onZoomed)
@@ -316,7 +318,7 @@ private fun LightboxPage(
                 bitmap = bmp,
                 contentDescription = image.name,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().zoomable(zoom, onClick = { onTap() }),
+                modifier = Modifier.fillMaxSize().zoomable(zoom, onClick = { onTap() }, onDoubleClick = PictureDoubleTap),
             )
         }
     }

@@ -2,7 +2,6 @@ package io.github.tianli0.switchtether.ui.files
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -72,7 +71,8 @@ fun MarkdownDocView(text: String, path: String, onOpenPath: ((String) -> Unit)?,
     val colors = DefaultMarkdownColors(
         text = scheme.onSurface,
         codeBackground = androidx.compose.ui.graphics.Color.Transparent, // MarkdownCodeCard draws it
-        inlineCodeBackground = dev.codeBackground,
+        // In the dark theme the code card colour is near black on the #303030 page: a soft tint reads as a chip.
+        inlineCodeBackground = if (dev.isDark) scheme.onSurface.copy(alpha = 0.10f) else dev.codeBackground,
         dividerColor = dev.gutter.copy(alpha = 0.35f),
         tableBackground = dev.codeBackground,
         alert = markdownAlertColors(darkTheme = dev.isDark),
@@ -119,10 +119,11 @@ fun MarkdownDocView(text: String, path: String, onOpenPath: ((String) -> Unit)?,
     CompositionLocalProvider(LocalUriHandler provides uriHandler) {
         SelectionContainer(modifier) {
             Markdown(
-                content = text,
+                content = remember(text) { joinSoftBreaks(text) },
                 colors = colors,
                 typography = typography,
                 components = components,
+                imageTransformer = NoRemoteImages,
                 modifier = Modifier.fillMaxSize(),
                 loading = { m -> Box(m.padding(16.dp)) { Text(stringResource(R.string.state_loading), color = scheme.onSurfaceVariantSummary) } },
                 success = { state, comps, m ->
@@ -162,7 +163,56 @@ fun resolveLink(docPath: String, link: String): String? {
 /** The library's highlighted code without its own header or background (the card draws those). */
 @Composable
 private fun HighlightedCode(code: String, language: String?, style: androidx.compose.ui.text.TextStyle, highlights: Highlights.Builder) {
-    androidx.compose.foundation.layout.Box(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
-        MarkdownHighlightedCode(code = code, language = language, style = style, highlightsBuilder = highlights, showHeader = false)
+    // No horizontalScroll of our own: the library's fence already scrolls its content sideways, and
+    // a second horizontal scroll inside it is measured with infinite width — a crash on a phone as
+    // soon as a fenced block (README_ZH's ```mermaid) scrolled into view (MarkdownDocCrashTest).
+    MarkdownHighlightedCode(code = code, language = language, style = style, highlightsBuilder = highlights, showHeader = false)
+}
+
+/**
+ * Drops the indentation of a paragraph's continuation lines (outside fenced code), so a soft line
+ * break reads as one space: the renderer kept it, and wrapped list items in AGENTS.md showed
+ * "configuration,  hooks". Lines that start a block (list item, quote, heading, table, fence) and
+ * lines after a blank line (indented code) keep their indentation.
+ */
+internal fun joinSoftBreaks(markdown: String): String {
+    val lines = markdown.split('\n')
+    val out = StringBuilder(markdown.length)
+    var fence: String? = null
+    var previousBlank = true
+    val blockStart = Regex("""^(?:[-*+]\s|\d+[.)]\s|>|#|\||```|~~~)""")
+    lines.forEachIndexed { i, line ->
+        val trimmed = line.trimStart()
+        var emitted = line
+        if (fence != null) {
+            if (trimmed.startsWith(fence!!)) fence = null
+        } else if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+            fence = trimmed.take(3)
+        } else if (!previousBlank && trimmed.isNotEmpty() && trimmed.length < line.length && !blockStart.containsMatchIn(trimmed)) {
+            emitted = trimmed
+        }
+        out.append(emitted)
+        if (i < lines.lastIndex) out.append('\n')
+        previousBlank = line.isBlank()
     }
+    return out.toString()
+}
+
+/**
+ * Pictures in a Markdown file are not fetched (the phone talks only to the paired computer), and an
+ * image that cannot load takes no room: the library's default kept a 180dp placeholder per image,
+ * so README_ZH's row of shields.io badges left ~580px of blank page. Links around badges stay.
+ */
+private object NoRemoteImages : com.mikepenz.markdown.model.ImageTransformer {
+    @androidx.compose.runtime.Composable
+    override fun transform(link: String): com.mikepenz.markdown.model.ImageData? = null
+
+    override fun placeholderConfig(
+        link: String,
+        density: androidx.compose.ui.unit.Density,
+        containerSize: androidx.compose.ui.geometry.Size,
+        imageWidth: com.mikepenz.markdown.model.ImageWidth,
+        imageSize: androidx.compose.ui.geometry.Size,
+        imageSizeChanged: ((String, androidx.compose.ui.geometry.Size) -> Unit)?,
+    ): com.mikepenz.markdown.model.PlaceholderConfig = com.mikepenz.markdown.model.PlaceholderConfig(androidx.compose.ui.geometry.Size.Zero)
 }

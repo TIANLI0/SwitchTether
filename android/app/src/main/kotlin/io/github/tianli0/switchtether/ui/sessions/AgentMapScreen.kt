@@ -103,13 +103,17 @@ fun BackgroundTaskNode.mapState(): AgentMapState = when (status) {
 /** Epoch ms of an RFC 3339 time, or null. */
 internal fun rfcMs(ts: String?): Long? = ts?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
 
-/** "42s", "3m 05s", "1h 02m". */
-internal fun compactDuration(ms: Long): String {
+/**
+ * A duration in the app's language ("2 分 55 秒", "1 小时 02 分"; "2m 55s" in English). A bare "2m 55s"
+ * showed English units in the Chinese UI.
+ */
+@androidx.compose.runtime.Composable
+internal fun durationText(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
     return when {
-        s < 60 -> "${s}s"
-        s < 3600 -> "%dm %02ds".format(s / 60, s % 60)
-        else -> "%dh %02dm".format(s / 3600, (s % 3600) / 60)
+        s < 60 -> androidx.compose.ui.res.stringResource(io.github.tianli0.switchtether.R.string.duration_seconds, s.toInt())
+        s < 3600 -> androidx.compose.ui.res.stringResource(io.github.tianli0.switchtether.R.string.duration_minutes, (s / 60).toInt(), (s % 60).toInt())
+        else -> androidx.compose.ui.res.stringResource(io.github.tianli0.switchtether.R.string.duration_hours, (s / 3600).toInt(), ((s % 3600) / 60).toInt())
     }
 }
 
@@ -240,7 +244,9 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
                         Column {
                             MainRow(m.agents, hasChildren = branches.isNotEmpty())
                             if (branches.isEmpty()) {
-                                MapNote(stringResource(R.string.subagent_tree_empty))
+                                // Right under the row (whose text already has its own padding): a full
+                                // note padding above it read as a blank line.
+                                MapNote(stringResource(R.string.subagent_tree_empty), top = 0.dp)
                             }
                             branches.forEach { b ->
                                 val node = b.node
@@ -333,8 +339,8 @@ private fun Dot(c: Color) {
 }
 
 @Composable
-private fun MapNote(text: String) {
-    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 10.dp))
+private fun MapNote(text: String, top: androidx.compose.ui.unit.Dp = 10.dp) {
+    Text(text, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = PageDefaults.TextGutter, end = PageDefaults.TextGutter, top = top, bottom = 10.dp))
 }
 
 /** The session itself, the root of the tree. */
@@ -432,7 +438,7 @@ private fun AgentRow(node: SubagentNode, depth: Int, rails: List<Boolean>, last:
             }
             val meta = listOfNotNull(
                 line ?: agentStateLabel(st),
-                agentElapsed(node, now)?.takeIf { it >= 1000 }?.let(::compactDuration),
+                agentElapsed(node, now)?.takeIf { it >= 1000 }?.let { durationText(it) },
                 node.tokens?.takeIf { it > 0 }?.let { stringResource(R.string.agent_map_tokens, compactTokens(it)) },
             ).joinToString(" · ")
             Text(meta, style = COUITheme.textStyles.footnote2, color = if (st == AgentMapState.Waiting) LocalDevColors.current.warn else COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -519,7 +525,7 @@ private fun TaskRow(t: BackgroundTaskNode, now: Long, position: CardListPosition
             val end = rfcMs(t.finishedAt) ?: if (st == AgentMapState.Working) now else null
             val meta = listOfNotNull(
                 agentStateLabel(st),
-                if (start != null && end != null && end - start >= 1000) compactDuration(end - start) else null,
+                if (start != null && end != null && end - start >= 1000) durationText(end - start) else null,
                 t.exitCode?.let { stringResource(R.string.agent_map_exit_code, it.toInt()) },
             ).joinToString(" · ")
             Text(meta, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1)
@@ -600,7 +606,8 @@ private fun TaskOutputBlock(st: TaskOutputState) {
             ) {
                 SelectionContainer {
                     Text(
-                        out.output.ifEmpty { stringResource(R.string.tools_task_output_empty) },
+                        // A trailing newline drew an empty last line (a one-line output got a tall box).
+                        out.output.trimEnd('\n', '\r').ifEmpty { stringResource(R.string.tools_task_output_empty) },
                         style = DevType.code,
                         color = dev.codeText,
                         modifier = Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(10.dp),

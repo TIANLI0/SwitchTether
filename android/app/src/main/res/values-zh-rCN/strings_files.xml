@@ -29,7 +29,7 @@
     <string name="downloads_settings_summary">已下载的文件，以及临时预览缓存</string>
     <string name="downloads_section_saved">已下载</string>
     <string name="downloads_saved_hint">这里是你主动下载的文件，保存在 Downloads/%1$s，只有你在这里删除才会移除，清除缓存不会影响它们。</string>
-    <string name="downloads_empty">还没有下载过文件。在“文件”页点“下载”即可把文件保存到手机。</string>
+    <string name="downloads_empty">还没有下载过文件。在“文件”页长按文件，选“下载到手机”即可保存到这里。</string>
     <plurals name="downloads_total">
         <item quantity="other">%1$d 个文件 · %2$s</item>
     </plurals>

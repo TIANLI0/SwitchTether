@@ -20,6 +20,9 @@ import io.github.tianli0.switchtether.ui.home.RowIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -125,6 +128,8 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
     val sizeEstimate = rememberTerminalSizeEstimate(term.fontSp, term.columns)
     Page(
         title = stringResource(R.string.tab_workspace),
+        // Landscape: a small title, so the content is not pushed below half the height.
+        large = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480,
         actions = {
             io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon({
                 termVm.refresh()
@@ -185,9 +190,8 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                     }
                     roots.forEachIndexed { i, r ->
                         ArrowPreference(
-                            // Desktop roots named after their full path read as the path twice: show the folder name.
-                            title = r.name.takeIf { it.isNotBlank() && it != r.path }
-                                ?: r.path.trimEnd('\\', '/').substringAfterLast('\\').substringAfterLast('/').ifBlank { r.path },
+                            // Folder name for a project root, the phone's words for Home / Desktop / ….
+                            title = rootLabel(r),
                             summary = r.path,
                             startAction = { RowIcon(AppIcons.Files) },
                             onClick = {
@@ -266,7 +270,22 @@ fun FilesPage(onBack: () -> Unit, onOpenDownloads: () -> Unit = {}) {
             else -> onBack()
         }
     }
-    Page(title = stringResource(R.string.ws_files), onBack = back, large = false, modifier = Modifier.imePadding()) {
-        FilesPane(st, vm, onOpenDownloads)
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        // On a phone an open file (or preview) has its own title bar with back; the Files page's
+        // "← 文件" bar above it was a second back key and a quarter of the screen of chrome. Side
+        // by side (tablet) the folder list keeps the page bar; a conflict has no bar of its own.
+        // The folder browser draws its own ColorOS-style header (folder name, "共 N 项", + / search /
+        // ⋮) with back, so only a conflict, which has no bar of its own, keeps the page bar.
+        val ownHeader = st.conflict == null || (maxWidth >= FILES_SPLIT_MIN_WIDTH && st.file != null)
+        if (ownHeader) {
+            Box(
+                Modifier.fillMaxSize().background(io.github.tianli0.coui17.patterns.pageContainerColor())
+                    .statusBarsPadding().navigationBarsPadding().imePadding(),
+            ) { FilesPane(st, vm, onOpenDownloads, onBack = onBack) }
+        } else {
+            Page(title = stringResource(R.string.ws_files), onBack = back, large = false, modifier = Modifier.imePadding()) {
+                FilesPane(st, vm, onOpenDownloads)
+            }
+        }
     }
 }

@@ -87,7 +87,9 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
     val okFmt = stringResource(R.string.stepup_ok)
     val failFmt = stringResource(R.string.stepup_failed)
 
-    Page(title = stringResource(R.string.tab_manage), immersive = true) {
+    // Landscape: the large collapsing title and the space above it took a third of the height.
+    val roomy = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480
+    Page(title = stringResource(R.string.tab_manage), immersive = true, large = roomy) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             item {
@@ -315,21 +317,44 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
             item {
                 GroupCard {
                     // The visible rows first: the last one is conditional, and each row needs its place in the card.
+                    // Identifiers (fingerprint, device id) are what one compares or reports: copyable.
                     val rows = buildList {
-                        add(stringResource(R.string.field_desktop) to d.name)
-                        add(stringResource(R.string.field_status) to connectionText(conn))
-                        add(stringResource(R.string.field_fingerprint) to Fingerprints.grouped(d.fingerprint))
-                        add(stringResource(R.string.field_last_host) to (d.lastGoodHost ?: "—") + ":" + d.port)
-                        add(stringResource(R.string.field_addresses) to d.hosts.joinToString("\n"))
-                        add(stringResource(R.string.field_device_id) to d.deviceId)
-                        add(stringResource(R.string.field_paired_at) to Formatters.dateTime(d.pairedAtMs))
-                        add(stringResource(R.string.field_step_up) to (if (d.stepUpEnabled) stringResource(R.string.stepup_enabled) else stringResource(R.string.stepup_disabled)))
-                        add(stringResource(R.string.field_key_storage) to container.keys.securityLevel(d.identityAlias))
+                        add(Triple(stringResource(R.string.field_desktop), d.name, false))
+                        add(Triple(stringResource(R.string.field_status), connectionText(conn), false))
+                        add(Triple(stringResource(R.string.field_fingerprint), Fingerprints.grouped(d.fingerprint), true))
+                        add(Triple(stringResource(R.string.field_last_host), (d.lastGoodHost ?: "—") + ":" + d.port, false))
+                        add(Triple(stringResource(R.string.field_addresses), d.hosts.joinToString("\n"), false))
+                        add(Triple(stringResource(R.string.field_device_id), d.deviceId, true))
+                        add(Triple(stringResource(R.string.field_paired_at), Formatters.dateTime(d.pairedAtMs), false))
+                        add(Triple(stringResource(R.string.field_step_up), if (d.stepUpEnabled) stringResource(R.string.stepup_enabled) else stringResource(R.string.stepup_disabled), false))
+                        add(Triple(stringResource(R.string.field_key_storage), keyStorageLabel(container.keys.securityLevel(d.identityAlias)), false))
                         (conn as? ConnectionState.Online)?.status?.let { s ->
-                            add(stringResource(R.string.field_server_version) to listOfNotNull(s.serverVersion, s.platform?.takeIf { it.isNotBlank() }).joinToString(" · "))
+                            add(Triple(stringResource(R.string.field_server_version), listOfNotNull(s.serverVersion, s.platform?.takeIf { it.isNotBlank() }?.let(::platformLabel)).joinToString(" · "), false))
                         }
                     }
-                    rows.forEachIndexed { i, (label, value) -> KeyValueRow(label, value, cardListPosition = cardListPositionOf(i, rows.size)) }
+                    val ctx = LocalContext.current
+                    val copied = stringResource(R.string.files_copied)
+                    val copyLabel = stringResource(R.string.action_copy)
+                    rows.forEachIndexed { i, (label, value, copyable) ->
+                        if (copyable) {
+                            io.github.suqi8.coui.kmp.basic.BasicComponent(
+                                title = label,
+                                summary = value,
+                                onClick = {
+                                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                                    cm?.setPrimaryClip(android.content.ClipData.newPlainText(label, value.replace(" ", "")))
+                                    android.widget.Toast.makeText(ctx, copied, android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                                onClickLabel = copyLabel,
+                                endActions = {
+                                    io.github.suqi8.coui.kmp.basic.Icon(io.github.tianli0.switchtether.ui.icons.AppIcons.Copy, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(18.dp))
+                                },
+                                cardListPosition = cardListPositionOf(i, rows.size),
+                            )
+                        } else {
+                            KeyValueRow(label, value, cardListPosition = cardListPositionOf(i, rows.size))
+                        }
+                    }
                 }
             }
             item {
@@ -345,6 +370,24 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val prefs by container.notifyPrefsState.collectAsStateWithLifecycle()
     fun update(t: (NotifyPrefs) -> NotifyPrefs) = container.appScope.launch { container.settingsStore.updateNotifyPrefs(t) }
+    var quietPick by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) }
+    QuietTimeSheet(
+        title = when (quietPick) {
+            QUIET_START -> stringResource(R.string.notif_quiet_start)
+            QUIET_END -> stringResource(R.string.notif_quiet_end)
+            else -> null
+        },
+        minutes = when (quietPick) {
+            QUIET_START -> prefs.quietStartMin
+            QUIET_END -> prefs.quietEndMin
+            else -> null
+        },
+        onDismiss = { quietPick = 0 },
+    ) { m ->
+        val which = quietPick
+        quietPick = 0
+        update { if (which == QUIET_START) it.copy(quietStartMin = m) else it.copy(quietEndMin = m) }
+    }
     Page(title = stringResource(R.string.settings_notifications), onBack = onBack, immersive = true) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { SectionHeader(stringResource(R.string.live_settings_title)) }
@@ -405,28 +448,25 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     SwitchPreference(
                         checked = prefs.quietHoursEnabled,
                         onCheckedChange = { v -> update { it.copy(quietHoursEnabled = v) } },
-                        title = stringResource(R.string.notif_quiet),
-                        summary = stringResource(R.string.notif_quiet_summary, hm(prefs.quietStartMin), hm(prefs.quietEndMin)),
+                        // The section header already says "quiet hours": the switch says what it does,
+                        // and the summary only promises silence while it is on.
+                        title = stringResource(R.string.notif_quiet_switch),
+                        summary = if (prefs.quietHoursEnabled) stringResource(R.string.notif_quiet_summary, hm(prefs.quietStartMin), hm(prefs.quietEndMin))
+                        else stringResource(R.string.notif_quiet_off),
                         cardListPosition = CardListPosition.Head,
                     )
-                    // System time pickers (hours and minutes, 12/24 h as the phone is set) instead of typed numbers.
-                    val is24h = android.text.format.DateFormat.is24HourFormat(context)
                     ArrowPreference(
                         title = stringResource(R.string.notif_quiet_start),
                         summary = hm(prefs.quietStartMin),
                         enabled = prefs.quietHoursEnabled,
-                        onClick = {
-                            android.app.TimePickerDialog(context, { _, h, m -> update { it.copy(quietStartMin = h * 60 + m) } }, prefs.quietStartMin / 60, prefs.quietStartMin % 60, is24h).show()
-                        },
+                        onClick = { quietPick = QUIET_START },
                         cardListPosition = CardListPosition.Middle,
                     )
                     ArrowPreference(
                         title = stringResource(R.string.notif_quiet_end),
                         summary = hm(prefs.quietEndMin),
                         enabled = prefs.quietHoursEnabled,
-                        onClick = {
-                            android.app.TimePickerDialog(context, { _, h, m -> update { it.copy(quietEndMin = h * 60 + m) } }, prefs.quietEndMin / 60, prefs.quietEndMin % 60, is24h).show()
-                        },
+                        onClick = { quietPick = QUIET_END },
                         cardListPosition = CardListPosition.Tail,
                     )
                 }
@@ -533,11 +573,11 @@ fun LicensesScreen(onBack: () -> Unit) {
                    Column {
                     LICENSES.forEachIndexed { i, l ->
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                Text(l.name, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                                Spacer(Modifier.size(8.dp))
-                                Text(l.license, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary)
-                            }
+                            // The name gets the full width (a long licence label beside it squeezed
+                            // "COUI17 (…)" into a four-line column); the licence is a quiet line under
+                            // it, not link-blue — it is not a link.
+                            Text(l.name, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                            Text(l.license, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceSecondary)
                             Text(l.note, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                         }
                         if (i < LICENSES.lastIndex) io.github.suqi8.coui.kmp.basic.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -549,4 +589,52 @@ fun LicensesScreen(onBack: () -> Unit) {
             item { Spacer(Modifier.height(24.dp)) }
         }
     }
+}
+
+private const val QUIET_START = 1
+private const val QUIET_END = 2
+
+/**
+ * The quiet-hours time in a COUI half-screen panel with the COUI wheel picker (hours and minutes,
+ * 12/24 h as the phone is set). The platform TimePickerDialog it replaces was the one teal,
+ * square-cornered dialog in the app.
+ */
+@Composable
+private fun QuietTimeSheet(title: String?, minutes: Int?, onDismiss: () -> Unit, onPick: (Int) -> Unit) {
+    val context = LocalContext.current
+    var value by androidx.compose.runtime.saveable.rememberSaveable(minutes) { mutableStateOf((minutes ?: 0)) }
+    io.github.tianli0.coui17.patterns.PanelSheet(
+        show = minutes != null,
+        title = title,
+        onDismissRequest = onDismiss,
+        confirm = io.github.tianli0.coui17.patterns.SheetConfirm(stringResource(R.string.action_done)) { onPick(value) },
+    ) {
+        Box(Modifier.fillMaxWidth().padding(bottom = 24.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            io.github.suqi8.coui.kmp.basic.TimePicker(
+                value = io.github.suqi8.coui.kmp.basic.TimeValue(value / 60, value % 60),
+                onValueChange = { value = it.hour * 60 + it.minute },
+                is24Hour = android.text.format.DateFormat.is24HourFormat(context),
+                amLabel = stringResource(R.string.time_am),
+                pmLabel = stringResource(R.string.time_pm),
+            )
+        }
+    }
+}
+
+/** Where the phone's pairing key lives, in words (the Keystore reports strongbox / tee / software). */
+@Composable
+private fun keyStorageLabel(level: String): String = when (level) {
+    "strongbox" -> stringResource(R.string.key_storage_strongbox)
+    "tee" -> stringResource(R.string.key_storage_tee)
+    "software" -> stringResource(R.string.key_storage_software)
+    "missing" -> stringResource(R.string.key_storage_missing)
+    else -> stringResource(R.string.key_storage_unknown)
+}
+
+/** The computer's OS as people write it (the server reports `windows`, `macos`, `linux`). */
+private fun platformLabel(p: String): String = when (p.lowercase()) {
+    "windows" -> "Windows"
+    "macos", "darwin" -> "macOS"
+    "linux" -> "Linux"
+    else -> p
 }

@@ -70,7 +70,9 @@ data class DevColors(
         )
         val Dark = DevColors(
             isDark = true,
-            codeBackground = Color(0xFF1B1D21),
+            // One step above the black page, level with a card (10 % white): a code block is part
+            // of the card it sits in, not a dark hole in it (ColorOS dark style).
+            codeBackground = Color(0xFF202020),
             codeText = Color(0xFFE6E8EB),
             gutter = Color(0xFF7D838C),
             addedBackground = Color(0xFF16351F),

@@ -51,7 +51,7 @@
     <string name="ntf_exited">%1$s ended unexpectedly</string>
     <string name="ntf_terminal_exited">Terminal %1$s exited</string>
     <string name="ntf_terminal_exited_code">Terminal %1$s exited (code %2$d)</string>
-    <string name="notif_ch_live">Followed tasks (Live Updates / Fluid Cloud)</string>
+    <string name="notif_ch_live">Followed tasks (Live Updates)</string>
     <string name="live_channel">Followed tasks</string>
     <string name="live_chip_running">Running</string>
     <string name="live_chip_waiting">Confirm</string>
@@ -81,20 +81,20 @@
     <string name="live_action_unpin">Stop following</string>
     <string name="live_not_sent">Not sent: not connected to the computer. Open the app to retry.</string>
     <string name="live_not_sent_detail">Not sent: %1$s</string>
-    <string name="pin_add">Follow in Fluid Cloud</string>
+    <string name="pin_add">Follow in Live Updates</string>
     <string name="pin_remove">Stop following</string>
     <string name="pin_tag">Following</string>
     <string name="pin_limit">All %1$d slots are held by tasks you follow. Stop following one first.</string>
-    <string name="pin_menu_pin_body">Follow this task in a live notification (Fluid Cloud / status bar) until you stop following it.</string>
+    <string name="pin_menu_pin_body">Follow this task in a live notification (status bar and lock screen) until you stop following it.</string>
     <string name="pin_menu_unpin_body">Stop following this task in a live notification.</string>
-    <string name="pin_sheet_title">Follow tasks in Fluid Cloud</string>
-    <string name="pin_sheet_body">A followed task shows its live status (running, waiting for you, finished) in Fluid Cloud and the status bar. Android shows it there only when “live notifications” are allowed for SwitchTether; otherwise it stays a normal ongoing notification.</string>
+    <string name="pin_sheet_title">Follow tasks in Live Updates</string>
+    <string name="pin_sheet_body">A followed task shows its live status (running, waiting for you, finished) in the status bar and on the lock screen. Android shows it there only when “live notifications” are allowed for SwitchTether; otherwise it stays a normal ongoing notification.</string>
     <string name="pin_open_settings">Allow live notifications</string>
     <string name="pin_open_fluid_cloud">Fluid Cloud settings</string>
     <string name="pin_anyway">Follow anyway</string>
-    <string name="live_settings_title">Fluid Cloud / live notifications</string>
+    <string name="live_settings_title">Live Updates</string>
     <string name="live_settings_status">Live notifications</string>
-    <string name="live_status_on">Allowed: followed tasks appear in Fluid Cloud / the status bar</string>
+    <string name="live_status_on">Allowed: followed tasks appear as Live Updates in the status bar and on the lock screen</string>
     <string name="live_status_off">Not allowed: followed tasks show as normal notifications. Tap to change</string>
     <string name="live_status_unsupported">Needs Android 16 or later</string>
     <string name="live_auto_pin">Follow tasks started from this phone</string>
@@ -140,4 +140,6 @@
     <string name="ntf_handled_elsewhere">Already handled elsewhere</string>
     <string name="ntf_offline_open">Could not reach the computer. Open SwitchTether to handle it.</string>
     <string name="ntf_open_to_check">Open SwitchTether to check.</string>
+    <string name="notif_quiet_switch">Silence by time of day</string>
+    <string name="notif_quiet_off">Off: notifications alert as usual</string>
 </resources>

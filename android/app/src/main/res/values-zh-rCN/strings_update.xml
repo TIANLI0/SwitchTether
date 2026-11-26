@@ -29,4 +29,5 @@
     <string name="update_err_signature">安装包的签名与本应用不一致：已删除，未安装</string>
     <string name="update_err_not_apk">下载的文件不是有效的安装包</string>
     <string name="update_err_install">安装未完成</string>
+    <string name="update_idle">查看是否有新版本</string>
 </resources>

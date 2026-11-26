@@ -27,7 +27,7 @@
     <string name="files_search">搜索文件</string>
     <string name="files_search_content">搜索文件内容</string>
     <string name="files_results">%1$d 个结果</string>
-    <string name="files_hidden">显示或隐藏隐藏文件</string>
+    <string name="files_hidden">显示隐藏文件</string>
     <string name="files_new_file">新建文件</string>
     <string name="files_new_folder">新建文件夹</string>
     <string name="files_upload">上传</string>
@@ -84,11 +84,22 @@
     <string name="term_scrollback_short">↑ 加载更早的输出</string>
     <!-- 文件：列表、路径栏、查看器 -->
     <string name="files_filter_hint">筛选此文件夹</string>
+    <string name="files_filter_clear">清除</string>
     <string name="files_filter_none">此文件夹中没有匹配项。</string>
     <string name="files_search_subfolders">在子文件夹中搜索“%1$s”</string>
     <string name="files_search_none">未找到结果。</string>
     <string name="files_empty_folder">此文件夹为空。</string>
     <string name="files_count">%1$d 个文件夹 · %2$d 个文件</string>
+    <string name="files_all">全部文件</string>
+    <plurals name="files_item_total">
+        <item quantity="other">共 %1$d 项</item>
+    </plurals>
+    <plurals name="files_filter_matches">
+        <item quantity="other">%2$d 项中有 %1$d 项匹配</item>
+    </plurals>
+    <string name="files_new">新建</string>
+    <string name="files_search_open">搜索</string>
+    <string name="files_sort_current">排序：%1$s</string>
     <string name="files_up">上一级文件夹</string>
     <string name="files_sort">排序</string>
     <string name="files_sort_name">名称</string>
@@ -115,6 +126,8 @@
     <string name="files_line_shortened">…（此行过长已截断，共 %1$d 个字符）</string>
     <string name="files_md_rendered">富文本</string>
     <string name="files_md_source">代码</string>
+    <string name="files_md_show_source">查看源码</string>
+    <string name="files_md_show_rendered">查看富文本</string>
     <string name="files_truncated_banner">只显示了这个 %2$s 文件的前 %1$s，无法在此编辑。</string>
     <string name="files_pdf_zoom">打开此页以缩放</string>
     <string name="files_code_copy">复制代码</string>
@@ -128,4 +141,9 @@
     <string name="files_err_not_connected">未连接到电脑</string>
     <string name="files_err_cancelled">已取消</string>
     <string name="files_msg_transfer_busy">另一个传输正在进行，请等它完成或先取消。</string>
+    <string name="new_session_parent_folder">上一级文件夹</string>
+    <string name="folder_home">主目录</string>
+    <string name="folder_desktop">桌面</string>
+    <string name="folder_documents">文档</string>
+    <string name="folder_downloads">下载</string>
 </resources>

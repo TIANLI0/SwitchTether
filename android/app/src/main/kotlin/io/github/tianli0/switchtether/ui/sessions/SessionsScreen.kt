@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -125,7 +126,7 @@ fun SessionsContent(
         Column(Modifier.fillMaxSize().padding(top = inner.calculateTopPadding())) {
             ConnectionBanner(state.connection, onRetryConnection)
             TabRowWithContour(
-                tabs = listOf(stringResource(R.string.sessions_live), stringResource(R.string.sessions_history), stringResource(R.string.sessions_all)),
+                tabs = listOf(stringResource(R.string.sessions_tab_live), stringResource(R.string.sessions_history), stringResource(R.string.sessions_all)),
                 selectedTabIndex = state.scope.ordinal,
                 onTabSelected = { onScope(SessionScope.entries[it]) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -172,21 +173,43 @@ fun SessionsContent(
                                         SessionScope.HISTORY -> stringResource(R.string.sessions_empty_history)
                                         SessionScope.ALL -> stringResource(R.string.sessions_empty)
                                     },
+                                    // History alone said only "none found": say where it comes from.
+                                    subtitle = if (state.scope == SessionScope.LIVE) null else stringResource(R.string.sessions_empty_history_hint),
+                                    illustration = {
+                                        io.github.suqi8.coui.kmp.basic.Icon(
+                                            if (state.scope == SessionScope.LIVE) io.github.tianli0.switchtether.ui.icons.AppIcons.Terminal else io.github.tianli0.switchtether.ui.icons.AppIcons.Clock,
+                                            contentDescription = null,
+                                            tint = io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(56.dp),
+                                        )
+                                    },
                                     modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
                                 )
                             }
                         }
-                        val groups = if (state.scope == SessionScope.ALL) {
-                            visible.partition { it.isLive }.let { (l, h) -> listOf(R.string.sessions_live to l, R.string.sessions_history to h) }
-                        } else {
-                            listOf(null to visible)
+                        // Live sessions split like Home: "运行中" only for those working or waiting,
+                        // "空闲" for live ones with nothing to do. Under one "运行中" header an idle
+                        // session read as busy here while Home called it idle.
+                        val (live, past) = visible.partition { it.isLive }
+                        val (idle, working) = live.partition { it.status == "idle" || it.status == "completed" }
+                        val groups: List<Pair<String, List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>>> = when (state.scope) {
+                            SessionScope.HISTORY -> listOf("history" to past)
+                            else -> listOf("running" to working, "idle" to idle) + if (state.scope == SessionScope.ALL) listOf("history" to past) else emptyList()
                         }
-                        groups.forEach { (groupTitle, list) ->
+                        val showHeaders = groups.count { it.second.isNotEmpty() } > 1 || state.scope != SessionScope.HISTORY
+                        groups.forEach { (groupKey, list) ->
                             if (list.isEmpty()) return@forEach
                             // A group (its title, its card) is one item: it fades in and out with the
                             // scope and glides when the group above it grows or empties.
-                            if (groupTitle != null) item(key = "h-$groupTitle") { SmallTitle(stringResource(groupTitle), Modifier.animateItem()) }
-                            item(key = "g-$groupTitle") {
+                            if (showHeaders) item(key = "h-$groupKey") {
+                                val groupTitle = when (groupKey) {
+                                    "running" -> stringResource(R.string.home_running, list.size)
+                                    "idle" -> stringResource(R.string.home_idle, list.size)
+                                    else -> stringResource(R.string.sessions_history)
+                                }
+                                SmallTitle(groupTitle, Modifier.animateItem())
+                            }
+                            item(key = "g-$groupKey") {
                                 // One row per conversation: resumed / continued sessions fold under the newest one.
                                 val grouped = androidx.compose.runtime.remember(list) { io.github.tianli0.switchtether.domain.SessionGrouping.group(list) }
                                 GroupCard(Modifier.animateItem()) {

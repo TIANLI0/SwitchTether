@@ -21,8 +21,8 @@
 
     <!-- Errors -->
     <string name="error_offline">Not connected to the desktop</string>
-    <string name="error_backend_unavailable">CC Switch is not available</string>
-    <string name="error_backend_unavailable_detail">The desktop is reachable, but its CC Switch backend is not ready (503 backend_unavailable). Open CC Switch on the computer and try again.</string>
+    <string name="error_backend_unavailable">Not available on this computer yet</string>
+    <string name="error_backend_unavailable_detail">The computer is connected, but its provider, usage and MCP management is not ready. Open the SwitchTether desktop app on the computer (a bare remote core has none of this), then try again.</string>
     <string name="error_not_found">Not found</string>
     <string name="error_forbidden">Not allowed</string>
     <string name="error_rate_limited">Too many requests — try again in a moment</string>
@@ -52,6 +52,10 @@
     <string name="confirm_pair">Pair</string>
     <string name="field_desktop">Computer</string>
     <string name="field_addresses">Addresses</string>
+    <plurals name="field_addresses_more_v6">
+        <item quantity="one">%1$d more IPv6 address</item>
+        <item quantity="other">%1$d more IPv6 addresses</item>
+    </plurals>
     <string name="field_fingerprint">Certificate fingerprint (SHA-256)</string>
     <string name="field_status">Status</string>
     <string name="field_last_host">Last address</string>
@@ -488,4 +492,17 @@
     <string name="settings_unpair_local_only">Unpaired on this phone. The computer could not be reached, so remove this phone there too (Settings → Remote access → Paired phones → Revoke).</string>
     <string name="companion_unbind_title">Unbind computer?</string>
     <string name="companion_unbind_confirm">Android stops treating %1$s as this phone\'s companion: the battery exemption and wake-ups when it is nearby end. Pairing with the computer is not affected.</string>
+    <string name="term_locked_title">Terminals need a screen lock</string>
+    <string name="term_open_security">Open security settings</string>
+    <string name="action_done">Done</string>
+    <string name="time_am">AM</string>
+    <string name="time_pm">PM</string>
+    <string name="key_storage_strongbox">Security chip (StrongBox)</string>
+    <string name="key_storage_tee">Hardware-backed (TEE)</string>
+    <string name="key_storage_software">Software only (no secure hardware keystore on this phone)</string>
+    <string name="key_storage_missing">Key not found</string>
+    <string name="key_storage_unknown">Unknown</string>
+    <string name="manage_mcp_summary">Turn servers on or off per app</string>
+    <string name="manage_skills_summary">Skills installed for each agent</string>
+    <string name="manage_prompts_summary">System prompts and which one is active</string>
 </resources>

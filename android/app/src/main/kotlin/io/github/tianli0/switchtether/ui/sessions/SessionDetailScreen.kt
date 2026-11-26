@@ -24,6 +24,9 @@ import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import androidx.compose.foundation.background
 import io.github.suqi8.coui.kmp.squircle.squircleClip
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import io.github.tianli0.switchtether.remote.protocol.arr
 import io.github.tianli0.switchtether.remote.protocol.obj
@@ -45,6 +48,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -65,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.asImageBitmap
@@ -630,9 +637,12 @@ fun SessionDetailContent(
         if (d != null && state.online && !state.canSend) {
             val readOnly = !d.summary.managed && d.summary.origin != "managed" && d.summary.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL
             val tip = if (readOnly) stringResource(R.string.session_readonly_tip) else stringResource(R.string.session_blocked_tip, capStatusLabel(state.cap(Capability.SEND_MESSAGE)))
+            // On a short screen (landscape) the tip is left out: the composer already reads
+            // "read-only on the phone", and title + tip + capsules took half the height.
+            val shortScreen = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 480
             TopTips(
                 text = tip,
-                visible = !tipDismissed,
+                visible = !tipDismissed && !shortScreen,
                 startIcon = { Icon(AppIcons.Info, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceSecondary, modifier = Modifier.size(20.dp)) },
                 onClose = {
                     tipDismissed = true
@@ -694,11 +704,16 @@ fun SessionDetailContent(
                 // Notices and capsules float over the top of the conversation, below the title bar.
                 // One material lies behind the bar and them: full blur and tint behind the title,
                 // tapering to nothing just below the capsules, so both stay readable over text.
-                val barFraction = with(density) { topInset.toPx() } / topOverlayPx.coerceAtLeast(1)
+                // Full material down to the capsules' bottom edge, tapering only in the strip below
+                // them: tapering from the title bar down left the capsules on nearly clear glass,
+                // with bright message text running through their labels (dark theme above all).
+                val taperPx = with(density) { HEADER_TAPER.toPx() }
+                val barFraction = ((topOverlayPx - taperPx) / topOverlayPx.coerceAtLeast(1).toFloat())
+                    .coerceAtLeast(with(density) { topInset.toPx() } / topOverlayPx.coerceAtLeast(1))
                 Column(
                     Modifier.align(Alignment.TopStart).fillMaxWidth().onSizeChanged { topOverlayPx = it.height }
                         .glassHeader(pageColor, barFraction)
-                        .padding(top = topInset, bottom = 10.dp),
+                        .padding(top = topInset, bottom = HEADER_TAPER),
                 ) {
                     topNotices()
                     StatusChipRow(
@@ -724,6 +739,13 @@ fun SessionDetailContent(
                         NewMessagesPill(listState, follow, chatRows(state), composerHeight)
                     }
                 }
+                // Under the gesture handle the conversation fades into the page: text scrolling past
+                // the composer used to run sharp beneath the handle at the screen's bottom edge.
+                val navBottom = androidx.compose.foundation.layout.WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                Box(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(navBottom + 12.dp)
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(pageColor.copy(alpha = 0f), pageColor.copy(alpha = 0.92f)))),
+                )
                 // The composer floats too. Nothing is laid behind it: only its own keys and field
                 // are glass, the conversation stays sharp around them (the title bar is the page's
                 // one progressive blur).
@@ -791,7 +813,8 @@ private fun StatusChipRow(
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 4.dp)
             .testTag("session-info-row"),
     ) {
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        val chipScroll = rememberScrollState()
+        Row(Modifier.edgeFade(chipScroll).horizontalScroll(chipScroll).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status), backdrop = bg)
             else InfoChip(stringResource(R.string.badge_ended), dot = dev.neutral, backdrop = bg)
             s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn, backdrop = bg) }
@@ -809,10 +832,10 @@ private fun StatusChipRow(
             s.gitBranch?.let { InfoChip(it, icon = AppIcons.Git, color = COUITheme.colorScheme.onSurfaceSecondary, backdrop = bg) }
             if (onOpenChanges != null) {
                 val changesLabel = stringResource(R.string.git_turn_chip)
-                InfoChip(changesLabel, icon = AppIcons.Edit, onClick = onOpenChanges, modifier = Modifier.semantics { contentDescription = changesLabel }.testTag("chip-changes"), backdrop = bg)
+                InfoChip(changesLabel, icon = AppIcons.Edit, onClick = onOpenChanges, modifier = Modifier.testTag("chip-changes"), backdrop = bg)
             }
             if (onOpenTerminal != null) {
-                InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, modifier = Modifier.semantics { contentDescription = terminalLabel }, backdrop = bg)
+                InfoChip(terminalLabel, icon = AppIcons.Terminal, onClick = onOpenTerminal, backdrop = bg)
             }
             if (onOpenSubagents != null && subagentCount > 0) {
                 // The ones running now; once none runs, how many there were.
@@ -827,9 +850,9 @@ private fun StatusChipRow(
                 }
                 val described = agentsDot?.takeIf { dot != null }?.let { "$label · ${agentStateLabel(it)}" } ?: label
                 if (dot != null) {
-                    InfoChip(label, dot = dot, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = described }.testTag("subagent-tree"), backdrop = bg)
+                    InfoChip(label, dot = dot, onClick = onOpenSubagents, modifier = Modifier.testTag("subagent-tree").clearAndSetSemantics { contentDescription = described; role = Role.Button; onClick { onOpenSubagents(); true } }, backdrop = bg)
                 } else {
-                    InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("subagent-tree"), backdrop = bg)
+                    InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.testTag("subagent-tree"), backdrop = bg)
                 }
             }
             // Commands left running in the background (`run_in_background`): their own capsule, so a
@@ -841,22 +864,22 @@ private fun StatusChipRow(
                 val label = if (bgRunning > 0) pluralStringResource(R.plurals.background_task_chip_running, bgRunning, bgRunning)
                 else pluralStringResource(R.plurals.background_task_chip, bgAll, bgAll)
                 if (bgRunning > 0) {
-                    InfoChip(label, dot = dev.info, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("chip-background"), backdrop = bg)
+                    InfoChip(label, dot = dev.info, onClick = onOpenSubagents, modifier = Modifier.testTag("chip-background"), backdrop = bg)
                 } else {
-                    InfoChip(label, icon = AppIcons.BackgroundTask, onClick = onOpenSubagents, modifier = Modifier.semantics { contentDescription = label }.testTag("chip-background"), backdrop = bg)
+                    InfoChip(label, icon = AppIcons.BackgroundTask, onClick = onOpenSubagents, modifier = Modifier.testTag("chip-background"), backdrop = bg)
                 }
             }
             costLabel?.let { label ->
                 val described = stringResource(R.string.cost_chip_a11y, label)
-                InfoChip(label, icon = AppIcons.Usage, onClick = onOpenCost, modifier = Modifier.semantics { contentDescription = described }.testTag("chip-cost"), backdrop = bg)
+                InfoChip(label, icon = AppIcons.Usage, onClick = onOpenCost, modifier = Modifier.testTag("chip-cost").clearAndSetSemantics { contentDescription = described; role = Role.Button; onClick { onOpenCost(); true } }, backdrop = bg)
             }
             // Extra functions sit in the same row as the sub-agents.
             if (onOpenTools != null) {
-                InfoChip(toolsLabel, icon = AppIcons.SessionTools, onClick = onOpenTools, modifier = Modifier.semantics { contentDescription = toolsLabel }.testTag("chip-tools"), backdrop = bg)
+                InfoChip(toolsLabel, icon = AppIcons.SessionTools, onClick = onOpenTools, modifier = Modifier.testTag("chip-tools"), backdrop = bg)
             }
             if (onOpenDshWeb != null) {
                 val webLabel = stringResource(R.string.dsh_web_chip)
-                InfoChip(webLabel, icon = AppIcons.Web, onClick = onOpenDshWeb, modifier = Modifier.semantics { contentDescription = webLabel }.testTag("chip-dsh-web"), backdrop = bg)
+                InfoChip(webLabel, icon = AppIcons.Web, onClick = onOpenDshWeb, modifier = Modifier.testTag("chip-dsh-web"), backdrop = bg)
             }
         }
     }
@@ -923,8 +946,12 @@ private fun EventList(
         Text(stringResource(R.string.session_no_events), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp + topInset, bottom = 24.dp))
         return
     }
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(top = topInset + 4.dp, bottom = bottomInset + 8.dp)) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        // A readable measure in landscape / on tablets: the conversation keeps at most ~720dp of
+        // width, centred (lines ran ~1200 px wide in landscape). The list itself stays full width,
+        // so it still scrolls from anywhere on the screen.
+        val side = ((maxWidth - MAX_READING_WIDTH) / 2).coerceAtLeast(0.dp)
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("event-list"), contentPadding = PaddingValues(start = side, end = side, top = topInset + 4.dp, bottom = bottomInset + 8.dp)) {
             item(key = "older") {
                 Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
                     when {
@@ -1395,10 +1422,18 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
                 s.gitBranch?.let { stringResource(R.string.session_info_branch) to it },
                 s.cwd?.let { stringResource(R.string.session_info_cwd) to it },
                 stringResource(R.string.session_info_last_active) to relativeTime(s.lastActiveAtMs),
-                stringResource(R.string.session_info_id) to listOf(s.id, s.nativeId).filter { it.isNotBlank() }.distinct().joinToString("\n"),
             )
+            // "claude:<uuid>" is only the agent's own id with a prefix: show that id once, copyable.
+            val sessionId = s.nativeId.takeIf { it.isNotBlank() && (s.id == it || s.id.endsWith(":$it")) } ?: s.id
+            val copyLabel = stringResource(R.string.action_copy)
             GroupCard {
-                rows.forEachIndexed { i, (k, v) -> BasicComponent(title = k, summary = v, cardListPosition = cardListPositionOf(i, rows.size)) }
+                rows.forEachIndexed { i, (k, v) -> BasicComponent(title = k, summary = v, cardListPosition = cardListPositionOf(i, rows.size + 1)) }
+                BasicComponent(
+                    title = stringResource(R.string.session_info_id),
+                    summary = sessionId,
+                    endActions = { io.github.tianli0.switchtether.ui.code.CopyButton(sessionId, copyLabel) },
+                    cardListPosition = cardListPositionOf(rows.size, rows.size + 1),
+                )
             }
             SmallTitle(stringResource(R.string.session_info_capabilities))
             val caps = listOf(
@@ -1410,18 +1445,33 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
             GroupCard {
                 caps.forEachIndexed { i, (cap, label) ->
                     val st = d.capabilities.status(cap)
+                    // A session only watched from the phone cannot be driven by design: its "不可用"
+                    // is the expected state, not an error, so it stays grey instead of alarm red.
+                    val color = if (st == CapStatus.BLOCKED && s.controlLevel == io.github.tianli0.switchtether.remote.protocol.ControlLevel.OBSERVE) LocalDevColors.current.neutral else capColor(st)
                     BasicComponent(
                         title = stringResource(label),
                         endActions = {
-                            StatusDot(capColor(st))
+                            StatusDot(color)
                             Spacer(Modifier.size(6.dp))
-                            Text(capStatusLabel(st), style = COUITheme.textStyles.body2, color = capColor(st))
+                            Text(capStatusLabel(st), style = COUITheme.textStyles.body2, color = color)
                         },
                         cardListPosition = cardListPositionOf(i, caps.size),
                     )
                 }
             }
-            d.capabilities.reason?.let {
+            // The computer explains in English; for a watched session the phone says it itself,
+            // naming its own button ("恢复会话" rather than the desktop's "Continue on phone").
+            val observedReason = if (s.controlLevel == io.github.tianli0.switchtether.remote.protocol.ControlLevel.OBSERVE && d.capabilities.continueSession != null) {
+                when (s.agent) {
+                    "claude_code" -> stringResource(R.string.cap_reason_observed_claude, stringResource(R.string.continue_action))
+                    "codex" -> stringResource(R.string.cap_reason_observed_codex, stringResource(R.string.continue_action))
+                    "dsh" -> stringResource(R.string.cap_reason_observed_dsh, stringResource(R.string.continue_action))
+                    else -> null
+                }
+            } else {
+                null
+            }
+            (observedReason ?: d.capabilities.reason)?.let {
                 Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp))
             }
             // Only for a live session SwitchTether started: its process is ours to end.
@@ -1536,3 +1586,36 @@ private fun ImageViewerDialog(
     }
     io.github.tianli0.switchtether.ui.files.ImageLightbox(images, startIndex = if (preview.gallery.isEmpty()) 0 else preview.index, onDismiss = onDismiss, loadBytes = onLoadBytes)
 }
+
+/**
+ * Fades the capsules out over the last 24dp on a side that can still scroll, so a row cut by the
+ * screen edge reads as "more this way" instead of a capsule sliced in half. Only the capsules'
+ * own alpha changes; no material is added behind them.
+ */
+private fun Modifier.edgeFade(scroll: androidx.compose.foundation.ScrollState): Modifier =
+    graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val w = 24.dp.toPx().coerceAtMost(size.width / 2)
+            if (scroll.value > 0) {
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(0f to Color.Transparent, 1f to Color.Black, startX = 0f, endX = w),
+                    size = androidx.compose.ui.geometry.Size(w, size.height),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+            }
+            if (scroll.value < scroll.maxValue) {
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(0f to Color.Black, 1f to Color.Transparent, startX = size.width - w, endX = size.width),
+                    topLeft = androidx.compose.ui.geometry.Offset(size.width - w, 0f),
+                    size = androidx.compose.ui.geometry.Size(w, size.height),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+            }
+        }
+
+/** The strip under the session header's capsules over which its material fades into the conversation. */
+private val HEADER_TAPER = 24.dp
+
+/** Widest the conversation column gets (landscape, tablets, unfolded foldables). */
+private val MAX_READING_WIDTH = 720.dp

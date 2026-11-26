@@ -56,6 +56,12 @@ class GitWriteFlowTest {
     /** POST answers by path; GETs answer the repository as it is. */
     @Volatile private var commitAnswer: MockResponse? = null
     @Volatile private var staged = false
+    @Volatile private var features = """["git","git_write"]"""
+    private val gets = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    private fun commitsJson(from: Int, n: Int) = (from until from + n).joinToString(",", "{\"commits\":[", "]}") {
+        """{"hash":"${"%040x".format(it)}","author":"Ada","email":"a@x","timeMs":1700000000000,"subject":"c$it"}"""
+    }
 
     private fun json(code: Int, body: String) = MockResponse.Builder().code(code).setHeader("Content-Type", "application/json").body(body).build()
 
@@ -71,11 +77,22 @@ class GitWriteFlowTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.url.encodedPath
-                if (request.method == "POST") posts += path to (request.body?.utf8() ?: "")
+                if (request.method == "POST") posts += path to (request.body?.utf8() ?: "") else gets += request.url.toString()
                 return when (path) {
-                    "/v1/capabilities" -> json(200, """{"features":["git","git_write"]}""")
+                    "/v1/capabilities" -> json(200, """{"features":$features}""")
                     "/v1/git/status" -> json(200, status(staged))
-                    "/v1/git/log" -> json(200, """{"commits":[]}""")
+                    "/v1/git/log" -> if (features.contains("git_manage")) {
+                        // 50 commits, then the last 3.
+                        val skip = request.url.queryParameter("skip")?.toInt() ?: 0
+                        json(200, commitsJson(skip, if (skip == 0) 50 else 3))
+                    } else {
+                        json(200, """{"commits":[]}""")
+                    }
+                    "/v1/git/stashes" -> json(200, """{"stashes":[{"index":0,"message":"On main: wip","timeMs":1700000000000}]}""")
+                    "/v1/git/commit-detail" -> json(200, """{"hash":"${request.url.queryParameter("rev")}","author":"Ada","email":"a@x","timeMs":1,"subject":"c0","body":"","parents":[],"files":[{"path":"src/new.kt","origPath":"src/old.kt","status":"R","added":1,"removed":0}]}""")
+                    "/v1/git/diff" -> json(200, """{"root":"/r","diff":"@@ -1 +1 @@\n-a\n+b\n","truncated":false}""")
+                    "/v1/git/merge", "/v1/git/branch-delete", "/v1/git/stash-push", "/v1/git/stash-pop", "/v1/git/merge-abort" ->
+                        json(200, """{"status":${status(false)},"output":""}""")
                     "/v1/git/stage" -> {
                         staged = true
                         json(200, """{"status":${status(true)},"output":""}""")
@@ -136,6 +153,49 @@ class GitWriteFlowTest {
         assertTrue(vm.state.value.gitNotice!!.ok)
         assertEquals("", vm.state.value.commitMessage)
         assertTrue(posts.single { it.first == "/v1/git/commit" }.second.contains("\"message\":\"fix: a\""))
+    }
+
+    @Test
+    fun manageHistoryPagesCommitDetailAndBranchWrites() {
+        features = """["git","git_write","git_manage"]"""
+        vm.setRepo("/r")
+        await { vm.state.value.git is Loadable.Ready && vm.state.value.gitManage && vm.state.value.gitStashes is Loadable.Ready }
+        assertEquals(50, (vm.state.value.gitLog as Loadable.Ready).value.size)
+        assertTrue(vm.state.value.gitLogMore)
+        vm.loadMoreLog()
+        await { (vm.state.value.gitLog as Loadable.Ready).value.size == 53 }
+        assertFalse(vm.state.value.gitLogMore)
+        assertTrue(gets.any { it.contains("/v1/git/log") && it.contains("skip=50") })
+
+        // A commit opens its files; a file opens what the commit changed in it (rename: both names).
+        val hash = "%040x".format(0)
+        vm.openCommit(hash)
+        await { vm.state.value.gitCommit?.second is Loadable.Ready }
+        val f = (vm.state.value.gitCommit!!.second as Loadable.Ready).value.files.single()
+        vm.commitFileDiff(hash, f.path, f.origPath)
+        await { vm.state.value.gitDiff?.second is Loadable.Ready }
+        assertEquals("${hash.take(8)}:src/new.kt", vm.state.value.gitDiff!!.first)
+        val diffGet = gets.last { it.contains("/v1/git/diff") }
+        assertTrue(diffGet, diffGet.contains("rev=$hash") && diffGet.contains("origPath=src%2Fold.kt"))
+        vm.closeGitDetail()
+        assertTrue(vm.state.value.gitCommit != null)
+        vm.closeCommit()
+        assertEquals(null, vm.state.value.gitCommit)
+
+        // Amend starts from the last commit's message.
+        vm.setAmend(true)
+        assertEquals("c0", vm.state.value.commitMessage)
+
+        vm.merge("feat")
+        await { vm.state.value.gitBusy == null && vm.state.value.gitNotice?.op == GitOps.MERGE }
+        assertTrue(posts.single { it.first == "/v1/git/merge" }.second.contains("\"branch\":\"feat\""))
+        vm.deleteBranch("old", force = true)
+        await { vm.state.value.gitBusy == null && vm.state.value.gitNotice?.op == GitOps.BRANCH_DELETE }
+        val del = posts.single { it.first == "/v1/git/branch-delete" }.second
+        assertTrue(del, del.contains("\"branch\":\"old\"") && del.contains("\"force\":true"))
+        vm.stashPop(0)
+        await { vm.state.value.gitBusy == null && vm.state.value.gitNotice?.op == GitOps.STASH_POP }
+        assertTrue(posts.single { it.first == "/v1/git/stash-pop" }.second.contains("\"index\":0"))
     }
 
     @Test

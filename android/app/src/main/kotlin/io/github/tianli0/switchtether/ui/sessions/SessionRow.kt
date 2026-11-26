@@ -63,7 +63,10 @@ fun SessionRow(
     BasicComponent(
         // Long-press rows get their press highlight clipped to the row's rounded card edges (never a square mask).
         modifier = if (onLongClick != null) marked.clip(groupRowShape(position)).combinedClickable(onClick = onClick, onLongClick = onLongClick) else marked,
-        title = io.github.tianli0.switchtether.domain.SessionNaming.rowTitle(title),
+        // Two lines at most, whatever the font size (coui17 patch 0009); the subtitle stays one.
+        title = title,
+        titleMaxLines = 2,
+        summaryMaxLines = 1,
         startAction = {
             // No extra end padding: the row's own icon gap is the same as every other list row's.
             AgentBadge(
@@ -81,7 +84,8 @@ fun SessionRow(
             if (session.isAttached) io.github.tianli0.switchtether.ui.common.clientLabel(session.origin, session.agent) else null,
             io.github.tianli0.switchtether.ui.common.sessionProjectName(session)?.takeIf { it != title },
             session.gitBranch,
-        ).joinToString(" · "),
+        // A segment never splits across lines ("Claude / Code"); a large font wraps between them.
+        ).joinToString(" · ") { it.replace(' ', NBSP) },
         // Right column: relative time over the small origin / waiting tags, so a row stays two lines.
         endActions = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -129,3 +133,5 @@ fun PinMenuDialog(session: SessionSummary?, pinned: Boolean, onDismiss: () -> Un
     )
 }
 
+/** No-break space: keeps a subtitle segment ("Claude Code") on one line. */
+private const val NBSP = '\u00A0'

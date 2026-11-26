@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -99,6 +100,32 @@ private const val MAX_FONT_SP = 24f
 private const val DEFAULT_FONT_SP = 12f
 
 /**
+ * The viewer's view settings and panels, owned by whoever draws its controls. A page that puts the
+ * viewer under its own title bar (the Files page) passes one and offers search / wrap / go to line
+ * / text size there; without one the viewer draws its own action row, as in chat previews.
+ */
+class CodeViewerState(wrap: Boolean = false, fontSp: Float = DEFAULT_FONT_SP) {
+    var wrap by mutableStateOf(wrap)
+    var fontSp by mutableFloatStateOf(fontSp)
+    var findOpen by mutableStateOf(false)
+    var gotoOpen by mutableStateOf(false)
+
+    fun larger() { fontSp = (fontSp + 1f).coerceAtMost(MAX_FONT_SP) }
+    fun smaller() { fontSp = (fontSp - 1f).coerceAtLeast(MIN_FONT_SP) }
+
+    companion object {
+        val Saver = androidx.compose.runtime.saveable.listSaver<CodeViewerState, Any>(
+            save = { listOf(it.wrap, it.fontSp, it.findOpen) },
+            restore = { CodeViewerState(it[0] as Boolean, it[1] as Float).apply { findOpen = it[2] as Boolean } },
+        )
+    }
+}
+
+/** A [CodeViewerState] kept per file across rotation. */
+@Composable
+fun rememberCodeViewerState(path: String): CodeViewerState = rememberSaveable(path, saver = CodeViewerState.Saver) { CodeViewerState() }
+
+/**
  * Read-only code/text viewer: a lazy list of lines (fast for multi-megabyte files) with line numbers, syntax
  * colours, a wrap / sideways-scroll toggle, find-in-file, go to line, pinch (or menu) text size, long-press a
  * line to copy it and "Copy all". [extraActions] go at the start of the action row (e.g. the Markdown toggle).
@@ -110,6 +137,8 @@ fun CodeViewer(
     language: String?,
     modifier: Modifier = Modifier,
     extraActions: @Composable RowScope.() -> Unit = {},
+    /** Controls drawn by the caller (no action row here); null = the viewer's own action row. */
+    controls: CodeViewerState? = null,
 ) {
     val dev = LocalDevColors.current
     val doc = remember(text) { TextDocument(text) }
@@ -117,12 +146,14 @@ fun CodeViewer(
         value = null
         value = withContext(Dispatchers.Default) { CodeHighlighting.highlight(doc.display, path, language, dev) }
     }
-    var wrap by rememberSaveable(path) { mutableStateOf(false) }
-    var fontSp by rememberSaveable { mutableFloatStateOf(DEFAULT_FONT_SP) }
-    var findOpen by rememberSaveable(path) { mutableStateOf(false) }
+    val own = rememberCodeViewerState(path)
+    val st = controls ?: own
+    var wrap by st::wrap
+    var fontSp by st::fontSp
+    var findOpen by st::findOpen
+    var gotoOpen by st::gotoOpen
     var query by rememberSaveable(path) { mutableStateOf("") }
     var current by rememberSaveable(path) { mutableIntStateOf(0) }
-    var gotoOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     val matches by produceState<List<TextMatch>>(emptyList(), doc, query, findOpen) {
         if (!findOpen || query.isEmpty()) {
@@ -146,6 +177,14 @@ fun CodeViewer(
     val gutterWidth = with(density) { (charWidthPx * digits).toDp() } + 16.dp
 
     var scrollX by remember(path) { mutableFloatStateOf(0f) }
+    // "Go to line" lands the line with context above it and marks it for a moment.
+    var flashLine by remember(path) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(flashLine) {
+        if (flashLine != null) {
+            delay(1400)
+            flashLine = null
+        }
+    }
     var viewportPx by remember { mutableIntStateOf(0) }
     val textViewportPx = (viewportPx - with(density) { (gutterWidth + 12.dp).toPx() }).coerceAtLeast(1f)
     val contentPx = charWidthPx * doc.widestLineCells.coerceAtMost(MAX_LINE_CHARS + 64)
@@ -173,9 +212,9 @@ fun CodeViewer(
     }
 
     Column(modifier.fillMaxSize()) {
-        // Action row.
+        // Action row (only when the caller does not draw the controls in its own title bar).
         // Tools of the viewer: the label lines up with the code card's text, keys 4dp from the edge.
-        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (controls == null) Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             extraActions()
             Text(
                 listOfNotNull(
@@ -256,7 +295,10 @@ fun CodeViewer(
                 matches = matches,
                 currentMatch = matches.getOrNull(current),
                 wrap = wrap,
-                scrollX = scrollX,
+                scrollX = { scrollX },
+                charWidthPx = charWidthPx,
+                textViewportPx = textViewportPx,
+                flashLine = flashLine,
                 style = style,
                 gutterWidth = gutterWidth,
                 listState = listState,
@@ -271,7 +313,11 @@ fun CodeViewer(
     if (gotoOpen) {
         GotoLineDialog(doc.lineCount, onDismiss = { gotoOpen = false }) { line ->
             gotoOpen = false
-            scope.launch { listState.scrollToItem((line - 1).coerceIn(0, doc.lineCount - 1)) }
+            val target = (line - 1).coerceIn(0, doc.lineCount - 1)
+            // Three lines of context above it, like find; the target was the second row, half cut
+            // by the card's top edge.
+            scope.launch { listState.scrollToItem((target - 3).coerceAtLeast(0)) }
+            flashLine = target
         }
     }
 }
@@ -283,7 +329,14 @@ private fun CodeLines(
     matches: List<TextMatch>,
     currentMatch: TextMatch?,
     wrap: Boolean,
-    scrollX: Float,
+    /**
+     * Read at placement, not at composition: rows composed (or prefetched) at different times used
+     * to keep different offsets, so one screen showed lines scrolled to two positions.
+     */
+    scrollX: () -> Float,
+    charWidthPx: Float,
+    textViewportPx: Float,
+    flashLine: Int?,
     style: androidx.compose.ui.text.TextStyle,
     gutterWidth: androidx.compose.ui.unit.Dp,
     listState: LazyListState,
@@ -292,6 +345,7 @@ private fun CodeLines(
 ) {
     val dev = LocalDevColors.current
     val primary = COUITheme.colorScheme.primary
+    val density = LocalDensity.current
     // Matches grouped by line once, so each row looks up only its own.
     val byLine = remember(matches) { matches.groupBy { it.line } }
     LazyColumn(
@@ -300,11 +354,21 @@ private fun CodeLines(
         contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp + LocalBottomBarSpace.current),
     ) {
         items(doc.lineCount, key = { it }) { line ->
-            val start = doc.lineStart(line)
+            val lineStart = doc.lineStart(line)
             val end = doc.lineEnd(line)
-            val cut = end - start > MAX_LINE_CHARS
-            val shownEnd = if (cut) start + MAX_LINE_CHARS else end
-            val content = remember(highlighted, line, byLine[line], currentMatch?.takeIf { it.line == line }) {
+            val cut = end - lineStart > MAX_LINE_CHARS
+            val shownEnd = if (cut) lineStart + MAX_LINE_CHARS else end
+            // Wrapped, a line keeps its indentation as a hanging indent: the leading spaces become
+            // the paragraph's indent (every row of the line starts there), so continuation rows no
+            // longer restart at column 0 and a deep indent is never wrapped onto a row of its own.
+            // The indent is capped at half the card so long code still has room.
+            var lead = 0
+            if (wrap) while (lineStart + lead < shownEnd && doc.display[lineStart + lead] == ' ') lead++
+            val maxLead = if (charWidthPx > 0f) (textViewportPx * 0.5f / charWidthPx).toInt() else 0
+            if (lead > maxLead) lead = maxLead
+            if (lineStart + lead >= shownEnd) lead = 0
+            val start = lineStart + lead
+            val content = remember(highlighted, line, lead, byLine[line], currentMatch?.takeIf { it.line == line }) {
                 buildAnnotatedString {
                     if (highlighted != null && highlighted.length >= shownEnd) append(highlighted.subSequence(start, shownEnd)) else append(doc.display, start, shownEnd)
                     byLine[line]?.forEach { m ->
@@ -315,13 +379,15 @@ private fun CodeLines(
                     if (cut) {
                         append("  ")
                         val at = length
-                        append(String.format(shortenedNote, end - start))
+                        append(String.format(shortenedNote, end - lineStart))
                         addStyle(SpanStyle(color = dev.gutter), at, length)
                     }
                 }
             }
             Row(
-                Modifier.fillMaxWidth().pointerInput(line) { detectTapGestures(onLongPress = { onLongPress(line) }) },
+                Modifier.fillMaxWidth()
+                    .then(if (flashLine == line) Modifier.background(primary.copy(alpha = 0.18f)) else Modifier)
+                    .pointerInput(line) { detectTapGestures(onLongPress = { onLongPress(line) }) },
             ) {
                 Text(
                     (line + 1).toString(),
@@ -331,11 +397,12 @@ private fun CodeLines(
                 )
                 Box(Modifier.weight(1f).clipToBounds().padding(end = 12.dp)) {
                     if (wrap) {
-                        Text(content, style = style, softWrap = true)
+                        val indent = with(density) { (charWidthPx * lead).toSp() }
+                        Text(content, style = style.copy(textIndent = androidx.compose.ui.text.style.TextIndent(firstLine = indent, restLine = indent)), softWrap = true)
                     } else {
                         Text(
                             content, style = style, softWrap = false, maxLines = 1,
-                            modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true).offset { IntOffset(-scrollX.roundToInt(), 0) },
+                            modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true).offset { IntOffset(-scrollX().roundToInt(), 0) },
                         )
                     }
                 }
@@ -356,12 +423,15 @@ private fun FindBar(
     onClose: () -> Unit,
 ) {
     val dev = LocalDevColors.current
+    // Opening find means typing next: the field takes focus and the keyboard comes up.
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         TextInput(
             value = query,
             onValueChange = onQuery,
             label = stringResource(R.string.files_find_hint),
-            modifier = Modifier.weight(1f).testTag("find-input"),
+            modifier = Modifier.weight(1f).focusRequester(focus).testTag("find-input"),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onNext() }),
         )
@@ -383,6 +453,8 @@ private fun FindBar(
 @Composable
 private fun GotoLineDialog(lineCount: Int, onDismiss: () -> Unit, onGo: (Int) -> Unit) {
     var value by remember { mutableStateOf("") }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val n = value.trim().toIntOrNull()
     val valid = n != null && n in 1..lineCount
     FormDialog(
@@ -395,6 +467,7 @@ private fun GotoLineDialog(lineCount: Int, onDismiss: () -> Unit, onGo: (Int) ->
     ) {
         TextInput(
             value, { value = it.filter(Char::isDigit) }, stringResource(R.string.files_goto_line_hint, lineCount),
+            modifier = Modifier.focusRequester(focus),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { if (valid) onGo(n!!) }),
         )

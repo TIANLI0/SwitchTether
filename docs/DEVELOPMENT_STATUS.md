@@ -785,3 +785,38 @@ on this machine, the phone UI on a device.
 - Not verified: anything on a real Mac (agents found through the login PATH, terminal login shell,
   `lsof` listing, App Nap behaviour, first open of the ad-hoc signed dmg, Keychain prompts after an
   update changes the ad-hoc signature). Not done: Codex Desktop takeover and in-app updates on macOS.
+
+## Android detail pass: emulator walk-through, Files / Git / viewer redesign (2026-11-26)
+
+- Method: three code reviews (sessions/home, workspace/files, manage/settings) and a screen-by-screen
+  walk-through on the headless emulator (`CouCou_A17`, API 37, `-gpu host` so blur renders as on a
+  phone, app locale zh-CN, `dev_server` with this PC's real sessions read-only), then dark mode,
+  font scale 1.3 and landscape. About 130 findings; nearly all fixed, the rest listed below.
+- Crash fixed: rich-text Markdown with a fenced code block (README_ZH's ```mermaid) crashed on scroll
+  (nested horizontal scroll measured with infinite width) — `MarkdownDocCrashTest`.
+- Files browser follows the ColorOS File Manager layout: folder name + "共 N 项" header with
+  new / search / ⋮, plain-text breadcrumb, flat rows with folder glyph, "size | date", dividers from
+  the text; root names localized (主目录 / 桌面 / 文档 / 下载); filter uses an ASCII keyboard so a CJK
+  IME does not turn "README_ZH" into "README＿". Remote images in Markdown take no room.
+- Text viewer: one title bar (name, "folder · size · time", "kind · lines · encoding"), keys for
+  Markdown rich text / source, find, ⋮ (edit, download, wrap, go to line, text size, copy all);
+  find and go-to-line focus their field; lines share one horizontal offset; wrapped lines keep a
+  hanging indent; go-to-line highlights its line. Patterns from Material Files / Squircle CE / Acode.
+- Git (patterns from PuppyGit / MGit / GitHub Mobile): tabs 改动 / 历史 / 分支; rows with status
+  letter, name, folder, +/− counts and a flat stage key; commit box with amend; fetch / pull / push
+  with ahead / behind; history paging; commit detail (changed files → diff); branch filter,
+  checkout (asks with uncommitted changes), create, delete, merge / merge abort; stash push / pop.
+  Core: per-file numstat, branch ahead/behind/gone, `log` paging, `GET /v1/git/commit-detail`,
+  `GET /v1/git/stashes`, `rev` on `/v1/git/diff`, writes `branch-delete`, `merge`, `merge-abort`,
+  `stash-push`, `stash-pop`, `commit` `amend` (PROTOCOL §7.7, fixtures, Rust + Kotlin tests).
+- Pictures: double-tap zooms 2.5x of the fitted size around the tap and back (was ~8x in one tap),
+  pinch limit 4x of the original (telephoto `DoubleClickToZoomListener`).
+- coui17 patch 0009 (branch `fix/switchtether-details` in the submodule): `BasicComponent`
+  `titleMaxLines` / `summaryMaxLines`, localized `TopTips` close label, `LocalSearchBarKeyboardType`.
+- Evidence: Android unit tests (incl. new `MarkdownDocCrashTest`, `MarkdownSoftBreakTest`,
+  `CommitBodyReflowTest`, Git flow tests) pass; core fmt / clippy / tests pass; emulator screenshots
+  of Files, viewer, Markdown, Git changes / history / commit detail and the picture zoom.
+- Not done: thumbnails and "N 项" for folders (needs a core field), content-search match
+  highlighting, Markdown bullet alignment (renderer), per-hunk staging, stash drop, resolving merge
+  conflicts on the phone; titles / bottom-bar labels keep ColorOS's fixed size at large font scales
+  (native behaviour). Not verified on the user's phone.

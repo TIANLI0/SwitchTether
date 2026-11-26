@@ -103,6 +103,17 @@ class ContentSearch(
     }
 }
 
+/**
+ * A transcript snippet as plain text: the agent writes Markdown, and in a three-line preview `**`,
+ * backticks, heading marks and link syntax were noise around the words that matched.
+ */
+fun plainSnippet(snippet: String): String = snippet
+    .replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1") // [text](url) -> text
+    .replace(Regex("""(\*\*|~~|`+)"""), "") // not `__`: it is part of identifiers like `__init__`
+    .replace(Regex("""(?m)^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+)"""), "")
+    .replace(Regex("""\s+"""), " ")
+    .trim()
+
 /** [snippet] with every case-insensitive occurrence of [query] in bold. */
 fun highlightMatches(snippet: String, query: String, style: SpanStyle): AnnotatedString = buildAnnotatedString {
     val q = query.trim()
@@ -147,9 +158,11 @@ fun ContentSearchResults(ui: ContentSearchUi, onOpen: (SessionSearchResult) -> U
                     BasicComponent(
                         title = r.title?.takeIf { it.isNotBlank() } ?: Formatters.agentLabel(r.agent),
                         summary = meta,
+                        // The agent's mark, as in the title results and the session list.
+                        startAction = { io.github.tianli0.switchtether.ui.common.AgentBadge(r.agent, size = 40.dp) },
                         bottomAction = {
                             Text(
-                                highlightMatches(r.snippet, ui.query, accent),
+                                highlightMatches(plainSnippet(r.snippet), ui.query, accent),
                                 style = COUITheme.textStyles.footnote1,
                                 color = muted,
                                 maxLines = 3,

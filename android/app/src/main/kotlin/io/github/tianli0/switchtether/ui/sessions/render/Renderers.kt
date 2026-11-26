@@ -674,7 +674,8 @@ fun FileChange(item: RenderItem, ctx: RenderContext? = null) {
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(name.ifEmpty { path }, style = COUITheme.textStyles.body2, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (dir.isNotEmpty()) SubtleMeta(dir)
+                // The end of a long folder says more than its start.
+                if (dir.isNotEmpty()) Text(dir, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.StartEllipsis)
             }
             Spacer(Modifier.size(8.dp))
             Text("+${d.long("additions") ?: 0}", style = DevType.label, fontWeight = FontWeight.SemiBold, color = dev.addedText)
@@ -692,16 +693,26 @@ fun FileChange(item: RenderItem, ctx: RenderContext? = null) {
                 ),
                 when (change) { "add" -> dev.ok; "delete" -> dev.danger; else -> dev.info },
             )
+            // Open the file as it is now: a key in the header, usable folded or not. It was a
+            // "查看 ›" link on a line of its own above the diff, which read as a stray row.
+            val openFile = ctx?.onOpenFile
+            if (openFile != null && change != "delete" && path.isNotBlank()) {
+                io.github.suqi8.coui.kmp.basic.IconButton(
+                    onClick = { openFile(path) },
+                    minWidth = 36.dp,
+                    minHeight = 36.dp,
+                    modifier = Modifier.testTag("tool-file"),
+                ) {
+                    Icon(AppIcons.File, contentDescription = stringResource(R.string.render_open_file), tint = COUITheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                }
+            } else {
+                Spacer(Modifier.size(4.dp))
+            }
             ExpandArrow(expanded = open)
         }
         ExpandBody(open) {
             val diff = d.str("diff").orEmpty()
             Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
-                // The file as it is now, like the Edit / Write step's own file row.
-                if (ctx?.onOpenFile != null && change != "delete" && path.isNotBlank()) {
-                    FileTarget(path, null, ctx)
-                    Spacer(Modifier.size(6.dp))
-                }
                 if (diff.isNotBlank()) {
                     val moreFmt = stringResource(R.string.render_show_more_lines)
                     DiffView(diff, showMoreLabel = { n -> moreFmt.format(n) })

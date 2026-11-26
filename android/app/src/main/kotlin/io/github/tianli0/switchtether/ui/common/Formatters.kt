@@ -51,9 +51,11 @@ object Formatters {
         return days to if (days == 0 || days == 1) time else date
     }
 
+    // A unit rolls over at 1000 of the smaller one, so a size never reads "1000.7 KiB".
     fun bytes(n: Long): String = when {
-        n >= 1 shl 20 -> DecimalFormat("0.#").format(n / 1048576.0) + " MiB"
-        n >= 1 shl 10 -> DecimalFormat("0.#").format(n / 1024.0) + " KiB"
+        n >= 1000L * 1024 * 1024 -> DecimalFormat("0.##").format(n / 1073741824.0) + " GiB"
+        n >= 1000L * 1024 -> DecimalFormat(if (n >= 10L * 1024 * 1024) "0.#" else "0.##").format(n / 1048576.0) + " MiB"
+        n >= 1000 -> DecimalFormat("0.#").format(n / 1024.0) + " KiB"
         else -> "$n B"
     }
 

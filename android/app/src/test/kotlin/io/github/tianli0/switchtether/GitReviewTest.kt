@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.tianli0.switchtether.domain.StepUpGate
@@ -87,13 +88,66 @@ class GitReviewScreenTest {
             ),
         )
         rule.onNodeWithTag("git-only-turn").assertExists()
-        rule.onNodeWithText("src/b.kt").assertExists()
+        // A file row names the file; its folder is the line under it.
+        rule.onNodeWithText("b.kt").assertExists()
+        rule.onNodeWithText("src").assertExists()
         rule.onAllNodesWithText("README.md").assertCountEquals(0)
         rule.onAllNodesWithText("This turn").assertCountEquals(1)
         // Writes are offered; committing needs a message first.
         rule.onNodeWithTag("git-stage-all").assertExists()
         rule.onNodeWithTag("git-commit").performScrollTo().assertIsNotEnabled()
         rule.onNodeWithTag("git-push").assertExists()
+    }
+
+    @Test
+    fun historyAndBranchesAreTabs() {
+        show(
+            FilesUiState(
+                repo = "/home/u/r",
+                git = Loadable.Ready(STATUS),
+                gitLog = Loadable.Ready(listOf(io.github.tianli0.switchtether.remote.protocol.GitCommit("0123456789abcdef", "Ada", "a@x", 1_700_000_000_000, "fix: the thing"))),
+                gitWritable = true,
+                gitManage = true,
+                gitBranches = Loadable.Ready(
+                    io.github.tianli0.switchtether.remote.protocol.GitBranches(
+                        root = "/home/u/r",
+                        current = "main",
+                        local = listOf(
+                            io.github.tianli0.switchtether.remote.protocol.GitBranch("main", current = true, upstream = "origin/main", ahead = 2),
+                            io.github.tianli0.switchtether.remote.protocol.GitBranch("feat"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        rule.onNodeWithTag("git-tabs").assertExists()
+        rule.onNodeWithText("History").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("fix: the thing").assertExists()
+        rule.onNodeWithText("01234567", substring = true).assertExists()
+        rule.onNodeWithText("Branches").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Current").assertExists()
+        rule.onNodeWithText("↑2 ↓0", substring = true).assertExists()
+        // Uncommitted changes: switching asks first.
+        rule.onNodeWithText("feat").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Switch to feat?").assertExists()
+    }
+
+    @Test
+    fun aStoppedMergeOffersAbort() {
+        show(
+            FilesUiState(
+                repo = "/home/u/r",
+                git = Loadable.Ready(STATUS.copy(merging = true)),
+                gitLog = Loadable.Ready(emptyList()),
+                gitWritable = true,
+                gitManage = true,
+            ),
+        )
+        rule.onNodeWithText("Merge stopped on conflicts").assertExists()
+        rule.onNodeWithTag("git-merge-abort").assertExists()
     }
 
     @Test

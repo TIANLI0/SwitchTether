@@ -211,7 +211,7 @@
     <string name="agent_map_state_stopped">已停止</string>
     <string name="agent_map_waiting_permission">等待你的授权</string>
     <string name="agent_map_waiting_detail">等待你的授权：请在对话中处理。</string>
-    <string name="agent_map_tokens">%1$s tokens</string>
+    <string name="agent_map_tokens">%1$s Token</string>
     <string name="agent_map_background">后台</string>
     <string name="agent_map_foreground">前台</string>
     <string name="agent_map_spawned_by">由 %1$s 启动</string>
@@ -237,4 +237,10 @@
     <string name="outgoing_delete_title">删除这条消息？</string>
     <string name="outgoing_delete_body">这条消息没有发出，删除后文字无法恢复。点“编辑”可以把它放回输入框。</string>
     <string name="outgoing_delete_confirm">删除消息</string>
+    <string name="sessions_tab_live">当前</string>
+    <string name="sessions_empty_history_hint">这台电脑上的 Claude Code 和 Codex 对话会显示在这里。</string>
+    <string name="duration_hours">%1$d 小时 %2$d 分</string>
+    <string name="cap_reason_observed_claude">这个 Claude Code 是在电脑上（终端或 VS Code）启动的，其他程序无法控制它的进程。点“%1$s”可在手机上接着这段对话：原进程空闲时，对话会在 SwitchTether 的进程里继续，原窗口不会显示新的回合。</string>
+    <string name="cap_reason_observed_codex">这个 Codex 是在电脑上（终端或 Codex Desktop）启动的，其他程序无法控制它的进程。点“%1$s”可在手机上接着这个线程：它会在 SwitchTether 自己的 Codex 里继续，Codex 只在线程没有在别处打开时允许这样做。</string>
+    <string name="cap_reason_observed_dsh">这个 DeepSeek Harness 窗口在没有安装插件时无法被其他程序控制。会话不在别处运行后，点“%1$s”可在手机上继续。</string>
 </resources>

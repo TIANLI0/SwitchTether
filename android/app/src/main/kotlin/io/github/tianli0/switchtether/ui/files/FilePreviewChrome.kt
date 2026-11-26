@@ -55,6 +55,8 @@ fun FilePreviewHeader(
     title: String,
     subtitle: String?,
     onBack: () -> Unit,
+    /** A quieter third line (kind · lines · encoding), under the subtitle at the same inset. */
+    meta: String? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     // The small title bar's measures: 56dp of bar, the back key on the 8dp edge, 12dp to the title,
@@ -80,6 +82,15 @@ fun FilePreviewHeader(
                     color = COUITheme.colorScheme.onSurfaceVariantSummary,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis,
+                )
+            }
+            if (!meta.isNullOrBlank()) {
+                Text(
+                    meta,
+                    style = COUITheme.textStyles.footnote2,
+                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

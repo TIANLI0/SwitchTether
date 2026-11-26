@@ -51,7 +51,7 @@
     <string name="ntf_exited">%1$s 意外结束</string>
     <string name="ntf_terminal_exited">终端 %1$s 已退出</string>
     <string name="ntf_terminal_exited_code">终端 %1$s 已退出（代码 %2$d）</string>
-    <string name="notif_ch_live">实时跟踪的任务（实时活动 / 流体云）</string>
+    <string name="notif_ch_live">实时跟踪的任务（实时活动）</string>
     <string name="live_channel">实时跟踪的任务</string>
     <string name="live_chip_running">运行中</string>
     <string name="live_chip_waiting">待确认</string>
@@ -81,24 +81,24 @@
     <string name="live_action_unpin">停止跟踪</string>
     <string name="live_not_sent">未发送：未连接到电脑。请打开应用重试。</string>
     <string name="live_not_sent_detail">未发送：%1$s</string>
-    <string name="pin_add">在流体云中跟踪</string>
+    <string name="pin_add">在实时活动中跟踪</string>
     <string name="pin_remove">停止跟踪</string>
     <string name="pin_tag">跟踪中</string>
     <string name="pin_limit">%1$d 个跟踪位都被你手动跟踪的任务占用，请先停止一个</string>
-    <string name="pin_menu_pin_body">在实时通知（流体云 / 状态栏）中持续跟进这个任务，直到停止跟踪。</string>
+    <string name="pin_menu_pin_body">在实时活动（状态栏 / 锁屏的实时通知）中持续跟进这个任务，直到停止跟踪。</string>
     <string name="pin_menu_unpin_body">不再在实时通知中跟进这个任务。</string>
-    <string name="pin_sheet_title">在流体云中跟进任务</string>
-    <string name="pin_sheet_body">实时跟踪的任务会在流体云和状态栏中显示实时状态（运行中、待确认、已完成）。只有为 SwitchTether 开启“实时通知”后系统才会这样显示，否则它是一条普通的常驻通知。</string>
+    <string name="pin_sheet_title">在实时活动中跟进任务</string>
+    <string name="pin_sheet_body">实时跟踪的任务会在状态栏和锁屏中显示实时状态（运行中、待确认、已完成）。只有为 SwitchTether 开启“实时通知”后系统才会这样显示，否则它是一条普通的常驻通知。</string>
     <string name="pin_open_settings">开启实时通知</string>
     <string name="pin_open_fluid_cloud">流体云设置</string>
     <string name="pin_anyway">仍然跟踪</string>
-    <string name="live_settings_title">流体云 / 实时通知</string>
+    <string name="live_settings_title">实时活动</string>
     <string name="live_settings_status">实时通知</string>
-    <string name="live_status_on">已开启：实时跟踪的任务会显示在流体云 / 状态栏</string>
+    <string name="live_status_on">已开启：实时跟踪的任务会显示在状态栏和锁屏的实时活动中</string>
     <string name="live_status_off">未开启：实时跟踪的任务以普通通知显示。点按去开启</string>
     <string name="live_status_unsupported">需要 Android 16 或更高版本</string>
     <string name="live_auto_pin">自动跟踪从手机发起的任务</string>
-    <string name="live_auto_pin_summary">在本机新建的会话会自动在流体云中跟踪</string>
+    <string name="live_auto_pin_summary">在本机新建的会话会自动在实时活动中跟踪</string>
     <string name="live_step_command">执行命令 %1$s</string>
     <string name="live_step_command_bare">执行命令</string>
     <string name="live_step_edit">编辑文件中 %1$s</string>
@@ -140,4 +140,6 @@
     <string name="ntf_handled_elsewhere">已在别处处理</string>
     <string name="ntf_offline_open">连不上电脑，请打开 SwitchTether 处理。</string>
     <string name="ntf_open_to_check">请打开 SwitchTether 查看。</string>
+    <string name="notif_quiet_switch">按时段静默</string>
+    <string name="notif_quiet_off">已关闭：通知照常提醒</string>
 </resources>

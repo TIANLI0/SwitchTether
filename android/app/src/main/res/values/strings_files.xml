@@ -29,7 +29,7 @@
     <string name="downloads_settings_summary">Files you downloaded, and the temporary preview cache</string>
     <string name="downloads_section_saved">Downloads</string>
     <string name="downloads_saved_hint">Files you chose to download. They are kept in Downloads/%1$s until you delete them here, and are not removed by clearing the cache.</string>
-    <string name="downloads_empty">Nothing downloaded yet. Use Download on the Files page to keep a file on this phone.</string>
+    <string name="downloads_empty">Nothing downloaded yet. On the Files page, long-press a file and choose Download to phone to keep it here.</string>
     <plurals name="downloads_total">
         <item quantity="one">%1$d file · %2$s</item>
         <item quantity="other">%1$d files · %2$s</item>

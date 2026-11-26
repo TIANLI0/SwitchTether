@@ -263,8 +263,8 @@ class ComposeScreensTest {
         assertTrue(rule.onAllNodesWithText("Read-only on the phone").fetchSemanticsNodes().isEmpty())
         assertTrue(rule.onAllNodesWithTag("continue").fetchSemanticsNodes().isEmpty())
         rule.onNodeWithText("Attached · VS Code").assertExists()
-        rule.onNodeWithContentDescriptionSafe("Open terminal")
-        rule.onNode(androidx.compose.ui.test.hasContentDescription("Open terminal")).performClick()
+        // The capsule's text is its label (no duplicate description: TalkBack read it twice).
+        rule.onNodeWithText("Open terminal").performClick()
         assertEquals("t-7", opened)
     }
 

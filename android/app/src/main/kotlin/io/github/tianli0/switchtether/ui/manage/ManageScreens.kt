@@ -97,9 +97,9 @@ fun ManageScreen(onOpen: (Route) -> Unit) {
             GroupCard {
                 ArrowPreference(title = stringResource(R.string.manage_providers), summary = stringResource(R.string.manage_providers_summary), startAction = { RowIcon(AppIcons.Providers) }, onClick = { onOpen(Route.Providers) }, cardListPosition = CardListPosition.Head)
                 ArrowPreference(title = stringResource(R.string.manage_usage), summary = stringResource(R.string.manage_usage_summary), startAction = { RowIcon(AppIcons.Usage) }, onClick = { onOpen(Route.Usage) }, cardListPosition = CardListPosition.Middle)
-                ArrowPreference(title = stringResource(R.string.manage_mcp), startAction = { RowIcon(AppIcons.Mcp) }, onClick = { onOpen(Route.Mcp) }, cardListPosition = CardListPosition.Middle)
-                ArrowPreference(title = stringResource(R.string.manage_skills), startAction = { RowIcon(AppIcons.Terminal) }, onClick = { onOpen(Route.Skills) }, cardListPosition = CardListPosition.Middle)
-                ArrowPreference(title = stringResource(R.string.manage_prompts), startAction = { RowIcon(AppIcons.Prompts) }, onClick = { onOpen(Route.Prompts) }, cardListPosition = CardListPosition.Tail)
+                ArrowPreference(title = stringResource(R.string.manage_mcp), summary = stringResource(R.string.manage_mcp_summary), startAction = { RowIcon(AppIcons.Mcp) }, onClick = { onOpen(Route.Mcp) }, cardListPosition = CardListPosition.Middle)
+                ArrowPreference(title = stringResource(R.string.manage_skills), summary = stringResource(R.string.manage_skills_summary), startAction = { RowIcon(AppIcons.Terminal) }, onClick = { onOpen(Route.Skills) }, cardListPosition = CardListPosition.Middle)
+                ArrowPreference(title = stringResource(R.string.manage_prompts), summary = stringResource(R.string.manage_prompts_summary), startAction = { RowIcon(AppIcons.Prompts) }, onClick = { onOpen(Route.Prompts) }, cardListPosition = CardListPosition.Tail)
             }
         }
         item { Text(stringResource(R.string.manage_write_note), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp)) }
@@ -313,7 +313,7 @@ fun UsageScreen(onBack: () -> Unit, onOpen: (io.github.tianli0.switchtether.ui.n
         // Apps switched off on the desktop (`visibleApps`) are not offered here either.
         val apps = listOf<String?>(null) + DEFAULT_APPS.filter { it !in state.hiddenApps }
         io.github.suqi8.coui.kmp.basic.ChipTabGroup(
-            tabs = apps.map { io.github.suqi8.coui.kmp.basic.ChipTabData(if (it == null) stringResource(R.string.usage_all_apps) else Formatters.agentLabel(it).let { l -> if (it == "claude") "Claude" else l }) },
+            tabs = apps.map { io.github.suqi8.coui.kmp.basic.ChipTabData(if (it == null) stringResource(R.string.usage_all_apps) else Formatters.agentLabel(it)) },
             selectedIndex = apps.indexOf(state.app).coerceAtLeast(0),
             onSelectedChange = { vm.setApp(apps[it]) },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),

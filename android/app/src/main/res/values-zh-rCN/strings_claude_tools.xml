@@ -3,31 +3,31 @@
 <resources>
     <string name="tools_title">会话工具</string>
     <string name="tools_open">会话工具</string>
-    <string name="tools_open_summary">权限模式、上下文、Plan、MCP、旁问、重命名、导出</string>
+    <string name="tools_open_summary">权限模式、上下文、计划、MCP、旁问、重命名、导出</string>
     <string name="tools_offline">连接到电脑后才能使用会话工具。</string>
     <string name="tools_refresh">刷新</string>
 
     <string name="tools_permission">权限模式</string>
     <string name="tools_permission_hint">立即作用于正在运行的会话，相当于 Claude Code 里的 Shift+Tab。</string>
-    <string name="perm_bypass_short">Bypass</string>
-    <string name="perm_bypass">Bypass permissions：所有操作直接执行，不再询问</string>
+    <string name="perm_bypass_short">全部放行</string>
+    <string name="perm_bypass">所有操作直接执行，不再询问</string>
     <string name="perm_full_access_short">完全访问</string>
-    <string name="perm_full_access">完全访问：不使用沙箱，也不再审批</string>
+    <string name="perm_full_access">不使用沙箱，也不再审批</string>
     <string name="perm_read_only_short">只读</string>
-    <string name="perm_read_only">只读：只读取文件，其它操作先询问</string>
+    <string name="perm_read_only">只读取文件，其它操作先询问</string>
     <string name="perm_untrusted_short">不信任</string>
-    <string name="perm_untrusted">不信任：凡是不确定安全的命令都先询问</string>
+    <string name="perm_untrusted">凡是不确定安全的命令都先询问</string>
     <string name="perm_codex_default">在项目文件夹内自由操作，超出范围时询问</string>
     <string name="perm_codex_auto_short">自动审核</string>
-    <string name="perm_codex_auto">自动审核：由审核代理替你决定审批请求</string>
-    <string name="perm_codex_plan">计划模式：先调研并给出计划，再动手修改</string>
+    <string name="perm_codex_auto">由审核代理替你决定审批请求</string>
+    <string name="perm_codex_plan">先调研并给出计划，再动手修改</string>
     <string name="perm_dangerous_title">不再询问直接执行？</string>
     <string name="perm_dangerous_body">代理会直接在电脑上运行命令、修改文件，不再先问你。这和远程终端一样危险，所以需要指纹验证。</string>
     <string name="perm_dangerous_confirm">开启</string>
-    <string name="perm_auto_short">Auto</string>
-    <string name="perm_auto">Auto mode：安全的操作直接执行，有风险的会被拦下，不再询问</string>
-    <string name="perm_dont_ask_short">Don\'t ask</string>
-    <string name="perm_dont_ask">Don\'t ask：未预先允许的操作一律拒绝，不再询问</string>
+    <string name="perm_auto_short">自动</string>
+    <string name="perm_auto">安全的操作直接执行，有风险的会被拦下</string>
+    <string name="perm_dont_ask_short">不询问</string>
+    <string name="perm_dont_ask">未预先允许的操作一律拒绝，不再询问</string>
     <string name="perm_unknown">模式：%1$s</string>
     <string name="tools_permission_failed">无法切换模式：%1$s</string>
 
@@ -38,15 +38,15 @@
     <string name="tools_context_kind_buffer">预留</string>
     <string name="tools_context_kind_deferred">延迟加载</string>
     <string name="tools_session_cost">本会话费用</string>
-    <string name="tools_session_cost_tokens">输入 %1$s · 输出 %2$s tokens</string>
+    <string name="tools_session_cost_tokens">输入 %1$s · 输出 %2$s Token</string>
     <string name="tools_session_cost_partial">Token 只统计本机已加载的对话部分。费用是 Claude Code 的累计值，包含更早的轮次，除非之前对话被清空或重新启动过。</string>
 
     <string name="plan_approve_auto">批准并自动接受编辑</string>
     <string name="plan_approve_review">批准，逐项确认编辑</string>
     <string name="plan_keep_planning">继续规划</string>
 
-    <string name="tools_plan">Plan</string>
-    <string name="tools_plan_none">还没有 Plan。Plan 在规划模式下生成。</string>
+    <string name="tools_plan">计划</string>
+    <string name="tools_plan_none">还没有计划。计划在规划模式下生成。</string>
 
     <string name="tools_mcp">MCP 服务器</string>
     <string name="tools_mcp_none">这个会话没有 MCP 服务器。</string>
@@ -115,5 +115,5 @@
     <plurals name="rewind_done">
         <item quantity="other">已恢复 %d 个文件</item>
     </plurals>
-    <string name="tools_read_only_note">这个 Claude Code 会话是在电脑上启动的，只能查看：可以看计划、导出对话、查看后台任务输出。要完整控制，请在 设置 → 远程 中为新的 VS Code 面板开启接管，或使用“在手机上继续”。</string>
+    <string name="tools_read_only_note">这个 Claude Code 会话是在电脑上启动的，只能查看：可以看计划、导出对话，后台任务的输出在 Agent 地图里。要完整控制，请在“设置 → 远程”中为新的 VS Code 面板开启接管，或点会话页的“恢复会话”。</string>
 </resources>

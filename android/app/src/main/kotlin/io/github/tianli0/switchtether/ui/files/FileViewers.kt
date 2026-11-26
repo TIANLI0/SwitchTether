@@ -17,7 +17,6 @@ import me.saket.telephoto.subsamplingimage.SubSamplingImageErrorReporter
 import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
 import me.saket.telephoto.subsamplingimage.rememberSubSamplingImageState
 import me.saket.telephoto.subsamplingimage.util.canBeSubSampled
-import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.ZoomableContentLocation
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.zoomable
@@ -192,17 +191,36 @@ private fun MediaFileViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDown
 
     Column(modifier.fillMaxSize()) {
         val where = ready?.let { stringResource(if (it.fromDownload) R.string.viewer_saved_copy else R.string.viewer_temp_copy) }
+        var menuOpen by remember { mutableStateOf(false) }
+        // Same bar as the text viewer: name, "folder · size", where the copy lives on its own quiet
+        // line (it was squeezed into the subtitle and cut mid-phrase), Download as the one key and
+        // the rest under ⋮ (four keys crowded the name before).
         FilePreviewHeader(
             title = ref.name,
-            subtitle = listOfNotNull(previewFolder(ref.path), (ready?.size ?: ref.size)?.let(Formatters::bytes), where).joinToString(" · "),
+            subtitle = listOfNotNull(previewFolder(ref.path), (ready?.size ?: ref.size)?.let(Formatters::bytes)).joinToString(" · "),
+            meta = where,
             onBack = onBack,
         ) {
-            if (ready != null) {
-                ToolbarIcon(AppIcons.Share, stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(ready), noApp) })
-                ToolbarIcon(AppIcons.OpenWith, stringResource(R.string.viewer_open_with), { startSafely(context, store.viewIntent(ready), noApp) })
-                if (!ready.fromDownload) io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(contentDescription = stringResource(R.string.viewer_refresh), onClick = { reload++ })
+            if (ready?.fromDownload != true) {
+                ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), save::start, enabled = !save.state.running)
             }
-            ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), save::start, enabled = !save.state.running && ready?.fromDownload != true)
+            if (ready != null) {
+                Box {
+                    ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { menuOpen = true })
+                    val shareLabel = stringResource(R.string.viewer_share)
+                    val openLabel = stringResource(R.string.viewer_open_with)
+                    val refreshLabel = stringResource(R.string.viewer_refresh)
+                    io.github.tianli0.coui17.patterns.GlassMenu(
+                        show = menuOpen,
+                        onDismiss = { menuOpen = false },
+                        entries = buildList {
+                            add(io.github.tianli0.coui17.patterns.MenuEntry(shareLabel, onClick = { startSafely(context, store.shareIntent(ready), noApp) }))
+                            add(io.github.tianli0.coui17.patterns.MenuEntry(openLabel, onClick = { startSafely(context, store.viewIntent(ready), noApp) }))
+                            if (!ready.fromDownload) add(io.github.tianli0.coui17.patterns.MenuEntry(refreshLabel, onClick = { reload++ }))
+                        },
+                    )
+                }
+            }
         }
         // The save line grows in under the header instead of pushing the preview down at once.
         io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.state.running || save.state.error != null || save.state.record != null) {
@@ -451,14 +469,14 @@ private fun ZoomableImage(file: LocalFile, modifier: Modifier) {
 
 @Composable
 private fun TiledImage(file: LocalFile, source: SubSamplingImageSource, onFailed: () -> Unit) {
-    val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 8f))
+    val zoom = rememberZoomableState(zoomSpec = PictureZoomSpec)
     val reporter = remember(onFailed) {
         object : SubSamplingImageErrorReporter {
             override fun onImageLoadingFailed(e: java.io.IOException, imageSource: SubSamplingImageSource) = onFailed()
         }
     }
     val state = rememberSubSamplingImageState(imageSource = source, zoomableState = zoom, errorReporter = reporter)
-    SubSamplingImage(state = state, contentDescription = file.name, modifier = Modifier.fillMaxSize().zoomable(zoom))
+    SubSamplingImage(state = state, contentDescription = file.name, modifier = Modifier.fillMaxSize().zoomable(zoom, onDoubleClick = PictureDoubleTap))
     if (!state.isImageDisplayed) ImageMessage(stringResource(R.string.state_loading))
 }
 
@@ -478,15 +496,15 @@ private fun DecodedZoomableImage(file: LocalFile) {
             }
         }
     }
-    val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 6f))
+    val zoom = rememberZoomableState(zoomSpec = PictureZoomSpec)
     val bmp = bitmap?.getOrNull()
     LaunchedEffect(bmp) {
-        if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
+        if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledToFitAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
     }
     when {
         bitmap == null -> ImageMessage(stringResource(R.string.state_loading))
         bmp == null -> ImageMessage(stringResource(R.string.viewer_image_failed))
-        else -> Image(bitmap = bmp, contentDescription = file.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().zoomable(zoom))
+        else -> Image(bitmap = bmp, contentDescription = file.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().zoomable(zoom, onDoubleClick = PictureDoubleTap))
     }
 }
 
@@ -594,14 +612,14 @@ private fun PdfZoomPager(pdf: PdfDoc, start: Int, renderWidthPx: Int, onClose: (
             val page by produceState<ImageBitmap?>(null, index, renderWidthPx) {
                 value = withContext(Dispatchers.IO) { pdf.render(index, renderWidthPx)?.asImageBitmap() }
             }
-            val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 5f))
+            val zoom = rememberZoomableState(zoomSpec = PictureZoomSpec)
             val bmp = page
             LaunchedEffect(bmp) {
-                if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
+                if (bmp != null) zoom.setContentLocation(ZoomableContentLocation.scaledToFitAndCenterAligned(Size(bmp.width.toFloat(), bmp.height.toFloat())))
             }
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (bmp != null) {
-                    Image(bmp, contentDescription = stringResource(R.string.viewer_pdf_page, index + 1, pdf.pageCount), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().zoomable(zoom))
+                    Image(bmp, contentDescription = stringResource(R.string.viewer_pdf_page, index + 1, pdf.pageCount), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().zoomable(zoom, onDoubleClick = PictureDoubleTap))
                 } else {
                     ImageMessage(stringResource(R.string.state_loading))
                 }

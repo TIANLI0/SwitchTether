@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -78,7 +79,7 @@ enum class CostMetric { COST, TOKENS }
 @Composable
 fun costChipLabel(b: SessionUsageBreakdown): String =
     b.costUsd?.let { UsageFormat.money(it, LocalMoney.current, if (it < 0.1) 3 else 2) }
-        ?: (UsageFormat.tokens(b.totalTokens) + " tokens")
+        ?: androidx.compose.ui.res.stringResource(R.string.cost_chip_tokens, UsageFormat.tokens(b.totalTokens))
 
 /**
  * "费用与用量": the session's cost, a per-turn bar chart (cost, or tokens stacked as cache read /
@@ -196,7 +197,8 @@ private fun CostHero(b: SessionUsageBreakdown) {
         }
         Row {
             HeroStat(stringResource(R.string.cost_turns_label), n.toString(), Modifier.weight(1f))
-            HeroStat(stringResource(R.string.usage_total_tokens), UsageFormat.tokens(b.totalTokens), Modifier.weight(1f))
+            // Without a cost the headline above already is the token total: not a second time here.
+            if (b.costUsd != null) HeroStat(stringResource(R.string.usage_total_tokens), UsageFormat.tokens(b.totalTokens), Modifier.weight(1f))
             HeroStat(stringResource(R.string.cost_cache_hit), UsageFormat.hitRate(b.cacheHitRate), Modifier.weight(1f))
         }
     }
@@ -253,13 +255,16 @@ private fun TurnBarChart(turns: List<TurnUsage>, metric: CostMetric, selected: I
             val n = turns.size.coerceAtLeast(1)
             val fit = (maxWidth - gap * (n - 1)) / n
             val barWidth: Dp = fit.coerceIn(6.dp, 22.dp)
-            // Few turns: the bars keep their width and spread over the card (the slot grows).
-            val slot: Dp = if (n > 1 && fit > barWidth) (maxWidth - barWidth) / (n - 1) else barWidth + gap
+            // Few turns: the bars keep their width and spread a little, centred. Spreading them over
+            // the whole card put two turns at its far edges with an empty middle.
+            val slot: Dp = if (n > 1 && fit > barWidth) ((maxWidth - barWidth) / (n - 1)).coerceAtMost(barWidth * 3) else barWidth + gap
             val contentWidth = if (n > 1) slot * (n - 1) + barWidth else barWidth
+            val chartBoxWidth = maxWidth
             val scroll = rememberScrollState()
             LaunchedEffect(n) { scroll.scrollTo(scroll.maxValue) }
             val density = LocalDensity.current
             Box(Modifier.fillMaxWidth().horizontalScroll(scroll, enabled = contentWidth > maxWidth)) {
+              Box(Modifier.widthIn(min = chartBoxWidth), contentAlignment = Alignment.Center) {
                 Canvas(
                     Modifier
                         .width(contentWidth)
@@ -317,6 +322,7 @@ private fun TurnBarChart(turns: List<TurnUsage>, metric: CostMetric, selected: I
                         }
                     }
                 }
+              }
             }
         }
     }
@@ -369,7 +375,8 @@ private fun TurnDetail(t: TurnUsage, hasCost: Boolean) {
         Row {
             if (hasCost) HeroStat(stringResource(R.string.cost_metric_cost), t.costUsd?.let { UsageFormat.money(it, money, 4) } ?: "—", Modifier.weight(1f))
             HeroStat(stringResource(R.string.usage_total_tokens), UsageFormat.tokens(t.totalTokens), Modifier.weight(1f))
-            HeroStat(stringResource(R.string.cost_duration), t.durationMs?.let { formatDuration(it) } ?: "—", Modifier.weight(1f))
+            // No duration reported for the turn: leave the stat out rather than show a dash.
+            t.durationMs?.let { HeroStat(stringResource(R.string.cost_duration), if (it < 1000) "${it}ms" else durationText(it), Modifier.weight(1f)) }
         }
         val parts = listOf(
             R.string.usage_input to t.inputTokens,
@@ -409,7 +416,8 @@ private fun TokenMix(b: SessionUsageBreakdown) {
             title = stringResource(label),
             startAction = { Box(Modifier.padding(end = 12.dp).size(10.dp).clip(CircleShape).background(color)) },
             endActions = {
-                Column(horizontalAlignment = Alignment.End) {
+                // Centred on the label's line, like the plain value rows below.
+                Column(Modifier.align(Alignment.CenterVertically), horizontalAlignment = Alignment.End) {
                     Text(UsageFormat.tokens(n), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
                     Box(Modifier.padding(top = 4.dp).width(72.dp).height(4.dp).clip(CircleShape).background(COUITheme.colorScheme.onSurface.copy(alpha = 0.06f))) {
                         Box(Modifier.fillMaxWidth(share.coerceIn(0f, 1f)).height(4.dp).clip(CircleShape).background(color))
@@ -430,12 +438,3 @@ private fun TokenMix(b: SessionUsageBreakdown) {
 
 private fun parseTs(ts: String): Long? = runCatching { java.time.Instant.parse(ts).toEpochMilli() }.getOrNull()
 
-private fun formatDuration(ms: Long): String {
-    val s = ms / 1000
-    return when {
-        s < 1 -> "${ms}ms"
-        s < 60 -> "${s}s"
-        s < 3600 -> "${s / 60}m ${s % 60}s"
-        else -> "${s / 3600}h ${(s % 3600) / 60}m"
-    }
-}

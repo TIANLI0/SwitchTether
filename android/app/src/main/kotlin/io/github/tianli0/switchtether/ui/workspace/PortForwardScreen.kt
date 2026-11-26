@@ -305,25 +305,39 @@ fun PortForwardScreen(onBack: () -> Unit) {
             }
             item(key = "listening-h") { SmallTitle(stringResource(R.string.forward_listening), Modifier.animateItem()) }
             item(key = "listening") {
-                val ports = st.ports.valueOrNull.orEmpty()
-                // Rows: [state line when there is no port] + ports + "enter a port".
-                val lead = if (ports.isEmpty()) 1 else 0
-                val rows = lead + ports.size + 1
+                // A PC listens on dozens of ports (chat apps, game launchers, system services): the
+                // dev servers come first in port order, the rest fold behind one row. "Enter a
+                // port" leads the card instead of trailing ~30 rows.
+                var showOthers by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+                val all = st.ports.valueOrNull.orEmpty().sortedBy { it.port }
+                val (dev, others) = all.partition { isLikelyDevServer(it.process) }
+                val ports = if (showOthers || dev.isEmpty()) all.sortedWith(compareBy({ !isLikelyDevServer(it.process) }, { it.port })) else dev
+                val folded = if (showOthers || dev.isEmpty()) 0 else others.size
+                // Rows: "enter a port" + [state line when there is no port] + ports + [show others].
+                val lead = 1 + if (all.isEmpty()) 1 else 0
+                val rows = lead + ports.size + (if (folded > 0 || (showOthers && dev.isNotEmpty() && others.isNotEmpty())) 1 else 0)
                 GroupCard(Modifier.animateItem()) {
+                    BasicComponent(
+                        title = stringResource(R.string.forward_manual),
+                        startAction = { RowIcon(AppIcons.Add) },
+                        enabled = st.online && st.busyPort == null,
+                        onClick = { manual = "" to "" },
+                        cardListPosition = cardListPositionOf(0, rows),
+                    )
                     when (val p = st.ports) {
                         is Loadable.Failed -> BasicComponent(
                             title = p.error.title(),
                             summary = p.error.detail,
-                            cardListPosition = cardListPositionOf(0, rows),
+                            cardListPosition = cardListPositionOf(1, rows),
                         )
                         Loadable.Loading -> BasicComponent(
                             title = stringResource(R.string.forward_listening) + "…",
-                            cardListPosition = cardListPositionOf(0, rows),
+                            cardListPosition = cardListPositionOf(1, rows),
                         )
-                        is Loadable.Ready -> if (ports.isEmpty()) {
+                        is Loadable.Ready -> if (all.isEmpty()) {
                             BasicComponent(
                                 summary = stringResource(R.string.forward_listening_empty),
-                                cardListPosition = cardListPositionOf(0, rows),
+                                cardListPosition = cardListPositionOf(1, rows),
                             )
                         }
                     }
@@ -331,7 +345,8 @@ fun PortForwardScreen(onBack: () -> Unit) {
                         val forwarded = active.any { it.remotePort == port.port }
                         BasicComponent(
                             title = ":${port.port}",
-                            summary = port.process,
+                            // Every row two lines high, named or not.
+                            summary = port.process?.takeIf { it.isNotBlank() } ?: stringResource(R.string.forward_unknown_process),
                             startAction = { RowIcon(AppIcons.Web) },
                             endActions = when {
                                 forwarded -> ({ StatusPill(stringResource(R.string.forward_already), LocalDevColors.current.ok) })
@@ -346,13 +361,13 @@ fun PortForwardScreen(onBack: () -> Unit) {
                             cardListPosition = cardListPositionOf(lead + i, rows),
                         )
                     }
-                    BasicComponent(
-                        title = stringResource(R.string.forward_manual),
-                        startAction = { RowIcon(AppIcons.Add) },
-                        enabled = st.online && st.busyPort == null,
-                        onClick = { manual = "" to "" },
-                        cardListPosition = cardListPositionOf(rows - 1, rows),
-                    )
+                    if (folded > 0 || (showOthers && dev.isNotEmpty() && others.isNotEmpty())) {
+                        BasicComponent(
+                            title = if (showOthers) stringResource(R.string.forward_hide_other_ports) else stringResource(R.string.forward_show_other_ports, others.size),
+                            onClick = { showOthers = !showOthers },
+                            cardListPosition = cardListPositionOf(rows - 1, rows),
+                        )
+                    }
                 }
             }
             item(key = "hint") {
@@ -452,3 +467,15 @@ private val PortPairSaver = androidx.compose.runtime.saveable.Saver<Pair<String,
     save = { p -> p?.let { listOf(it.first, it.second) } },
     restore = { l -> if (l.size == 2) l[0] to l[1] else null },
 )
+
+/** Runtimes and servers people forward from a phone: their listening ports are shown first. */
+private val DEV_PROCESSES = listOf(
+    "node", "bun", "deno", "python", "py", "uvicorn", "gunicorn", "java", "javaw", "ruby", "rails", "php", "go",
+    "dotnet", "cargo", "vite", "next", "esbuild", "webpack", "hugo", "jekyll", "nginx", "caddy", "httpd", "apache",
+    "docker", "com.docker", "wslrelay", "code", "jupyter", "postgres", "mysqld", "redis", "mongod", "dsh",
+)
+
+internal fun isLikelyDevServer(process: String?): Boolean {
+    val p = process?.lowercase()?.removeSuffix(".exe")?.substringAfterLast('/')?.substringAfterLast('\\') ?: return false
+    return DEV_PROCESSES.any { p == it || p.startsWith("$it-") || p.startsWith("${it}3") || p.startsWith("$it.") }
+}

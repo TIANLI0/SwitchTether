@@ -38,6 +38,11 @@ fun TextFileBody(
     onOpenPath: ((String) -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
     onOpenBinary: (() -> Unit)? = null,
+    /**
+     * The caller's title bar offers the viewer's tools and the Markdown rich text / source choice
+     * (Files page); null = this body draws them itself (previews opened from chat).
+     */
+    controls: CodeViewerState? = null,
 ) {
     Column(modifier.fillMaxSize()) {
         if (file.truncated && file.text != null) {
@@ -56,14 +61,14 @@ fun TextFileBody(
         if (FileTypes.isMarkdown(file.path)) {
             // Rich text or source; the choice carries over to the next Markdown file.
             val rendered = MarkdownPreviewMode.rendered
-            MarkdownModeSwitch(rendered, onChange = { MarkdownPreviewMode.rendered = it })
+            if (controls == null) MarkdownModeSwitch(rendered, onChange = { MarkdownPreviewMode.rendered = it })
             if (rendered) {
                 MarkdownDocView(text, file.path, onOpenPath, Modifier.weight(1f).fillMaxWidth())
             } else {
-                CodeViewer(text, file.path, file.language ?: "markdown", Modifier.weight(1f))
+                CodeViewer(text, file.path, file.language ?: "markdown", Modifier.weight(1f), controls = controls)
             }
         } else {
-            CodeViewer(text, file.path, file.language, Modifier.weight(1f))
+            CodeViewer(text, file.path, file.language, Modifier.weight(1f), controls = controls)
         }
     }
 }

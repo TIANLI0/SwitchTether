@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -142,22 +143,28 @@ private fun MdTable(
     onImageClick: ((String, String) -> Unit)?,
 ) {
     val border = COUITheme.colorScheme.dividerLine
+    val headerFill = LocalDevColors.current.codeBackground
     val columns = maxOf(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
+    val rows = listOf(table.header).plus(table.rows)
     val cellStyle = COUITheme.textStyles.body2.copy(
         fontSize = 13.sp,
         fontFamily = FontFamily.SansSerif,
         fontSynthesis = FontSynthesis.All,
     )
+    // A real grid: every column as wide as its widest cell (64–260dp), every row as tall as its
+    // tallest cell. Rows used to size themselves, so columns started at a different x per row,
+    // and the body rows' `surface` fill (black in the dark theme) only reached their own text.
+    // Body cells now sit on the page colour; only the header row is filled, like the file preview.
+    val grid = remember { TableGrid() }
     Box(
         Modifier
             .clip(SquircleShape(8.dp))
             .border(1.dp, border, SquircleShape(8.dp))
             .horizontalScroll(rememberScrollState()),
     ) {
-        Column {
-            listOf(table.header).plus(table.rows).forEachIndexed { r, row ->
-                if (r > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(border))
-                Row(Modifier.background(if (r == 0) LocalDevColors.current.codeBackground else COUITheme.colorScheme.surface)) {
+        androidx.compose.ui.layout.Layout(
+            content = {
+                rows.forEachIndexed { r, row ->
                     for (c in 0 until columns) {
                         val align = when (table.align.getOrNull(c)) {
                             Align.CENTER -> TextAlign.Center
@@ -170,11 +177,52 @@ private fun MdTable(
                             fontWeight = if (r == 0) FontWeight.Bold else null,
                             textAlign = align,
                             color = COUITheme.colorScheme.onSurface,
-                            modifier = Modifier.widthIn(min = 64.dp, max = 260.dp).padding(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         )
                     }
+                }
+            },
+            modifier = Modifier.drawBehind {
+                if (grid.rowBottoms.isEmpty()) return@drawBehind
+                val line = 1.dp.toPx()
+                drawRect(headerFill, size = androidx.compose.ui.geometry.Size(size.width, grid.rowBottoms[0].toFloat()))
+                grid.rowBottoms.dropLast(1).forEach { y ->
+                    drawRect(border, topLeft = androidx.compose.ui.geometry.Offset(0f, y.toFloat()), size = androidx.compose.ui.geometry.Size(size.width, line))
+                }
+                grid.columnRights.dropLast(1).forEach { x ->
+                    drawRect(border, topLeft = androidx.compose.ui.geometry.Offset(x.toFloat(), 0f), size = androidx.compose.ui.geometry.Size(line, size.height))
+                }
+            },
+        ) { measurables, _ ->
+            val minW = 64.dp.roundToPx()
+            val maxW = 260.dp.roundToPx()
+            val line = 1.dp.roundToPx()
+            val widths = IntArray(columns) { c ->
+                (0 until rows.size).maxOf { r -> measurables[r * columns + c].maxIntrinsicWidth(Int.MAX_VALUE) }.coerceIn(minW, maxW)
+            }
+            val placeables = measurables.mapIndexed { i, m -> m.measure(androidx.compose.ui.unit.Constraints.fixedWidth(widths[i % columns])) }
+            val heights = IntArray(rows.size) { r -> (0 until columns).maxOfOrNull { c -> placeables[r * columns + c].height } ?: 0 }
+            val width = widths.sum() + line * (columns - 1).coerceAtLeast(0)
+            val height = heights.sum() + line * (rows.size - 1).coerceAtLeast(0)
+            grid.rowBottoms = heights.runningFold(0) { acc, h -> acc + h + line }.drop(1).map { it - line }
+            grid.columnRights = widths.toList().runningFold(0) { acc, w -> acc + w + line }.drop(1).map { it - line }
+            layout(width, height) {
+                var y = 0
+                for (r in rows.indices) {
+                    var x = 0
+                    for (c in 0 until columns) {
+                        placeables[r * columns + c].place(x, y)
+                        x += widths[c] + line
+                    }
+                    y += heights[r] + line
                 }
             }
         }
     }
+}
+
+/** Where the table's rows end and columns end (px), from its last layout, for the dividers. */
+private class TableGrid {
+    var rowBottoms: List<Int> = emptyList()
+    var columnRights: List<Int> = emptyList()
 }

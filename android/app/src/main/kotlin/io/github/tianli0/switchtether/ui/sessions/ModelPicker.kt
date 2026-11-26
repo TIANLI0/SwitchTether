@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.sessions
 
 import io.github.tianli0.coui17.patterns.PageDefaults
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -16,7 +17,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.style.TextAlign
 import io.github.suqi8.coui.kmp.basic.Slider
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
@@ -160,7 +160,7 @@ fun ModelEffortChooser(
             LinkButton(
                 text = stringResource(if (showPinned) R.string.model_fewer_versions else R.string.model_more_versions, pinned.size),
                 onClick = { showPinned = !showPinned },
-                modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 8.dp),
+                modifier = Modifier.padding(start = PageDefaults.TextGutter - 10.dp, end = 14.dp).padding(bottom = 8.dp),
             )
         }
         if (allowCustom) {
@@ -204,6 +204,8 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
             Text(stringResource(R.string.effort_title), style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
             Text(effortLabel(stops[index]), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.primary)
         }
+        // Where the stops are: inside the track's rounded ends (half the slider's height).
+        var stopInset by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
         Slider(
             value = pos,
             onValueChange = { pos = it },
@@ -220,6 +222,7 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 6.dp)
+                .onSizeChanged { stopInset = (it.height / 2f).coerceAtMost(it.width / 4f) }
                 // The slider itself only follows a drag: a tap lands on the nearest stop.
                 .pointerInput(stops, enabled) {
                     if (!enabled) return@pointerInput
@@ -234,25 +237,35 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
                 }
                 .testTag("effort-slider"),
         )
-        Row(Modifier.fillMaxWidth()) {
-            stops.forEachIndexed { i, e ->
-                Text(
-                    effortLabel(e),
-                    style = COUITheme.textStyles.footnote2,
-                    color = if (i == index) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurfaceVariantSummary,
-                    textAlign = when (i) {
-                        0 -> TextAlign.Start
-                        stops.lastIndex -> TextAlign.End
-                        else -> TextAlign.Center
-                    },
-                    maxLines = 1,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable(enabled = enabled) { pick(i) }
-                        .padding(vertical = 4.dp)
-                        .testTag("effort-${e.ifEmpty { "default" }}"),
-                )
+        androidx.compose.ui.layout.Layout(
+            content = {
+                stops.forEachIndexed { i, e ->
+                    Text(
+                        effortLabel(e),
+                        style = COUITheme.textStyles.footnote2,
+                        color = if (i == index) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(enabled = enabled) { pick(i) }
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                            .testTag("effort-${e.ifEmpty { "default" }}"),
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { measurables, constraints ->
+            val w = constraints.maxWidth
+            val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, maxWidth = (w / stops.size.coerceAtLeast(1)) * 2)) }
+            val h = placeables.maxOfOrNull { it.height } ?: 0
+            layout(w, h) {
+                val span = (w - 2 * stopInset).coerceAtLeast(0f)
+                placeables.forEachIndexed { i, pl ->
+                    val centre = stopInset + if (stops.size > 1) span * i / stops.lastIndex else span / 2f
+                    // Centred under its stop, kept inside the card at both ends.
+                    val x = (centre - pl.width / 2f).toInt().coerceIn(0, (w - pl.width).coerceAtLeast(0))
+                    pl.placeRelative(x, 0)
+                }
             }
         }
       }

@@ -40,7 +40,8 @@ import io.github.tianli0.switchtether.update.UpdateState
 /** One-line summary for the Settings row. */
 @Composable
 fun updateSummary(state: UpdateState, current: String): String = when (state) {
-    UpdateState.Idle -> stringResource(R.string.update_current, current)
+    // The version is the row right above it on About: say what the row does instead.
+    UpdateState.Idle -> stringResource(R.string.update_idle)
     UpdateState.Checking -> stringResource(R.string.update_checking)
     is UpdateState.UpToDate -> stringResource(R.string.update_up_to_date, current)
     UpdateState.NoReleases -> stringResource(R.string.update_no_releases)

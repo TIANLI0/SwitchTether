@@ -44,7 +44,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -72,7 +74,6 @@ import io.github.tianli0.switchtether.remote.pairing.PairingLink
 import io.github.tianli0.switchtether.remote.tls.Fingerprints
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.coui17.patterns.TextInput
-import io.github.tianli0.coui17.patterns.NoticeBanner
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -218,7 +219,7 @@ private fun IntroContent(
 ) {
     Title(stringResource(R.string.app_name), stringResource(R.string.onboarding_subtitle))
     if (revokedReason != null) {
-        NoticeBanner(stringResource(R.string.onboarding_revoked, revokedReason.second ?: "—", revokedReason.first), LocalDevColors.current.danger, Modifier.clip(SquircleShape(10.dp)))
+        io.github.tianli0.switchtether.ui.common.WrapNotice(stringResource(R.string.onboarding_revoked, revokedReason.second ?: "—", revokedReason.first), LocalDevColors.current.danger, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     Card(Modifier.fillMaxWidth()) {
@@ -234,7 +235,7 @@ private fun IntroContent(
     }
     if (!deviceSecure) {
         Spacer(Modifier.height(12.dp))
-        NoticeBanner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
+        io.github.tianli0.switchtether.ui.common.WrapNotice(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     Button(
@@ -344,7 +345,7 @@ private fun ConfirmContent(link: PairingLink, deviceSecure: Boolean, onPair: () 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Field(stringResource(R.string.field_desktop), link.desktopName)
-            Field(stringResource(R.string.field_addresses), link.hosts.joinToString("\n") { h -> (if (h.contains(':')) "[$h]" else h) + ":" + link.port })
+            AddressesField(link.hosts, link.port)
             Field(stringResource(R.string.field_fingerprint), Fingerprints.grouped(link.fingerprint), mono = true)
         }
     }
@@ -352,7 +353,7 @@ private fun ConfirmContent(link: PairingLink, deviceSecure: Boolean, onPair: () 
     Text(stringResource(R.string.confirm_fingerprint_hint), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
     if (!deviceSecure) {
         Spacer(Modifier.height(10.dp))
-        NoticeBanner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
+        io.github.tianli0.switchtether.ui.common.WrapNotice(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     StepButtons(
@@ -362,6 +363,37 @@ private fun ConfirmContent(link: PairingLink, deviceSecure: Boolean, onPair: () 
         secondary = stringResource(R.string.action_cancel),
         onSecondary = onBack,
     )
+}
+
+/**
+ * The computer's addresses, one per line as `host:port` (IPv6 in brackets). A line never wraps —
+ * a long IPv6 address is shortened in the middle, so the port is never split across lines — and
+ * the IPv6 addresses fold behind "N more IPv6 addresses" when there are IPv4 ones (tap to show).
+ */
+@Composable
+private fun AddressesField(hosts: List<String>, port: Int) {
+    val (v6, v4) = hosts.partition { it.contains(':') }
+    var showV6 by rememberSaveable { mutableStateOf(v4.isEmpty()) }
+    Column {
+        Text(stringResource(R.string.field_addresses), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+        (v4 + if (showV6) v6 else emptyList()).forEach { h ->
+            Text(
+                (if (h.contains(':')) "[$h]" else h) + ":" + port,
+                style = COUITheme.textStyles.body1,
+                color = COUITheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis,
+            )
+        }
+        if (!showV6 && v6.isNotEmpty()) {
+            Text(
+                pluralStringResource(R.plurals.field_addresses_more_v6, v6.size, v6.size),
+                style = COUITheme.textStyles.footnote1,
+                color = COUITheme.colorScheme.primary,
+                modifier = Modifier.clickable { showV6 = true }.padding(vertical = 6.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -432,7 +464,7 @@ private fun CodeContent(
     }
     if (!deviceSecure) {
         Spacer(Modifier.height(10.dp))
-        NoticeBanner(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
+        io.github.tianli0.switchtether.ui.common.WrapNotice(stringResource(R.string.onboarding_no_lock_screen), LocalDevColors.current.warn, Modifier.clip(SquircleShape(10.dp)))
     }
     Spacer(Modifier.height(20.dp))
     StepButtons(
@@ -487,11 +519,11 @@ private fun VerificationContent(result: PairingResult, onDone: () -> Unit, onRej
         },
     )
     if (!result.codesMatch) {
-        NoticeBanner(stringResource(R.string.verify_mismatch), dev.danger, Modifier.clip(SquircleShape(10.dp)))
+        io.github.tianli0.switchtether.ui.common.WrapNotice(stringResource(R.string.verify_mismatch), dev.danger, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     if (!result.stepUpEnabled) {
-        NoticeBanner(stringResource(R.string.verify_no_stepup), dev.warn, Modifier.clip(SquircleShape(10.dp)))
+        io.github.tianli0.switchtether.ui.common.WrapNotice(stringResource(R.string.verify_no_stepup), dev.warn, Modifier.clip(SquircleShape(10.dp)))
         Spacer(Modifier.height(12.dp))
     }
     Spacer(Modifier.height(8.dp))

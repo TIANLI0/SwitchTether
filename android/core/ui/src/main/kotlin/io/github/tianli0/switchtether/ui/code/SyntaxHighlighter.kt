@@ -42,6 +42,7 @@ object SyntaxHighlighter {
         val kw = keywords[lang] ?: keywords.getValue("java")
         val hashComments = lang in setOf("py", "python", "sh", "bash", "zsh", "shell", "console", "yaml", "toml", "ps1", "powershell", "rb", "ruby")
         val slashComments = !hashComments || lang == null
+        val shell = lang in setOf("sh", "bash", "zsh", "shell", "console")
         val kwStyle = SpanStyle(color = colors.keyword)
         val strStyle = SpanStyle(color = colors.string)
         val comStyle = SpanStyle(color = colors.comment, fontStyle = FontStyle.Italic)
@@ -50,9 +51,42 @@ object SyntaxHighlighter {
             append(code)
             var i = 0
             val n = code.length
+            // A shell here-document body (`<<EOF` … `EOF`) is text, not script: an apostrophe in a
+            // commit message opened a string to the end of its line and numbers turned blue.
+            var docStart = -1
+            var docEnd = -1
             while (i < n) {
+                if (docStart in 0..i) {
+                    i = maxOf(i, docEnd)
+                    docStart = -1
+                    continue
+                }
                 val c = code[i]
                 when {
+                    shell && docStart < 0 && c == '<' && i + 1 < n && code[i + 1] == '<' && (i + 2 >= n || code[i + 2] != '<') -> {
+                        var j = i + 2
+                        if (j < n && code[j] == '-') j++
+                        while (j < n && code[j] == ' ') j++
+                        val quote = code.getOrNull(j)?.takeIf { it == '\'' || it == '"' }
+                        if (quote != null) j++
+                        val wordStart = j
+                        while (j < n && (code[j].isLetterOrDigit() || code[j] == '_')) j++
+                        val word = code.substring(wordStart, j)
+                        if (quote != null && j < n && code[j] == quote) j++
+                        if (word.isNotEmpty()) {
+                            val bodyStart = code.indexOf('\n', j).let { if (it < 0) n else it + 1 }
+                            var k = bodyStart
+                            var end = n
+                            while (k < n) {
+                                val e = code.indexOf('\n', k).let { if (it < 0) n else it }
+                                if (code.substring(k, e).trim() == word) { end = e; break }
+                                k = e + 1
+                            }
+                            // The rest of the opening line is still script; the body is skipped.
+                            if (bodyStart < n) { docStart = bodyStart; docEnd = end }
+                        }
+                        i = j
+                    }
                     slashComments && c == '/' && i + 1 < n && code[i + 1] == '/' -> {
                         val end = code.indexOf('\n', i).let { if (it < 0) n else it }
                         addStyle(comStyle, i, end); i = end

@@ -27,7 +27,7 @@
     <string name="files_search">Search files</string>
     <string name="files_search_content">Search inside files</string>
     <string name="files_results">%1$d results</string>
-    <string name="files_hidden">Show or hide hidden files</string>
+    <string name="files_hidden">Show hidden files</string>
     <string name="files_new_file">New file</string>
     <string name="files_new_folder">New folder</string>
     <string name="files_upload">Upload</string>
@@ -84,11 +84,24 @@
     <string name="term_scrollback_short">↑ Load earlier output</string>
     <!-- Files: list, path bar, viewer (file browsing usability pass) -->
     <string name="files_filter_hint">Filter this folder</string>
+    <string name="files_filter_clear">Clear</string>
     <string name="files_filter_none">No matches in this folder.</string>
     <string name="files_search_subfolders">Search subfolders for “%1$s”</string>
     <string name="files_search_none">Nothing found.</string>
     <string name="files_empty_folder">This folder is empty.</string>
     <string name="files_count">%1$d folders · %2$d files</string>
+    <string name="files_all">All files</string>
+    <plurals name="files_item_total">
+        <item quantity="one">%1$d item</item>
+        <item quantity="other">%1$d items</item>
+    </plurals>
+    <plurals name="files_filter_matches">
+        <item quantity="one">%1$d of %2$d matches</item>
+        <item quantity="other">%1$d of %2$d match</item>
+    </plurals>
+    <string name="files_new">New</string>
+    <string name="files_search_open">Search</string>
+    <string name="files_sort_current">Sort: %1$s</string>
     <string name="files_up">Up one folder</string>
     <string name="files_sort">Sort</string>
     <string name="files_sort_name">Name</string>
@@ -115,6 +128,8 @@
     <string name="files_line_shortened">… (line shortened, %1$d characters)</string>
     <string name="files_md_rendered">Rich text</string>
     <string name="files_md_source">Code</string>
+    <string name="files_md_show_source">Show source</string>
+    <string name="files_md_show_rendered">Show rich text</string>
     <string name="files_truncated_banner">Only the first %1$s of this %2$s file are shown; it can\'t be edited here.</string>
     <string name="files_pdf_zoom">Open page to zoom</string>
     <string name="files_code_copy">Copy code</string>
@@ -128,4 +143,9 @@
     <string name="files_err_not_connected">Not connected to the computer</string>
     <string name="files_err_cancelled">Cancelled</string>
     <string name="files_msg_transfer_busy">Another transfer is running. Wait for it to finish or cancel it first.</string>
+    <string name="new_session_parent_folder">Parent folder</string>
+    <string name="folder_home">Home</string>
+    <string name="folder_desktop">Desktop</string>
+    <string name="folder_documents">Documents</string>
+    <string name="folder_downloads">Downloads</string>
 </resources>

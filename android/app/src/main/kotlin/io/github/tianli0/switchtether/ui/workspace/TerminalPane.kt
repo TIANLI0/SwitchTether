@@ -181,7 +181,8 @@ fun TerminalActions(state: TerminalUiState, vm: TerminalViewModel, controller: T
         GlassMenu(
             show = menu,
             entries = buildList {
-                add(MenuEntry(stringResource(R.string.term_new)) { controller.showShells = true })
+                // A new terminal fails the same way while the phone has no fingerprint key.
+                if (state.link != TermLink.NO_STEP_UP_KEY) add(MenuEntry(stringResource(R.string.term_new)) { controller.showShells = true })
                 if (state.selectedId != null) {
                     add(MenuEntry(stringResource(R.string.term_copy_screen)) { clipboard.setText(AnnotatedString(state.screen.plainText())) })
                     add(MenuEntry(stringResource(R.string.action_refresh)) { vm.refresh() })
@@ -227,7 +228,24 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: Term
         }
         state.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = 16.dp)) }
         when {
-            state.link == TermLink.NO_STEP_UP_KEY -> Box(Modifier.padding(top = 8.dp)) { GroupCard { EmptyState(title = stringResource(R.string.term_no_stepup), modifier = Modifier.padding(24.dp)) } }
+            // Terminals need the fingerprint key made at pairing; without a screen lock there is none.
+            // Say so in full (the one-line card cut the instruction off) and offer the way there,
+            // as DeepSeek Harness Web does for the same case.
+            state.link == TermLink.NO_STEP_UP_KEY -> {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                Box(Modifier.fillMaxSize().padding(bottom = 48.dp), contentAlignment = Alignment.Center) {
+                    io.github.tianli0.coui17.patterns.ErrorState(
+                        title = stringResource(R.string.term_locked_title),
+                        message = stringResource(R.string.term_no_stepup),
+                        retryLabel = stringResource(R.string.term_open_security),
+                        onRetry = {
+                            runCatching {
+                                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }
+                        },
+                    )
+                }
+            }
             state.link == TermLink.NEEDS_STEP_UP -> Box(Modifier.padding(top = 8.dp)) {
                 GroupCard {
                     Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {

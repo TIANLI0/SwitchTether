@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui.common
 
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
@@ -13,7 +14,7 @@ import java.util.Locale
 
 /** Localized relative time ("刚刚" / "5 分钟前" …), falling back to a short local date after a week. */
 @Composable
-fun relativeTime(epochMs: Long?, nowMs: Long = System.currentTimeMillis()): String {
+fun relativeTime(epochMs: Long?, nowMs: Long = MinuteClock.now.longValue): String {
     if (epochMs == null || epochMs <= 0) return "—"
     val d = (nowMs - epochMs).coerceAtLeast(0) / 1000
     return when {
@@ -122,4 +123,23 @@ data class UiText(val res: Int, val args: List<Any> = emptyList())
 fun UiText.resolve(): String {
     val resolved = args.map { a -> if (a is Int && a > 0x7f000000) stringResource(a) else a }
     return stringResource(res, *resolved.toTypedArray())
+}
+
+/**
+ * The time relative labels are measured from, advanced every 30 s while the app runs, so "5 分钟前"
+ * keeps counting on a page left open (it froze at the moment the row was composed, and Home and
+ * Sessions could show the same session minutes apart). One clock for every row.
+ */
+object MinuteClock {
+    val now = androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis())
+
+    init {
+        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            while (true) {
+                kotlinx.coroutines.delay(30_000)
+                now.longValue = System.currentTimeMillis()
+            }
+        }
+    }
 }

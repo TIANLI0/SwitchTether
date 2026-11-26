@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.common
 
+import androidx.compose.ui.unit.dp
 import io.github.tianli0.coui17.patterns.LocalPageTopInset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -72,7 +73,11 @@ fun <T> LoadableContent(state: Loadable<T>, onRetry: () -> Unit, content: @Compo
         Loadable.Loading -> androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().padding(top = LocalPageTopInset.current)) {
             LoadingState(stringResource(R.string.state_loading))
         }
-        is Loadable.Failed -> androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().padding(top = LocalPageTopInset.current)) {
+        // Centred like the loading state (it sat at the top of an empty page before).
+        is Loadable.Failed -> androidx.compose.foundation.layout.Box(
+            androidx.compose.ui.Modifier.fillMaxSize().padding(top = LocalPageTopInset.current, bottom = 48.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) {
             ErrorState(
                 title = state.error.title(),
                 message = if (state.error.kind == UiError.Kind.BACKEND_UNAVAILABLE) stringResource(R.string.error_backend_unavailable_detail) else state.error.detail,
