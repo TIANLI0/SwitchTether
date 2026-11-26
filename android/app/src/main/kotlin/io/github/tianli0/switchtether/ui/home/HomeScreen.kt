@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.home
 
+import io.github.suqi8.coui.kmp.basic.preciseClickAnchor
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.LinkButton
 import io.github.tianli0.coui17.patterns.SmallButton
@@ -189,8 +190,9 @@ private const val MAX_IDLE_ROWS = 3
 private fun SessionGroup(list: List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>, onOpen: (Route) -> Unit) {
     val pins by io.github.tianli0.switchtether.ui.appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
     var menuFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.remote.protocol.SessionSummary?>(null) }
-    io.github.tianli0.switchtether.ui.sessions.PinMenuDialog(menuFor, menuFor?.id in pins) { menuFor = null }
-    GroupCard {
+    val touch = io.github.suqi8.coui.kmp.basic.rememberPreciseClickState()
+    io.github.tianli0.switchtether.ui.sessions.PinMenu(menuFor, menuFor?.id in pins, touch) { menuFor = null }
+    GroupCard(Modifier.preciseClickAnchor(touch)) {
         list.forEachIndexed { i, it ->
             SessionRow(it, onClick = { onOpen(Route.SessionDetail(it.id, it.title)) }, position = cardListPositionOf(i, list.size), compact = true, pinned = it.id in pins, onLongClick = { menuFor = it })
         }

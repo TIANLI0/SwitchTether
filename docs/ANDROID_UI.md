@@ -176,7 +176,7 @@ the accent is the brand blue `#1F6BFF` (dark: `#4A86FF`) fed into `lightColorSch
 
 | Screen | coui17 components |
 | :--- | :--- |
-| Shell | `BottomFloatingNavigationBar` (floating glass capsule over a `LayerBackdrop` of the page, `expansion` "+" melt-ball on the Sessions tab → New session, hidden with animation on detail pages) + `BottomFloatingNavigationBarItem` (`icon`, plus `selectedIcon` where coui-icons has a Fill glyph); `NavigationRail` + `NavigationRailItem` (≥ 600 dp); `COUIIcons` |
+| Shell | `BottomFloatingNavigationBar` (floating glass capsule over a `LayerBackdrop` of the page, `expansion` "+" melt-ball on the Sessions tab → New session, hidden in place on detail pages: scale, alpha and a foreground blur that follows the system blur switch, `rememberCouiScaleVisibility`) + `BottomFloatingNavigationBarItem` (`icon`, plus `selectedIcon` where coui-icons has a Fill glyph); `NavigationRail` + `NavigationRailItem` (≥ 600 dp); `COUIIcons` |
 | Home | `Scaffold`, `TopAppBar` (large, subtitle = desktop), `Card` groups, `BasicComponent` (connection, session rows, states), `ArrowPreference` + icons (quick links), `SmallTitle`, `TextButton` |
 | Sessions | `TopAppBar`, `TextField`, `TabRowWithContour` (Live/History/All), `ChipTabGroup` (agents), `PullToRefresh`, `BasicComponent` rows in group cards, `EmptyState` (New session = capsule expansion) |
 | Session detail | Redesigned in Phase C, see §11 |
@@ -623,7 +623,7 @@ the offline banner (UDP magic packet to the subnet broadcast and 255.255.255.255
 ### 13.8 Live Updates / Fluid Cloud (钉住任务)
 ColorOS 16 shows Android 16 Live Updates in Fluid Cloud (流体云); the app posts standard Live
 Updates only (no OPPO SDK).
-- Pin up to 3 sessions ("钉到流体云" in the session toolbar, long-press on a row; optional
+- Pin up to 3 sessions ("钉到流体云" in the session toolbar, or the menu a long-press on a row opens at the finger; optional
   "从手机发起的任务自动钉住"). One promoted ongoing notification per pin, re-posted only when what
   it shows changed (§21.1); a pin keeps the connection alive (the keep-alive service starts when the first pin is
   added and stops with the last one unless "后台保持连接" is on).

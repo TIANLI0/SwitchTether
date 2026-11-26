@@ -116,20 +116,22 @@ fun statusLabel(status: String): String = when (status) {
     else -> stringResource(R.string.step_unknown)
 }
 
-/** Long-press menu of a session row: pin / unpin to Fluid Cloud (Live Update). */
+/**
+ * The long-press menu of a session row: follow it in Live Updates, or stop. Opens at the finger
+ * ([touch] is recorded by `Modifier.preciseClickAnchor` on the list holding the rows).
+ */
 @Composable
-fun PinMenuDialog(session: SessionSummary?, pinned: Boolean, onDismiss: () -> Unit) {
+fun PinMenu(session: SessionSummary?, pinned: Boolean, touch: io.github.suqi8.coui.kmp.basic.PreciseClickState, onDismiss: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    io.github.tianli0.coui17.patterns.ConfirmDialog(
+    io.github.tianli0.coui17.patterns.GlassMenu(
         show = session != null,
-        title = session?.let { io.github.tianli0.switchtether.domain.SessionNaming.rowTitle(sessionDisplayTitle(it)) }.orEmpty(),
-        message = stringResource(if (pinned) R.string.pin_menu_unpin_body else R.string.pin_menu_pin_body),
-        confirmText = stringResource(if (pinned) R.string.pin_remove else R.string.pin_add),
-        onConfirm = {
-            session?.let { io.github.tianli0.switchtether.ui.common.togglePin(context, it) }
-            onDismiss()
-        },
+        entries = listOf(
+            io.github.tianli0.coui17.patterns.MenuEntry(stringResource(if (pinned) R.string.pin_remove else R.string.pin_add)) {
+                session?.let { io.github.tianli0.switchtether.ui.common.togglePin(context, it) }
+            },
+        ),
         onDismiss = onDismiss,
+        touch = touch,
     )
 }
 

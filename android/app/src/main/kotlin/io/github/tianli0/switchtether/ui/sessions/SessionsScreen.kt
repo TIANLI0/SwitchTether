@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
+import io.github.suqi8.coui.kmp.basic.preciseClickAnchor
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Box
 import io.github.tianli0.coui17.patterns.LinkButton
@@ -90,7 +91,8 @@ fun SessionsContent(
     val title = stringResource(R.string.tab_sessions)
     val agents = if (state.knownAgents.size > 1) listOf<String?>(null) + state.knownAgents else null
     val agentTabs = agents?.map { ChipTabData(if (it == null) stringResource(R.string.sessions_all_agents) else Formatters.agentLabel(it)) }
-    PinMenuDialog(menuFor, menuFor?.id in pins) { menuFor = null }
+    val touch = io.github.suqi8.coui.kmp.basic.rememberPreciseClickState()
+    PinMenu(menuFor, menuFor?.id in pins, touch) { menuFor = null }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = containerColor,
@@ -164,7 +166,7 @@ fun SessionsContent(
             LoadableContent(state.items, onRetry = onReload) { _ ->
                 val visible = state.visible
                 PullToRefresh(isRefreshing = refreshing, onRefresh = onReload, topAppBarScrollBehavior = null) {
-                    LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("session-list"), contentPadding = pageListPadding(top = 8.dp)) {
+                    LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().preciseClickAnchor(touch).testTag("session-list"), contentPadding = pageListPadding(top = 8.dp)) {
                         if (visible.isEmpty()) {
                             item {
                                 EmptyState(

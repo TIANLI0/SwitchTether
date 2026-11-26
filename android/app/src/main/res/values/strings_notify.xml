@@ -85,8 +85,6 @@
     <string name="pin_remove">Stop following</string>
     <string name="pin_tag">Following</string>
     <string name="pin_limit">All %1$d slots are held by tasks you follow. Stop following one first.</string>
-    <string name="pin_menu_pin_body">Follow this task in a live notification (status bar and lock screen) until you stop following it.</string>
-    <string name="pin_menu_unpin_body">Stop following this task in a live notification.</string>
     <string name="pin_sheet_title">Follow tasks in Live Updates</string>
     <string name="pin_sheet_body">A followed task shows its live status (running, waiting for you, finished) in the status bar and on the lock screen. Android shows it there only when “live notifications” are allowed for SwitchTether; otherwise it stays a normal ongoing notification.</string>
     <string name="pin_open_settings">Allow live notifications</string>
