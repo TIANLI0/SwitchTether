@@ -7,5 +7,7 @@
   "setUpstream": false,
   "remote": null,
   "branch": null,
-  "create": false
+  "create": false,
+  "amend": false,
+  "force": false
 }

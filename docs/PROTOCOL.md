@@ -120,7 +120,7 @@ device credential succeeded on the phone. The server never trusts a client-side 
 | `files_write` | write / create / rename / delete / upload files |
 | `config_write` | provider credential update, config restore, MCP/skill writes |
 | `port_forward` | start (or renew) a port forward lease (§7.11); the lease, not the grant, authorises its tunnel |
-| `git_write` | Git stage / unstage / discard / commit / push / pull / fetch / checkout (§7.7) |
+| `git_write` | Git stage / unstage / discard / commit / push / pull / fetch / checkout, and with `git_manage` branch delete / merge / merge abort / stash (§7.7) |
 
 Devices paired without a step-up key cannot use these scopes (`step_up_required` with
 `details.reason = "no_step_up_key"`).
@@ -337,32 +337,51 @@ The desktop runs the terminal emulator (vt100 state machine) and streams screen 
 - `PUT /v1/fs/write` *(files_write)* `{commandId, path, text, baseSha256|null, encoding?, bom?, createOnly?}` → `200 {path, sha256, size, created}` or `409 conflict` with `details {currentSha256, currentText?, suggestedCopyPath}`
 - `POST /v1/fs/rename` `{commandId, from, to, overwrite?}` · `POST /v1/fs/delete` `{commandId, path, baseSha256?}` (moves to the OS trash) · `POST /v1/fs/mkdir` `{commandId, path}` *(files_write)*
 - `GET /v1/fs/download?path=` (streamed, single `Range` supported; sensitive files refused) · `POST /v1/fs/upload` `{commandId, path, size, sha256?, overwrite?}` → `{uploadId}`, then `PUT /v1/fs/upload/{id}?offset=` raw chunks ≤ 8 MiB, `DELETE /v1/fs/upload/{id}` cancels *(files_write)*
-- `GET /v1/git/status?repo=` · `GET /v1/git/diff?repo=&path=&staged=` · `GET /v1/git/log?repo=&path=&limit=` · `GET /v1/git/show?repo=&rev=&path=` (file at a commit)
-- `GET /v1/git/branches?repo=` → `{ root, current, local: [Branch], remote: [Branch] }`, `Branch = { name, current, upstream, timeMs }`;
-  `local` has the current branch first, then by last commit; `remote` lists remote-tracking branches (`origin/x`, no
-  `*/HEAD`) without a local branch of the same short name (fixture `git_branches.json`).
+- `GET /v1/git/status?repo=` → `RepoStatus { root, branch, upstream, ahead, behind, entries: [StatusEntry], merging? }`;
+  `StatusEntry { path, origPath, index, worktree, untracked, conflicted, added?, removed?, stagedAdded?, stagedRemoved? }`
+  — the line counts come from `diff --numstat` (worktree) and `diff --cached --numstat` (index) and are left out for
+  binary / untracked files; `merging: true` while a merge stopped on conflicts (`MERGE_HEAD`).
+- `GET /v1/git/diff?repo=&path=&staged=` · with `rev=` (and `origPath=` for a rename): what that commit changed in
+  `path`, against its first parent (a root commit against the empty tree) → `{ root, diff, truncated }`
+- `GET /v1/git/log?repo=&path=&limit=&skip=` (pagination: `skip` commits first) · `GET /v1/git/show?repo=&rev=&path=` (file at a commit)
+- `GET /v1/git/commit-detail?repo=&rev=` *(feature `git_manage`)* → `{ hash, author, email, timeMs, subject, body, parents,
+  files: [{ path, origPath?, status, added?, removed? }] }` (fixture `git_commit_detail.json`): `status` is git's letter
+  (`A` `M` `D` `R` `C` `T`) against the first parent; at most 2000 files.
+- `GET /v1/git/stashes?repo=` *(feature `git_manage`)* → `{ stashes: [{ index, message, timeMs }] }` (fixture `git_stashes.json`)
+- `GET /v1/git/branches?repo=` → `{ root, current, local: [Branch], remote: [Branch] }`, `Branch = { name, current,
+  upstream, timeMs, ahead?, behind?, gone? }` (ahead / behind the upstream, `gone` when it was deleted on the remote;
+  left out when 0 / false); `local` has the current branch first, then by last commit; `remote` lists
+  remote-tracking branches (`origin/x`, no `*/HEAD`) without a local branch of the same short name (fixture
+  `git_branches.json`).
 
 **Git writes** *(git_write, feature `git_write`)*: `POST /v1/git/{op}` with one body for every op (fixture
 `git_write_request.json`; fields an op does not use are ignored):
-`{ commandId, repo, paths?: [string], all?: bool, message?, setUpstream?: bool, remote?, branch?, create?: bool }`.
+`{ commandId, repo, paths?: [string], all?: bool, message?, setUpstream?: bool, remote?, branch?, create?: bool,
+amend?: bool, force?: bool, index?: number }`. The ops marked *git_manage* exist on desktops that list feature
+`git_manage`.
 
 | op | git | notes |
 |---|---|---|
 | `stage` | `add -A -- <paths>` (`all: true` → `add -A`) | deletions included |
 | `unstage` | `restore --staged -- <paths>` (no commit yet: `rm --cached -r`) | |
 | `discard` | `restore --worktree -- <paths>`; untracked paths are moved to the OS trash | every path must appear in `git status`; a path with only staged changes or a conflict is refused (unstage / resolve first); never deletes |
-| `commit` | `commit -m <message>` | message trimmed, non-empty, ≤ 16 KiB; no amend |
+| `commit` | `commit -m <message>` (`amend` → `commit --amend -m`) | message trimmed, non-empty, ≤ 16 KiB; amend needs a commit |
 | `push` | `push` (`setUpstream` → `push -u <remote or origin> <current branch>`) | |
 | `pull` | `pull --ff-only --no-rebase` | a diverged branch fails with git's message, nothing is merged |
 | `fetch` | `fetch --prune` | |
 | `checkout` | `switch <branch>` / `switch -c <branch>` (`create`) | git refuses a switch that would overwrite local changes; its message is returned |
+| `branch-delete` *(git_manage)* | `branch -d <branch>` (`force` → `-D`) | never the current branch; `-d` refuses an unmerged branch |
+| `merge` *(git_manage)* | `merge --no-edit <branch>` | fast-forward when possible; refused while a merge is in progress or for the current branch; on conflicts git's message is returned and the status shows `merging` plus the conflicted files |
+| `merge-abort` *(git_manage)* | `merge --abort` | |
+| `stash-push` *(git_manage)* | `stash push --include-untracked [-m <message>]` | |
+| `stash-pop` *(git_manage)* | `stash pop stash@{<index>}` (default 0) | git keeps the stash when the pop conflicts |
 
 → `200 { status: RepoStatus, output, head? }` (fixture `git_write_result.json`): the repository after the write, git's
-stdout + stderr (last 4000 characters, through `redact_text`), the new HEAD after `commit` / `pull` / `checkout`.
+stdout + stderr (last 4000 characters, through `redact_text`), the new HEAD after `commit` / `pull` / `checkout` / `merge` / `merge-abort`.
 Paths are repository-relative (no absolute paths, no `..` segment, no leading `-`, no control characters) and passed
 literally (`GIT_LITERAL_PATHSPECS=1`) after `--`; branch names follow `git check-ref-format --branch` rules. git never
 prompts: `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, no askpass, `GIT_EDITOR=:`; missing credentials or a signing
-key that needs a passphrase fail with git's message (`400 bad_request`). Timeouts: 30 s (index ops), 60 s (`commit`,
+key that needs a passphrase fail with git's message (`400 bad_request`). Timeouts: 30 s (index, branch and stash ops), 60 s (`commit`, `merge`,
 which runs the user's hooks as a terminal commit would), 120 s (`push` / `pull` / `fetch`). Every write is audited
 (`git.<op>`, repository, path count or branch, outcome) and idempotent by `commandId`.
 

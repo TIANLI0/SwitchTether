@@ -43,6 +43,8 @@ pub fn routes() -> Router<Arc<ApiContext>> {
         .route("/v1/git/log", get(git_log))
         .route("/v1/git/show", get(git_show))
         .route("/v1/git/branches", get(git_branches))
+        .route("/v1/git/commit-detail", get(git_commit_detail))
+        .route("/v1/git/stashes", get(git_stashes))
         .route("/v1/git/stage", post(git_stage))
         .route("/v1/git/unstage", post(git_unstage))
         .route("/v1/git/discard", post(git_discard))
@@ -51,6 +53,11 @@ pub fn routes() -> Router<Arc<ApiContext>> {
         .route("/v1/git/pull", post(git_pull))
         .route("/v1/git/fetch", post(git_fetch))
         .route("/v1/git/checkout", post(git_checkout))
+        .route("/v1/git/branch-delete", post(git_branch_delete))
+        .route("/v1/git/merge", post(git_merge))
+        .route("/v1/git/merge-abort", post(git_merge_abort))
+        .route("/v1/git/stash-push", post(git_stash_push))
+        .route("/v1/git/stash-pop", post(git_stash_pop))
 }
 
 pub(crate) fn fs_err(e: FsError) -> ApiError {
@@ -501,7 +508,11 @@ struct GitQuery {
     #[serde(default)]
     staged: bool,
     limit: Option<usize>,
+    /// History pagination: commits to skip.
+    skip: Option<usize>,
     rev: Option<String>,
+    /// Commit file diff: the old path of a renamed file.
+    orig_path: Option<String>,
 }
 
 fn git_dir(raw: &str) -> ApiResult<PathBuf> {
@@ -548,10 +559,49 @@ async fn git_diff(
     Query(q): Query<GitQuery>,
 ) -> ApiResult<Json<Value>> {
     safe_rel(&q.path)?;
+    safe_rel(&q.orig_path)?;
     let dir = git_dir(&q.repo)?;
+    // With `rev`: what that commit changed in `path` (against its first parent).
+    if let Some(rev) = q.rev.as_deref() {
+        let path = q
+            .path
+            .as_deref()
+            .ok_or_else(|| ApiError::validation("path is required"))?;
+        return crate::git::commit_diff(&dir, rev, path, q.orig_path.as_deref())
+            .await
+            .map(|s| Json(json!(s)))
+            .map_err(git_err);
+    }
     crate::git::diff(&dir, q.path.as_deref(), q.staged)
         .await
         .map(|s| Json(json!(s)))
+        .map_err(git_err)
+}
+
+async fn git_commit_detail(
+    State(_c): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<GitQuery>,
+) -> ApiResult<Json<Value>> {
+    let dir = git_dir(&q.repo)?;
+    let rev = q
+        .rev
+        .ok_or_else(|| ApiError::validation("rev is required"))?;
+    crate::git::commit_detail(&dir, &rev)
+        .await
+        .map(|d| Json(json!(d)))
+        .map_err(git_err)
+}
+
+async fn git_stashes(
+    State(_c): State<Arc<ApiContext>>,
+    _d: AuthDevice,
+    Query(q): Query<GitQuery>,
+) -> ApiResult<Json<Value>> {
+    let dir = git_dir(&q.repo)?;
+    crate::git::stashes(&dir)
+        .await
+        .map(|s| Json(json!({ "stashes": s })))
         .map_err(git_err)
 }
 
@@ -562,10 +612,15 @@ async fn git_log(
 ) -> ApiResult<Json<Value>> {
     safe_rel(&q.path)?;
     let dir = git_dir(&q.repo)?;
-    crate::git::log(&dir, q.path.as_deref(), q.limit.unwrap_or(50))
-        .await
-        .map(|c| Json(json!({ "commits": c })))
-        .map_err(git_err)
+    crate::git::log(
+        &dir,
+        q.path.as_deref(),
+        q.limit.unwrap_or(50),
+        q.skip.unwrap_or(0),
+    )
+    .await
+    .map(|c| Json(json!({ "commits": c })))
+    .map_err(git_err)
 }
 
 async fn git_show(
@@ -618,6 +673,14 @@ struct GitWriteBody {
     branch: Option<String>,
     #[serde(default)]
     create: bool,
+    /// commit: `--amend`.
+    #[serde(default)]
+    amend: bool,
+    /// branch-delete: `-D` (also an unmerged branch).
+    #[serde(default)]
+    force: bool,
+    /// stash-pop: `stash@{index}` (default 0).
+    index: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -630,6 +693,11 @@ enum GitOp {
     Pull,
     Fetch,
     Checkout,
+    BranchDelete,
+    Merge,
+    MergeAbort,
+    StashPush,
+    StashPop,
 }
 
 impl GitOp {
@@ -643,6 +711,11 @@ impl GitOp {
             GitOp::Pull => "git.pull",
             GitOp::Fetch => "git.fetch",
             GitOp::Checkout => "git.checkout",
+            GitOp::BranchDelete => "git.branch_delete",
+            GitOp::Merge => "git.merge",
+            GitOp::MergeAbort => "git.merge_abort",
+            GitOp::StashPush => "git.stash_push",
+            GitOp::StashPop => "git.stash_pop",
         }
     }
 }
@@ -670,7 +743,9 @@ async fn git_write_op(
                 GitOp::Stage => crate::git::stage(&dir, &b.paths).await,
                 GitOp::Unstage => crate::git::unstage(&dir, &b.paths).await,
                 GitOp::Discard => crate::git::discard(&dir, &b.paths).await,
-                GitOp::Commit => crate::git::commit(&dir, b.message.as_deref().unwrap_or("")).await,
+                GitOp::Commit => {
+                    crate::git::commit(&dir, b.message.as_deref().unwrap_or(""), b.amend).await
+                }
                 GitOp::Push => crate::git::push(&dir, b.set_upstream, b.remote.as_deref()).await,
                 GitOp::Pull => crate::git::pull(&dir).await,
                 GitOp::Fetch => crate::git::fetch(&dir).await,
@@ -681,13 +756,29 @@ async fn git_write_op(
                         .ok_or_else(|| ApiError::validation("branch is required"))?;
                     crate::git::checkout(&dir, branch, b.create).await
                 }
+                GitOp::BranchDelete | GitOp::Merge => {
+                    let branch = b
+                        .branch
+                        .as_deref()
+                        .ok_or_else(|| ApiError::validation("branch is required"))?;
+                    if matches!(op, GitOp::Merge) {
+                        crate::git::merge(&dir, branch).await
+                    } else {
+                        crate::git::delete_branch(&dir, branch, b.force).await
+                    }
+                }
+                GitOp::MergeAbort => crate::git::merge_abort(&dir).await,
+                GitOp::StashPush => crate::git::stash_push(&dir, b.message.as_deref()).await,
+                GitOp::StashPop => crate::git::stash_pop(&dir, b.index.unwrap_or(0)).await,
             };
             let detail = match op {
                 GitOp::Stage if b.all => "all".to_string(),
                 GitOp::Stage | GitOp::Unstage | GitOp::Discard => {
                     format!("{} path(s)", b.paths.len())
                 }
-                GitOp::Checkout => b.branch.clone().unwrap_or_default(),
+                GitOp::Checkout | GitOp::BranchDelete | GitOp::Merge => {
+                    b.branch.clone().unwrap_or_default()
+                }
                 _ => String::new(),
             };
             match res {
@@ -738,6 +829,11 @@ git_write_handler!(git_push, GitOp::Push);
 git_write_handler!(git_pull, GitOp::Pull);
 git_write_handler!(git_fetch, GitOp::Fetch);
 git_write_handler!(git_checkout, GitOp::Checkout);
+git_write_handler!(git_branch_delete, GitOp::BranchDelete);
+git_write_handler!(git_merge, GitOp::Merge);
+git_write_handler!(git_merge_abort, GitOp::MergeAbort);
+git_write_handler!(git_stash_push, GitOp::StashPush);
+git_write_handler!(git_stash_pop, GitOp::StashPop);
 
 #[cfg(test)]
 mod tests {
@@ -754,7 +850,8 @@ mod tests {
         assert_eq!(b.repo, "/home/u/project");
         assert_eq!(b.paths, vec!["src/lib.rs", "docs/new file.md"]);
         assert_eq!(b.message.as_deref(), Some("fix: thing"));
-        assert!(!b.all && !b.set_upstream && !b.create);
+        assert!(!b.all && !b.set_upstream && !b.create && !b.amend && !b.force);
+        assert_eq!(b.index, None);
         // Optional fields may be left out.
         let min: GitWriteBody = serde_json::from_str(r#"{"commandId":"x","repo":"/r"}"#).unwrap();
         assert!(min.paths.is_empty() && min.branch.is_none());

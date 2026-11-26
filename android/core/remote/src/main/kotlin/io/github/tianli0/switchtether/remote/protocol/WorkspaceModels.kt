@@ -118,6 +118,11 @@ data class GitStatusEntry(
     val worktree: String = " ",
     val untracked: Boolean = false,
     val conflicted: Boolean = false,
+    /** Lines added / removed in the worktree and in the index (absent for binary / untracked files). */
+    val added: Long? = null,
+    val removed: Long? = null,
+    val stagedAdded: Long? = null,
+    val stagedRemoved: Long? = null,
 ) {
     /** Something is staged for this path (porcelain v2 uses `.` for "unchanged"). */
     val staged: Boolean get() = !untracked && index.trim() !in UNCHANGED && index != "?"
@@ -138,6 +143,8 @@ data class RepoStatus(
     val ahead: Long = 0,
     val behind: Long = 0,
     val entries: List<GitStatusEntry> = emptyList(),
+    /** A merge stopped on conflicts: resolve and commit, or abort (`git_manage`). */
+    val merging: Boolean = false,
 )
 
 @Serializable
@@ -152,6 +159,36 @@ data class GitLog(val commits: List<GitCommit> = emptyList())
 @Serializable
 data class GitShow(val text: String? = null, val binary: Boolean = false)
 
+/** A file one commit changed, against its first parent: [status] is git's letter (A M D R C T). */
+@Serializable
+data class GitCommitFile(
+    val path: String = "",
+    val origPath: String? = null,
+    val status: String = "M",
+    val added: Long? = null,
+    val removed: Long? = null,
+)
+
+/** `GET /v1/git/commit-detail` (feature `git_manage`): a commit's message, parents and changed files. */
+@Serializable
+data class GitCommitDetail(
+    val hash: String = "",
+    val author: String = "",
+    val email: String = "",
+    val timeMs: Long = 0,
+    val subject: String = "",
+    val body: String = "",
+    val parents: List<String> = emptyList(),
+    val files: List<GitCommitFile> = emptyList(),
+)
+
+@Serializable
+data class GitStash(val index: Int = 0, val message: String = "", val timeMs: Long = 0)
+
+/** `GET /v1/git/stashes` (feature `git_manage`). */
+@Serializable
+data class GitStashes(val stashes: List<GitStash> = emptyList())
+
 /** Body of every Git write, `POST /v1/git/{op}` (step-up `git_write`); fields an op does not use are ignored. */
 @Serializable
 data class GitWriteBody(
@@ -165,6 +202,12 @@ data class GitWriteBody(
     val remote: String? = null,
     val branch: String? = null,
     val create: Boolean = false,
+    /** commit: `--amend`. */
+    val amend: Boolean = false,
+    /** branch-delete: also an unmerged branch (`-D`). */
+    val force: Boolean = false,
+    /** stash-pop: `stash@{index}`. */
+    val index: Int? = null,
 )
 
 /** Answer of a Git write: the repository afterwards, git's (redacted) output, the new HEAD after commit / pull / checkout. */
@@ -172,7 +215,16 @@ data class GitWriteBody(
 data class GitWriteResult(val status: RepoStatus = RepoStatus(), val output: String = "", val head: String? = null)
 
 @Serializable
-data class GitBranch(val name: String = "", val current: Boolean = false, val upstream: String? = null, val timeMs: Long = 0)
+data class GitBranch(
+    val name: String = "",
+    val current: Boolean = false,
+    val upstream: String? = null,
+    val timeMs: Long = 0,
+    /** Commits ahead of / behind the upstream; [gone] = the upstream was deleted on the remote. */
+    val ahead: Long = 0,
+    val behind: Long = 0,
+    val gone: Boolean = false,
+)
 
 /** `GET /v1/git/branches`: local branches (current first) and remote-tracking ones without a local branch. */
 @Serializable
@@ -193,6 +245,13 @@ object GitOps {
     const val PULL = "pull"
     const val FETCH = "fetch"
     const val CHECKOUT = "checkout"
+
+    // Feature `git_manage`.
+    const val BRANCH_DELETE = "branch-delete"
+    const val MERGE = "merge"
+    const val MERGE_ABORT = "merge-abort"
+    const val STASH_PUSH = "stash-push"
+    const val STASH_POP = "stash-pop"
 }
 
 // ---------------------------------------------------------------------------------------------

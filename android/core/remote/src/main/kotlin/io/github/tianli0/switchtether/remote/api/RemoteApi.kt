@@ -603,15 +603,29 @@ class RemoteApi(
 
     suspend fun gitStatus(repo: String): RepoStatus = get(url("v1/git/status").newBuilder().addQueryParameter("repo", repo).build())
 
-    suspend fun gitDiff(repo: String, path: String?, staged: Boolean = false): GitDiff = get(
+    /** The worktree / index diff of [path]; with [rev], what that commit changed in it (feature `git_manage`). */
+    suspend fun gitDiff(repo: String, path: String?, staged: Boolean = false, rev: String? = null, origPath: String? = null): GitDiff = get(
         url("v1/git/diff").newBuilder().addQueryParameter("repo", repo).apply { path?.let { addQueryParameter("path", it) } }
-            .addQueryParameter("staged", staged.toString()).build(),
+            .addQueryParameter("staged", staged.toString())
+            .apply {
+                rev?.let { addQueryParameter("rev", it) }
+                origPath?.let { addQueryParameter("origPath", it) }
+            }.build(),
     )
 
-    suspend fun gitLog(repo: String, path: String? = null, limit: Int = 50): GitLog = get(
+    suspend fun gitLog(repo: String, path: String? = null, limit: Int = 50, skip: Int = 0): GitLog = get(
         url("v1/git/log").newBuilder().addQueryParameter("repo", repo).apply { path?.let { addQueryParameter("path", it) } }
-            .addQueryParameter("limit", limit.toString()).build(),
+            .addQueryParameter("limit", limit.toString())
+            .apply { if (skip > 0) addQueryParameter("skip", skip.toString()) }.build(),
     )
+
+    /** `GET /v1/git/commit-detail` (feature `git_manage`): message, parents and changed files of [rev]. */
+    suspend fun gitCommit(repo: String, rev: String): io.github.tianli0.switchtether.remote.protocol.GitCommitDetail =
+        get(url("v1/git/commit-detail").newBuilder().addQueryParameter("repo", repo).addQueryParameter("rev", rev).build())
+
+    /** `GET /v1/git/stashes` (feature `git_manage`). */
+    suspend fun gitStashes(repo: String): io.github.tianli0.switchtether.remote.protocol.GitStashes =
+        get(url("v1/git/stashes").newBuilder().addQueryParameter("repo", repo).build())
 
     suspend fun gitShow(repo: String, rev: String, path: String): GitShow = get(
         url("v1/git/show").newBuilder().addQueryParameter("repo", repo).addQueryParameter("rev", rev).addQueryParameter("path", path).build(),

@@ -1,0 +1,14 @@
+{
+  "hash": "3f2a1c9d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49",
+  "author": "Ada",
+  "email": "ada@example.com",
+  "timeMs": 1700000000000,
+  "subject": "fix: thing",
+  "body": "Longer explanation.",
+  "parents": ["0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"],
+  "files": [
+    { "path": "src/lib.rs", "status": "M", "added": 3, "removed": 1 },
+    { "path": "docs/new.md", "origPath": "docs/old.md", "status": "R", "added": 0, "removed": 0 },
+    { "path": "img.png", "status": "A" }
+  ]
+}

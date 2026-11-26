@@ -89,7 +89,7 @@ pub async fn repo_root(dir: &Path) -> Result<PathBuf, GitError> {
     Ok(PathBuf::from(out.trim()))
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusEntry {
     pub path: String,
@@ -100,6 +100,17 @@ pub struct StatusEntry {
     pub worktree: char,
     pub untracked: bool,
     pub conflicted: bool,
+    /// Lines added / removed in the worktree (`git diff --numstat`); absent for binary files,
+    /// untracked files and when nothing changed there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed: Option<i64>,
+    /// Lines added / removed in the index (`git diff --cached --numstat`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged_added: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged_removed: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -111,6 +122,9 @@ pub struct RepoStatus {
     pub ahead: i64,
     pub behind: i64,
     pub entries: Vec<StatusEntry>,
+    /// A merge stopped on conflicts (`MERGE_HEAD` exists): resolve and commit, or abort.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub merging: bool,
 }
 
 /// Parse `git status --porcelain=v2 --branch -z`.
@@ -122,6 +136,7 @@ pub fn parse_status_v2(root: &str, raw: &str) -> RepoStatus {
         ahead: 0,
         behind: 0,
         entries: Vec::new(),
+        merging: false,
     };
     let mut fields = raw.split('\0').peekable();
     while let Some(rec) = fields.next() {
@@ -158,6 +173,7 @@ pub fn parse_status_v2(root: &str, raw: &str) -> RepoStatus {
                         worktree: xy[1],
                         untracked: false,
                         conflicted: false,
+                        ..Default::default()
                     });
                 }
             }
@@ -174,6 +190,7 @@ pub fn parse_status_v2(root: &str, raw: &str) -> RepoStatus {
                         worktree: xy[1],
                         untracked: false,
                         conflicted: false,
+                        ..Default::default()
                     });
                 }
             }
@@ -188,6 +205,7 @@ pub fn parse_status_v2(root: &str, raw: &str) -> RepoStatus {
                         worktree: xy[1],
                         untracked: false,
                         conflicted: true,
+                        ..Default::default()
                     });
                 }
             }
@@ -198,6 +216,7 @@ pub fn parse_status_v2(root: &str, raw: &str) -> RepoStatus {
                 worktree: '?',
                 untracked: true,
                 conflicted: false,
+                ..Default::default()
             }),
             _ => {}
         }
@@ -219,7 +238,68 @@ pub async fn status(dir: &Path) -> Result<RepoStatus, GitError> {
         4 * 1024 * 1024,
     )
     .await?;
-    Ok(parse_status_v2(&root.to_string_lossy(), &raw))
+    let mut st = parse_status_v2(&root.to_string_lossy(), &raw);
+    // Line counts are a nicety: a failure (e.g. no commit yet for --cached) leaves them out.
+    let numstat = |cached: bool| {
+        let root = root.clone();
+        async move {
+            let mut args = vec![
+                "diff",
+                "--numstat",
+                "-z",
+                "-M",
+                "--no-ext-diff",
+                "--no-textconv",
+            ];
+            if cached {
+                args.push("--cached");
+            }
+            run(&root, &args, 4 * 1024 * 1024)
+                .await
+                .map(|(raw, _)| parse_numstat(&raw))
+                .unwrap_or_default()
+        }
+    };
+    let (work, index) = (numstat(false).await, numstat(true).await);
+    for e in &mut st.entries {
+        if let Some(&(a, r)) = work.get(&e.path) {
+            e.added = a;
+            e.removed = r;
+        }
+        if let Some(&(a, r)) = index.get(&e.path) {
+            e.staged_added = a;
+            e.staged_removed = r;
+        }
+    }
+    st.merging = run(&root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], 1024)
+        .await
+        .is_ok();
+    Ok(st)
+}
+
+/// `git diff --numstat -z`: path (the new path of a rename) → (added, removed); `None` for binary.
+pub fn parse_numstat(raw: &str) -> std::collections::HashMap<String, (Option<i64>, Option<i64>)> {
+    let mut out = std::collections::HashMap::new();
+    let mut it = raw.split('\0');
+    while let Some(rec) = it.next() {
+        let rec = rec.trim_start_matches('\n');
+        if rec.is_empty() {
+            continue;
+        }
+        let mut f = rec.splitn(3, '\t');
+        let (Some(a), Some(d), Some(path)) = (f.next(), f.next(), f.next()) else {
+            continue;
+        };
+        let path = if path.is_empty() {
+            // Rename / copy: "a\td\t\0old\0new\0".
+            let _old = it.next();
+            it.next().unwrap_or_default().to_string()
+        } else {
+            path.to_string()
+        };
+        out.insert(path, (a.parse().ok(), d.parse().ok()));
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,12 +360,19 @@ pub fn parse_log(raw: &str) -> Vec<Commit> {
         .collect()
 }
 
-pub async fn log(dir: &Path, path: Option<&str>, limit: usize) -> Result<Vec<Commit>, GitError> {
+pub async fn log(
+    dir: &Path,
+    path: Option<&str>,
+    limit: usize,
+    skip: usize,
+) -> Result<Vec<Commit>, GitError> {
     let root = repo_root(dir).await?;
     let n = format!("--max-count={}", limit.clamp(1, 500));
+    let sk = format!("--skip={skip}");
     let mut args = vec![
         "log",
         n.as_str(),
+        sk.as_str(),
         "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%s%x1e",
     ];
     if path.is_some() {
@@ -299,11 +386,185 @@ pub async fn log(dir: &Path, path: Option<&str>, limit: usize) -> Result<Vec<Com
     Ok(parse_log(&raw))
 }
 
-/// File content at a revision (for history view). Returns None for binary.
-pub async fn show_file(dir: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
+fn validate_rev(rev: &str) -> Result<(), GitError> {
     if !rev.chars().all(|c| c.is_ascii_hexdigit()) || rev.len() < 4 || rev.len() > 64 {
         return Err(GitError::Failed("invalid revision".into()));
     }
+    Ok(())
+}
+
+/// One file a commit changed (against its first parent).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitFile {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orig_path: Option<String>,
+    /// `A` / `M` / `D` / `R` / `C` / `T` (git's letter, score dropped).
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetail {
+    pub hash: String,
+    pub author: String,
+    pub email: String,
+    pub time_ms: i64,
+    pub subject: String,
+    /// The message after the subject line (trimmed).
+    pub body: String,
+    pub parents: Vec<String>,
+    pub files: Vec<CommitFile>,
+}
+
+/// `diff-tree --name-status -z` records: status, path (and the new path of a rename / copy).
+pub fn parse_name_status(raw: &str) -> Vec<CommitFile> {
+    let mut files = Vec::new();
+    let mut it = raw.split('\0').map(|t| t.trim_start_matches('\n'));
+    while let Some(st) = it.next() {
+        if st.is_empty() {
+            continue;
+        }
+        let letter: String = st.chars().take(1).collect();
+        let Some(first) = it.next() else { break };
+        let (path, orig_path) = if letter == "R" || letter == "C" {
+            (
+                it.next().unwrap_or_default().to_string(),
+                Some(first.to_string()),
+            )
+        } else {
+            (first.to_string(), None)
+        };
+        files.push(CommitFile {
+            path,
+            orig_path,
+            status: letter,
+            added: None,
+            removed: None,
+        });
+    }
+    files
+}
+
+/// The first parent of [rev], or None for a root commit.
+async fn first_parent(root: &Path, rev: &str) -> Option<String> {
+    let spec = format!("{rev}^1");
+    run(root, &["rev-parse", "-q", "--verify", &spec], 1024)
+        .await
+        .ok()
+        .map(|(h, _)| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+}
+
+/// A commit's message, parents and changed files with line counts (against its first parent;
+/// a root commit against the empty tree). At most 2000 files.
+pub async fn commit_detail(dir: &Path, rev: &str) -> Result<CommitDetail, GitError> {
+    validate_rev(rev)?;
+    let root = repo_root(dir).await?;
+    let (meta, _) = run(
+        &root,
+        &[
+            "log",
+            "-1",
+            "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%s%x1f%b",
+            rev,
+            "--",
+        ],
+        256 * 1024,
+    )
+    .await?;
+    let f: Vec<&str> = meta.splitn(7, '\x1f').collect();
+    if f.len() < 7 {
+        return Err(GitError::Failed("unknown revision".into()));
+    }
+    let parent = first_parent(&root, rev).await;
+    let range: Vec<&str> = match &parent {
+        Some(p) => vec![p.as_str(), rev],
+        None => vec!["--root", rev],
+    };
+    let mut ns = vec![
+        "diff-tree",
+        "-r",
+        "-M",
+        "-z",
+        "--no-commit-id",
+        "--name-status",
+    ];
+    ns.extend(&range);
+    let (raw, _) = run(&root, &ns, 4 * 1024 * 1024).await?;
+    let mut files = parse_name_status(&raw);
+    files.truncate(2000);
+    let mut nm = vec!["diff-tree", "-r", "-M", "-z", "--no-commit-id", "--numstat"];
+    nm.extend(&range);
+    if let Ok((raw, _)) = run(&root, &nm, 4 * 1024 * 1024).await {
+        let counts = parse_numstat(&raw);
+        for file in &mut files {
+            if let Some(&(a, r)) = counts.get(&file.path) {
+                file.added = a;
+                file.removed = r;
+            }
+        }
+    }
+    Ok(CommitDetail {
+        hash: f[0].trim().to_string(),
+        author: f[1].to_string(),
+        email: f[2].to_string(),
+        time_ms: f[3].trim().parse::<i64>().unwrap_or(0) * 1000,
+        parents: f[4].split_whitespace().map(str::to_string).collect(),
+        subject: f[5].trim_end().to_string(),
+        body: f[6].trim().to_string(),
+        files,
+    })
+}
+
+/// The diff one commit made to [path] (and [orig_path] for a rename), against its first parent.
+pub async fn commit_diff(
+    dir: &Path,
+    rev: &str,
+    path: &str,
+    orig_path: Option<&str>,
+) -> Result<DiffResult, GitError> {
+    validate_rev(rev)?;
+    validate_rel_path(path)?;
+    if let Some(o) = orig_path {
+        validate_rel_path(o)?;
+    }
+    let root = repo_root(dir).await?;
+    let parent = first_parent(&root, rev).await;
+    let mut args = vec![
+        "diff-tree",
+        "-p",
+        "-M",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-commit-id",
+    ];
+    match &parent {
+        Some(p) => args.extend([p.as_str(), rev]),
+        None => args.extend(["--root", rev]),
+    }
+    args.push("--");
+    if let Some(o) = orig_path {
+        args.push(o);
+    }
+    args.push(path);
+    let (diff, truncated) = run(&root, &args, MAX_DIFF_BYTES).await?;
+    Ok(DiffResult {
+        root: root.to_string_lossy().into_owned(),
+        diff,
+        truncated,
+    })
+}
+
+/// File content at a revision (for history view). Returns None for binary.
+pub async fn show_file(dir: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
+    validate_rev(rev)?;
     let root = repo_root(dir).await?;
     let spec = format!("{rev}:{path}");
     let (out, _) = run(
@@ -409,7 +670,14 @@ fn tail_chars(s: &str, max: usize) -> String {
 
 /// Run a write command; returns combined stdout + stderr (trimmed, tail kept).
 async fn run_write(dir: &Path, args: &[&str], timeout: Duration) -> Result<String, GitError> {
-    let mut cmd = write_command(dir);
+    run_write_cmd(write_command(dir), args, timeout).await
+}
+
+async fn run_write_cmd(
+    mut cmd: Command,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<String, GitError> {
     cmd.args(args);
     let out = match tokio::time::timeout(timeout, cmd.output()).await {
         Err(_) => return Err(GitError::Timeout),
@@ -570,7 +838,7 @@ pub async fn discard(dir: &Path, paths: &[String]) -> Result<WriteResult, GitErr
     finish(&root, output, false).await
 }
 
-pub async fn commit(dir: &Path, message: &str) -> Result<WriteResult, GitError> {
+pub async fn commit(dir: &Path, message: &str, amend: bool) -> Result<WriteResult, GitError> {
     let msg = message.trim();
     if msg.is_empty() {
         return Err(GitError::Failed("commit message is empty".into()));
@@ -579,7 +847,15 @@ pub async fn commit(dir: &Path, message: &str) -> Result<WriteResult, GitError> 
         return Err(GitError::Failed("commit message is too long".into()));
     }
     let root = repo_root(dir).await?;
-    let out = run_write(&root, &["commit", "-m", msg], COMMIT_TIMEOUT).await?;
+    let args: Vec<&str> = if amend {
+        if !has_head(&root).await {
+            return Err(GitError::Failed("nothing to amend: no commit yet".into()));
+        }
+        vec!["commit", "--amend", "-m", msg]
+    } else {
+        vec!["commit", "-m", msg]
+    };
+    let out = run_write(&root, &args, COMMIT_TIMEOUT).await?;
     finish(&root, out, true).await
 }
 
@@ -639,6 +915,113 @@ pub async fn checkout(dir: &Path, branch: &str, create: bool) -> Result<WriteRes
     finish(&root, out, true).await
 }
 
+/// Delete a local branch: `branch -d` (git refuses an unmerged one; `force` → `-D`). The
+/// current branch is never deleted.
+pub async fn delete_branch(dir: &Path, branch: &str, force: bool) -> Result<WriteResult, GitError> {
+    validate_branch_name(branch)?;
+    let root = repo_root(dir).await?;
+    if status(&root).await?.branch.as_deref() == Some(branch) {
+        return Err(GitError::Failed(
+            "the current branch cannot be deleted".into(),
+        ));
+    }
+    let flag = if force { "-D" } else { "-d" };
+    let out = run_write(&root, &["branch", flag, branch], LOCAL_TIMEOUT).await?;
+    finish(&root, out, false).await
+}
+
+/// Merge [branch] (local or `remote/branch`) into the current branch, fast-forward when
+/// possible, never opening an editor. On conflicts git stops with `MERGE_HEAD` set: the
+/// error carries git's message and the status shows `merging` plus the conflicted files.
+pub async fn merge(dir: &Path, branch: &str) -> Result<WriteResult, GitError> {
+    validate_branch_name(branch)?;
+    let root = repo_root(dir).await?;
+    let st = status(&root).await?;
+    if st.merging {
+        return Err(GitError::Failed("a merge is already in progress".into()));
+    }
+    if st.branch.as_deref() == Some(branch) {
+        return Err(GitError::Failed("cannot merge a branch into itself".into()));
+    }
+    let out = run_write(&root, &["merge", "--no-edit", branch], COMMIT_TIMEOUT).await?;
+    finish(&root, out, true).await
+}
+
+/// `merge --abort`: back to the state before the merge.
+pub async fn merge_abort(dir: &Path) -> Result<WriteResult, GitError> {
+    let root = repo_root(dir).await?;
+    let out = run_write(&root, &["merge", "--abort"], LOCAL_TIMEOUT).await?;
+    finish(&root, out, true).await
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Stash {
+    /// `0` for `stash@{0}`.
+    pub index: u32,
+    pub message: String,
+    pub time_ms: i64,
+}
+
+pub fn parse_stashes(raw: &str) -> Vec<Stash> {
+    raw.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\x1f').collect();
+            if f.len() < 3 {
+                return None;
+            }
+            let index = f[0]
+                .strip_prefix("stash@{")?
+                .strip_suffix('}')?
+                .parse()
+                .ok()?;
+            Some(Stash {
+                index,
+                time_ms: f[1].trim().parse::<i64>().unwrap_or(0) * 1000,
+                message: f[2].to_string(),
+            })
+        })
+        .collect()
+}
+
+pub async fn stashes(dir: &Path) -> Result<Vec<Stash>, GitError> {
+    let root = repo_root(dir).await?;
+    let (raw, _) = run(
+        &root,
+        &["stash", "list", "--format=%gd%x1f%ct%x1f%gs"],
+        1024 * 1024,
+    )
+    .await?;
+    Ok(parse_stashes(&raw))
+}
+
+/// `stash push --include-untracked [-m message]`.
+pub async fn stash_push(dir: &Path, message: Option<&str>) -> Result<WriteResult, GitError> {
+    let root = repo_root(dir).await?;
+    let mut args = vec!["stash", "push", "--include-untracked"];
+    let msg = message.map(str::trim).filter(|m| !m.is_empty());
+    if let Some(m) = msg {
+        if m.len() > MAX_MESSAGE_BYTES || m.contains('\0') {
+            return Err(GitError::Failed("stash message is too long".into()));
+        }
+        args.extend(["-m", m]);
+    }
+    // No user paths here, and literal pathspecs keep `--include-untracked` from stashing
+    // untracked files.
+    let mut cmd = write_command(&root);
+    cmd.env_remove("GIT_LITERAL_PATHSPECS");
+    let out = run_write_cmd(cmd, &args, LOCAL_TIMEOUT).await?;
+    finish(&root, out, false).await
+}
+
+/// `stash pop stash@{index}`; git keeps the stash when the pop conflicts.
+pub async fn stash_pop(dir: &Path, index: u32) -> Result<WriteResult, GitError> {
+    let root = repo_root(dir).await?;
+    let spec = format!("stash@{{{index}}}");
+    let out = run_write(&root, &["stash", "pop", &spec], LOCAL_TIMEOUT).await?;
+    finish(&root, out, false).await
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Branch {
@@ -646,6 +1029,32 @@ pub struct Branch {
     pub current: bool,
     pub upstream: Option<String>,
     pub time_ms: i64,
+    /// Commits ahead of / behind the upstream (local branches with one).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub ahead: i64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub behind: i64,
+    /// The upstream branch was deleted on the remote.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub gone: bool,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+/// `%(upstream:track,nobracket)`: "ahead 1, behind 2", "gone" or "".
+fn parse_track(t: &str) -> (i64, i64, bool) {
+    let (mut ahead, mut behind) = (0, 0);
+    for part in t.split(',') {
+        let part = part.trim();
+        if let Some(n) = part.strip_prefix("ahead ") {
+            ahead = n.trim().parse().unwrap_or(0);
+        } else if let Some(n) = part.strip_prefix("behind ") {
+            behind = n.trim().parse().unwrap_or(0);
+        }
+    }
+    (ahead, behind, t.trim() == "gone")
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -668,12 +1077,16 @@ pub fn parse_branches(root: &str, raw: &str) -> Branches {
         }
         let (refname, upstream, head, time) = (f[0], f[1], f[2], f[3]);
         let time_ms = time.trim().parse::<i64>().unwrap_or(0) * 1000;
+        let (ahead, behind, gone) = parse_track(f.get(4).copied().unwrap_or(""));
         if let Some(name) = refname.strip_prefix("refs/heads/") {
             local.push(Branch {
                 name: name.to_string(),
                 current: head.trim() == "*",
                 upstream: (!upstream.is_empty()).then(|| upstream.to_string()),
                 time_ms,
+                ahead,
+                behind,
+                gone,
             });
         } else if let Some(name) = refname.strip_prefix("refs/remotes/") {
             if name.ends_with("/HEAD") {
@@ -684,6 +1097,9 @@ pub fn parse_branches(root: &str, raw: &str) -> Branches {
                 current: false,
                 upstream: None,
                 time_ms,
+                ahead: 0,
+                behind: 0,
+                gone: false,
             });
         }
     }
@@ -708,7 +1124,7 @@ pub async fn branches(dir: &Path) -> Result<Branches, GitError> {
         &root,
         &[
             "for-each-ref",
-            "--format=%(refname)%1f%(upstream:short)%1f%(HEAD)%1f%(committerdate:unix)",
+            "--format=%(refname)%1f%(upstream:short)%1f%(HEAD)%1f%(committerdate:unix)%1f%(upstream:track,nobracket)",
             "refs/heads",
             "refs/remotes",
         ],
@@ -782,7 +1198,7 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
         assert!(st.entries.iter().any(|e| e.path == "b.txt" && e.untracked));
         let df = diff(d, Some("a.txt"), false).await.unwrap();
         assert!(df.diff.contains("+two"));
-        let lg = log(d, Some("a.txt"), 10).await.unwrap();
+        let lg = log(d, Some("a.txt"), 10, 0).await.unwrap();
         assert_eq!(lg.len(), 1);
         assert_eq!(lg[0].subject, "first");
         let shown = show_file(d, &lg[0].hash, "a.txt").await.unwrap();
@@ -845,6 +1261,7 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
                 upstream: Some("origin/main".into()),
                 ahead: 1,
                 behind: 0,
+                merging: false,
                 entries: vec![StatusEntry {
                     path: "src/lib.rs".into(),
                     orig_path: None,
@@ -852,6 +1269,7 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
                     worktree: 'M',
                     untracked: false,
                     conflicted: false,
+                    ..Default::default()
                 }],
             },
             output: "[main 3f2a1c9] fix: thing\n 1 file changed, 2 insertions(+)".into(),
@@ -869,6 +1287,47 @@ refs/remotes/origin/main\x1f\x1f \x1f1700000100\n\
 refs/remotes/origin/other\x1f\x1f \x1f1700000300\n",
         );
         assert_eq!(serde_json::to_value(&b).unwrap(), read("git_branches.json"));
+        let detail = CommitDetail {
+            hash: "3f2a1c9d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49".into(),
+            author: "Ada".into(),
+            email: "ada@example.com".into(),
+            time_ms: 1_700_000_000_000,
+            subject: "fix: thing".into(),
+            body: "Longer explanation.".into(),
+            parents: vec!["0a1b2c3d4e5f60718293a4b5c6d7e8f901234567".into()],
+            files: vec![
+                CommitFile {
+                    path: "src/lib.rs".into(),
+                    orig_path: None,
+                    status: "M".into(),
+                    added: Some(3),
+                    removed: Some(1),
+                },
+                CommitFile {
+                    path: "docs/new.md".into(),
+                    orig_path: Some("docs/old.md".into()),
+                    status: "R".into(),
+                    added: Some(0),
+                    removed: Some(0),
+                },
+                CommitFile {
+                    path: "img.png".into(),
+                    orig_path: None,
+                    status: "A".into(),
+                    added: None,
+                    removed: None,
+                },
+            ],
+        };
+        assert_eq!(
+            serde_json::to_value(&detail).unwrap(),
+            read("git_commit_detail.json")
+        );
+        let stashes = parse_stashes("stash@{0}\x1f1700000000\x1fOn main: wip\n");
+        assert_eq!(
+            serde_json::json!({ "stashes": stashes }),
+            read("git_stashes.json")
+        );
     }
 
     #[test]
@@ -938,10 +1397,10 @@ refs/remotes/origin/other\x1f\x1f \x1f1700000300\n";
         assert!(entry(&r.status, "a.txt").unwrap().untracked);
         let r = stage_all(d).await.unwrap();
         assert_eq!(entry(&r.status, "a.txt").unwrap().index, 'A');
-        let r = commit(d, "first").await.unwrap();
+        let r = commit(d, "first", false).await.unwrap();
         assert!(r.status.entries.is_empty());
         assert_eq!(r.head.as_deref().map(str::len), Some(40));
-        assert!(commit(d, "   ").await.is_err());
+        assert!(commit(d, "   ", false).await.is_err());
 
         // Modify + stage + unstage with HEAD present.
         std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
@@ -989,11 +1448,176 @@ refs/remotes/origin/other\x1f\x1f \x1f1700000300\n";
         checkout(d, "feat/x", false).await.unwrap();
         std::fs::write(d.join("a.txt"), "feat\n").unwrap();
         stage_all(d).await.unwrap();
-        commit(d, "feat change").await.unwrap();
+        commit(d, "feat change", false).await.unwrap();
         std::fs::write(d.join("a.txt"), "dirty\n").unwrap();
         let err = checkout(d, "main", false).await.unwrap_err();
         assert!(matches!(err, GitError::Failed(_)), "{err}");
         assert_eq!(std::fs::read_to_string(d.join("a.txt")).unwrap(), "dirty\n");
+    }
+
+    #[test]
+    fn parses_numstat_name_status_stashes_and_tracking() {
+        let n = parse_numstat("3\t1\tsrc/a.rs\0-\t-\timg.png\0\x32\t0\t\0old.rs\0new.rs\0");
+        assert_eq!(n.get("src/a.rs"), Some(&(Some(3), Some(1))));
+        assert_eq!(n.get("img.png"), Some(&(None, None)));
+        assert_eq!(n.get("new.rs"), Some(&(Some(2), Some(0))));
+        let f = parse_name_status("M\0src/a.rs\0R087\0old.rs\0new.rs\0A\0b.txt\0");
+        assert_eq!(f.len(), 3);
+        assert_eq!(
+            (
+                f[1].status.as_str(),
+                f[1].path.as_str(),
+                f[1].orig_path.as_deref()
+            ),
+            ("R", "new.rs", Some("old.rs"))
+        );
+        assert_eq!(f[2].status, "A");
+        let st = parse_stashes(
+            "stash@{0}\x1f1700000000\x1fOn main: wip
+stash@{1}\x1f1690000000\x1fWIP on main: x
+",
+        );
+        assert_eq!(st.len(), 2);
+        assert_eq!(
+            (st[1].index, st[0].message.as_str(), st[0].time_ms),
+            (1, "On main: wip", 1_700_000_000_000)
+        );
+        assert_eq!(parse_track("ahead 2, behind 3"), (2, 3, false));
+        assert_eq!(parse_track("behind 1"), (0, 1, false));
+        assert_eq!(parse_track("gone"), (0, 0, true));
+        assert_eq!(parse_track(""), (0, 0, false));
+    }
+
+    #[tokio::test]
+    async fn manage_roundtrip_counts_detail_amend_delete_merge_stash() {
+        if !git_available() {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        init_repo(d);
+        std::fs::write(
+            d.join("a.txt"),
+            "one
+",
+        )
+        .unwrap();
+        stage_all(d).await.unwrap();
+        let first = commit(d, "first", false).await.unwrap().head.unwrap();
+        // Per-file line counts, worktree and index.
+        std::fs::write(
+            d.join("a.txt"),
+            "one
+two
+three
+",
+        )
+        .unwrap();
+        let st = status(d).await.unwrap();
+        let e = entry(&st, "a.txt").unwrap();
+        assert_eq!(
+            (e.added, e.removed, e.staged_added),
+            (Some(2), Some(0), None)
+        );
+        stage_all(d).await.unwrap();
+        let st = status(d).await.unwrap();
+        assert_eq!(entry(&st, "a.txt").unwrap().staged_added, Some(2));
+        let second = commit(d, "second", false).await.unwrap().head.unwrap();
+        // Amend replaces the last commit's message.
+        let amended = commit(d, "second, amended", true)
+            .await
+            .unwrap()
+            .head
+            .unwrap();
+        assert_ne!(amended, second);
+        let lg = log(d, None, 10, 0).await.unwrap();
+        assert_eq!(lg[0].subject, "second, amended");
+        assert_eq!(log(d, None, 10, 1).await.unwrap()[0].hash, first);
+        // Commit detail and the file's diff in that commit; the root commit too.
+        let det = commit_detail(d, &amended).await.unwrap();
+        assert_eq!(det.parents, vec![first.clone()]);
+        assert_eq!(det.files.len(), 1);
+        assert_eq!(
+            (det.files[0].status.as_str(), det.files[0].added),
+            ("M", Some(2))
+        );
+        let diff = commit_diff(d, &amended, "a.txt", None).await.unwrap();
+        assert!(diff.diff.contains("+three"), "{}", diff.diff);
+        let root = commit_detail(d, &first).await.unwrap();
+        assert!(root.parents.is_empty());
+        assert_eq!(root.files[0].status, "A");
+        assert!(commit_diff(d, &first, "a.txt", None)
+            .await
+            .unwrap()
+            .diff
+            .contains("+one"));
+        assert!(commit_detail(d, "not-a-rev").await.is_err());
+        // Branch delete: never the current one; an unmerged one needs force.
+        checkout(d, "side", true).await.unwrap();
+        std::fs::write(
+            d.join("a.txt"),
+            "side
+",
+        )
+        .unwrap();
+        stage_all(d).await.unwrap();
+        commit(d, "side change", false).await.unwrap();
+        assert!(delete_branch(d, "side", false).await.is_err());
+        checkout(d, "main", false).await.unwrap();
+        assert!(
+            delete_branch(d, "side", false).await.is_err(),
+            "unmerged branch deleted without force"
+        );
+        // Merge with a conflict stops in a merge; abort restores main.
+        std::fs::write(
+            d.join("a.txt"),
+            "main
+",
+        )
+        .unwrap();
+        stage_all(d).await.unwrap();
+        commit(d, "main change", false).await.unwrap();
+        assert!(merge(d, "side").await.is_err());
+        let st = status(d).await.unwrap();
+        assert!(st.merging && st.entries.iter().any(|e| e.conflicted));
+        let r = merge_abort(d).await.unwrap();
+        assert!(!r.status.merging && r.status.entries.is_empty());
+        assert!(
+            merge(d, "main").await.is_err(),
+            "merged a branch into itself"
+        );
+        // A merged branch is deleted without force.
+        checkout(d, "done", true).await.unwrap();
+        checkout(d, "main", false).await.unwrap();
+        delete_branch(d, "done", false).await.unwrap();
+        delete_branch(d, "side", true).await.unwrap();
+        assert!(!branches(d)
+            .await
+            .unwrap()
+            .local
+            .iter()
+            .any(|b| b.name == "side" || b.name == "done"));
+        // Stash push / list / pop, untracked files included.
+        std::fs::write(
+            d.join("a.txt"),
+            "wip
+",
+        )
+        .unwrap();
+        std::fs::write(
+            d.join("new.txt"),
+            "new
+",
+        )
+        .unwrap();
+        let r = stash_push(d, Some("wip")).await.unwrap();
+        assert!(r.status.entries.is_empty(), "{:?}", r.status.entries);
+        let list = stashes(d).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list[0].message.contains("wip"));
+        let r = stash_pop(d, 0).await.unwrap();
+        assert!(entry(&r.status, "new.txt").is_some());
+        assert!(stashes(d).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1012,7 +1636,7 @@ refs/remotes/origin/other\x1f\x1f \x1f1700000300\n";
         sh_git(&a, &["remote", "add", "origin", &bare.to_string_lossy()]);
         std::fs::write(a.join("f.txt"), "1\n").unwrap();
         stage_all(&a).await.unwrap();
-        commit(&a, "one").await.unwrap();
+        commit(&a, "one", false).await.unwrap();
         // No upstream yet: a plain push fails with git's message, -u works.
         assert!(push(&a, false, None).await.is_err());
         let r = push(&a, true, None).await.unwrap();
@@ -1032,7 +1656,7 @@ refs/remotes/origin/other\x1f\x1f \x1f1700000300\n";
 
         std::fs::write(a.join("f.txt"), "1\n2\n").unwrap();
         stage_all(&a).await.unwrap();
-        let r = commit(&a, "two").await.unwrap();
+        let r = commit(&a, "two", false).await.unwrap();
         assert_eq!(r.status.ahead, 1);
         let r = push(&a, false, None).await.unwrap();
         assert_eq!(r.status.ahead, 0);
@@ -1051,11 +1675,11 @@ refs/remotes/origin/other\x1f\x1f \x1f1700000300\n";
         // Diverged history: --ff-only refuses instead of merging.
         std::fs::write(a.join("f.txt"), "a\n").unwrap();
         stage_all(&a).await.unwrap();
-        commit(&a, "a side").await.unwrap();
+        commit(&a, "a side", false).await.unwrap();
         push(&a, false, None).await.unwrap();
         std::fs::write(b.join("g.txt"), "b\n").unwrap();
         stage_all(&b).await.unwrap();
-        commit(&b, "b side").await.unwrap();
+        commit(&b, "b side", false).await.unwrap();
         assert!(pull(&b).await.is_err());
     }
 }

@@ -3,6 +3,8 @@ package io.github.tianli0.switchtether.remote
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
 import io.github.tianli0.switchtether.remote.protocol.EventKinds
 import io.github.tianli0.switchtether.remote.protocol.GitBranches
+import io.github.tianli0.switchtether.remote.protocol.GitCommitDetail
+import io.github.tianli0.switchtether.remote.protocol.GitStashes
 import io.github.tianli0.switchtether.remote.protocol.GitStatusEntry
 import io.github.tianli0.switchtether.remote.protocol.GitWriteBody
 import io.github.tianli0.switchtether.remote.protocol.GitWriteResult
@@ -127,5 +129,20 @@ class TurnFilesAndGitTest {
         assertEquals(listOf("main", "feat/a"), b.local.map { it.name })
         assertEquals("origin/main", b.local.first().upstream)
         assertEquals("origin/other", b.remote.single().name)
+        assertEquals(0L, b.local.first().ahead)
+        assertFalse(req.amend || req.force)
+
+        val d = ProtocolJson.decodeFromString(GitCommitDetail.serializer(), fixture("git_commit_detail.json"))
+        assertEquals("fix: thing", d.subject)
+        assertEquals("Longer explanation.", d.body)
+        assertEquals(1, d.parents.size)
+        assertEquals(listOf("M", "R", "A"), d.files.map { it.status })
+        assertEquals("docs/old.md", d.files[1].origPath)
+        assertEquals(3L, d.files[0].added)
+        assertNull(d.files[2].added)
+
+        val st = ProtocolJson.decodeFromString(GitStashes.serializer(), fixture("git_stashes.json"))
+        assertEquals(0, st.stashes.single().index)
+        assertEquals("On main: wip", st.stashes.single().message)
     }
 }
