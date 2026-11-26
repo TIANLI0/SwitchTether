@@ -8,7 +8,7 @@ Living log so work survives context limits. Newest entries at the bottom of each
 - AGP 9.5.2, Kotlin 2.4.21, Compose MP 1.12.2 (androidx.compose pinned 1.13.0, which needs compileSdk 37.2).
   coui17 @ a51f957 upstream uses AGP 9.3.1 / Kotlin 2.4.10 / CMP 1.11.1; materialkolor stays on 5.0.1
   because 6.x removes `DynamicScheme` used by coui-ui.
-- JDK 21 (`JAVA_HOME="C:\Program Files\Java\jdk-21"` per command). compileSdk 37.2, minSdk 29, targetSdk 36.
+- JDK 21 (`JAVA_HOME="C:\Program Files\Java\jdk-21"` per command). compileSdk 37.2, minSdk 35 (Android 15), targetSdk 36.
 - `local.properties` has `sdk.dir=D:/AndroidSDK` (gitignored).
 - Build: `JAVA_HOME=... ./gradlew :app:assembleDebug testDebugUnitTest :core:remote:test`
 

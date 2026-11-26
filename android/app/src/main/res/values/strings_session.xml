@@ -257,4 +257,10 @@
     <string name="cap_reason_observed_claude">Claude Code was started on the computer (terminal or VS Code), and another program cannot steer that process. Tap “%1$s” to go on with this conversation from the phone: it continues in a SwitchTether process while the original is idle, and the original window will not show the new turns.</string>
     <string name="cap_reason_observed_codex">Codex was started on the computer (terminal or Codex Desktop), and another program cannot steer that process. Tap “%1$s” to go on with this thread from the phone: it continues in SwitchTether’s own Codex, which Codex allows only while the thread is not open elsewhere.</string>
     <string name="cap_reason_observed_dsh">This DeepSeek Harness window cannot be steered by another program unless its plugin is installed. Tap “%1$s” to go on from the phone once the session is no longer active elsewhere.</string>
+    <string name="home_activity_agent">Sub-agent</string>
+    <string name="home_activity_task">Background task</string>
+    <plurals name="home_activity_more">
+        <item quantity="one">%1$d more running</item>
+        <item quantity="other">%1$d more running</item>
+    </plurals>
 </resources>

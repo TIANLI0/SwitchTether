@@ -604,7 +604,7 @@ the offline banner (UDP magic packet to the subnet broadcast and 255.255.255.255
   reference value, the connection order test, and an opt-in test against the Go relay
   (`SWITCHTETHER_RELAY_TEST`, `SWITCHTETHER_RELAY_KEY`).
 
-### 13.7 Android 17 (targetSdk 37, minSdk 29)
+### 13.7 Android 17 (targetSdk 37, minSdk 35)
 - **Local network permission** (`ACCESS_LOCAL_NETWORK`): requested with a Chinese rationale sheet at
   pairing (when the link has LAN hosts) and at the first LAN connect. Denied → LAN hosts and
   discovery are skipped (Tailscale / relay still work) and a strip "未授予局域网权限… 去授权" offers

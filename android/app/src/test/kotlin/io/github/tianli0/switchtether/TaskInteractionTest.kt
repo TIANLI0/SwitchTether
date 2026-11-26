@@ -43,7 +43,7 @@ import org.robolectric.annotation.GraphicsMode
 
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [32], qualifiers = "en-w411dp-h891dp-xxhdpi")
+@Config(sdk = [35], qualifiers = "en-w411dp-h891dp-xxhdpi")
 class TaskInteractionTest {
     @get:Rule val rule = createAndroidComposeRule<androidx.activity.ComponentActivity>()
     private fun context(answer: (JsonObject?) -> Unit = {}) = RenderContext(

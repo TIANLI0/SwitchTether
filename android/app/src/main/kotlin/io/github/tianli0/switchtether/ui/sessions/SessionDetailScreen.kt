@@ -165,6 +165,14 @@ fun SessionDetailScreen(
     var viewingFile by remember { mutableStateOf<io.github.tianli0.switchtether.ui.files.RemoteFileRef?>(null) }
     var pendingApproval by remember { mutableStateOf<Triple<String, String, String>?>(null) }
     var viewingImage by remember { mutableStateOf<io.github.tianli0.switchtether.ui.sessions.render.ImagePreview?>(null) }
+    // A file on the computer: a picture goes to the lightbox (the same one as pictures in messages),
+    // anything else to the file viewer.
+    val openDesktopFile: (String) -> Unit = { path ->
+        val name = io.github.tianli0.switchtether.files.FileTypes.fileName(path)
+        val kind = io.github.tianli0.switchtether.files.FileTypes.kindOf(name)
+        if (kind == io.github.tianli0.switchtether.files.FileKind.IMAGE) viewingImage = io.github.tianli0.switchtether.ui.sessions.render.ImagePreview(path = path)
+        else viewingFile = io.github.tianli0.switchtether.ui.files.RemoteFileRef(path, name, kind)
+    }
     var confirmInterrupt by remember { mutableStateOf(false) }
     var confirmStop by rememberSaveable { mutableStateOf(false) }
     var showContinue by rememberSaveable { mutableStateOf(false) }
@@ -229,18 +237,14 @@ fun SessionDetailScreen(
                 // A link to a file on the desktop opens in the local viewer (pdf / image / video / audio / other app).
                 val path = io.github.tianli0.switchtether.files.FileTypes.resolveChatPath(link, summary?.cwd)
                 if (path != null) {
-                    val name = io.github.tianli0.switchtether.files.FileTypes.fileName(path)
-                    viewingFile = io.github.tianli0.switchtether.ui.files.RemoteFileRef(path, name, io.github.tianli0.switchtether.files.FileTypes.kindOf(name))
+                    openDesktopFile(path)
                 } else if (link.startsWith("https://") || link.startsWith("http://")) {
                     pendingLink = link
                 }
             },
             // The file a Read / Edit / Write step is about opens in the same viewer.
             onOpenFile = { file ->
-                io.github.tianli0.switchtether.files.FileTypes.resolveChatPath(file, summary?.cwd)?.let { path ->
-                    val name = io.github.tianli0.switchtether.files.FileTypes.fileName(path)
-                    viewingFile = io.github.tianli0.switchtether.ui.files.RemoteFileRef(path, name, io.github.tianli0.switchtether.files.FileTypes.kindOf(name))
-                }
+                io.github.tianli0.switchtether.files.FileTypes.resolveChatPath(file, summary?.cwd)?.let(openDesktopFile)
             },
             onLoadImageBytes = vm::loadImageBytes,
             onViewImage = { viewingImage = it },
@@ -849,10 +853,19 @@ private fun StatusChipRow(
                     else -> null
                 }
                 val described = agentsDot?.takeIf { dot != null }?.let { "$label · ${agentStateLabel(it)}" } ?: label
+                // The tree glyph breathes while agents work, turns the warning colour (still) while
+                // one waits for the user, and rests once they are done.
+                val glyph: @Composable () -> Unit = {
+                    io.github.tianli0.switchtether.ui.common.SubagentGlyph(
+                        tint = dot ?: COUITheme.colorScheme.primary,
+                        running = agentsDot == AgentMapState.Working || (agentsDot == null && subagentRunning > 0),
+                        size = 15.dp,
+                    )
+                }
                 if (dot != null) {
-                    InfoChip(label, dot = dot, onClick = onOpenSubagents, modifier = Modifier.testTag("subagent-tree").clearAndSetSemantics { contentDescription = described; role = Role.Button; onClick { onOpenSubagents(); true } }, backdrop = bg)
+                    InfoChip(label, leading = glyph, onClick = onOpenSubagents, modifier = Modifier.testTag("subagent-tree").clearAndSetSemantics { contentDescription = described; role = Role.Button; onClick { onOpenSubagents(); true } }, backdrop = bg)
                 } else {
-                    InfoChip(label, icon = AppIcons.SubAgent, onClick = onOpenSubagents, modifier = Modifier.testTag("subagent-tree"), backdrop = bg)
+                    InfoChip(label, leading = glyph, onClick = onOpenSubagents, modifier = Modifier.testTag("subagent-tree"), backdrop = bg)
                 }
             }
             // Commands left running in the background (`run_in_background`): their own capsule, so a
@@ -863,11 +876,14 @@ private fun StatusChipRow(
             if (onOpenSubagents != null && (bgRunning > 0 || (bgAll > 0 && subagentCount == 0))) {
                 val label = if (bgRunning > 0) pluralStringResource(R.plurals.background_task_chip_running, bgRunning, bgRunning)
                 else pluralStringResource(R.plurals.background_task_chip, bgAll, bgAll)
-                if (bgRunning > 0) {
-                    InfoChip(label, dot = dev.info, onClick = onOpenSubagents, modifier = Modifier.testTag("chip-background"), backdrop = bg)
-                } else {
-                    InfoChip(label, icon = AppIcons.BackgroundTask, onClick = onOpenSubagents, modifier = Modifier.testTag("chip-background"), backdrop = bg)
-                }
+                // The hourglass turns over while a task runs.
+                InfoChip(
+                    label,
+                    leading = { io.github.tianli0.switchtether.ui.common.BackgroundTaskGlyph(tint = if (bgRunning > 0) dev.info else COUITheme.colorScheme.primary, running = bgRunning > 0, size = 15.dp) },
+                    onClick = onOpenSubagents,
+                    modifier = Modifier.testTag("chip-background"),
+                    backdrop = bg,
+                )
             }
             costLabel?.let { label ->
                 val described = stringResource(R.string.cost_chip_a11y, label)

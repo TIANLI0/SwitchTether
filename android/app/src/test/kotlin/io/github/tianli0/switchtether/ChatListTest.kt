@@ -167,7 +167,7 @@ class ChatListTest {
     // QuestionAnswerTest); the legacy mode hands Compose a null bitmap there.
     @Test
     @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    @Config(sdk = [32])
+    @Config(sdk = [35])
     fun failedBubbleOffersRetryAndDelete() {
         val out = OutgoingMessage("c9", "deploy it", OutgoingStatus.FAILED, afterSeq = 3, error = "session busy")
         show(state(messages(3), listOf(out)))

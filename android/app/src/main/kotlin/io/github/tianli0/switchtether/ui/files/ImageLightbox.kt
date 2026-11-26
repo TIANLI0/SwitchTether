@@ -132,7 +132,6 @@ internal fun LightboxContent(
     onDismiss: () -> Unit,
     loadBytes: (suspend (String) -> ByteArray?)?,
 ) {
-    LightSystemBars()
     // Absent where no app container exists (previews): the picture still shows, without the actions.
     val app = LocalContext.current.applicationContext as? io.github.tianli0.switchtether.SwitchTetherApp
     val store: FileStore? = app?.container?.fileStore
@@ -142,6 +141,10 @@ internal fun LightboxContent(
     val pager = rememberPagerState(initialPage = startIndex) { images.size }
     var chrome by remember { mutableStateOf(true) }
     var zoomed by remember { mutableStateOf(false) }
+    // Immersive like the system gallery: light bar icons on black, and the status / navigation
+    // bars leave with the controls (a tap, or the 4 s timeout) so the picture has the whole
+    // screen; an edge swipe still shows them for a moment.
+    LightSystemBars(barsVisible = chrome)
     val loaded = remember { mutableStateMapOf<Int, ByteArray>() }
     // Telephoto's flick-to-dismiss: the picture follows the finger with rubber banding and is
     // thrown off screen (or springs back) on release by distance and velocity.
@@ -354,19 +357,26 @@ private fun OverMediaAction(icon: ImageVector, label: String, onClick: () -> Uni
 
 /** Light status and navigation bar icons while the lightbox is open (it is always dark). */
 @Composable
-private fun LightSystemBars() {
+private fun LightSystemBars(barsVisible: Boolean) {
     val view = LocalView.current
-    DisposableEffect(view) {
-        val window = (view.parent as? DialogWindowProvider)?.window
-        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+    val controller = remember(view) {
+        (view.parent as? DialogWindowProvider)?.window?.let { WindowCompat.getInsetsController(it, view) }
+    }
+    DisposableEffect(controller) {
         val wasLightStatus = controller?.isAppearanceLightStatusBars
         val wasLightNav = controller?.isAppearanceLightNavigationBars
         controller?.isAppearanceLightStatusBars = false
         controller?.isAppearanceLightNavigationBars = false
+        controller?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         onDispose {
+            controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             wasLightStatus?.let { controller.isAppearanceLightStatusBars = it }
             wasLightNav?.let { controller.isAppearanceLightNavigationBars = it }
         }
+    }
+    androidx.compose.runtime.LaunchedEffect(controller, barsVisible) {
+        val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
+        if (barsVisible) controller?.show(bars) else controller?.hide(bars)
     }
 }
 

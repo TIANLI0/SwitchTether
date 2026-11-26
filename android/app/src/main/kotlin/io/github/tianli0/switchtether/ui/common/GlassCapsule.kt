@@ -37,7 +37,10 @@ fun GlassCapsule(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Bo
                 enabled = enabled,
                 shape = shape,
                 lightParams = SpotLightDefaults.capsuleParams2(dark),
-                consumeDrag = false,
+                // The capsule takes the drag, gives under the finger and springs back, as a COUI
+                // button does. Handing the drag on as well let the conversation scroll at the same
+                // time, which cut the spring short: the bounce stuttered.
+                consumeDrag = true,
             )
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 11.dp),

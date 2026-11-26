@@ -1,5 +1,6 @@
 package io.github.tianli0.switchtether.ui.home
 
+import androidx.lifecycle.repeatOnLifecycle
 import io.github.suqi8.coui.kmp.basic.preciseClickAnchor
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.LinkButton
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -36,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -72,6 +75,11 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 fun HomeScreen(onOpen: (Route) -> Unit, onSelectTab: (Tab) -> Unit) {
     val vm = containerViewModel { HomeViewModel(it.connection, it.sessions, it.management) }
     val state by vm.state.collectAsStateWithLifecycle()
+    // Running agents / tasks refresh only while Home is shown and the app is in front.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.LaunchedEffect(vm, lifecycle) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) { vm.followActivity() }
+    }
     HomeContent(state, onOpen, onSelectTab, onRetry = vm::retryConnection, onRefresh = vm::pullRefresh)
 }
 
@@ -107,7 +115,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                 is Loadable.Ready -> {
                     if (state.attention.isNotEmpty()) {
                         item(key = "att-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_attention, state.attention.size), highlight = true) } }
-                        item(key = "att") { Box(Modifier.animateItem()) { SessionGroup(state.attention, onOpen) } }
+                        item(key = "att") { Box(Modifier.animateItem()) { SessionGroup(state.attention, onOpen, state.activity) } }
                     }
                     item(key = "live-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_running, state.running.size)) } }
                     item(key = "live") {
@@ -126,7 +134,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                                     )
                                 }
                             } else {
-                                SessionGroup(state.running.take(MAX_ROWS), onOpen)
+                                SessionGroup(state.running.take(MAX_ROWS), onOpen, state.activity)
                             }
                         }
                     }
@@ -137,7 +145,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                     if (state.idle.isNotEmpty()) {
                         item(key = "idle-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_idle, state.idle.size)) } }
                         // Idle sessions are background: a few are enough here, the rest are one tap away.
-                        item(key = "idle") { Box(Modifier.animateItem()) { SessionGroup(state.idle.take(MAX_IDLE_ROWS), onOpen) } }
+                        item(key = "idle") { Box(Modifier.animateItem()) { SessionGroup(state.idle.take(MAX_IDLE_ROWS), onOpen, state.activity) } }
                     }
                     if (state.running.size > MAX_ROWS || state.idle.size > MAX_IDLE_ROWS) {
                         item(key = "all-live") {
@@ -187,14 +195,27 @@ private const val MAX_ROWS = 8
 private const val MAX_IDLE_ROWS = 3
 
 @Composable
-private fun SessionGroup(list: List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>, onOpen: (Route) -> Unit) {
+private fun SessionGroup(
+    list: List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>,
+    onOpen: (Route) -> Unit,
+    activity: Map<String, SessionActivity> = emptyMap(),
+) {
     val pins by io.github.tianli0.switchtether.ui.appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
     var menuFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.remote.protocol.SessionSummary?>(null) }
     val touch = io.github.suqi8.coui.kmp.basic.rememberPreciseClickState()
     io.github.tianli0.switchtether.ui.sessions.PinMenu(menuFor, menuFor?.id in pins, touch) { menuFor = null }
     GroupCard(Modifier.preciseClickAnchor(touch)) {
         list.forEachIndexed { i, it ->
-            SessionRow(it, onClick = { onOpen(Route.SessionDetail(it.id, it.title)) }, position = cardListPositionOf(i, list.size), compact = true, pinned = it.id in pins, onLongClick = { menuFor = it })
+            val running = activity[it.id]?.takeIf { a -> !a.isEmpty }
+            SessionRow(
+                it,
+                onClick = { onOpen(Route.SessionDetail(it.id, it.title)) },
+                position = cardListPositionOf(i, list.size),
+                compact = true,
+                pinned = it.id in pins,
+                onLongClick = { menuFor = it },
+                bottom = running?.let { a -> { ActivityLines(a) { onOpen(Route.SubagentTree(it.id, it.agent)) } } },
+            )
         }
     }
 }
@@ -237,3 +258,98 @@ private fun UsageRow(today: Loadable<UsageSummary>, onRetry: () -> Unit, positio
 fun RowIcon(icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Icon(icon, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(24.dp))
 }
+
+/**
+ * What runs inside a session, under its row: each sub-agent (name and what it is doing, or that
+ * it waits for the user) and each background task (command and how long it has run), with the
+ * same animated glyphs as the session page's capsules. At most [MAX_ACTIVITY_LINES]; a tap opens
+ * the session's Agent map.
+ */
+@Composable
+private fun ActivityLines(a: SessionActivity, onOpenMap: () -> Unit) {
+    val dev = LocalDevColors.current
+    val now = io.github.tianli0.switchtether.ui.common.MinuteClock.now.longValue
+    val lines = buildList<@Composable () -> Unit> {
+        a.agents.forEach { n ->
+            add {
+                val waiting = n.waiting == true
+                ActivityLine(
+                    glyph = { io.github.tianli0.switchtether.ui.common.SubagentGlyph(tint = if (waiting) dev.warn else dev.info, running = !waiting, size = 14.dp) },
+                    title = n.description?.takeIf { it.isNotBlank() } ?: n.agentType?.takeIf { it.isNotBlank() } ?: stringResource(R.string.home_activity_agent),
+                    detail = if (waiting) stringResource(R.string.agent_map_waiting_permission) else n.activity?.takeIf { it.isNotBlank() },
+                    detailColor = if (waiting) dev.warn else COUITheme.colorScheme.onSurfaceVariantSummary,
+                    trailing = io.github.tianli0.switchtether.ui.sessions.agentElapsed(n, now)?.let { io.github.tianli0.switchtether.ui.sessions.durationText(it) },
+                    onClick = onOpenMap,
+                )
+            }
+        }
+        a.tasks.forEach { t ->
+            add {
+                ActivityLine(
+                    glyph = { io.github.tianli0.switchtether.ui.common.BackgroundTaskGlyph(tint = dev.info, running = true, size = 14.dp) },
+                    title = t.title?.takeIf { it.isNotBlank() } ?: t.summary?.takeIf { it.isNotBlank() } ?: stringResource(R.string.home_activity_task),
+                    detail = null,
+                    detailColor = COUITheme.colorScheme.onSurfaceVariantSummary,
+                    trailing = io.github.tianli0.switchtether.ui.sessions.rfcMs(t.startedAt)?.let { io.github.tianli0.switchtether.ui.sessions.durationText(now - it) },
+                    onClick = onOpenMap,
+                )
+            }
+        }
+    }
+    // Indented to the row's text (the compact avatar and its gap), so the lines read as the row's.
+    Column(Modifier.fillMaxWidth().padding(start = ACTIVITY_INDENT, end = 12.dp, top = 0.dp, bottom = 2.dp)) {
+        lines.take(MAX_ACTIVITY_LINES).forEach { it() }
+        if (lines.size > MAX_ACTIVITY_LINES) {
+            Text(
+                pluralStringResource(R.plurals.home_activity_more, lines.size - MAX_ACTIVITY_LINES, lines.size - MAX_ACTIVITY_LINES),
+                style = COUITheme.textStyles.footnote2,
+                color = COUITheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClick = onOpenMap).padding(vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActivityLine(
+    glyph: @Composable () -> Unit,
+    title: String,
+    detail: String?,
+    detailColor: androidx.compose.ui.graphics.Color,
+    trailing: String?,
+    onClick: () -> Unit,
+) {
+    androidx.compose.foundation.layout.Row(
+        Modifier.fillMaxWidth().clip(io.github.suqi8.coui.kmp.squircle.SquircleShape(8.dp)).clickable(onClick = onClick).heightIn(min = 26.dp).padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        glyph()
+        androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+        Text(
+            androidx.compose.ui.text.buildAnnotatedString {
+                append(title)
+                if (detail != null) {
+                    pushStyle(androidx.compose.ui.text.SpanStyle(color = detailColor))
+                    append(" · ")
+                    append(detail)
+                    pop()
+                }
+            },
+            style = COUITheme.textStyles.footnote1,
+            color = COUITheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (trailing != null) {
+            androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+            Text(trailing, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1)
+        }
+    }
+}
+
+/** Lines of running agents / tasks under one Home row before "N more". */
+private const val MAX_ACTIVITY_LINES = 3
+
+/** The compact row's avatar (32dp) and its gap to the text. */
+private val ACTIVITY_INDENT = 48.dp

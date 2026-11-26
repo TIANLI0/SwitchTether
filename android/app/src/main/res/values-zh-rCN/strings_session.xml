@@ -243,4 +243,9 @@
     <string name="cap_reason_observed_claude">这个 Claude Code 是在电脑上（终端或 VS Code）启动的，其他程序无法控制它的进程。点“%1$s”可在手机上接着这段对话：原进程空闲时，对话会在 SwitchTether 的进程里继续，原窗口不会显示新的回合。</string>
     <string name="cap_reason_observed_codex">这个 Codex 是在电脑上（终端或 Codex Desktop）启动的，其他程序无法控制它的进程。点“%1$s”可在手机上接着这个线程：它会在 SwitchTether 自己的 Codex 里继续，Codex 只在线程没有在别处打开时允许这样做。</string>
     <string name="cap_reason_observed_dsh">这个 DeepSeek Harness 窗口在没有安装插件时无法被其他程序控制。会话不在别处运行后，点“%1$s”可在手机上继续。</string>
+    <string name="home_activity_agent">子 agent</string>
+    <string name="home_activity_task">后台任务</string>
+    <plurals name="home_activity_more">
+        <item quantity="other">还有 %1$d 个在运行</item>
+    </plurals>
 </resources>

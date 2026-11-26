@@ -46,7 +46,7 @@ import org.robolectric.annotation.GraphicsMode
 /** Tablet / unfolded-foldable list | detail layout (docs/ANDROID_UI.md §27). Synthetic data. */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [32], qualifiers = "zh-rCN-w1280dp-h800dp-xhdpi")
+@Config(sdk = [35], qualifiers = "zh-rCN-w1280dp-h800dp-xhdpi")
 class TwoPaneTest {
     @get:Rule val rule = createAndroidComposeRule<androidx.activity.ComponentActivity>()
 

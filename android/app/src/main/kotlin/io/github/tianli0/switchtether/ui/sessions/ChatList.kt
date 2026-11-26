@@ -173,6 +173,14 @@ fun FollowBottomEffects(listState: LazyListState, follow: FollowState, rows: Lis
             val before = prev
             prev = now
             if (before == null || before.height <= 0 || now.height <= 0 || now.height == before.height || before.index < 0) return@collect
+            // Following the newest message: stay at the end, whatever changed (sending clears the
+            // draft and the composer shrinks in the same frames as the new bubble arrives — keeping
+            // the old bottom row in place pushed the sent message back out of view).
+            if (follow.following) {
+                follow.autoScrolling = true
+                try { listState.scrollToEnd() } finally { follow.autoScrolling = false }
+                return@collect
+            }
             val info = listState.layoutInfo
             val delta = if (now.height < before.height) {
                 // Shorter: what was at the edge is now below it by exactly the lost height.
@@ -191,13 +199,21 @@ fun FollowBottomEffects(listState: LazyListState, follow: FollowState, rows: Lis
         }
     }
     // Sending always brings the newest message (the user's own bubble) into view.
+    // The bubble, the cleared composer and the keyboard settle over the next frames: land at the
+    // end again on each of them, not only on the first (which still had the old rows).
     LaunchedEffect(sendTick) {
         if (sendTick == 0) return@LaunchedEffect
         follow.following = true
-        follow.autoScrolling = true
-        try { listState.scrollToEnd() } finally { follow.autoScrolling = false }
+        repeat(SEND_SETTLE_FRAMES) {
+            follow.autoScrolling = true
+            try { listState.scrollToEnd() } finally { follow.autoScrolling = false }
+            androidx.compose.runtime.withFrameNanos { }
+        }
     }
 }
+
+/** Frames after a send in which the list re-lands at its end (about a quarter second). */
+private const val SEND_SETTLE_FRAMES = 15
 
 /** Floating "N 条新消息 ↓" / "回到最新" pill above the composer while the user reads older rows. */
 @Composable
@@ -211,25 +227,18 @@ fun BoxScope.NewMessagesPill(listState: LazyListState, follow: FollowState, rows
         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp + bottomInset),
     ) {
         val label = if (newCount > 0) pluralStringResource(R.plurals.new_messages, newCount, newCount) else stringResource(R.string.jump_latest)
-        val shape = RoundedCornerShape(50)
-        Row(
-            Modifier
-                // The composer's glass and halo, but denser: it sits over moving text (bubbles,
-                // code) and with the plain glass that text read through its label. Tinted with the
-                // page colour, so it is a dark capsule in the dark theme (the card colour, 10 %
-                // white, turned it into a light grey blob there).
-                .glassSurface(shape, tint = io.github.tianli0.coui17.patterns.pageContainerColor().copy(alpha = 0.85f), halo = true)
-                .clickable(role = Role.Button) {
-                    follow.following = true
-                    scope.launch {
-                        follow.autoScrolling = true
-                        try { listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0), 1_000_000) } finally { follow.autoScrolling = false }
-                    }
+        // The same glass capsule as the run-settings and "stop" capsules above the composer: same
+        // tint in both themes (a near-black fill read too heavy in the dark one), and the same COUI
+        // touch motion — it gives under the finger and springs back.
+        io.github.tianli0.switchtether.ui.common.GlassCapsule(
+            onClick = {
+                follow.following = true
+                scope.launch {
+                    follow.autoScrolling = true
+                    try { listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0), 1_000_000) } finally { follow.autoScrolling = false }
                 }
-                .heightIn(min = 40.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .testTag("new-messages-pill"),
-            verticalAlignment = Alignment.CenterVertically,
+            },
+            modifier = Modifier.heightIn(min = 36.dp).padding(horizontal = 4.dp).testTag("new-messages-pill"),
         ) {
             Text(label, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary)
             Spacer(Modifier.size(6.dp))

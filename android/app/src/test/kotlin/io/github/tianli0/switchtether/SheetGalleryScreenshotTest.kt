@@ -61,7 +61,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [32], qualifiers = "zh-rCN-w411dp-h891dp-xxhdpi")
+@Config(sdk = [35], qualifiers = "zh-rCN-w411dp-h891dp-xxhdpi")
 class SheetGalleryScreenshotTest {
     @get:Rule val rule = createAndroidComposeRule<androidx.activity.ComponentActivity>()
 

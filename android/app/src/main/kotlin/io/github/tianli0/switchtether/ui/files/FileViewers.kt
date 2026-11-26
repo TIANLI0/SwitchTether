@@ -154,6 +154,13 @@ fun RemoteFileViewer(
     /** A file link inside a rendered Markdown file; null leaves such links inert. */
     onOpenPath: ((String) -> Unit)? = null,
 ) {
+    // A picture opens in the lightbox, wherever it was opened from (a file row, a step's "view",
+    // a link): one picture viewer, not a second titled page with its own zoom.
+    if (ref.kind == FileKind.IMAGE) {
+        val sessions = appContainer().sessions
+        ImageLightbox(listOf(LightboxImage(name = ref.name, path = ref.path)), onDismiss = onBack, loadBytes = { p -> sessions.downloadFile(p) })
+        return
+    }
     val store = appContainer().fileStore
     val scope = rememberCoroutineScope()
     val save = remember(ref) { SaveController(ref, store, scope) }

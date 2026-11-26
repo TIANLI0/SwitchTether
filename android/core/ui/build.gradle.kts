@@ -12,7 +12,7 @@ android {
     }
     buildToolsVersion = "37.0.0"
     defaultConfig {
-        minSdk = 29
+        minSdk = 35
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21

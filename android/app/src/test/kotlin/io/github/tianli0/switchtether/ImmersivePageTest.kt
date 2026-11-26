@@ -23,7 +23,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [32], qualifiers = "en-w411dp-h891dp-xxhdpi")
+@Config(sdk = [35], qualifiers = "en-w411dp-h891dp-xxhdpi")
 class ImmersivePageTest {
     @get:Rule val rule = createAndroidComposeRule<androidx.activity.ComponentActivity>()
 

@@ -107,7 +107,7 @@ evidence in [AGENT_COMPATIBILITY](docs/AGENT_COMPATIBILITY.md).
 
 ## Quick start
 
-1. **Install** the desktop app (Windows, macOS, Linux) and the Android APK (Android 10+) from the
+1. **Install** the desktop app (Windows, macOS, Linux) and the Android APK (Android 15+) from the
    [latest release](https://github.com/TIANLI0/SwitchTether/releases/latest).
 2. **On the computer:** Settings → **Remote (phone)** → turn it on → **Show QR code**.
 3. **On the phone:** **Pair a computer** → scan → check that both screens show the same 6-digit code.

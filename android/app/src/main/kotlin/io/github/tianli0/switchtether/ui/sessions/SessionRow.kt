@@ -47,6 +47,8 @@ fun SessionRow(
     compact: Boolean = false,
     pinned: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    /** Lines under the row inside the same card slot (Home: what runs inside the session). */
+    bottom: (@Composable () -> Unit)? = null,
 ) {
     val dev = LocalDevColors.current
     val agent = Formatters.agentLabel(session.agent)
@@ -102,6 +104,7 @@ fun SessionRow(
         },
         insideMargin = if (compact) androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp) else io.github.suqi8.coui.kmp.basic.BasicComponentDefaults.InsideMargin,
         cardListPosition = position,
+        bottomAction = bottom,
         onClick = if (onLongClick != null) null else onClick,
     )
 }

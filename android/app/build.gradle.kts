@@ -15,7 +15,7 @@ android {
 
     defaultConfig {
         applicationId = "io.github.tianli0.switchtether"
-        minSdk = 29
+        minSdk = 35
         // Android 17. Local network access needs ACCESS_LOCAL_NETWORK (requested at runtime).
         targetSdk = 37
         versionCode = 23

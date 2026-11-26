@@ -102,7 +102,7 @@ flowchart LR
 ## 快速开始
 
 1. **安装**：从[最新版本](https://github.com/TIANLI0/SwitchTether/releases/latest)下载桌面端
-   （Windows、macOS、Linux）和 Android APK（Android 10 及以上）。
+   （Windows、macOS、Linux）和 Android APK（Android 15 及以上）。
 2. **电脑端**：设置 → **远程（手机）** → 开启 → **显示二维码**。
 3. **手机端**：**配对电脑** → 扫码 → 确认两边显示的 6 位验证码一致。
 
