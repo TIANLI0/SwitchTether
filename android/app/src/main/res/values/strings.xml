@@ -473,8 +473,8 @@
     <string name="attach_photos_hint">From the system photo picker</string>
     <string name="attach_files">Files</string>
     <string name="attach_files_hint">Any file: documents, logs, archives…</string>
-    <string name="attach_where">Files are copied to a SwitchTether folder on the computer (kept for 7 days) and given to the agent as paths. Up to 10 files, 64 MB each.</string>
-    <string name="attach_too_large">Over 64 MB</string>
+    <string name="attach_where">Files are copied to a SwitchTether folder on the computer (kept for 7 days) and given to the agent as paths. Up to 10 files, 1 GB each.</string>
+    <string name="attach_too_large">Over 1 GB</string>
     <string name="attach_empty">Empty file</string>
     <string name="attach_old_desktop">Update the desktop app</string>
     <string name="attach_failed">Upload failed</string>
@@ -505,4 +505,19 @@
     <string name="manage_mcp_summary">Turn servers on or off per app</string>
     <string name="manage_skills_summary">Skills installed for each agent</string>
     <string name="manage_prompts_summary">System prompts and which one is active</string>
+    <string name="about_developer">Developer</string>
+    <string name="about_author_name">Tianli</string>
+    <string name="about_author_summary">GitHub @TIANLI0</string>
+    <string name="about_homepage">Website</string>
+    <string name="about_blog">Blog</string>
+    <string name="about_email">Email</string>
+    <string name="about_project">Project</string>
+    <string name="about_source">Source code</string>
+    <string name="about_feedback">Feedback</string>
+    <string name="about_feedback_summary">Report a problem or suggest a feature on GitHub</string>
+    <string name="about_releases">Releases</string>
+    <string name="about_releases_summary">Every version and its notes</string>
+    <string name="about_coui17_summary">The ColorOS 17 component library this app is built with</string>
+    <string name="about_upstream_summary">The desktop app SwitchTether is a fork of</string>
+    <string name="home_manage_summary">Providers, usage, MCP, skills, settings</string>
 </resources>

@@ -62,7 +62,7 @@ import io.github.tianli0.switchtether.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}) {
+fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manageItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}) {
     val container = appContainer()
     val scope = rememberCoroutineScope()
     val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(null)
@@ -89,7 +89,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
 
     // Landscape: the large collapsing title and the space above it took a third of the height.
     val roomy = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480
-    Page(title = stringResource(R.string.tab_manage), immersive = true, large = roomy) {
+    Page(title = stringResource(R.string.tab_manage), onBack = onBack, immersive = true, large = roomy) {
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             item {
@@ -555,6 +555,8 @@ val LICENSES = listOf(
     LicenseEntry("Telephoto (zoomable, sub-sampling-image, flick)", "Apache-2.0", "Saket Narayan"),
     LicenseEntry("multiplatform-markdown-renderer, JetBrains Markdown", "Apache-2.0", "Mike Penz; JetBrains s.r.o."),
     LicenseEntry("Highlights (dev.snipme)", "Apache-2.0", "SnipMe"),
+    LicenseEntry("Lottie for Android (airbnb/lottie-android)", "Apache-2.0", "Airbnb, Inc."),
+    LicenseEntry("useAnimations (useAnimations/react-useanimations @ f7af6f5): clock, gitBranch, notification4", "MIT", "Copyright (c) useAnimations. Animated icons bundled as res/raw/lottie_*.json"),
     LicenseEntry("AndroidX Media3 ExoPlayer (video / audio preview)", "Apache-2.0", "The Android Open Source Project"),
     LicenseEntry("material-color-utilities (com.materialkolor)", "Apache-2.0", "Google LLC / Jordon de Hoog"),
     LicenseEntry("material3-window-size-class (JetBrains)", "Apache-2.0", "JetBrains s.r.o."),

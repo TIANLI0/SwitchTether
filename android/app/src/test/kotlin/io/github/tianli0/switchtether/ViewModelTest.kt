@@ -223,7 +223,7 @@ class ViewModelTest {
         assertTrue(drafts.all { it.ready })
         assertTrue(repo.uploads.getValue("att-1").contentEquals(big))
         // Too large is refused locally, never uploaded, and blocks sending until removed.
-        vm.addAttachment("huge.iso", 65L * 1024 * 1024, null) { null }
+        vm.addAttachment("huge.iso", io.github.tianli0.switchtether.ui.sessions.MAX_ATTACHMENT_BYTES + 1, null) { null }
         val huge = vm.state.value.draftAttachments.last()
         assertEquals(io.github.tianli0.switchtether.ui.sessions.AttachmentFailure.TOO_LARGE, huge.failure)
         vm.send()

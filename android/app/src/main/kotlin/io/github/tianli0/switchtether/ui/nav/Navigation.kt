@@ -30,6 +30,8 @@ sealed interface Route {
     /** DeepSeek Harness Web in a WebView over a port forward (docs/ANDROID_UI.md §31). */
     data object DshWeb : Route
     data object PickFolder : Route
+    /** Manage (providers, usage, MCP, skills, prompts, settings): a page opened from Home, not a tab. */
+    data object Manage : Route
     data object Providers : Route
     data object Usage : Route
     /** One project's usage and its sessions (by project name, as the session list shows it). */

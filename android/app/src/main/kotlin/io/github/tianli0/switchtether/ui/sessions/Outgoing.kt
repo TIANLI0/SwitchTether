@@ -35,8 +35,10 @@ data class OutgoingMessage(
 )
 
 const val MAX_ATTACHMENTS = 10
-const val MAX_ATTACHMENT_BYTES = 64L * 1024 * 1024
-const val ATTACHMENT_CHUNK = 2 * 1024 * 1024
+/** One attachment, as the desktop allows: 1 GiB (streamed from the file in chunks, never held whole). */
+const val MAX_ATTACHMENT_BYTES = 1024L * 1024 * 1024
+/** Upload chunk: fewer round trips for large files, well under the desktop's 8 MiB per chunk. */
+const val ATTACHMENT_CHUNK = 4 * 1024 * 1024
 
 enum class AttachmentFailure { TOO_LARGE, EMPTY, OLD_DESKTOP, FAILED }
 

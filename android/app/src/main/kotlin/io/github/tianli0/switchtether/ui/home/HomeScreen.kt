@@ -171,18 +171,28 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
             item(key = "more-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_more)) } }
             item(key = "more") {
                 GroupCard(Modifier.animateItem()) {
-                    UsageRow(state.usageToday, onRefresh, cardListPositionOf(0, 3)) { onOpen(Route.Usage) }
+                    UsageRow(state.usageToday, onRefresh, cardListPositionOf(0, 4)) { onOpen(Route.Usage) }
                     ArrowPreference(
                         title = stringResource(R.string.manage_providers),
                         startAction = { RowIcon(AppIcons.Providers) },
                         onClick = { onOpen(Route.Providers) },
-                        cardListPosition = cardListPositionOf(1, 3),
+                        cardListPosition = cardListPositionOf(1, 4),
                     )
                     ArrowPreference(
                         title = stringResource(R.string.settings_desktop),
                         startAction = { RowIcon(AppIcons.Info) },
                         onClick = { onOpen(Route.DesktopInfo) },
-                        cardListPosition = cardListPositionOf(2, 3),
+                        cardListPosition = cardListPositionOf(2, 4),
+                    )
+                    // Manage left the bottom bar (three tabs, like the system Gallery): everything it
+                    // held — providers, usage, MCP, skills, prompts, settings — is one row away here.
+                    ArrowPreference(
+                        title = stringResource(R.string.tab_manage),
+                        summary = stringResource(R.string.home_manage_summary),
+                        startAction = { RowIcon(AppIcons.Manage) },
+                        onClick = { onOpen(Route.Manage) },
+                        cardListPosition = cardListPositionOf(3, 4),
+                        modifier = Modifier.testTag("home-manage"),
                     )
                 }
             }
@@ -274,7 +284,10 @@ private fun ActivityLines(a: SessionActivity, onOpenMap: () -> Unit) {
             add {
                 val waiting = n.waiting == true
                 ActivityLine(
-                    glyph = { io.github.tianli0.switchtether.ui.common.SubagentGlyph(tint = if (waiting) dev.warn else dev.info, running = !waiting, size = 14.dp) },
+                    glyph = {
+                        if (waiting) io.github.tianli0.switchtether.ui.common.WaitingGlyph(tint = dev.warn, size = 16.dp)
+                        else io.github.tianli0.switchtether.ui.common.SubagentGlyph(tint = dev.info, running = true, size = 16.dp)
+                    },
                     title = n.description?.takeIf { it.isNotBlank() } ?: n.agentType?.takeIf { it.isNotBlank() } ?: stringResource(R.string.home_activity_agent),
                     detail = if (waiting) stringResource(R.string.agent_map_waiting_permission) else n.activity?.takeIf { it.isNotBlank() },
                     detailColor = if (waiting) dev.warn else COUITheme.colorScheme.onSurfaceVariantSummary,
@@ -286,7 +299,7 @@ private fun ActivityLines(a: SessionActivity, onOpenMap: () -> Unit) {
         a.tasks.forEach { t ->
             add {
                 ActivityLine(
-                    glyph = { io.github.tianli0.switchtether.ui.common.BackgroundTaskGlyph(tint = dev.info, running = true, size = 14.dp) },
+                    glyph = { io.github.tianli0.switchtether.ui.common.BackgroundTaskGlyph(tint = dev.info, running = true, size = 16.dp) },
                     title = t.title?.takeIf { it.isNotBlank() } ?: t.summary?.takeIf { it.isNotBlank() } ?: stringResource(R.string.home_activity_task),
                     detail = null,
                     detailColor = COUITheme.colorScheme.onSurfaceVariantSummary,

@@ -130,7 +130,13 @@ fun SwitchTetherTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable (
         // One red: the developer palette's danger is the COUI scheme's error colour, the one the
         // library's own danger buttons and links use.
         val dev = (if (dark) DevColors.Dark else DevColors.Light).copy(danger = COUITheme.colorScheme.error)
-        CompositionLocalProvider(LocalDevColors provides dev, content = content)
+        CompositionLocalProvider(
+            LocalDevColors provides dev,
+            // Top bars keep their material on, as ColorOS Gallery's pages do
+            // (`scrollDrivenAlphaEnabled = false`), instead of fading it in over the first 30dp.
+            io.github.suqi8.coui.kmp.basic.LocalAppBarMaterialScrollDriven provides false,
+            content = content,
+        )
     }
 }
 

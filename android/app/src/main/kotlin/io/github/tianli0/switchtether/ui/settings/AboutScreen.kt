@@ -86,9 +86,50 @@ fun AboutScreen(onBack: () -> Unit, onOpen: (Route) -> Unit) {
                     )
                 }
             }
+            // The developer and the project, as on the author's other apps' About pages (THRM):
+            // who makes it and where to reach them, then the code, feedback and related projects.
+            item { io.github.suqi8.coui.kmp.basic.SmallTitle(stringResource(R.string.about_developer)) }
+            item {
+                GroupCard {
+                    LinkRow(stringResource(R.string.about_author_name), stringResource(R.string.about_author_summary), "https://github.com/TIANLI0", CardListPosition.Head)
+                    LinkRow(stringResource(R.string.about_homepage), "tianli0.top", "https://tianli0.top", CardListPosition.Middle)
+                    LinkRow(stringResource(R.string.about_blog), "blog.tianli0.top", "https://blog.tianli0.top", CardListPosition.Middle)
+                    LinkRow(stringResource(R.string.about_email), AUTHOR_EMAIL, "mailto:$AUTHOR_EMAIL", CardListPosition.Tail)
+                }
+            }
+            item { io.github.suqi8.coui.kmp.basic.SmallTitle(stringResource(R.string.about_project)) }
+            item {
+                GroupCard {
+                    LinkRow(stringResource(R.string.about_source), "github.com/TIANLI0/SwitchTether", "$REPO_URL", CardListPosition.Head)
+                    LinkRow(stringResource(R.string.about_feedback), stringResource(R.string.about_feedback_summary), "$REPO_URL/issues", CardListPosition.Middle)
+                    LinkRow(stringResource(R.string.about_releases), stringResource(R.string.about_releases_summary), "$REPO_URL/releases", CardListPosition.Middle)
+                    LinkRow("COUI17", stringResource(R.string.about_coui17_summary), "https://github.com/TIANLI0/COUI17", CardListPosition.Middle)
+                    LinkRow("CC Switch", stringResource(R.string.about_upstream_summary), "https://github.com/farion1231/cc-switch", CardListPosition.Tail)
+                }
+            }
             item { Spacer(Modifier.height(24.dp)) }
         }
     }
+}
+
+private const val REPO_URL = "https://github.com/TIANLI0/SwitchTether"
+private const val AUTHOR_EMAIL = "wutianli@tianli0.top"
+
+/** A row that opens a web page (or writes a mail) in the phone's own app for it. */
+@Composable
+private fun LinkRow(title: String, summary: String, url: String, position: CardListPosition) {
+    val context = LocalContext.current
+    val noApp = stringResource(R.string.viewer_no_app)
+    ArrowPreference(
+        title = title,
+        summary = summary,
+        cardListPosition = position,
+        onClick = {
+            val action = if (url.startsWith("mailto:")) android.content.Intent.ACTION_SENDTO else android.content.Intent.ACTION_VIEW
+            runCatching { context.startActivity(android.content.Intent(action, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { android.widget.Toast.makeText(context, noApp, android.widget.Toast.LENGTH_SHORT).show() }
+        },
+    )
 }
 
 @Composable

@@ -214,7 +214,6 @@ fun MainShell() {
             NavItem(Tab.HOME, stringResource(R.string.tab_home), AppIcons.Home, AppIcons.HomeSelected),
             NavItem(Tab.SESSIONS, stringResource(R.string.tab_sessions), AppIcons.Sessions, AppIcons.SessionsSelected),
             NavItem(Tab.WORKSPACE, stringResource(R.string.tab_workspace), AppIcons.Workspace, AppIcons.WorkspaceSelected),
-            NavItem(Tab.MANAGE, stringResource(R.string.tab_manage), AppIcons.Manage, AppIcons.ManageSelected),
         )
         if (wide) {
             Row(Modifier.fillMaxSize()) {
@@ -280,8 +279,6 @@ fun MainShell() {
                         CompositionLocalProvider(
                             LocalBackdrop provides backdrop,
                             LocalBlurEnabled provides true,
-                            // Four short tabs: the tighter capsule (62dp items) instead of 70dp cells.
-                            io.github.suqi8.coui.kmp.basic.LocalBottomFloatingNavigationBarMetrics provides io.github.suqi8.coui.kmp.basic.BottomFloatingNavigationBarMetrics.Compact,
                         ) {
                             // Search and New session split out of the capsule on the two list tabs
                             // (Home, Sessions) and melt back into it on Workspace and Manage.
@@ -396,6 +393,7 @@ private fun Destination(nav: NavViewModel, tab: Tab, route: Route?, onOpenRoot: 
         Route.PortForward -> io.github.tianli0.switchtether.ui.workspace.PortForwardScreen(onBack)
         Route.DshWeb -> io.github.tianli0.switchtether.ui.workspace.DshWebScreen(onBack)
         Route.PickFolder -> io.github.tianli0.switchtether.ui.sessions.PickFolderScreen(onBack)
+        Route.Manage -> ManageScreen(onOpen = nav::push, onBack = onBack)
         Route.Providers -> ProvidersScreen(onBack)
         Route.Usage -> UsageScreen(onBack, onOpen = nav::push)
         is Route.ProjectUsage -> io.github.tianli0.switchtether.ui.manage.ProjectUsageScreen(top.project, onBack, onOpen = nav::push)

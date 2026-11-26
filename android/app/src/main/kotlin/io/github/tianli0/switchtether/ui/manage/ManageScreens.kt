@@ -90,8 +90,8 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
 /** Manage + Settings in one page: computer, agent management, then app preferences. */
 @Composable
-fun ManageScreen(onOpen: (Route) -> Unit) {
-    io.github.tianli0.switchtether.ui.settings.SettingsScreen(onOpen = onOpen, manageItems = {
+fun ManageScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null) {
+    io.github.tianli0.switchtether.ui.settings.SettingsScreen(onOpen = onOpen, onBack = onBack, manageItems = {
         item { SectionHeader(stringResource(R.string.manage_agents_section)) }
         item {
             GroupCard {

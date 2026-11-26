@@ -21,15 +21,18 @@ use serde_json::{json, Value};
 
 use crate::error::{ApiError, ApiResult, ErrorCode};
 
-pub const MAX_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
+/// One attachment: 1 GiB (a video, a disk image, a large log). Uploads stream to disk chunk by
+/// chunk, so the size never sits in memory.
+pub const MAX_ATTACHMENT_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_PER_MESSAGE: usize = 10;
 pub const MAX_CHUNK_BYTES: usize = 8 * 1024 * 1024;
 const KEEP_DAYS: i64 = 7;
-const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// Uploaded attachments stay addressable by id this long (a send can be retried).
 const ID_TTL: Duration = Duration::from_secs(24 * 3600);
-/// An upload that is not finished within this time is discarded.
-const UPLOAD_TTL: Duration = Duration::from_secs(3600);
+/// An upload that is not finished within this time is discarded. Long enough for 1 GiB over a
+/// slow relay (about 50 KB/s).
+const UPLOAD_TTL: Duration = Duration::from_secs(6 * 3600);
 
 /// First line of the block appended to a message. It tells the agent what the paths are and lets
 /// the timeline turn the block back into attachment chips.

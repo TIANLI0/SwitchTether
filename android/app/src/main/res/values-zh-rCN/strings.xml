@@ -457,8 +457,8 @@
     <string name="attach_photos_hint">从系统相册选择</string>
     <string name="attach_files">文件</string>
     <string name="attach_files_hint">任意文件：文档、日志、压缩包…</string>
-    <string name="attach_where">文件会复制到电脑上 SwitchTether 的文件夹（保留 7 天），以路径形式交给智能体。每次最多 10 个，每个不超过 64 MB。</string>
-    <string name="attach_too_large">超过 64 MB</string>
+    <string name="attach_where">文件会复制到电脑上 SwitchTether 的文件夹（保留 7 天），以路径形式交给智能体。每次最多 10 个，每个不超过 1 GB。</string>
+    <string name="attach_too_large">超过 1 GB</string>
     <string name="attach_empty">空文件</string>
     <string name="attach_old_desktop">请先更新电脑端</string>
     <string name="attach_failed">上传失败</string>
@@ -489,4 +489,19 @@
     <string name="manage_mcp_summary">按应用开关 MCP 服务器</string>
     <string name="manage_skills_summary">各 Agent 已安装的技能</string>
     <string name="manage_prompts_summary">系统提示词与当前启用项</string>
+    <string name="about_developer">开发者</string>
+    <string name="about_author_name">Tianli</string>
+    <string name="about_author_summary">GitHub @TIANLI0</string>
+    <string name="about_homepage">个人主页</string>
+    <string name="about_blog">博客</string>
+    <string name="about_email">邮件联系</string>
+    <string name="about_project">项目</string>
+    <string name="about_source">源代码</string>
+    <string name="about_feedback">问题反馈</string>
+    <string name="about_feedback_summary">在 GitHub 上报告问题或提出建议</string>
+    <string name="about_releases">版本发布</string>
+    <string name="about_releases_summary">所有版本及更新说明</string>
+    <string name="about_coui17_summary">本应用使用的 ColorOS 17 组件库</string>
+    <string name="about_upstream_summary">SwitchTether 桌面端所基于的上游项目</string>
+    <string name="home_manage_summary">供应商、用量、MCP、Skills、设置</string>
 </resources>

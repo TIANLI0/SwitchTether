@@ -1,78 +1,64 @@
 package io.github.tianli0.switchtether.ui.common
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.keyframes
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.annotation.RawRes
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.github.suqi8.coui.kmp.basic.Icon
-import io.github.tianli0.switchtether.ui.icons.AppIcons
+import com.airbnb.lottie.LottieProperty
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
+import com.airbnb.lottie.compose.rememberLottieComposition
+import com.airbnb.lottie.compose.rememberLottieDynamicProperties
+import com.airbnb.lottie.compose.rememberLottieDynamicProperty
+import io.github.tianli0.switchtether.R
 
-/**
- * The background-task hourglass. While a task runs it turns over like a real one: still for most
- * of a 1.6 s beat, then a quick half turn — readable as "time is passing" without the busy feel
- * of a spinner. Still when [running] is false.
+/*
+ * "Something runs" glyphs from the useAnimations icon set (MIT, Lottie line icons on a 32 grid with
+ * 2-unit strokes — the weight of the app's Phosphor Regular icons at 24dp). Single-colour strokes,
+ * tinted at runtime. While [running] they loop; otherwise they rest on their first frame, which is
+ * the icon at rest. Bundled in res/raw (see the licences screen).
  */
-@Composable
-fun BackgroundTaskGlyph(tint: Color, running: Boolean, modifier: Modifier = Modifier, size: Dp = 16.dp) {
-    val rotation = if (running) {
-        val t = rememberInfiniteTransition(label = "hourglass")
-        val r by t.animateFloat(
-            initialValue = 0f,
-            targetValue = 180f,
-            animationSpec = infiniteRepeatable(
-                keyframes {
-                    durationMillis = 1600
-                    0f at 0
-                    0f at 1050 using FastOutSlowInEasing
-                    180f at 1600
-                },
-            ),
-            label = "hourglass-turn",
-        )
-        r
-    } else {
-        0f
-    }
-    Icon(AppIcons.BackgroundTask, contentDescription = null, tint = tint, modifier = modifier.size(size).graphicsLayer { rotationZ = rotation })
-}
 
-/**
- * The sub-agent tree glyph. While agents work it breathes (scale and alpha on a 1.2 s cycle), the
- * same rhythm as the running badge on session rows; still when [running] is false.
- */
+/** A background shell task: the clock's hand goes round while it runs. */
 @Composable
-fun SubagentGlyph(tint: Color, running: Boolean, modifier: Modifier = Modifier, size: Dp = 16.dp) {
-    val (scale, alpha) = if (running) {
-        val t = rememberInfiniteTransition(label = "subagent")
-        val p by t.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "subagent-breath",
-        )
-        (0.86f + 0.14f * p) to (0.55f + 0.45f * p)
-    } else {
-        1f to 1f
-    }
-    Icon(
-        AppIcons.SubAgent,
-        contentDescription = null,
-        tint = tint,
-        modifier = modifier.size(size).graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-            this.alpha = alpha
-        },
+fun BackgroundTaskGlyph(tint: Color, running: Boolean, modifier: Modifier = Modifier, size: Dp = 16.dp) =
+    LottieGlyph(R.raw.lottie_clock, tint, running, modifier, size)
+
+/** Sub-agents at work: the branch redraws and its nodes bounce while they run. */
+@Composable
+fun SubagentGlyph(tint: Color, running: Boolean, modifier: Modifier = Modifier, size: Dp = 16.dp) =
+    LottieGlyph(R.raw.lottie_git_branch, tint, running, modifier, size)
+
+/** Something waits for the user (a sub-agent's permission request): the bell swings. */
+@Composable
+fun WaitingGlyph(tint: Color, modifier: Modifier = Modifier, size: Dp = 16.dp) =
+    LottieGlyph(R.raw.lottie_notification, tint, running = true, modifier, size)
+
+@Composable
+private fun LottieGlyph(@RawRes res: Int, tint: Color, running: Boolean, modifier: Modifier, size: Dp) {
+    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(res))
+    val progress by animateLottieCompositionAsState(
+        composition,
+        isPlaying = running,
+        iterations = LottieConstants.IterateForever,
+        restartOnPlay = false,
+    )
+    val argb = tint.toArgb()
+    val dynamic = rememberLottieDynamicProperties(
+        rememberLottieDynamicProperty(LottieProperty.STROKE_COLOR, argb, "**"),
+        rememberLottieDynamicProperty(LottieProperty.COLOR, argb, "**"),
+    )
+    LottieAnimation(
+        composition = composition,
+        progress = { if (running) progress else 0f },
+        dynamicProperties = dynamic,
+        modifier = modifier.size(size),
     )
 }

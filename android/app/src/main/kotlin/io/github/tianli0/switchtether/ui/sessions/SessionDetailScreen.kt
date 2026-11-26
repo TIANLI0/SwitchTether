@@ -856,11 +856,15 @@ private fun StatusChipRow(
                 // The tree glyph breathes while agents work, turns the warning colour (still) while
                 // one waits for the user, and rests once they are done.
                 val glyph: @Composable () -> Unit = {
-                    io.github.tianli0.switchtether.ui.common.SubagentGlyph(
-                        tint = dot ?: COUITheme.colorScheme.primary,
-                        running = agentsDot == AgentMapState.Working || (agentsDot == null && subagentRunning > 0),
-                        size = 15.dp,
-                    )
+                    if (agentsDot == AgentMapState.Waiting) {
+                        io.github.tianli0.switchtether.ui.common.WaitingGlyph(tint = dev.warn, size = 16.dp)
+                    } else {
+                        io.github.tianli0.switchtether.ui.common.SubagentGlyph(
+                            tint = dot ?: COUITheme.colorScheme.primary,
+                            running = agentsDot == AgentMapState.Working || (agentsDot == null && subagentRunning > 0),
+                            size = 16.dp,
+                        )
+                    }
                 }
                 if (dot != null) {
                     InfoChip(label, leading = glyph, onClick = onOpenSubagents, modifier = Modifier.testTag("subagent-tree").clearAndSetSemantics { contentDescription = described; role = Role.Button; onClick { onOpenSubagents(); true } }, backdrop = bg)
@@ -879,7 +883,7 @@ private fun StatusChipRow(
                 // The hourglass turns over while a task runs.
                 InfoChip(
                     label,
-                    leading = { io.github.tianli0.switchtether.ui.common.BackgroundTaskGlyph(tint = if (bgRunning > 0) dev.info else COUITheme.colorScheme.primary, running = bgRunning > 0, size = 15.dp) },
+                    leading = { io.github.tianli0.switchtether.ui.common.BackgroundTaskGlyph(tint = if (bgRunning > 0) dev.info else COUITheme.colorScheme.primary, running = bgRunning > 0, size = 16.dp) },
                     onClick = onOpenSubagents,
                     modifier = Modifier.testTag("chip-background"),
                     backdrop = bg,

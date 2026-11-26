@@ -106,6 +106,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.lottie.compose)
     implementation(project(":core:remote"))
     implementation(project(":core:security"))
     implementation(project(":core:ui"))
