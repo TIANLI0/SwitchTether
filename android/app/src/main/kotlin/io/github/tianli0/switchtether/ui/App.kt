@@ -2,7 +2,7 @@ package io.github.tianli0.switchtether.ui
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
-import io.github.tianli0.switchtether.ui.nav.AnimatedNavHost
+import io.github.tianli0.switchtether.ui.nav.AppNavHost
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -176,7 +176,7 @@ fun MainShell() {
             androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
     }
-    // Back (incl. the predictive gesture) is handled by AnimatedNavHost.
+    // Back (incl. the predictive gesture) is handled by AppNavHost.
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val twoPanes = io.github.tianli0.switchtether.ui.nav.usesTwoPanes(maxWidth)
@@ -231,7 +231,7 @@ fun MainShell() {
                 Box(Modifier.weight(1f).fillMaxSize()) {
                     // Tablets / unfolded foldables: the tab's list stays beside what it opened (§27).
                     if (twoPanes) TwoPaneHost(nav)
-                    else AnimatedNavHost(nav) { Destination(nav, it) }
+                    else AppNavHost(nav, root = { Destination(nav, it, null) }, page = { t, r -> Destination(nav, t, r) })
                 }
             }
         } else {
@@ -256,7 +256,7 @@ fun MainShell() {
                         LocalBlurEnabled provides true,
                         LocalBottomBarSpace provides if (showBar) 96.dp else 0.dp,
                     ) {
-                        AnimatedNavHost(nav) { Destination(nav, it) }
+                        AppNavHost(nav, root = { Destination(nav, it, null) }, page = { t, r -> Destination(nav, t, r) })
                     }
                 }
                 // ColorOS shows and hides the bar in place (COUIBottomFloatingNavigationBarMenuView
@@ -351,14 +351,12 @@ private fun TwoPaneHost(nav: NavViewModel) {
             list = {
                 androidx.compose.animation.Crossfade(nav.tab, animationSpec = androidx.compose.animation.core.tween(150), label = "pane-list") { t ->
                     listStates.SaveableStateProvider("list/${t.name}") {
-                        Destination(nav, io.github.tianli0.switchtether.ui.nav.NavEntry(t, null, 0), onOpenRoot = nav::openFromList)
+                        Destination(nav, t, null, onOpenRoot = nav::openFromList)
                     }
                 }
             },
             detail = {
-                AnimatedNavHost(nav) { entry ->
-                    if (entry.route == null) io.github.tianli0.switchtether.ui.nav.PaneEmptyState(entry.tab) else Destination(nav, entry)
-                }
+                AppNavHost(nav, root = { io.github.tianli0.switchtether.ui.nav.PaneEmptyState(it) }, page = { t, r -> Destination(nav, t, r) })
             },
         )
     }
@@ -368,16 +366,20 @@ private fun TwoPaneHost(nav: NavViewModel) {
 private class NavItem(val tab: Tab, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
 @Composable
-private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether.ui.nav.NavEntry, onOpenRoot: (Route) -> Unit = nav::push) {
+private fun Destination(nav: NavViewModel, tab: Tab, route: Route?, onOpenRoot: (Route) -> Unit = nav::push) {
     val onBack: () -> Unit = { nav.back() }
-    when (val top = entry.route) {
+    when (val top = route) {
         is Route.SessionDetail -> {
             val container = appContainer()
-            androidx.compose.runtime.DisposableEffect(top.sessionId) {
-                container.handoffSession.value = top.sessionId
+            androidx.compose.runtime.LaunchedEffect(top.sessionId) {
                 // Seen: its "已完成" result notification has done its job.
                 container.liveUpdates.onSessionOpened(top.sessionId)
-                onDispose { if (container.handoffSession.value == top.sessionId) container.handoffSession.value = null }
+            }
+            // Handed off only while this page is the one on top (the page under a pushed page
+            // stays composed, paused).
+            androidx.lifecycle.compose.LifecycleResumeEffect(top.sessionId) {
+                container.handoffSession.value = top.sessionId
+                onPauseOrDispose { if (container.handoffSession.value == top.sessionId) container.handoffSession.value = null }
             }
             // A resumed session takes this page's place, so back does not return to the old read-only view.
             SessionDetailScreen(top.sessionId, top.title, onBack, onOpenSession = { id, title -> nav.replace(Route.SessionDetail(id, title)) }, onOpenRoute = nav::push)
@@ -411,7 +413,7 @@ private fun Destination(nav: NavViewModel, entry: io.github.tianli0.switchtether
         Route.Licenses -> LicensesScreen(onBack)
         Route.About -> io.github.tianli0.switchtether.ui.settings.AboutScreen(onBack, onOpen = nav::push)
         Route.DesktopInfo -> DesktopInfoScreen(onBack)
-        null -> when (entry.tab) {
+        null -> when (tab) {
             Tab.HOME -> HomeScreen(onOpen = onOpenRoot, onSelectTab = nav::select)
             Tab.SESSIONS -> SessionsScreen(onOpen = onOpenRoot)
             Tab.WORKSPACE -> WorkspaceScreen(onOpen = onOpenRoot)

@@ -1,10 +1,12 @@
 package io.github.tianli0.switchtether.ui.nav
 
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import io.github.suqi8.coui.kmp.nav.core.NavBackStack
+import io.github.suqi8.coui.kmp.nav.core.NavKey
+import io.github.suqi8.coui.kmp.nav.core.navBackStackOf
 
 enum class Tab { HOME, SESSIONS, WORKSPACE, MANAGE }
 
@@ -41,46 +43,48 @@ sealed interface Route {
     data object DesktopInfo : Route
 }
 
-/** One screen in the navigation: a tab root ([route] null) or a detail route [depth] deep in that tab. */
-data class NavEntry(val tab: Tab, val route: Route?, val depth: Int) {
-    /** Stable per back-stack position: keys saved UI state (scroll, fields) of that screen. */
-    val key: String get() = "${tab.name}/$depth/$route"
-}
+/**
+ * One page on a tab's back stack: the tab's root ([route] null) or a detail [route]. [serial] makes
+ * every push its own entry, so the same route twice on one stack still has two identities (the
+ * entry's saved UI state and its place in the stack motion are keyed by this value).
+ */
+data class Page(val tab: Tab, val route: Route?, val serial: Int) : NavKey
 
 /**
  * Typed navigation: the selected tab plus one back stack PER TAB, so switching tabs keeps each
  * tab's place (Sessions → a session → Home → Sessions returns to that session). Back pops the
  * current tab's stack, then returns to Home, then leaves the app (system "back to home"
  * animation). Held in a ViewModel so it survives configuration changes.
+ *
+ * Each tab's stack starts with its root [Page] and is rendered by coui-nav's `NavDisplay`
+ * ([AppNavHost]); [stack] is the same stack as routes, without the root.
  */
 class NavViewModel : ViewModel() {
     var tab by mutableStateOf(Tab.HOME)
         private set
-    private val stacks: Map<Tab, androidx.compose.runtime.snapshots.SnapshotStateList<Route>> = Tab.entries.associateWith { mutableStateListOf() }
+    private val stacks: Map<Tab, NavBackStack> = Tab.entries.associateWith { navBackStackOf(Page(it, null, 0)) }
+    private var serial = 0
 
-    /** The current tab's back stack. */
-    val stack: List<Route> get() = stacks.getValue(tab)
+    /** [t]'s back stack of [Page]s, root first. */
+    fun backStack(t: Tab): NavBackStack = stacks.getValue(t)
+
+    /** The current tab's detail routes (its root not included). */
+    val stack: List<Route> get() = routes(tab)
 
     val top: Route? get() = stack.lastOrNull()
 
-    val current: NavEntry get() = NavEntry(tab, top, stack.size)
+    private fun routes(t: Tab): List<Route> = stacks.getValue(t).mapNotNull { (it as Page).route }
 
-    /** Where back goes from here, or null when back leaves the app. */
-    val previous: NavEntry?
-        get() = when {
-            stack.isNotEmpty() -> NavEntry(tab, stack.getOrNull(stack.size - 2), stack.size - 1)
-            tab != Tab.HOME -> stacks.getValue(Tab.HOME).let { NavEntry(Tab.HOME, it.lastOrNull(), it.size) }
-            else -> null
-        }
+    private fun page(r: Route) = Page(tab, r, ++serial)
 
     /** Selecting the current tab again returns to its root. */
     fun select(t: Tab) {
-        if (t == tab) stacks.getValue(t).clear() else tab = t
+        if (t == tab) clear(stacks.getValue(t)) else tab = t
     }
 
     fun push(r: Route) {
         val s = stacks.getValue(tab)
-        if (s.lastOrNull() != r) s.add(r)
+        if ((s.last() as Page).route != r) s.add(page(r))
     }
 
     /**
@@ -90,22 +94,22 @@ class NavViewModel : ViewModel() {
      */
     fun openFromList(r: Route) {
         val s = stacks.getValue(tab)
-        if (s.size == 1 && s[0] == r) return
-        s.clear()
-        s.add(r)
+        if (s.size == 2 && (s[1] as Page).route == r) return
+        clear(s)
+        s.add(page(r))
     }
 
     /** Replaces the current page (e.g. a session that was resumed opens in its place). */
     fun replace(r: Route) {
         val s = stacks.getValue(tab)
-        if (s.isEmpty()) s.add(r) else s[s.lastIndex] = r
+        if (s.size == 1) s.add(page(r)) else s[s.lastIndex] = page(r)
     }
 
     /** @return false when there is nothing to pop (let the system handle back). */
     fun back(): Boolean {
         val s = stacks.getValue(tab)
         return when {
-            s.isNotEmpty() -> {
+            s.size > 1 -> {
                 s.removeAt(s.lastIndex)
                 true
             }
@@ -117,8 +121,18 @@ class NavViewModel : ViewModel() {
         }
     }
 
+    /** Pops [t]'s stack (its `NavDisplay` back); the root always stays. */
+    fun pop(t: Tab) {
+        val s = stacks.getValue(t)
+        if (s.size > 1) s.removeAt(s.lastIndex)
+    }
+
     fun reset() {
-        stacks.values.forEach { it.clear() }
+        stacks.values.forEach(::clear)
         tab = Tab.HOME
+    }
+
+    private fun clear(s: NavBackStack) {
+        while (s.size > 1) s.removeAt(s.lastIndex)
     }
 }

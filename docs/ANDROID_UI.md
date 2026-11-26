@@ -670,11 +670,18 @@ Updates only (no OPPO SDK).
 
 ### 13.10 Navigation, predictive back, language
 - Per-tab back stacks: switching tabs keeps each tab's place; re-selecting a tab returns to its root.
-- `AnimatedNavHost`: shared X axis for push / pop, fade-through between tabs, each entry's UI state
-  saved while it is in the stack. Back (key or gesture) is a plain `BackHandler`: nothing of the
-  app follows the finger, the pop runs once back is committed (custom gesture-driven cards were
-  removed in 0.1.19: they read as messy next to the system's own motion). At Home with nothing to
-  pop no handler is enabled, so the system "back to home" animation runs.
+- `AppNavHost` (`ui/nav/AppNavHost.kt`): one coui-nav `NavDisplay` per tab (COUI17 `coui-nav`,
+  from upstream coui17), cross-faded between tabs; each page's UI state is saved while it is in the
+  stack, also while another tab shows. Push, pop, the system predictive back gesture and an in-page
+  swipe to the right all drive one position, so the ColorOS slide (§30) follows the finger 1:1:
+  release finishes the pop from there, cancel slides back, a programmatic push / pop runs 280ms.
+  The in-page swipe is the fallback for systems that do not hand the app the gesture's progress;
+  it starts anywhere on the page but only on drags nothing in the page claims first (horizontal
+  code / chip scrollers, selection keep theirs; COUI17 patch 0011). Settings → Appearance →
+  predictive back off: no swipe, back is a plain pop once committed. Pages keep the activity's
+  ViewModels; the page under the top one stays composed (lifecycle STARTED) and is the one revealed
+  by the gesture. Back at a tab root returns to Home; at Home with nothing to pop no handler is
+  enabled, so the system "back to home" animation runs.
   `enableOnBackInvokedCallback="true"`; edge-to-edge via `enableEdgeToEdge()`.
 - Per-app language: `locales_config` (en, zh-CN) and Settings → 语言 opens the system page
   (Android 13+).
@@ -1602,7 +1609,7 @@ real desktop and the offline fallback.
 Values compared against the COUI SDK bundled in OPPO Health 6.7.17 (com.heytap.health, HeyTap-signed),
 read for the numbers only; no SDK code or resources were copied.
 
-- **Page push / pop** (`ui/nav/AnimatedNavHost.kt`) follow `Animation.COUI.Activity` instead of a
+- **Page push / pop** (`ui/nav/AnimatedNavHost.kt`, now `AppNavHost.kt` on coui-nav, §13.10) follow `Animation.COUI.Activity` instead of a
   Material shared X axis. Push: the new page slides in over the whole width, opaque, 350ms on
   (0.3, 0.1, 0.3, 1); the page underneath moves to −30% on (0.3, 0.15, 0.3, 1) and dims under a black
   scrim to 0.5 on COUIEase (0.33, 0, 0.67, 1) — it stays visible. Pop runs back: the top page leaves to

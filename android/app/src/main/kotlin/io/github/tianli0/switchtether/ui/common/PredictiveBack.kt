@@ -28,7 +28,7 @@ val LocalPredictiveBack = androidx.compose.runtime.staticCompositionLocalOf { tr
 /**
  * Predictive back for a view that replaces its content in place (a file opened over its folder, a
  * Git diff over the status, a folder over its parent, a step of a flow) instead of pushing a page on
- * the [io.github.tianli0.switchtether.ui.nav.AnimatedNavHost] stack.
+ * the [io.github.tianli0.switchtether.ui.nav.AppNavHost] stack.
  *
  * While the back gesture runs, the content follows the finger as Android's in-app predictive back
  * does: it shrinks to 90 %, rounds its corners and moves a little toward the swipe edge. Release
@@ -62,7 +62,7 @@ fun rememberPredictiveBack(enabled: Boolean = true, onBack: () -> Unit): Modifie
         }
     }
     return Modifier.graphicsLayer {
-        val p = io.github.tianli0.switchtether.ui.nav.backEase(progress.value)
+        val p = backEase(progress.value)
         if (p <= 0f) return@graphicsLayer
         val scale = 1f - MAX_SHRINK * p
         scaleX = scale
@@ -72,6 +72,15 @@ fun rememberPredictiveBack(enabled: Boolean = true, onBack: () -> Unit): Modifie
         shape = RoundedCornerShape(MAX_CORNER * p)
         clip = true
     }
+}
+
+/**
+ * The gesture's progress grows slowly over the first part of the drag, so a linear shrink barely
+ * moved and the gesture read as "no preview": ease it out, the content answers as soon as the finger moves.
+ */
+internal fun backEase(progress: Float): Float {
+    val p = progress.coerceIn(0f, 1f)
+    return 1f - (1f - p) * (1f - p)
 }
 
 /** Android's in-app predictive back: the content scales to 90 % at the end of the drag. */

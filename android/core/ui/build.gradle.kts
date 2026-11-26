@@ -33,6 +33,8 @@ dependencies {
     api(project(":coui-ui"))
     api(project(":coui-preference"))
     api(project(":coui-icons"))
+    // Back-stack host: push / pop, predictive back and the in-app swipe on one driver.
+    api(project(":coui-nav"))
     // App icon set: Phosphor Icons (Regular + Fill pairs), MIT. R8 strips unused icons in release.
     api(libs.phosphor.icon)
     api(libs.androidx.compose.ui)
