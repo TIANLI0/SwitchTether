@@ -1314,7 +1314,7 @@ mod tests {
                 assert!(me
                     .process
                     .as_deref()
-                    .is_some_and(|n| n.contains("switchtether_core")));
+                    .is_some_and(|n| n.contains("switchtether")));
             }
         }
         assert!(!excluded.iter().any(|p| p.port == port));
