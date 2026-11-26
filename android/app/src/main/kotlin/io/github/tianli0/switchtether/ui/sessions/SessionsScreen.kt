@@ -48,7 +48,7 @@ import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.nav.Route
 
 @Composable
-fun SessionsScreen(onOpen: (Route) -> Unit) {
+fun SessionsScreen(onOpen: (Route) -> Unit, searchRequested: Boolean = false, onSearchHandled: () -> Unit = {}) {
     val container = appContainer()
     val vm = containerViewModel { SessionsViewModel(it.connection, it.sessions) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -65,6 +65,8 @@ fun SessionsScreen(onOpen: (Route) -> Unit) {
         onOpen = onOpen,
         contentSearch = content,
         onContentSearch = vm.content::setEnabled,
+        searchRequested = searchRequested,
+        onSearchHandled = onSearchHandled,
     )
 }
 
@@ -81,12 +83,21 @@ fun SessionsContent(
     onOpen: (Route) -> Unit,
     contentSearch: ContentSearchUi = ContentSearchUi(),
     onContentSearch: (Boolean) -> Unit = {},
+    searchRequested: Boolean = false,
+    onSearchHandled: () -> Unit = {},
 ) {
     val refreshing = state.items is Loadable.Ready && state.items.refreshing
     val pins by appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
     var menuFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.remote.protocol.SessionSummary?>(null) }
     var expanded by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var searchExpanded by rememberSaveable { mutableStateOf(state.query.isNotEmpty()) }
+    // The bar's search key (Home / Sessions) opens the field once, then the request is handled.
+    androidx.compose.runtime.LaunchedEffect(searchRequested) {
+        if (searchRequested) {
+            searchExpanded = true
+            onSearchHandled()
+        }
+    }
     val containerColor = pageContainerColor()
     val title = stringResource(R.string.tab_sessions)
     val agents = if (state.knownAgents.size > 1) listOf<String?>(null) + state.knownAgents else null

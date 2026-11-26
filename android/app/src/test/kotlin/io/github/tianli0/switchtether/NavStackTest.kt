@@ -87,6 +87,19 @@ class NavStackTest {
     }
 
     @Test
+    fun theBarSearchKeyOpensTheSessionsListWithItsSearch() {
+        val nav = NavViewModel()
+        nav.select(Tab.SESSIONS)
+        nav.push(Route.SessionDetail("a", null))
+        nav.select(Tab.HOME)
+        nav.openSessionsSearch()
+        assertEquals(Tab.SESSIONS, nav.tab)
+        // The list itself, not the session that was open on that tab.
+        assertTrue(nav.stack.isEmpty())
+        assertTrue(nav.sessionsSearchRequested)
+    }
+
+    @Test
     fun theSwipeFollowsTheReadingDirectionAndTurnsOffWithPredictiveBack() {
         assertEquals(NavSwipeDirection.LeftToRight, colorOsSlide(swipe = true, rtl = false).dismissDirection)
         assertEquals(NavSwipeDirection.RightToLeft, colorOsSlide(swipe = true, rtl = true).dismissDirection)

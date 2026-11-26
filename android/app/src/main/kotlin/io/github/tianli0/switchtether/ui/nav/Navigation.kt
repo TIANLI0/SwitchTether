@@ -121,6 +121,16 @@ class NavViewModel : ViewModel() {
         }
     }
 
+    /** Set by the bar's search key; the Sessions page opens its search field and clears it. */
+    var sessionsSearchRequested by mutableStateOf(false)
+
+    /** The bar's search key: the Sessions list (not a page pushed on it) with its search field open. */
+    fun openSessionsSearch() {
+        clear(stacks.getValue(Tab.SESSIONS))
+        tab = Tab.SESSIONS
+        sessionsSearchRequested = true
+    }
+
     /** Pops [t]'s stack (its `NavDisplay` back); the root always stays. */
     fun pop(t: Tab) {
         val s = stacks.getValue(t)

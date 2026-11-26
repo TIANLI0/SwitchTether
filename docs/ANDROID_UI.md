@@ -176,7 +176,7 @@ the accent is the brand blue `#1F6BFF` (dark: `#4A86FF`) fed into `lightColorSch
 
 | Screen | coui17 components |
 | :--- | :--- |
-| Shell | `BottomFloatingNavigationBar` (floating glass capsule over a `LayerBackdrop` of the page, `expansion` "+" melt-ball on the Sessions tab → New session, hidden in place on detail pages: scale, alpha and a foreground blur that follows the system blur switch, `rememberCouiScaleVisibility`) + `BottomFloatingNavigationBarItem` (`icon`, plus `selectedIcon` where coui-icons has a Fill glyph); `NavigationRail` + `NavigationRailItem` (≥ 600 dp); `COUIIcons` |
+| Shell | `BottomFloatingNavigationBar` (floating glass capsule over a `LayerBackdrop` of the page, `BottomFloatingAccessoryNavigationBar` with Search (→ the Sessions list, search open) and New session balls that split out of the capsule on Home and Sessions and melt back on Workspace / Manage, the Compact capsule metrics, hidden in place on detail pages: scale, alpha and a foreground blur that follows the system blur switch, `rememberCouiScaleVisibility`) + `BottomFloatingNavigationBarItem` (`icon`, plus `selectedIcon` where coui-icons has a Fill glyph); `NavigationRail` + `NavigationRailItem` (≥ 600 dp); `COUIIcons` |
 | Home | `Scaffold`, `TopAppBar` (large, subtitle = desktop), `Card` groups, `BasicComponent` (connection, session rows, states), `ArrowPreference` + icons (quick links), `SmallTitle`, `TextButton` |
 | Sessions | `TopAppBar`, `TextField`, `TabRowWithContour` (Live/History/All), `ChipTabGroup` (agents), `PullToRefresh`, `BasicComponent` rows in group cards, `EmptyState` (New session = capsule expansion) |
 | Session detail | Redesigned in Phase C, see §11 |

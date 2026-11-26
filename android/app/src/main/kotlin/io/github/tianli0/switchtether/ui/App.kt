@@ -182,6 +182,7 @@ fun MainShell() {
         val twoPanes = io.github.tianli0.switchtether.ui.nav.usesTwoPanes(maxWidth)
         val top = nav.top
         val newSessionLabel = stringResource(R.string.new_session_title)
+        val searchLabel = stringResource(R.string.sessions_search)
         var showNewSession by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
         io.github.tianli0.switchtether.ui.sessions.NewSessionSheet(
             show = showNewSession,
@@ -282,21 +283,14 @@ fun MainShell() {
                             // Four short tabs: the tighter capsule (62dp items) instead of 70dp cells.
                             io.github.suqi8.coui.kmp.basic.LocalBottomFloatingNavigationBarMetrics provides io.github.suqi8.coui.kmp.basic.BottomFloatingNavigationBarMetrics.Compact,
                         ) {
-                            BottomFloatingNavigationBar(
-                                // Primary action of the Sessions tab melts out of the capsule.
-                                expanded = nav.tab == Tab.SESSIONS,
-                                expansion = {
-                                    Box(
-                                        Modifier
-                                            .fillMaxSize()
-                                            .clip(androidx.compose.foundation.shape.CircleShape)
-                                            .clickable(role = Role.Button, onClickLabel = newSessionLabel) { showNewSession = true }
-                                            .semantics { contentDescription = newSessionLabel },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(AppIcons.Add, contentDescription = null, tint = COUITheme.colorScheme.onSurface)
-                                    }
-                                },
+                            // Search and New session split out of the capsule on the two list tabs
+                            // (Home, Sessions) and melt back into it on Workspace and Manage.
+                            val listTab = nav.tab == Tab.HOME || nav.tab == Tab.SESSIONS
+                            io.github.suqi8.coui.kmp.basic.BottomFloatingAccessoryNavigationBar(
+                                startAccessoryVisible = listTab,
+                                endAccessoryVisible = listTab,
+                                startAccessory = { BarAccessory(AppIcons.Search, searchLabel, enabled = listTab) { nav.openSessionsSearch() } },
+                                endAccessory = { BarAccessory(AppIcons.Add, newSessionLabel, enabled = listTab) { showNewSession = true } },
                             ) {
                                 items.forEach { item ->
                                     val selected = nav.tab == item.tab
@@ -340,6 +334,24 @@ private fun TwoPaneHost(nav: NavViewModel) {
                 AppNavHost(nav, root = { io.github.tianli0.switchtether.ui.nav.PaneEmptyState(it) }, page = { t, r -> Destination(nav, t, r) })
             },
         )
+    }
+}
+
+/**
+ * One round key that splits out of the floating bar ([io.github.suqi8.coui.kmp.basic.BottomFloatingAccessoryNavigationBar]):
+ * the bar draws the glass ball, its press light and spring; this is the icon and the click.
+ */
+@Composable
+private fun BarAccessory(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, interactionSource = null, indication = null, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = COUITheme.colorScheme.onSurface)
     }
 }
 
@@ -396,7 +408,7 @@ private fun Destination(nav: NavViewModel, tab: Tab, route: Route?, onOpenRoot: 
         Route.DesktopInfo -> DesktopInfoScreen(onBack)
         null -> when (tab) {
             Tab.HOME -> HomeScreen(onOpen = onOpenRoot, onSelectTab = nav::select)
-            Tab.SESSIONS -> SessionsScreen(onOpen = onOpenRoot)
+            Tab.SESSIONS -> SessionsScreen(onOpen = onOpenRoot, searchRequested = nav.sessionsSearchRequested, onSearchHandled = { nav.sessionsSearchRequested = false })
             Tab.WORKSPACE -> WorkspaceScreen(onOpen = onOpenRoot)
             Tab.MANAGE -> ManageScreen(onOpen = onOpenRoot)
         }
