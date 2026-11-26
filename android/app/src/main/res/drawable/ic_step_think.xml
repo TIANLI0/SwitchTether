@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Live Update icon, 思考中: four-point sparkle. Same weight as ic_step_command (supplied 2026-11-26), without its
+     frame: bold glyph with square ends, monochrome white, arc flags spelled out (VectorPathDataTest). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:pathData="M12,2l2.4,7.6l7.6,2.4l-7.6,2.4l-2.4,7.6l-2.4,-7.6l-7.6,-2.4l7.6,-2.4z" android:fillColor="#FFFFFFFF" />
+    android:width="24dp" android:height="24dp" android:viewportWidth="1024" android:viewportHeight="1024">
+    <group android:pivotX="512" android:pivotY="512" android:scaleX="1.15" android:scaleY="1.15">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M512,224L584,440L800,512L584,584L512,800L440,584L224,512L440,440z" />
+    </group>
 </vector>
