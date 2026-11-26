@@ -42,9 +42,53 @@ pub fn ms_to_rfc3339(ms: i64) -> String {
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+/// The user's login-shell PATH merged into this process's PATH (see [`set_login_path`]).
+static CHILD_PATH: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+
+/// Joins two `:`-separated PATH values: every entry of `primary` in order, then the entries
+/// of `extra` not seen yet. Empty entries (which mean "current directory") are dropped.
+pub fn merge_search_paths(primary: &str, extra: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    primary
+        .split(':')
+        .chain(extra.split(':'))
+        .filter(|s| !s.is_empty() && seen.insert(*s))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// Hands the Remote Core the user's login-shell PATH (macOS / Linux desktops).
+///
+/// An app opened from Finder, the Dock or a desktop launcher gets the launcher's minimal PATH
+/// (`/usr/bin:/bin:/usr/sbin:/sbin` on macOS), not the one the user's shell profile builds:
+/// Homebrew, nvm, volta, `~/.local/bin` are missing. Without it `claude` / `codex` / `dsh` /
+/// `git` may not be found, and a found npm script still fails on `#!/usr/bin/env node`.
+/// The desktop resolves the login shell's PATH once and passes it here; [`which`] searches it
+/// and [`child_path`] gives it to every process SwitchTether starts. The process's own
+/// environment is not modified. Only the first call has an effect.
+pub fn set_login_path(login: &str) {
+    let login = login.trim();
+    if login.is_empty() || cfg!(windows) {
+        return;
+    }
+    let current = std::env::var("PATH").unwrap_or_default();
+    let merged = merge_search_paths(login, &current);
+    if merged != current {
+        let _ = CHILD_PATH.set(merged.into());
+    }
+}
+
+/// PATH to give a child process, when it differs from the inherited one.
+pub fn child_path() -> Option<&'static std::ffi::OsStr> {
+    CHILD_PATH.get().map(|p| p.as_os_str())
+}
+
 /// Find an executable on PATH (handles `.exe`/`.cmd`/`.bat` on Windows).
+/// Searches the login-shell PATH as well once the desktop has provided it.
 pub fn which(cmd: &str) -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
+    let path = child_path()
+        .map(|p| p.to_os_string())
+        .or_else(|| std::env::var_os("PATH"))?;
     let exts: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".bat", ""]
     } else {
@@ -94,6 +138,15 @@ pub fn desktop_time_zone() -> (Option<String>, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_paths_merge_in_order_without_duplicates() {
+        assert_eq!(
+            merge_search_paths("/opt/homebrew/bin:/usr/bin", "/usr/bin:/bin::/usr/sbin"),
+            "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin"
+        );
+        assert_eq!(merge_search_paths("", "/usr/bin"), "/usr/bin");
+    }
 
     #[test]
     fn tokens_are_unique_and_urlsafe() {

@@ -537,6 +537,9 @@ fn dsh_plugin_installed() -> bool {
 
 fn run_dsh_plugin(bin: &Path, args: &[&str]) -> Result<String, String> {
     let mut cmd = std::process::Command::new(bin);
+    if let Some(path) = switchtether_core::util::child_path() {
+        cmd.env("PATH", path);
+    }
     cmd.args(["plugin", "--profile", DSH_PROFILE])
         .args(args)
         .current_dir(dsh_profile_dir())

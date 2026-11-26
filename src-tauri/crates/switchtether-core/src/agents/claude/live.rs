@@ -85,6 +85,9 @@ pub fn parse_agents_json(raw: &str) -> Option<Vec<LiveClaudeSession>> {
 /// `claude agents --json` (bounded to a few seconds).
 pub async fn agents_json(claude_bin: &Path) -> Option<Vec<LiveClaudeSession>> {
     let mut cmd = tokio::process::Command::new(claude_bin);
+    if let Some(path) = crate::util::child_path() {
+        cmd.env("PATH", path);
+    }
     cmd.args(["agents", "--json"])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

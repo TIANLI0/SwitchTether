@@ -141,10 +141,11 @@ windows-sys = { version = "0.61", features = [
 rquickjs = { version = "0.8", features = ["bindgen"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# 托盘面板的原生玻璃：NSGlassEffectView（macOS 26）/ NSVisualEffectView
+# 托盘面板的原生玻璃：NSGlassEffectView（macOS 26）/ NSVisualEffectView；
+# NSProcessInfo：远程服务在后台时不被 App Nap 降频（switchtether::keep_responsive）
 objc2 = "0.6"
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "block2"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAppearance", "NSGlassEffectView", "NSGraphics", "NSResponder", "NSScreen", "NSView", "NSVisualEffectView", "NSWindow"] }
 
 # 本地 `cargo test` / `tauri dev` 和 CI 用同一份调试信息级别：只留行号表。

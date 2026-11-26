@@ -79,8 +79,9 @@ TODO list. Each item says what the user experiences.
      until it expires, and the forwarding screen offers to resume it without a new confirmation.
 10d. Plain TCP only (HTTP, WebSocket, most dev tools). UDP (e.g. HTTP/3-only servers) is not
      forwarded. Through the relay, throughput and latency are those of the relay.
-10e. The list of listening ports shows process names on Windows only; on macOS only common
-     development ports are probed (any port can still be entered by hand).
+10e. The list of listening ports shows process names on Windows and macOS (macOS: `lsof`, the
+     user's own processes only); on Linux it has no process names (any port can still be entered
+     by hand).
 
 ## Desktop
 
@@ -110,7 +111,12 @@ TODO list. Each item says what the user experiences.
 ## Testing gaps (see docs/TESTING.md)
 
 21. macOS and Linux desktop builds are configured in CI but were not built on the development
-    machine (Windows).
+    machine (Windows). The macOS-specific Remote code (login-shell PATH, `lsof` port list, login
+    shell terminals, App Nap activity, ad-hoc signed dmg) is compiled and unit-tested by CI only;
+    it has not run on a real Mac.
+22a. Codex Desktop takeover (§6b of AGENT_COMPATIBILITY) is Windows-only; on macOS it reports
+    "only available on Windows". The in-app desktop update (FluentSetup) is Windows-only as well:
+    macOS users download the new dmg from the release page.
 22. Android instrumented tests on real devices from several vendors (battery optimisation,
     biometric variants) have not been run.
 23. Upstream CC Switch tests: 2 locale-sensitive chart-formatting tests and one 10 s integration

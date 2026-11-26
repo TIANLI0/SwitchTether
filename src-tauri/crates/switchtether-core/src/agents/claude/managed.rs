@@ -372,6 +372,9 @@ impl ManagedClaude {
         log: Arc<Mutex<SessionLog>>,
     ) -> anyhow::Result<Arc<Self>> {
         let mut cmd = Command::new(&options.claude_bin);
+        if let Some(path) = crate::util::child_path() {
+            cmd.env("PATH", path);
+        }
         cmd.args([
             "--output-format",
             "stream-json",

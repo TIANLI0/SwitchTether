@@ -560,7 +560,7 @@ async fn run_stream(
 #[serde(rename_all = "camelCase")]
 pub struct ListeningPort {
     pub port: u16,
-    /// Executable name of the listening process, where the OS tells (Windows).
+    /// Executable name of the listening process, where the OS tells (Windows, macOS).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -583,6 +583,14 @@ const SYSTEM_PROCESSES: &[&str] = &[
     "spoolsv.exe",
     "smss.exe",
     "csrss.exe",
+    // macOS: AirPlay Receiver (ControlCenter) holds *:5000 and *:7000; the others are
+    // Continuity / Handoff and system daemons.
+    "ControlCenter",
+    "rapportd",
+    "sharingd",
+    "launchd",
+    "mDNSResponder",
+    "identityservicesd",
 ];
 
 /// Every listener the OS reports on loopback or the any-address, unfiltered (common development
@@ -860,7 +868,77 @@ fn process_name(pid: u32) -> Option<String> {
     }
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+/// macOS: `lsof` (part of the base system) lists the TCP listeners of the user's own
+/// processes with pid and command name. System daemons owned by other users are not visible
+/// without root, which suits a list of development servers.
+#[cfg(target_os = "macos")]
+fn os_listening_ports() -> Option<Vec<ListeningPort>> {
+    let mut cmd = std::process::Command::new("/usr/sbin/lsof");
+    // -nP: numeric hosts and ports; +c 0: full command names; -F pcn: machine-readable
+    // pid / command / name fields; -w: no warnings.
+    cmd.args(["-nP", "-w", "+c", "0", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let out = cmd.output().ok()?;
+    match out.status.code() {
+        Some(0) => Some(parse_lsof_listeners(&String::from_utf8_lossy(&out.stdout))),
+        // lsof exits 1 when nothing matches: an empty list, not a failure.
+        Some(1) if out.stdout.is_empty() => Some(Vec::new()),
+        _ => None,
+    }
+}
+
+/// Parses `lsof -F pcn` output: `p<pid>` starts a process, `c<command>` names it, every
+/// `n<address>:<port>` is one listening socket. Keeps loopback and any-address listeners.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_lsof_listeners(text: &str) -> Vec<ListeningPort> {
+    let mut out = Vec::new();
+    let mut pid: Option<u32> = None;
+    let mut command: Option<String> = None;
+    for line in text.lines() {
+        let Some(tag) = line.chars().next() else {
+            continue;
+        };
+        let value = &line[tag.len_utf8()..];
+        match tag {
+            'p' => {
+                pid = value.trim().parse().ok();
+                command = None;
+            }
+            'c' => command = Some(value.to_string()).filter(|c| !c.is_empty()),
+            'n' => {
+                // `*:3000`, `127.0.0.1:5173`, `[::1]:8080`, `[::]:80`; never `a->b` for a listener.
+                if value.contains("->") {
+                    continue;
+                }
+                let Some((addr, port)) = value.rsplit_once(':') else {
+                    continue;
+                };
+                let Ok(port) = port.parse::<u16>() else {
+                    continue;
+                };
+                let addr = addr.trim_start_matches('[').trim_end_matches(']');
+                let reachable = match addr {
+                    "*" | "0.0.0.0" | "::" | "::1" | "localhost" => true,
+                    a => a
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified()),
+                };
+                if reachable {
+                    out.push(ListeningPort {
+                        port,
+                        process: command.clone(),
+                        pid,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn os_listening_ports() -> Option<Vec<ListeningPort>> {
     None
 }
@@ -868,6 +946,49 @@ fn os_listening_ports() -> Option<Vec<ListeningPort>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lsof_listeners_keep_loopback_and_any_address_with_process() {
+        let text = [
+            "p501",
+            "f12",
+            "cnode",
+            "n*:5173",
+            "f13",
+            "n[::1]:3000", //
+            "p777",
+            "cControlCenter",
+            "n*:5000", //
+            "p900",
+            "cpostgres",
+            "n192.168.1.4:5432",
+            "n127.0.0.1:5433",
+            "n[::]:8080", //
+            "p901",
+            "cweird",
+            "nfoo->bar",
+            "nno-port",
+        ]
+        .join(
+            "
+",
+        );
+        let v = parse_lsof_listeners(&text);
+        let got: Vec<(u16, Option<&str>, Option<u32>)> = v
+            .iter()
+            .map(|p| (p.port, p.process.as_deref(), p.pid))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (5173, Some("node"), Some(501)),
+                (3000, Some("node"), Some(501)),
+                (5000, Some("ControlCenter"), Some(777)),
+                (5433, Some("postgres"), Some(900)),
+                (8080, Some("postgres"), Some(900)),
+            ]
+        );
+    }
     use tokio::net::TcpListener;
 
     #[test]

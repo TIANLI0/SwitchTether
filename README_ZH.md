@@ -108,6 +108,10 @@ flowchart LR
 
 完成。你的会话会出现在手机上，点开就能跟进，也可以直接新建一个。
 
+> **macOS：** dmg 是通用版本（Apple Silicon 和 Intel 都能用），只做了 ad-hoc 签名，没有经过公证。
+> 第一次打开时请在访达里右键 → **打开**（或到 系统设置 → 隐私与安全性 → **仍要打开**）。
+> 如果仍提示"已损坏"，执行一次 `xattr -dr com.apple.quarantine /Applications/SwitchTether.app`。
+
 > 首次启动时，SwitchTether 会把 `~/.cc-switch` 里的 CC Switch 数据复制到自己的
 > `~/.switchtether`，不会修改 CC Switch 本身。两个应用写入同一份 Agent 配置，请只用其中一个管理供应商。
 

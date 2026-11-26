@@ -48,6 +48,18 @@ pub struct ShellInfo {
 
 use crate::util::which;
 
+/// zsh, bash, sh, fish, ksh, dash accept `-l` (login shell).
+fn is_posix_login_capable(path: &str) -> bool {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    matches!(
+        name.as_str(),
+        "zsh" | "bash" | "sh" | "fish" | "ksh" | "dash"
+    )
+}
+
 /// Shells available on this desktop, default first.
 pub fn available_shells() -> Vec<ShellInfo> {
     let mut out = Vec::new();
@@ -402,10 +414,18 @@ impl TerminalManager {
         if shell.id == "pwsh" || shell.id == "powershell" {
             cmd.arg("-NoLogo");
         }
+        // macOS terminals start login shells: `.zprofile` / `.bash_profile` (Homebrew, conda,
+        // the user's exports) are read there, not by a plain interactive shell.
+        if cfg!(target_os = "macos") && is_posix_login_capable(&shell.path) {
+            cmd.arg("-l");
+        }
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("SWITCHTETHER_TERMINAL", "1");
+        if let Some(path) = crate::util::child_path() {
+            cmd.env("PATH", path);
+        }
         if !cfg!(windows) && std::env::var_os("LANG").is_none() {
             cmd.env("LANG", "en_US.UTF-8");
         }

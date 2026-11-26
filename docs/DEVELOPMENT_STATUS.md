@@ -755,3 +755,33 @@ on this machine, the phone UI on a device.
     clients name on submit; asking after the first turn left long first turns unnamed for minutes —
     live: Claude Code answered `generate_session_title` in 2.7 s while its turn ran until 9.5 s), and
     never replaces one the user set.
+
+
+## macOS adaptation of the Remote features (2026-11-26)
+
+- **Login-shell PATH.** An app opened from Finder / the Dock gets launchd's PATH
+  (`/usr/bin:/bin:/usr/sbin:/sbin`): Homebrew, nvm, volta and `~/.local/bin` are missing, so
+  `claude` / `codex` / `dsh` were not found, or a found npm script failed on `#!/usr/bin/env node`.
+  At startup the desktop (macOS and Linux) resolves the user's login-shell PATH once with upstream's
+  `cached_login_shell_path` and hands it to `switchtether_core::util::set_login_path`; `util::which`
+  searches it and `util::child_path` is set on every process the Remote starts (managed Claude /
+  Codex / DSH sessions, `claude agents`, `codex --version`, model probes, `dsh web`, git, remote
+  terminals, `dsh plugin`). The process's own environment is not modified. Unit test
+  `search_paths_merge_in_order_without_duplicates`.
+- **Remote terminals** on macOS start zsh / bash / sh / fish as login shells (`-l`), as Terminal.app
+  does, so `.zprofile` / `.bash_profile` are read.
+- **Port forwarding list** on macOS: `/usr/sbin/lsof -nP -w +c 0 -iTCP -sTCP:LISTEN -F pcn` gives port,
+  pid and process name (also lets `dsh web` discovery match by process). AirPlay Receiver
+  (`ControlCenter`, *:5000 / *:7000) and other macOS daemons are filtered. Unit test
+  `lsof_listeners_keep_loopback_and_any_address_with_process`.
+- **App Nap**: the app declares `NSActivityUserInitiatedAllowingIdleSystemSleep` for its lifetime so a
+  hidden (tray-only) SwitchTether keeps answering phones promptly. Idle system sleep stays allowed.
+- **dmg** is ad-hoc signed (`bundle.macOS.signingIdentity: "-"`; a configured
+  `APPLE_SIGNING_IDENTITY` still takes precedence), so Apple Silicon Macs no longer report the
+  unsigned app as damaged; README explains the first open.
+- Checks on this machine (Windows): `cargo clippy` (core all targets, desktop) clean, core 217 tests
+  pass, `cargo test --lib switchtether` pass. A local `--target aarch64-apple-darwin` check is not
+  possible (no macOS SDK); the macOS code paths are compiled and tested by the `macos-latest` CI job.
+- Not verified: anything on a real Mac (agents found through the login PATH, terminal login shell,
+  `lsof` listing, App Nap behaviour, first open of the ad-hoc signed dmg, Keychain prompts after an
+  update changes the ad-hoc signature). Not done: Codex Desktop takeover and in-app updates on macOS.

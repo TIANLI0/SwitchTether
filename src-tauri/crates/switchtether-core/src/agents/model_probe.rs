@@ -14,6 +14,9 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(25);
 
 fn command(bin: &Path) -> Command {
     let mut cmd = Command::new(bin);
+    if let Some(path) = crate::util::child_path() {
+        cmd.env("PATH", path);
+    }
     cmd.current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

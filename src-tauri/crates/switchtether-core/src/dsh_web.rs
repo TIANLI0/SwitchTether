@@ -278,6 +278,9 @@ fn spawn_child(
     cwd: PathBuf,
 ) -> std::io::Result<()> {
     let mut cmd = Command::new(bin);
+    if let Some(path) = crate::util::child_path() {
+        cmd.env("PATH", path);
+    }
     cmd.args(&launcher.args)
         .current_dir(cwd)
         .stdin(Stdio::null())

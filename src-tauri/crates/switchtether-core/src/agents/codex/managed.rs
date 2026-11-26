@@ -751,6 +751,9 @@ impl ManagedCodex {
         log: Arc<Mutex<SessionLog>>,
     ) -> anyhow::Result<Arc<Self>> {
         let mut cmd = Command::new(&options.codex_bin);
+        if let Some(path) = crate::util::child_path() {
+            cmd.env("PATH", path);
+        }
         cmd.arg("app-server")
             .current_dir(&options.cwd)
             .stdin(Stdio::piped())
@@ -3420,6 +3423,9 @@ pub fn find_codex_bin() -> Option<PathBuf> {
 /// `codex --version` → comparable (major, minor, patch); unknown sorts lowest.
 fn codex_version(p: &std::path::Path) -> (u64, u64, u64) {
     let mut cmd = std::process::Command::new(p);
+    if let Some(path) = crate::util::child_path() {
+        cmd.env("PATH", path);
+    }
     cmd.arg("--version")
         .stdin(Stdio::null())
         .stderr(Stdio::null());

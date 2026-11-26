@@ -167,6 +167,9 @@ impl ManagedDsh {
         log: Arc<Mutex<SessionLog>>,
     ) -> anyhow::Result<Arc<Self>> {
         let mut cmd = Command::new(&options.dsh_bin);
+        if let Some(path) = crate::util::child_path() {
+            cmd.env("PATH", path);
+        }
         cmd.args(["--profile", "acp"])
             .current_dir(&options.cwd)
             .stdin(Stdio::piped())

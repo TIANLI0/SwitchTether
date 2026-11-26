@@ -56,7 +56,8 @@
       }
     },
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-"
     },
     "externalBin": [
       "binaries/switchtether-shim"

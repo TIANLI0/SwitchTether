@@ -61,10 +61,42 @@ pub fn upstream_version() -> &'static str {
     UPSTREAM_VERSION.trim().trim_start_matches('v')
 }
 
+/// macOS App Nap throttles timers and network of an app whose windows are hidden, which is
+/// SwitchTether's normal state (tray only) while a phone drives it. Declare an ongoing
+/// user-initiated activity for the app's lifetime. Idle system sleep stays allowed: SwitchTether
+/// never changes the computer's power behaviour.
+#[cfg(target_os = "macos")]
+fn keep_responsive() {
+    use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+    let activity = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
+        &NSString::from_str("SwitchTether Remote serves paired phones in the background"),
+    );
+    // Held until the process exits.
+    std::mem::forget(activity);
+}
+
 pub fn setup_remote(app: &tauri::App) {
+    #[cfg(target_os = "macos")]
+    keep_responsive();
     app.manage(remote::RemoteState::default());
     let handle = app.handle().clone();
     tauri::async_runtime::spawn(async move {
+        // A GUI app opened from Finder / the Dock / a launcher has a minimal PATH; give the
+        // Remote Core the user's login-shell PATH before it looks for claude / codex / dsh.
+        #[cfg(not(windows))]
+        {
+            let login = tokio::task::spawn_blocking(crate::commands::cached_login_shell_path)
+                .await
+                .ok()
+                .flatten();
+            match login {
+                Some(path) => switchtether_core::util::set_login_path(&path),
+                None => log::warn!(
+                    "[switchtether] login shell PATH not resolved; using the inherited PATH"
+                ),
+            }
+        }
         // Keep the shim used by enabled takeover hooks up to date.
         let _ = tokio::task::spawn_blocking(takeover::refresh_installed_shim).await;
         match remote::RemoteRuntime::init(handle.clone()).await {

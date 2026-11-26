@@ -114,6 +114,11 @@ evidence in [AGENT_COMPATIBILITY](docs/AGENT_COMPATIBILITY.md).
 
 Done. Your sessions appear on the phone; tap one to follow it, or start a new one.
 
+> **macOS:** the dmg is a universal build (Apple Silicon and Intel) with an ad-hoc signature, not
+> notarized. The first time, open it from Finder with right-click → **Open** (or System Settings →
+> Privacy & Security → **Open Anyway**). If macOS still calls it damaged, run
+> `xattr -dr com.apple.quarantine /Applications/SwitchTether.app` once.
+
 > On first launch SwitchTether copies your CC Switch data from `~/.cc-switch` into its own
 > `~/.switchtether`. CC Switch itself is never modified. Both apps write the same agent
 > configuration, so manage providers in one of them.

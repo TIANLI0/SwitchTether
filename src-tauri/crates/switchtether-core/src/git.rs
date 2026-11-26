@@ -26,6 +26,9 @@ pub enum GitError {
 
 fn base_command(dir: &Path) -> Command {
     let mut c = Command::new("git");
+    if let Some(path) = crate::util::child_path() {
+        c.env("PATH", path);
+    }
     c.arg("-C")
         .arg(dir)
         .args([
