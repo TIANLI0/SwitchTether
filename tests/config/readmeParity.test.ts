@@ -44,15 +44,18 @@ describe.each(READMES)("%s", (file) => {
   const text = existsSync(path.join(ROOT, file)) ? read(file) : "";
 
   it("links every other README from its language switcher", () => {
+    // The switcher is the header line linking the other language(s); it never
+    // links the README itself.
     const switcher = text
       .split("\n")
-      .find(
-        (line) => line.includes("(CHANGELOG.md)") && line.includes("README"),
+      .find((line) =>
+        READMES.some(
+          ([other]) => other !== file && line.includes(`(${other})`),
+        ),
       );
     expect(switcher, "language switcher line").toBeDefined();
     for (const [other, name] of READMES) {
       if (other === file) {
-        expect(switcher).toContain(name);
         expect(switcher).not.toContain(`(${other})`);
       } else {
         expect(switcher).toContain(`[${name}](${other})`);
