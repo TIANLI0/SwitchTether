@@ -87,7 +87,15 @@ fun HomeScreen(onOpen: (Route) -> Unit, onSelectTab: (Tab) -> Unit) {
 fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) -> Unit, onRetry: () -> Unit, onRefresh: () -> Unit) {
     // Task-first: no "connected" card when healthy, attention items on top, compact rows.
     val online = state.connection as? ConnectionState.Online
-    Page(title = online?.desktop?.name ?: stringResource(R.string.tab_home), large = false, immersive = true) {
+    // Settings at the top right, as the system apps put it: Manage (providers, usage, MCP, skills,
+    // prompts, app settings) left the bottom bar.
+    val settingsLabel = stringResource(R.string.tab_settings)
+    Page(
+        title = online?.desktop?.name ?: stringResource(R.string.tab_home),
+        large = false,
+        immersive = true,
+        actions = { io.github.tianli0.coui17.patterns.ToolbarIcon(AppIcons.Settings, settingsLabel, { onOpen(Route.Manage) }, modifier = Modifier.testTag("home-settings")) },
+    ) {
         io.github.suqi8.coui.kmp.basic.PullToRefresh(
             isRefreshing = state.refreshing,
             onRefresh = onRefresh,
