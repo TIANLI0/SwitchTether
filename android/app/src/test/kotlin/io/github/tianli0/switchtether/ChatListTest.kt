@@ -163,7 +163,11 @@ class ChatListTest {
         assertTrue(noPill())
     }
 
+    // The delete confirmation opens a dialog window: its vector icons need native graphics (as in
+    // QuestionAnswerTest); the legacy mode hands Compose a null bitmap there.
     @Test
+    @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    @Config(sdk = [32])
     fun failedBubbleOffersRetryAndDelete() {
         val out = OutgoingMessage("c9", "deploy it", OutgoingStatus.FAILED, afterSeq = 3, error = "session busy")
         show(state(messages(3), listOf(out)))
