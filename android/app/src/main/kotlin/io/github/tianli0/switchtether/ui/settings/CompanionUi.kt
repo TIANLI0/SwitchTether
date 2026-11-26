@@ -107,6 +107,8 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
         }
     }
 
+    // Unbinding removes the Android association (battery exemption, presence wake-ups): confirm first.
+    var confirmUnbind by remember { mutableStateOf<io.github.tianli0.switchtether.connection.CompanionLink.Association?>(null) }
     PanelSheet(show = show, title = stringResource(R.string.companion_title), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
             Text(
@@ -122,7 +124,7 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
                             title = a.name,
                             summary = a.address,
                             cardListPosition = cardListPositionOf(i, associations.size + 1),
-                            endActions = { SmallButton(stringResource(R.string.companion_unbind), { link.disassociate(a); reload() }, tone = ActionTone.Danger) },
+                            endActions = { SmallButton(stringResource(R.string.companion_unbind), { confirmUnbind = a }, tone = ActionTone.Danger) },
                         )
                     }
                     SwitchPreference(
@@ -174,4 +176,16 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
             }
         }
     }
+    io.github.tianli0.coui17.patterns.ConfirmDialog(
+        show = confirmUnbind != null,
+        title = stringResource(R.string.companion_unbind_title),
+        message = stringResource(R.string.companion_unbind_confirm, confirmUnbind?.name.orEmpty()),
+        confirmText = stringResource(R.string.companion_unbind),
+        onConfirm = {
+            confirmUnbind?.let { link.disassociate(it) }
+            confirmUnbind = null
+            reload()
+        },
+        onDismiss = { confirmUnbind = null },
+    )
 }

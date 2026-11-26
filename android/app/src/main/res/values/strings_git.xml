@@ -27,6 +27,9 @@
     <string name="git_branches_local">Branches</string>
     <string name="git_branches_remote">Remote branches</string>
     <string name="git_branch_current">Current</string>
+    <string name="git_branch_filter">Filter branches</string>
+    <string name="git_branches_more">%1$d more. Type a name to filter</string>
+    <string name="git_branches_no_match">No branch matches</string>
     <string name="git_new_branch">New branch</string>
     <string name="git_branch_name">Branch name</string>
     <string name="git_create_branch">Create and switch</string>
@@ -34,4 +37,5 @@
     <string name="git_op_failed">%1$s failed</string>
     <string name="git_op_failed_generic">Not completed. Check the connection and try again.</string>
     <string name="git_read_only">SwitchTether on this computer only shows Git. Update it to stage, commit and push from the phone.</string>
+    <string name="git_show_binary">Binary file: no text to show.</string>
 </resources>

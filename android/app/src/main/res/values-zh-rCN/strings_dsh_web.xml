@@ -36,6 +36,7 @@
     <string name="dsh_web_sign_in_action">登录</string>
     <string name="dsh_web_no_downloads">此界面中无法下载</string>
     <string name="dsh_web_no_app">没有可以打开此链接的应用</string>
-    <string name="dsh_web_exit_full_screen">再按返回退出全屏</string>
+    <string name="dsh_web_exit_full_screen">按返回退出全屏</string>
     <string name="dsh_web_chip">网页版</string>
+    <string name="dsh_web_error_code">错误 %1$d</string>
 </resources>

@@ -118,7 +118,7 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
             }
         }
         state.conflict != null -> { { ConflictScreen(state, vm) } }
-        file != null -> { { FileScreen(state, vm) } }
+        file != null -> { { FileScreen(state, vm, onOpenDownloads) } }
         else -> null
     }
     // Wide enough (a tablet's detail pane, §27): the folder stays on the left while a file is open.
@@ -176,9 +176,9 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
 
 @Composable
 private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
-    var nameDialog by remember { mutableStateOf<String?>(null) } // "file" | "folder" | "rename"
-    var target by remember { mutableStateOf<FsEntry?>(null) }
-    var confirmDelete by remember { mutableStateOf<FsEntry?>(null) }
+    var nameDialog by rememberSaveable { mutableStateOf<String?>(null) } // "file" | "folder" | "rename"
+    var target by rememberSaveable(stateSaver = FsEntrySaver) { mutableStateOf<FsEntry?>(null) }
+    var confirmDelete by rememberSaveable(stateSaver = FsEntrySaver) { mutableStateOf<FsEntry?>(null) }
     var actionsFor by remember { mutableStateOf<FsEntry?>(null) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -263,7 +263,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                         entries = listOf(
                             MenuEntry(stringResource(R.string.files_new_file)) { if (listing != null) nameDialog = "file" },
                             MenuEntry(stringResource(R.string.files_new_folder)) { if (listing != null) nameDialog = "folder" },
-                            MenuEntry(stringResource(R.string.files_upload)) { if (listing != null) picker.launch(arrayOf("*/*")) },
+                            MenuEntry(stringResource(R.string.files_upload)) { if (listing != null && !vm.refuseIfTransferring()) picker.launch(arrayOf("*/*")) },
                             MenuEntry(stringResource(R.string.files_hidden), selected = state.showHidden) { vm.toggleHidden() },
                             MenuEntry(stringResource(R.string.files_downloads_manage)) { onOpenDownloads() },
                         ),
@@ -385,7 +385,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         val copied = stringResource(R.string.files_copied)
         PanelSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }) {
             val opts = buildList {
-                if (!e.isDir) add(stringResource(R.string.files_download) to { actionsFor = null; vm.download(e) })
+                if (!e.isDir && !state.transferRunning) add(stringResource(R.string.files_download) to { actionsFor = null; vm.download(e) })
                 add(stringResource(R.string.files_copy_path) to {
                     actionsFor = null
                     scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(e.name, e.path))) }
@@ -409,7 +409,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         }
     }
     nameDialog?.let { kind ->
-        var name by remember(kind) { mutableStateOf(if (kind == "rename") target?.name.orEmpty() else "") }
+        var name by rememberSaveable(kind) { mutableStateOf(if (kind == "rename") target?.name.orEmpty() else "") }
         val invalidName = name.contains('/') || name.contains('\\')
         FormDialog(
             show = true,
@@ -480,7 +480,7 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
             Text(t.label + " · " + Formatters.bytes(t.done) + (t.total?.let { " / " + Formatters.bytes(it) } ?: ""), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
             if (t.error == null && !t.finished) LinearProgressIndicator(progress = t.total?.let { if (it > 0) t.done.toFloat() / it else null }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, end = 10.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                t.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.weight(1f)) }
+                t.error?.let { Text(it.resolve(), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.weight(1f)) }
                 if (t.finished) Text(stringResource(R.string.files_done), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.ok, modifier = Modifier.weight(1f))
                 t.downloaded?.let { r ->
                     LinkButton(stringResource(R.string.files_transfer_open), { io.github.tianli0.switchtether.ui.files.startSafely(context, store.viewIntent(store.asLocal(r)), noApp) })
@@ -493,7 +493,7 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
 }
 
 @Composable
-private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
+private fun FileScreen(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
     androidx.activity.compose.BackHandler(onBack = vm::requestCloseFile)
     Column(Modifier.fillMaxSize()) {
         val f = (state.file as? Loadable.Ready)?.value
@@ -510,8 +510,8 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
             },
             onBack = vm::requestCloseFile,
         ) {
-            if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit, enabled = f.text != null && !f.truncated)
-            if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(name, f.path, "file", f.size)) })
+            if (f != null && !state.editing) ToolbarIcon(AppIcons.Edit, stringResource(R.string.files_edit), vm::startEdit)
+            if (f != null && !state.editing) ToolbarIcon(AppIcons.Download, stringResource(R.string.files_download), { vm.download(FsEntry(name, f.path, "file", f.size)) }, enabled = !state.transferRunning)
             if (state.editing) {
                 SmallButton(
                     text = if (state.saving) "…" else stringResource(R.string.files_save),
@@ -522,7 +522,7 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel) {
                 )
             }
         }
-        state.transfer?.let { TransferRow(it, vm, {}) }
+        state.transfer?.let { TransferRow(it, vm, onOpenDownloads) }
         LoadableContent(state.file!!, onRetry = { (state.file as? Loadable.Ready)?.value?.path?.let(vm::openPath) }) { file ->
             val dev = LocalDevColors.current
             // Size and time are in the title bar now; the encoding stays as a quiet line for editing.
@@ -592,3 +592,9 @@ private val QUIET_MESSAGES = setOf(R.string.files_msg_saved, R.string.files_msg_
 
 /** Width from which an open file shows beside its folder instead of replacing it (§27). */
 private val FILES_SPLIT_MIN_WIDTH = 720.dp
+
+/** Keeps a dialog's file entry across rotation / process death (the entry is plain protocol data). */
+private val FsEntrySaver = androidx.compose.runtime.saveable.Saver<FsEntry?, String>(
+    save = { e -> e?.let { io.github.tianli0.switchtether.remote.protocol.ProtocolJson.encodeToString(FsEntry.serializer(), it) } },
+    restore = { runCatching { io.github.tianli0.switchtether.remote.protocol.ProtocolJson.decodeFromString(FsEntry.serializer(), it) }.getOrNull() },
+)

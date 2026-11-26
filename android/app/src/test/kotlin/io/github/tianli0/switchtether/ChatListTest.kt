@@ -170,6 +170,9 @@ class ChatListTest {
         rule.onNodeWithText("Not sent · session busy").assertExists()
         rule.onNodeWithTag("outgoing-retry").performClick()
         rule.onNodeWithTag("outgoing-delete").performClick()
+        // The text would be lost: deleting asks first.
+        assertTrue(deleted.isEmpty())
+        rule.onNodeWithText("Delete message").performClick()
         assertEquals(listOf("c9"), retried)
         assertEquals(listOf("c9"), deleted)
     }

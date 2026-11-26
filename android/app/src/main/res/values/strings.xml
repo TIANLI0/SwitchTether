@@ -476,4 +476,16 @@
     <string name="attach_failed">Upload failed</string>
     <string name="attach_remove">Remove attachment</string>
     <string name="render_attachments">Attachments</string>
+    <!-- Review fixes: manage / settings -->
+    <string name="provider_credential_not_verified">Biometric confirmation was not completed, so nothing was saved. Try again.</string>
+    <string name="provider_url_copied">Address copied</string>
+    <string name="stepup_scope_config_write">changing settings</string>
+    <string name="stepup_reason_canceled">cancelled</string>
+    <string name="stepup_reason_no_key">no confirmation key on this phone (set a screen lock and pair again)</string>
+    <string name="stepup_reason_key_invalidated">the confirmation key is no longer valid (the screen lock or fingerprints changed); pair again</string>
+    <string name="stepup_reason_failed">not recognised</string>
+    <string name="settings_clear_cache_done">Cache cleared</string>
+    <string name="settings_unpair_local_only">Unpaired on this phone. The computer could not be reached, so remove this phone there too (Settings → Remote access → Paired phones → Revoke).</string>
+    <string name="companion_unbind_title">Unbind computer?</string>
+    <string name="companion_unbind_confirm">Android stops treating %1$s as this phone\'s companion: the battery exemption and wake-ups when it is nearby end. Pairing with the computer is not affected.</string>
 </resources>

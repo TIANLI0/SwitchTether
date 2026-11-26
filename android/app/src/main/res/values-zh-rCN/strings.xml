@@ -461,4 +461,16 @@
     <string name="attach_failed">上传失败</string>
     <string name="attach_remove">移除附件</string>
     <string name="render_attachments">附件</string>
+    <!-- Review fixes: manage / settings -->
+    <string name="provider_credential_not_verified">未完成身份验证，没有保存任何内容，请重试。</string>
+    <string name="provider_url_copied">已复制地址</string>
+    <string name="stepup_scope_config_write">修改设置</string>
+    <string name="stepup_reason_canceled">已取消</string>
+    <string name="stepup_reason_no_key">此手机上没有确认密钥（请设置锁屏后重新配对）</string>
+    <string name="stepup_reason_key_invalidated">确认密钥已失效（锁屏或指纹已更改），请重新配对</string>
+    <string name="stepup_reason_failed">未能识别</string>
+    <string name="settings_clear_cache_done">缓存已清除</string>
+    <string name="settings_unpair_local_only">已在此手机上取消配对。无法连接到电脑，请在电脑上也移除此手机（设置 → 远程访问 → 已配对的手机 → 撤销）。</string>
+    <string name="companion_unbind_title">解除绑定电脑？</string>
+    <string name="companion_unbind_confirm">Android 将不再把 %1$s 视为此手机的配套设备：电池优化豁免和靠近时唤醒都会停止。与电脑的配对不受影响。</string>
 </resources>

@@ -40,11 +40,16 @@ data class HomeState(
     val running: List<SessionSummary> get() = notWaiting.filter { !it.isIdle }
     /** Live sessions sitting idle (process open, turn finished): listed apart so "running" means running. */
     val idle: List<SessionSummary> get() = notWaiting.filter { it.isIdle }
-    val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedWith(RECENT_FIRST).take(5)
+    val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedWith(RECENT_FIRST).take(MAX_RECENT_ROWS)
+    /** Ended sessions in the list: more than [recent] shows → a link to the Sessions tab. */
+    val historyCount: Int get() = sessions.valueOrNull.orEmpty().count { !it.isLive }
 }
 
 /** Most recently active first; the id breaks ties so a live update never reshuffles equal rows. */
 private val RECENT_FIRST: Comparator<SessionSummary> = compareByDescending<SessionSummary> { it.lastActiveAtMs ?: 0L }.thenBy { it.id }
+
+/** Ended sessions listed on Home under "Recent". */
+const val MAX_RECENT_ROWS = 5
 
 private val QUOTA_TOOLS = listOf("claude", "codex")
 

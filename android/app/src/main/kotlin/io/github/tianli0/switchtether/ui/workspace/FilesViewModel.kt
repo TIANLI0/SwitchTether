@@ -73,7 +73,7 @@ data class TransferState(
     val label: String,
     val done: Long,
     val total: Long?,
-    val error: String? = null,
+    val error: UiText? = null,
     val finished: Boolean = false,
     val downloaded: DownloadRecord? = null,
 )
@@ -128,6 +128,15 @@ data class FilesUiState(
     /** Show only the latest turn's files. */
     val onlyTurn: Boolean = false,
 )
+
+/** Text from the desktop or the network shown as is (already in the user's words or git's). */
+fun plainText(text: String): UiText = UiText(R.string.files_text_plain, listOf(text))
+
+/** Body of a file-at-commit that has no text (binary): the page shows its own label instead. */
+const val GIT_SHOW_BINARY = "\u0000binary"
+
+/** A transfer (upload or download) is running: only one at a time shares the progress card. */
+val FilesUiState.transferRunning: Boolean get() = transfer.let { it != null && it.error == null && !it.finished }
 
 /** Result of one Git write: [ok] with git's [text] (push / pull output), or the desktop's error message. */
 data class GitNotice(val op: String, val ok: Boolean, val text: String? = null)
@@ -239,7 +248,12 @@ class FilesViewModel(
     fun discardEdits() = _state.update { it.copy(confirmDiscard = false, editing = false) }
     fun keepEditing() = _state.update { it.copy(confirmDiscard = false) }
 
-    fun setSearchContent(v: Boolean) = _state.update { it.copy(searchContent = v) }
+    /** Switching between name and content search runs the search again when results are on screen. */
+    fun setSearchContent(v: Boolean) {
+        val rerun = _state.value.results != null && _state.value.searchContent != v
+        _state.update { it.copy(searchContent = v) }
+        if (rerun) search()
+    }
 
     fun search() {
         val api = api() ?: return
@@ -416,32 +430,72 @@ class FilesViewModel(
     }
 
     /** No directory is loaded yet: report it like any other refused operation; nothing is sent. */
-    private fun noDirectory(label: Int) = _state.update { it.copy(message = UiText(R.string.files_msg_rejected, listOf(label, "no directory"))) }
+    private fun noDirectory(label: Int) = _state.update { it.copy(message = UiText(R.string.files_msg_rejected, listOf(label, R.string.files_err_no_directory))) }
 
     fun newFile(name: String) {
         val dir = currentDir() ?: return noDirectory(R.string.files_op_save)
         val path = join(dir, name)
-        write(FileContent(path = path), "", base = null, path = path, createOnly = true) { browse(dir) }
+        write(FileContent(path = path), "", base = null, path = path, createOnly = true) { refreshAfterOp(dir) }
     }
 
-    fun rename(entry: FsEntry, newName: String) = pathOp(R.string.files_op_rename) { api, id ->
+    fun rename(entry: FsEntry, newName: String) = pathOp(R.string.files_op_rename, touched = entry.path) { api, id ->
         api.fsRename(RenameBody(id, entry.path, join(entry.path.substring(0, maxOf(entry.path.lastIndexOf('\\'), entry.path.lastIndexOf('/'))), newName)))
     }
 
     /** Moves to the desktop's trash/recycle bin (server side). */
-    fun delete(entry: FsEntry) = pathOp(R.string.files_op_delete) { api, id -> api.fsDelete(PathBody(id, entry.path)) }
+    fun delete(entry: FsEntry) = pathOp(R.string.files_op_delete, touched = entry.path) { api, id -> api.fsDelete(PathBody(id, entry.path)) }
 
-    private fun pathOp(label: Int, op: suspend (RemoteApi, String) -> CommandResponse) {
+    /**
+     * A create / rename / delete in the current folder. Afterwards the folder list is reloaded in place: a file
+     * or editor open beside it stays open, unless it is [touched] (renamed or deleted) or lies inside it.
+     */
+    private fun pathOp(label: Int, touched: String? = null, op: suspend (RemoteApi, String) -> CommandResponse) {
         viewModelScope.launch {
             val out = writeOp(label, op)
             when (out) {
-                is CommandOutcome.Succeeded -> _state.update { it.copy(message = UiText(R.string.files_msg_ok, listOf(label))) }
+                is CommandOutcome.Succeeded -> {
+                    _state.update { it.copy(message = UiText(R.string.files_msg_ok, listOf(label))) }
+                    if (touched != null) closeIfUnder(touched)
+                }
                 is CommandOutcome.Rejected -> _state.update { it.copy(message = UiText(R.string.files_msg_rejected, listOf(label, "${out.error.code}: ${out.error.body.message}"))) }
                 null -> Unit
                 else -> _state.update { it.copy(message = UiText(R.string.files_msg_unknown, listOf(label))) }
             }
-            currentDir()?.let(::browse)
+            currentDir()?.let(::refreshAfterOp)
         }
+    }
+
+    /** Reloads [dir] in place after a write, if the user is still in it; nothing open is closed. */
+    private fun refreshAfterOp(dir: String) {
+        val api = api() ?: return
+        if (currentDir() != dir) return
+        viewModelScope.launch {
+            val r = loadable { api.fsList(dir, _state.value.showHidden) }
+            // The user may have opened another folder meanwhile: keep that one.
+            _state.update { if (it.navigatingTo == null && (it.listing as? Loadable.Ready)?.value?.path == dir) it.copy(listing = r) else it }
+        }
+    }
+
+    /** The open file / viewer is [path] or lies inside it (a renamed or deleted folder): close it. */
+    private fun closeIfUnder(path: String) {
+        val p = path.trimEnd('/', '\\')
+        fun hit(open: String?) = open != null && (open == p || open.startsWith("$p/") || open.startsWith("$p\\"))
+        _state.update { st ->
+            val filePath = (st.file as? Loadable.Ready)?.value?.path
+            var n = st
+            if (hit(filePath)) n = n.copy(file = null, editing = false, conflict = null, confirmDiscard = false)
+            if (hit(st.viewer?.path)) n = n.copy(viewer = null)
+            n
+        }
+    }
+
+    /** Before picking a file to upload: says so and returns true when a transfer already runs. */
+    fun refuseIfTransferring(): Boolean = refuseBusyTransfer()
+
+    private fun refuseBusyTransfer(): Boolean {
+        if (!_state.value.transferRunning) return false
+        _state.update { it.copy(message = UiText(R.string.files_msg_transfer_busy)) }
+        return true
     }
 
     private fun join(dir: String, name: String): String {
@@ -454,6 +508,7 @@ class FilesViewModel(
     /** SAF document → chunked upload into the current directory (progress + cancel). */
     fun upload(uri: Uri) {
         val dir = currentDir() ?: return
+        if (refuseBusyTransfer()) return
         uploadJob = viewModelScope.launch {
             val (name, size) = withContext(Dispatchers.IO) {
                 resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
@@ -461,7 +516,7 @@ class FilesViewModel(
                 } ?: ("upload.bin" to -1L)
             }
             if (size < 0) {
-                _state.update { it.copy(transfer = TransferState(name, 0, null, "unknown file size")) }
+                _state.update { it.copy(transfer = TransferState(name, 0, null, UiText(R.string.files_err_unknown_size))) }
                 return@launch
             }
             _state.update { it.copy(transfer = TransferState(name, 0, size)) }
@@ -471,14 +526,14 @@ class FilesViewModel(
             }
             val uploadId = (begin as? CommandOutcome.Succeeded)?.response?.body?.obj()?.str("uploadId")
             if (uploadId == null) {
-                _state.update { it.copy(transfer = it.transfer?.copy(error = (begin as? CommandOutcome.Rejected)?.error?.body?.message ?: "upload refused")) }
+                _state.update { it.copy(transfer = it.transfer?.copy(error = (begin as? CommandOutcome.Rejected)?.error?.body?.message?.let(::plainText) ?: UiText(R.string.files_err_upload_refused))) }
                 return@launch
             }
             val api = api()
             if (api == null) {
                 // The connection went away after the upload was opened: no request can be sent, not even the
                 // cancel, but the transfer must not look in progress forever.
-                _state.update { it.copy(transfer = it.transfer?.copy(error = "not connected to the computer")) }
+                _state.update { it.copy(transfer = it.transfer?.copy(error = UiText(R.string.files_err_not_connected))) }
                 return@launch
             }
             try {
@@ -501,7 +556,7 @@ class FilesViewModel(
                     }
                 }
                 _state.update { it.copy(transfer = it.transfer?.copy(finished = true)) }
-                browse(dir)
+                refreshAfterOp(dir)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // The job is already cancelled: without NonCancellable the request would never be sent and the
                 // partial upload would stay on the computer.
@@ -509,14 +564,14 @@ class FilesViewModel(
                 throw e
             } catch (e: Exception) {
                 runCatching { api.cancelUpload(uploadId) }
-                _state.update { it.copy(transfer = it.transfer?.copy(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))) }
+                _state.update { it.copy(transfer = it.transfer?.copy(error = plainText((e as? ApiException)?.body?.message ?: ConnectionManager.describe(e)))) }
             }
         }
     }
 
     fun cancelTransfer() {
         uploadJob?.cancel()
-        _state.update { it.copy(transfer = it.transfer?.copy(error = "cancelled")) }
+        _state.update { it.copy(transfer = it.transfer?.copy(error = UiText(R.string.files_err_cancelled))) }
     }
 
     fun dismissTransfer() = _state.update { it.copy(transfer = null) }
@@ -528,16 +583,17 @@ class FilesViewModel(
      */
     fun download(entry: FsEntry) {
         val store = store ?: return
+        if (refuseBusyTransfer()) return
         uploadJob = viewModelScope.launch {
             _state.update { it.copy(transfer = TransferState(entry.name, 0, entry.size.takeIf { s -> s > 0 })) }
             try {
                 val record = store.download(entry.path, entry.name, entry.size.takeIf { it > 0 }, entry.modifiedMs) { n, total -> _state.update { it.copy(transfer = it.transfer?.copy(done = n, total = total)) } }
                 _state.update { it.copy(transfer = it.transfer?.copy(finished = true, downloaded = record)) }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                _state.update { it.copy(transfer = it.transfer?.copy(error = "cancelled")) }
+                _state.update { it.copy(transfer = it.transfer?.copy(error = UiText(R.string.files_err_cancelled))) }
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(transfer = it.transfer?.copy(error = (e as? ApiException)?.body?.message ?: ConnectionManager.describe(e))) }
+                _state.update { it.copy(transfer = it.transfer?.copy(error = plainText((e as? ApiException)?.body?.message ?: ConnectionManager.describe(e)))) }
             }
         }
     }
@@ -700,7 +756,7 @@ class FilesViewModel(
         val repo = _state.value.repo ?: return
         _state.update { it.copy(gitShow = "$rev:$path" to Loadable.Loading) }
         viewModelScope.launch {
-            val r = loadable { api.gitShow(repo, rev, path).text ?: "(binary)" }
+            val r = loadable { api.gitShow(repo, rev, path).text ?: GIT_SHOW_BINARY }
             _state.update { it.copy(gitShow = "$rev:$path" to r) }
         }
     }

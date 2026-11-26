@@ -121,4 +121,11 @@
     <string name="files_code_copied">Code copied</string>
     <string name="files_code_plain">text</string>
     <string name="files_line_count">%1$d lines</string>
+    <string name="files_text_plain">%1$s</string>
+    <string name="files_err_no_directory">no folder is open</string>
+    <string name="files_err_unknown_size">Unknown file size</string>
+    <string name="files_err_upload_refused">The computer refused the upload</string>
+    <string name="files_err_not_connected">Not connected to the computer</string>
+    <string name="files_err_cancelled">Cancelled</string>
+    <string name="files_msg_transfer_busy">Another transfer is running. Wait for it to finish or cancel it first.</string>
 </resources>

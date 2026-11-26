@@ -27,6 +27,9 @@
     <string name="git_branches_local">本地分支</string>
     <string name="git_branches_remote">远程分支</string>
     <string name="git_branch_current">当前</string>
+    <string name="git_branch_filter">筛选分支</string>
+    <string name="git_branches_more">还有 %1$d 个，输入名称筛选</string>
+    <string name="git_branches_no_match">没有匹配的分支</string>
     <string name="git_new_branch">新建分支</string>
     <string name="git_branch_name">分支名</string>
     <string name="git_create_branch">创建并切换</string>
@@ -34,4 +37,5 @@
     <string name="git_op_failed">%1$s 失败</string>
     <string name="git_op_failed_generic">未完成，请检查连接后重试。</string>
     <string name="git_read_only">这台电脑上的 SwitchTether 只支持查看 Git，更新后可在手机上暂存、提交和推送。</string>
+    <string name="git_show_binary">二进制文件，没有可显示的文本。</string>
 </resources>

@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,7 +72,8 @@ import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 fun GitPage(onBack: () -> Unit) {
     val vm = filesViewModel()
     val st by vm.state.collectAsStateWithLifecycle()
-    Page(title = stringResource(R.string.ws_git), onBack = onBack, large = false) {
+    // Edge-to-edge window: the page itself makes room for the keyboard (commit message field).
+    Page(title = stringResource(R.string.ws_git), onBack = onBack, large = false, modifier = Modifier.imePadding()) {
         GitPane(st, vm)
     }
 }
@@ -83,7 +87,7 @@ fun GitReviewPage(cwd: String, turnFiles: List<String>, onBack: () -> Unit) {
     val vm = filesViewModel()
     val st by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(cwd, turnFiles) { vm.openReview(cwd, turnFiles) }
-    Page(title = stringResource(R.string.git_review_title), onBack = onBack, large = false) {
+    Page(title = stringResource(R.string.git_review_title), onBack = onBack, large = false, modifier = Modifier.imePadding()) {
         GitPane(st, vm)
     }
 }
@@ -146,12 +150,19 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 ToolbarIcon(AppIcons.Back, stringResource(R.string.action_back), vm::closeGitDetail)
+                // A file at a commit is keyed "rev:path": a short hash, and the path cut in the middle so
+                // the file name at its end stays visible.
+                val title = if (state.gitShow != null) {
+                    detail.first.substringBefore(':').take(8) + "  " + detail.first.substringAfter(':')
+                } else {
+                    detail.first
+                }
                 Text(
-                    detail.first,
+                    title,
                     style = DevType.code,
                     color = COUITheme.colorScheme.onSurface,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    overflow = TextOverflow.MiddleEllipsis,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -160,7 +171,11 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
                     if (state.gitDiff != null) {
                         if (text.isBlank()) Text(stringResource(R.string.git_no_changes), color = COUITheme.colorScheme.onSurfaceVariantSummary) else DiffView(text)
                     } else {
-                        CodeBlockView(text, SyntaxHighlighter.languageForPath(detail.first.substringAfter(':')))
+                        if (text == GIT_SHOW_BINARY) {
+                            Text(stringResource(R.string.git_show_binary), color = COUITheme.colorScheme.onSurfaceVariantSummary)
+                        } else {
+                            CodeBlockView(text, SyntaxHighlighter.languageForPath(detail.first.substringAfter(':')))
+                        }
                     }
                 }
             }
@@ -188,7 +203,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel) {
     }
     var showRepoDialog by rememberSaveable { mutableStateOf(false) }
     if (showRepoDialog) {
-        var repoDraft by remember(state.repo) { mutableStateOf(state.repo.orEmpty()) }
+        var repoDraft by rememberSaveable(state.repo) { mutableStateOf(state.repo.orEmpty()) }
         FormDialog(
             show = true,
             title = stringResource(R.string.git_repo),
@@ -483,44 +498,89 @@ private fun SectionHeader(title: String, action: @Composable () -> Unit) {
     }
 }
 
-/** Switch to a local or remote branch, or create one from HEAD. */
+/**
+ * Switch to a local or remote branch, or create one from HEAD. The branch lists scroll inside the
+ * panel (at most half the screen) so "new branch" stays reachable under them; with many branches a
+ * filter field narrows both lists.
+ */
 @Composable
 private fun BranchSheet(show: Boolean, state: FilesUiState, vm: FilesViewModel, onDismiss: () -> Unit) {
     var newBranch by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(show) {
+        if (!show) {
+            filter = ""
+            newBranch = ""
+        }
+    }
+    val listMax = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.5f).dp
     PanelSheet(show = show, title = stringResource(R.string.git_checkout), onDismissRequest = onDismiss) {
         val branches = state.gitBranches ?: Loadable.Loading
         Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             LoadableContent(branches, onRetry = vm::loadBranches) { b ->
+                val q = filter.trim()
+                val local = if (q.isEmpty()) b.local else b.local.filter { it.name.contains(q, ignoreCase = true) }
+                val remoteAll = if (q.isEmpty()) b.remote else b.remote.filter { it.name.contains(q, ignoreCase = true) }
+                val remote = remoteAll.take(REMOTE_BRANCH_LIMIT)
                 Column {
-                    SmallTitle(stringResource(R.string.git_branches_local))
-                    GroupCard {
-                        b.local.forEachIndexed { i, br ->
-                            BasicComponent(
-                                title = br.name,
-                                summary = br.upstream,
-                                endActions = { if (br.current) StatusPill(stringResource(R.string.git_branch_current), COUITheme.colorScheme.primary) },
-                                onClick = if (br.current || state.gitBusy != null) null else ({
-                                    vm.checkout(br.name, create = false)
-                                    onDismiss()
-                                }),
-                                cardListPosition = cardListPositionOf(i, b.local.size),
-                            )
-                        }
+                    if (b.local.size + b.remote.size > BRANCH_FILTER_AT) {
+                        TextInput(
+                            value = filter,
+                            onValueChange = { filter = it },
+                            label = stringResource(R.string.git_branch_filter),
+                            showClearButton = true,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = PageDefaults.CardGutter).padding(bottom = 8.dp),
+                        )
                     }
-                    if (b.remote.isNotEmpty()) {
-                        SmallTitle(stringResource(R.string.git_branches_remote))
-                        GroupCard {
-                            b.remote.take(50).forEachIndexed { i, br ->
-                                BasicComponent(
-                                    title = br.name,
-                                    onClick = if (state.gitBusy != null) null else ({
-                                        // `git switch other` creates the local branch tracking origin/other.
-                                        vm.checkout(br.name.substringAfter('/'), create = false)
-                                        onDismiss()
-                                    }),
-                                    cardListPosition = cardListPositionOf(i, minOf(50, b.remote.size)),
+                    Column(Modifier.fillMaxWidth().heightIn(max = listMax).verticalScroll(rememberScrollState())) {
+                        if (local.isNotEmpty()) {
+                            SmallTitle(stringResource(R.string.git_branches_local))
+                            GroupCard {
+                                local.forEachIndexed { i, br ->
+                                    BasicComponent(
+                                        title = br.name,
+                                        summary = br.upstream,
+                                        endActions = { if (br.current) StatusPill(stringResource(R.string.git_branch_current), COUITheme.colorScheme.primary) },
+                                        onClick = if (br.current || state.gitBusy != null) null else ({
+                                            vm.checkout(br.name, create = false)
+                                            onDismiss()
+                                        }),
+                                        cardListPosition = cardListPositionOf(i, local.size),
+                                    )
+                                }
+                            }
+                        }
+                        if (remote.isNotEmpty()) {
+                            SmallTitle(stringResource(R.string.git_branches_remote))
+                            GroupCard {
+                                remote.forEachIndexed { i, br ->
+                                    BasicComponent(
+                                        title = br.name,
+                                        onClick = if (state.gitBusy != null) null else ({
+                                            // `git switch other` creates the local branch tracking origin/other.
+                                            vm.checkout(br.name.substringAfter('/'), create = false)
+                                            onDismiss()
+                                        }),
+                                        cardListPosition = cardListPositionOf(i, remote.size),
+                                    )
+                                }
+                            }
+                            if (remoteAll.size > remote.size) {
+                                Text(
+                                    stringResource(R.string.git_branches_more, remoteAll.size - remote.size),
+                                    style = COUITheme.textStyles.footnote1,
+                                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 8.dp),
                                 )
                             }
+                        }
+                        if (local.isEmpty() && remote.isEmpty() && q.isNotEmpty()) {
+                            Text(
+                                stringResource(R.string.git_branches_no_match),
+                                style = COUITheme.textStyles.footnote1,
+                                color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp),
+                            )
                         }
                     }
                 }
@@ -544,6 +604,12 @@ private fun BranchSheet(show: Boolean, state: FilesUiState, vm: FilesViewModel, 
         }
     }
 }
+
+/** Above this many branches the branch panel offers a filter field. */
+private const val BRANCH_FILTER_AT = 8
+
+/** Remote branches listed at once (the filter finds the rest). */
+private const val REMOTE_BRANCH_LIMIT = 50
 
 /** Success: a toast. Failure: a dialog with git's own message (credentials, conflicts, hooks …). */
 @Composable

@@ -87,6 +87,8 @@ data class PortForwardUiState(
     val resumable: List<ForwardView> = emptyList(),
     /** Remote port being started (biometric prompt / lease request in flight). */
     val busyPort: Int? = null,
+    /** Lease being resumed or extended (one request at a time per lease). */
+    val busyLease: String? = null,
     val online: Boolean = false,
 )
 
@@ -136,17 +138,29 @@ class PortForwardViewModel(private val conn: ConnectionController, private val f
     }
 
     fun resume(lease: ForwardView) {
+        if (_state.value.busyLease != null) return
+        _state.update { it.copy(busyLease = lease.id) }
         viewModelScope.launch {
-            report(forwards.attach(lease))
+            try {
+                report(forwards.attach(lease))
+            } finally {
+                _state.update { it.copy(busyLease = null) }
+            }
             refresh()
         }
     }
 
     fun extend(f: ActiveForward) {
+        if (_state.value.busyLease != null) return
+        _state.update { it.copy(busyLease = f.leaseId) }
         viewModelScope.launch {
-            when (val r = forwards.extend(f.leaseId)) {
-                is StartResult.Started -> _messages.tryEmit(ForwardMessage.Extended(r.forward.expiresAtMs))
-                else -> report(r)
+            try {
+                when (val r = forwards.extend(f.leaseId)) {
+                    is StartResult.Started -> _messages.tryEmit(ForwardMessage.Extended(r.forward.expiresAtMs))
+                    else -> report(r)
+                }
+            } finally {
+                _state.update { it.copy(busyLease = null) }
             }
         }
     }
@@ -194,7 +208,7 @@ fun PortForwardScreen(onBack: () -> Unit) {
     val st by vm.state.collectAsStateWithLifecycle()
     val conn by container.connection.state.collectAsStateWithLifecycle()
     val active by container.portForwards.active.collectAsStateWithLifecycle()
-    var manual by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var manual by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = PortPairSaver) { mutableStateOf<Pair<String, String>?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -263,6 +277,7 @@ fun PortForwardScreen(onBack: () -> Unit) {
                                 onOpen = { openInBrowser(context, f.url) },
                                 onCopy = { copy(context, f.url) },
                                 onExtend = { vm.extend(f) },
+                                extending = st.busyLease == f.leaseId,
                                 onStop = { vm.stop(f) },
                             )
                         }
@@ -279,7 +294,9 @@ fun PortForwardScreen(onBack: () -> Unit) {
                                 title = "localhost:${r.port}",
                                 summary = stringResource(R.string.forward_resume_summary) + " · " + stringResource(R.string.forward_until, timeOf(r.expiresAtMs)),
                                 startAction = { RowIcon(AppIcons.PortForward) },
+                                endActions = if (st.busyLease == r.id) ({ StatusPill(stringResource(R.string.forward_status_connecting), LocalDevColors.current.info) }) else null,
                                 onClick = { vm.resume(r) },
+                                enabled = st.online && st.busyLease == null,
                                 cardListPosition = cardListPositionOf(i, resumable.size),
                             )
                         }
@@ -358,6 +375,7 @@ private fun ActiveForwardRow(
     onCopy: () -> Unit,
     onExtend: () -> Unit,
     onStop: () -> Unit,
+    extending: Boolean = false,
 ) {
     val colors = LocalDevColors.current
     val (statusText, statusColor) = when (f.status) {
@@ -388,7 +406,7 @@ private fun ActiveForwardRow(
             ) {
                 SmallButton(stringResource(R.string.forward_open), onOpen, tone = ActionTone.Primary)
                 SmallButton(stringResource(R.string.forward_copy), onCopy)
-                SmallButton(stringResource(R.string.forward_extend), onExtend)
+                SmallButton(stringResource(R.string.forward_extend), onExtend, enabled = !extending)
                 SmallButton(stringResource(R.string.forward_stop), onStop, tone = ActionTone.Danger)
             }
         },
@@ -404,8 +422,8 @@ private fun ManualPortDialog(
     onDismiss: () -> Unit,
     onConfirm: (remote: Int, local: Int) -> Unit,
 ) {
-    var remote by remember { mutableStateOf(initialRemote) }
-    var local by remember { mutableStateOf(initialLocal) }
+    var remote by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialRemote) }
+    var local by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialLocal) }
     val remotePort = remote.trim().toIntOrNull()?.takeIf { it in 1..65535 }
     val localPort = if (local.isBlank()) remotePort else local.trim().toIntOrNull()?.takeIf { it in 1..65535 }
     val numbers = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -428,3 +446,9 @@ private fun ManualPortDialog(
 
     }
 }
+
+/** The manual port dialog's drafts (remote, local) across rotation. */
+private val PortPairSaver = androidx.compose.runtime.saveable.Saver<Pair<String, String>?, List<String>>(
+    save = { p -> p?.let { listOf(it.first, it.second) } },
+    restore = { l -> if (l.size == 2) l[0] to l[1] else null },
+)

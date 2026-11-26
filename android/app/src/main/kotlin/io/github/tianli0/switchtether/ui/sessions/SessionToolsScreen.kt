@@ -571,7 +571,8 @@ fun PermissionModeSheet(
     agent: String? = null,
 ) {
     PanelSheet(show = show, title = stringResource(R.string.tools_permission), onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+        // Up to six modes with two-line descriptions: scrolls in landscape or with large text.
+        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             PermissionModeOptions(current, pending, enabled, onSelect, modes, agent)
             error?.let { ToolsNote(stringResource(R.string.tools_permission_failed, it), LocalDevColors.current.danger) }
             ToolsNote(stringResource(R.string.tools_permission_hint))
@@ -804,16 +805,19 @@ fun RewindDialog(state: RewindState?, onConfirm: () -> Unit, onDismiss: () -> Un
     val preview: RewindResult? = state?.preview
     val canConfirm = state != null && !state.loading && !state.applying && preview?.canRewind == true &&
         preview.error == null && preview.filesChanged.isNotEmpty()
-    ConfirmDialog(
+    // A form dialog, not an alert: its confirm capsule is greyed out while there is nothing to
+    // rewind yet (checking, unavailable, no files), instead of looking tappable and doing nothing.
+    io.github.tianli0.coui17.patterns.FormDialog(
         show = state != null,
         title = stringResource(R.string.rewind_title),
-        message = stringResource(R.string.rewind_explain),
         confirmText = stringResource(if (state?.applying == true) R.string.rewind_applying else R.string.rewind_confirm),
         cancelText = stringResource(R.string.action_cancel),
+        confirmEnabled = canConfirm,
         onConfirm = { if (canConfirm) onConfirm() },
         onDismiss = onDismiss,
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp).testTag("rewind-dialog"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth().testTag("rewind-dialog"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.rewind_explain), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceSecondary)
             when {
                 state == null -> {}
                 state.loading -> Row(verticalAlignment = Alignment.CenterVertically) {

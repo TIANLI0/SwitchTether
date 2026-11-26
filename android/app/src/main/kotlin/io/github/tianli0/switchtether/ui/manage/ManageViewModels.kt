@@ -88,11 +88,19 @@ class ProvidersViewModel(
         commands.run(label, onSuccess = { load() }) { id -> repo.switchProvider(app, providerId, id) }
     }
 
-    /** Write-only credential update behind a `config_write` step-up (value never read back). */
-    fun setCredential(label: String, providerId: String, field: String, value: String) {
+    /**
+     * Write-only credential update behind a `config_write` step-up (value never read back).
+     * [stepUpDone] gets false when the biometric confirmation was cancelled or failed: nothing was
+     * sent, and the dialog keeps the typed value so the user can try again.
+     */
+    fun setCredential(label: String, providerId: String, field: String, value: String, stepUpDone: (Boolean) -> Unit = {}) {
         val app = _state.value.app
         viewModelScope.launch {
-            if (gate != null && gate.ensure(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.CONFIG_WRITE).isFailure) return@launch
+            if (gate != null && gate.ensure(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.CONFIG_WRITE).isFailure) {
+                stepUpDone(false)
+                return@launch
+            }
+            stepUpDone(true)
             commands.run(label, onSuccess = { load() }) { id -> repo.setCredential(app, providerId, field, value, id) }
         }
     }

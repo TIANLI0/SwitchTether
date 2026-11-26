@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -172,7 +173,7 @@ fun OnboardingContent(
                 PairingUiState.Scanning -> ScanContent(onScanned, onBack)
                 is PairingUiState.Confirm -> ConfirmContent(state.link, deviceSecure, onPair, onBack)
                 is PairingUiState.EnterCode -> CodeContent(state, deviceSecure, onSubmitCode, onBack)
-                is PairingUiState.Pairing -> ProgressContent(state.target)
+                is PairingUiState.Pairing -> ProgressContent(state.target, onBack)
                 is PairingUiState.LinkInvalid -> MessageContent(
                     title = stringResource(R.string.pair_invalid_title),
                     message = linkReasonText(state.reason, state.field),
@@ -343,7 +344,7 @@ private fun ConfirmContent(link: PairingLink, deviceSecure: Boolean, onPair: () 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Field(stringResource(R.string.field_desktop), link.desktopName)
-            Field(stringResource(R.string.field_addresses), link.hosts.joinToString("\n") + " : " + link.port)
+            Field(stringResource(R.string.field_addresses), link.hosts.joinToString("\n") { h -> (if (h.contains(':')) "[$h]" else h) + ":" + link.port })
             Field(stringResource(R.string.field_fingerprint), Fingerprints.grouped(link.fingerprint), mono = true)
         }
     }
@@ -379,7 +380,7 @@ private fun CodeContent(
     onBack: () -> Unit,
 ) {
     // After a failed attempt the typed address comes back pre-filled, ready to correct.
-    var address by remember(state.manual, state.host) {
+    var address by rememberSaveable(state.manual, state.host) {
         mutableStateOf(
             state.host?.takeIf { state.manual }?.let { h ->
                 val host = if (h.contains(':')) "[$h]" else h
@@ -387,7 +388,7 @@ private fun CodeContent(
             }.orEmpty(),
         )
     }
-    var code by remember(state.host, state.manual) { mutableStateOf("") }
+    var code by rememberSaveable(state.host, state.manual) { mutableStateOf("") }
     Title(stringResource(R.string.pair_code_title), stringResource(R.string.pair_code_subtitle))
     if (state.manual) {
         TextInput(
@@ -450,10 +451,14 @@ private fun ErrorLine(text: String) {
 }
 
 @Composable
-private fun ProgressContent(target: io.github.tianli0.switchtether.remote.pairing.PairingTarget) {
+private fun ProgressContent(target: io.github.tianli0.switchtether.remote.pairing.PairingTarget, onCancel: () -> Unit) {
     Title(stringResource(R.string.pairing_title), stringResource(R.string.pairing_progress, target.hosts.joinToString(", ")))
     Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
         io.github.suqi8.coui.kmp.basic.InfiniteProgressIndicator(size = 36.dp)
+    }
+    // An unreachable address can take a while to fail: a visible way out (cancels the attempt).
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        LinkButton(stringResource(R.string.action_cancel), onCancel)
     }
 }
 

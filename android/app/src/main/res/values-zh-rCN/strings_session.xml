@@ -229,4 +229,12 @@
     <string name="session_menu">会话</string>
     <string name="menu_tools_hint">权限模式、上下文、计划、MCP、导出</string>
     <string name="menu_info_hint">状态、项目、分支、连接方式</string>
+    <string name="model_options_loading">正在从电脑读取模型列表…</string>
+    <string name="model_options_failed">无法读取模型列表，只显示默认模型。</string>
+    <string name="new_session_listing_truncated">此文件夹条目过多，未能全部列出。</string>
+    <string name="new_session_listing_truncated_filter">此文件夹条目过多，未能全部列出；筛选只在已列出的条目中查找。</string>
+    <string name="home_see_all_sessions">查看全部会话</string>
+    <string name="outgoing_delete_title">删除这条消息？</string>
+    <string name="outgoing_delete_body">这条消息没有发出，删除后文字无法恢复。点“编辑”可以把它放回输入框。</string>
+    <string name="outgoing_delete_confirm">删除消息</string>
 </resources>

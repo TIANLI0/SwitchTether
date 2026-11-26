@@ -107,6 +107,9 @@ data class SessionDetailState(
     val awaitingReply: Boolean = false,
     /** Models / effort levels for the model sheet (loaded when it opens). */
     val modelOptions: io.github.tianli0.switchtether.remote.protocol.ModelOptions? = null,
+    /** [modelOptions] is being read / could not be read (the model sheet says so). */
+    val modelOptionsLoading: Boolean = false,
+    val modelOptionsFailed: Boolean = false,
     /** Permission mode being switched to (Claude Code session tools). */
     val permissionPending: String? = null,
     val permissionError: String? = null,
@@ -554,9 +557,10 @@ class SessionDetailViewModel(
     /** Loads the models / effort levels the running agent offers (built-in aliases on failure). */
     fun loadModelOptions() {
         val s = _state.value.detail.valueOrNull?.summary ?: return
+        _state.update { it.copy(modelOptionsLoading = true, modelOptionsFailed = false) }
         viewModelScope.launch {
             val o = runCatching { repo.modelOptions(s.agent, sessionId) }.getOrNull()
-            if (o != null) _state.update { it.copy(modelOptions = o) }
+            _state.update { it.copy(modelOptions = o ?: it.modelOptions, modelOptionsLoading = false, modelOptionsFailed = o == null && it.modelOptions == null) }
         }
     }
 

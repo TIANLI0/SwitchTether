@@ -92,6 +92,11 @@ fun ModelEffortChooser(
     recent: List<String> = emptyList(),
     allowCustom: Boolean = true,
     enabled: Boolean = true,
+    /** The model list is being read from the computer ([options] still null). */
+    optionsLoading: Boolean = false,
+    /** Reading the model list failed ([options] null): only the default can be shown. */
+    optionsFailed: Boolean = false,
+    onRetryOptions: (() -> Unit)? = null,
 ) {
     val listed = options?.models.orEmpty()
     val official = listed.firstOrNull { it.id == "default" }
@@ -107,8 +112,25 @@ fun ModelEffortChooser(
     val defaultLabel = stringResource(R.string.model_default)
     // Laid out like a settings page: a heading, the models as one group card, then the rest at the
     // page's 16dp gutter. The caller adds no side padding.
+    var custom by rememberSaveable(agent) { mutableStateOf("") }
     Column(modifier) {
         SmallTitle(stringResource(R.string.model_title))
+        if (options == null && (optionsLoading || optionsFailed)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(if (optionsLoading) R.string.model_options_loading else R.string.model_options_failed),
+                    style = COUITheme.textStyles.footnote1,
+                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!optionsLoading && onRetryOptions != null) {
+                    LinkButton(text = stringResource(R.string.action_retry), onClick = onRetryOptions, modifier = Modifier.testTag("model-options-retry"))
+                }
+            }
+        }
         val rows = buildList {
             add(Triple("", official?.label?.takeIf { it != "default" } ?: defaultLabel, official?.description))
             main.forEach { add(Triple(it.id, it.label, it.description)) }
@@ -121,7 +143,13 @@ fun ModelEffortChooser(
                     title = label,
                     summary = description,
                     selected = id == model,
-                    onClick = { if (enabled) onModel(id) },
+                    onClick = {
+                        if (enabled) {
+                            onModel(id)
+                            // A picked row replaces what was typed: the field no longer describes the choice.
+                            if (id != custom.trim()) custom = ""
+                        }
+                    },
                     enabled = enabled,
                     cardListPosition = cardListPositionOf(i, rows.size),
                     modifier = Modifier.testTag("model-${id.ifEmpty { "default" }}"),
@@ -136,10 +164,10 @@ fun ModelEffortChooser(
             )
         }
         if (allowCustom) {
-            var custom by rememberSaveable(agent) { mutableStateOf("") }
             TextInput(
                 value = custom,
-                onValueChange = { custom = it; if (it.isNotBlank()) onModel(it.trim()) },
+                // Emptying the field goes back to the agent's default ("").
+                onValueChange = { custom = it; onModel(it.trim()) },
                 label = stringResource(R.string.new_session_model_hint),
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
@@ -247,6 +275,9 @@ fun ModelEffortSheet(
     extra: @Composable () -> Unit = {},
     /** Set when the model cannot be changed from here (a session taken over from VS Code): shown instead of the chooser. */
     modelNote: String? = null,
+    optionsLoading: Boolean = false,
+    optionsFailed: Boolean = false,
+    onRetryOptions: (() -> Unit)? = null,
 ) {
     PanelSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
@@ -262,6 +293,9 @@ fun ModelEffortSheet(
                 onEffort = onEffort,
                 allowCustom = false,
                 enabled = !busy,
+                optionsLoading = optionsLoading,
+                optionsFailed = optionsFailed,
+                onRetryOptions = onRetryOptions,
             )
             extra()
             Text(

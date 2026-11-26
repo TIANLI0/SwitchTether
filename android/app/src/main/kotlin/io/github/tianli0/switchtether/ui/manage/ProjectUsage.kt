@@ -101,7 +101,7 @@ private fun ProjectRows(view: ProjectUsageView, onOpenProject: (String) -> Unit)
         view.projects.forEachIndexed { i, p ->
             UsageRow(
                 title = p.project,
-                summary = stringResource(R.string.usage_project_sessions, UsageFormat.tokens(p.totalTokens) + " tokens", p.sessionCount),
+                summary = stringResource(R.string.usage_project_sessions, stringResource(R.string.usage_log_tokens, UsageFormat.tokens(p.totalTokens)), p.sessionCount),
                 costUsd = p.costUsd,
                 share = if (all > 0) (p.costUsd / all).toFloat() else 0f,
                 position = cardListPositionOf(i, count),
@@ -111,7 +111,7 @@ private fun ProjectRows(view: ProjectUsageView, onOpenProject: (String) -> Unit)
         extra.forEachIndexed { i, (label, t) ->
             UsageRow(
                 title = label,
-                summary = UsageFormat.tokens(t.totalTokens) + " tokens",
+                summary = stringResource(R.string.usage_log_tokens, UsageFormat.tokens(t.totalTokens)),
                 costUsd = t.costUsd,
                 share = if (all > 0) (t.costUsd / all).toFloat() else 0f,
                 position = cardListPositionOf(view.projects.size + i, count),
@@ -276,7 +276,7 @@ private fun SessionUsageRow(s: SessionUsage, projectCost: Double, position: Card
         title = title,
         summary = listOf(
             Formatters.agentLabel(if (s.app == "claude") "claude_code" else s.app),
-            UsageFormat.tokens(s.totalTokens) + " tokens",
+            stringResource(R.string.usage_log_tokens, UsageFormat.tokens(s.totalTokens)),
             relativeTime(s.lastMs),
         ).joinToString(" · "),
         costUsd = s.costUsd,

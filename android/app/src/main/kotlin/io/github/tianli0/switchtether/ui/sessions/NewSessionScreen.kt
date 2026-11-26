@@ -159,6 +159,9 @@ data class NewSessionState(
     val effort: String = "",
     /** Models and effort levels the desktop offers for [agent] (null until loaded / older desktop). */
     val modelOptions: io.github.tianli0.switchtether.remote.protocol.ModelOptions? = null,
+    /** [modelOptions] is being read / could not be read (the chooser says so instead of showing only "Default"). */
+    val modelOptionsLoading: Boolean = false,
+    val modelOptionsFailed: Boolean = false,
     val permissionMode: String = "default",
     /** Models used before with this agent (one-tap chips under the model field). */
     val recentModels: List<String> = emptyList(),
@@ -304,11 +307,15 @@ class NewSessionViewModel(
     }
 
     /** Models / effort levels for the selected agent (older desktops: built-in aliases only). */
-    private fun loadModelOptions() {
+    fun loadModelOptions() {
         val agent = _state.value.agent
+        _state.update { it.copy(modelOptionsLoading = true, modelOptionsFailed = false) }
         viewModelScope.launch {
             val o = runCatching { repo.modelOptions(agent) }.getOrNull()
-            _state.update { if (it.agent == agent) it.copy(modelOptions = o) else it }
+            _state.update {
+                if (it.agent != agent) it
+                else it.copy(modelOptions = o ?: it.modelOptions, modelOptionsLoading = false, modelOptionsFailed = o == null && it.modelOptions == null)
+            }
         }
     }
 
@@ -337,7 +344,7 @@ class NewSessionViewModel(
     fun setAgent(a: String) {
         prefs.agent = a
         _state.update {
-            it.copy(agent = a, model = prefs.model(a), effort = prefs.effort(a), recentModels = prefs.recentModels(a), modelOptions = null, resume = if (a == it.agent) it.resume else null, permissionMode = prefs.permissionMode(a) ?: "default")
+            it.copy(agent = a, model = prefs.model(a), effort = prefs.effort(a), recentModels = prefs.recentModels(a), modelOptions = null, modelOptionsLoading = false, modelOptionsFailed = false, resume = if (a == it.agent) it.resume else null, permissionMode = prefs.permissionMode(a) ?: "default")
         }
         if (_state.value.connection is ConnectionState.Online) loadModelOptions()
     }
@@ -429,6 +436,7 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
                 onPermissionMode = vm::setPermissionMode,
                 onEffort = vm::setEffort,
                 onResume = vm::setResume,
+                onRetryModels = vm::loadModelOptions,
             )
         }
     }
@@ -454,6 +462,8 @@ fun NewSessionContent(
     onResume: (SessionSummary?) -> Unit = {},
     /** DeepSeek Harness: its own web UI instead of a SwitchTether-managed session (null = not offered). */
     onOpenDshWeb: (() -> Unit)? = null,
+    /** Reads the model list again after it failed. */
+    onRetryModels: (() -> Unit)? = null,
 ) {
     val dev = LocalDevColors.current
     var options by rememberSaveable { mutableStateOf(false) }
@@ -501,7 +511,7 @@ fun NewSessionContent(
                 )
                 resumable.forEachIndexed { i, s ->
                     RadioButtonPreference(
-                        title = sessionDisplayTitle(s),
+                        title = io.github.tianli0.switchtether.domain.SessionNaming.rowTitle(sessionDisplayTitle(s)),
                         summary = listOfNotNull(sessionProjectName(s) ?: s.cwd?.let(::folderName), relativeTime(s.lastActiveAtMs)).joinToString(" · "),
                         selected = state.resume?.id == s.id,
                         onClick = { onResume(s) },
@@ -567,6 +577,9 @@ fun NewSessionContent(
                 onEffort = onEffort,
                 recent = state.recentModels,
                 modifier = Modifier.fillMaxWidth(),
+                optionsLoading = state.modelOptionsLoading,
+                optionsFailed = state.modelOptionsFailed,
+                onRetryOptions = onRetryModels,
             )
         }
         // Say why Start is disabled instead of leaving a grey button.
@@ -711,7 +724,14 @@ fun PickFolderScreen(onBack: () -> Unit) {
                             FolderRow(d.name, null, d.sensitive, cardListPositionOf(i + offset, total)) { vm.browse(d.path) }
                         }
                         if (l.value.truncated || l.value.blocked > 0) {
-                            item(key = "note") { Text(stringResource(R.string.new_session_listing_note, l.value.blocked), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
+                            item(key = "note") {
+                                // Cut short and blocked are different reasons; a cut-off list also limits the filter.
+                                val note = listOfNotNull(
+                                    if (l.value.truncated) stringResource(if (q.isEmpty()) R.string.new_session_listing_truncated else R.string.new_session_listing_truncated_filter) else null,
+                                    if (l.value.blocked > 0) stringResource(R.string.new_session_listing_note, l.value.blocked) else null,
+                                ).joinToString("\n")
+                                Text(note, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp))
+                            }
                         }
                     }
                 }
@@ -779,6 +799,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
                     onEffort = vm::setEffort,
                 onResume = vm::setResume,
                     onOpenDshWeb = onOpenDshWeb,
+                    onRetryModels = vm::loadModelOptions,
                 )
             }
         }

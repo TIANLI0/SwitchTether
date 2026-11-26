@@ -175,7 +175,7 @@ private fun DshWebBrowser(ready: DshWebUi.Ready, onBack: () -> Unit, onStop: () 
     var fullScreen by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
-    var signIn by remember { mutableStateOf(false) }
+    var signIn by rememberSaveable { mutableStateOf(false) }
     val localPort = ready.localPort
     val origin = DshWebUrls.origin(localPort)
     val exitHint = stringResource(R.string.dsh_web_exit_full_screen)
@@ -219,9 +219,9 @@ private fun DshWebBrowser(ready: DshWebUi.Ready, onBack: () -> Unit, onStop: () 
         page.loadError = null
         webView.loadUrl(ready.startUrl)
     }
-    // Back: the page's own history first, then out of full screen, then leave.
+    // Back: out of full screen first (full screen has no toolbar), then the page's own history, then leave.
     BackHandler(enabled = page.canGoBack || fullScreen) {
-        if (page.canGoBack) webView.goBack() else fullScreen = false
+        if (fullScreen) fullScreen = false else webView.goBack()
     }
     if (fullScreen) PageColoredSystemBars(page.pageColor)
 
@@ -341,7 +341,7 @@ private fun PageColoredSystemBars(color: Int?) {
 
 @Composable
 private fun SignInDialog(onDismiss: () -> Unit, onToken: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf("") }
     val token = DshWebUrls.tokenOf(text)
     FormDialog(
         show = true,
@@ -440,7 +440,7 @@ private fun createWebView(
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            if (request.isForMainFrame) page.loadError = error.description?.toString() ?: "error ${error.errorCode}"
+            if (request.isForMainFrame) page.loadError = error.description?.toString() ?: context.getString(R.string.dsh_web_error_code, error.errorCode)
         }
     }
     webChromeClient = object : WebChromeClient() {

@@ -243,4 +243,12 @@
     <string name="session_menu">Session</string>
     <string name="menu_tools_hint">Permission mode, context, plan, MCP, export</string>
     <string name="menu_info_hint">Status, project, branch, how it is connected</string>
+    <string name="model_options_loading">Reading the models from the computer…</string>
+    <string name="model_options_failed">Could not read the model list; only the default is shown.</string>
+    <string name="new_session_listing_truncated">This folder has more entries than can be listed here.</string>
+    <string name="new_session_listing_truncated_filter">This folder has more entries than can be listed; the filter only searches the ones listed.</string>
+    <string name="home_see_all_sessions">All sessions</string>
+    <string name="outgoing_delete_title">Delete this message?</string>
+    <string name="outgoing_delete_body">It was not sent, and its text cannot be restored. Edit puts it back into the composer instead.</string>
+    <string name="outgoing_delete_confirm">Delete message</string>
 </resources>

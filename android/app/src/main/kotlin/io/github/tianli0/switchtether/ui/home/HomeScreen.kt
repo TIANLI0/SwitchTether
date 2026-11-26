@@ -92,7 +92,14 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
             when (val s = state.sessions) {
                 Loadable.Loading -> item(key = "loading") { CompactNote(stringResource(R.string.state_loading)) }
                 is Loadable.Failed -> item(key = "error") {
-                    GroupCard { BasicComponent(title = s.error.title(), summary = s.error.detail, cardListPosition = CardListPosition.Full) }
+                    GroupCard {
+                        BasicComponent(
+                            title = s.error.title(),
+                            summary = s.error.detail,
+                            endActions = { SmallButton(stringResource(R.string.action_retry), onRefresh) },
+                            cardListPosition = CardListPosition.Full,
+                        )
+                    }
                 }
                 // Each section (its title, its card) is one item: when a section comes or goes
                 // (a session starts waiting, the last one finishes) it fades and the rest glide.
@@ -142,6 +149,13 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
                     if (state.recent.isNotEmpty()) {
                         item(key = "recent-h") { Box(Modifier.animateItem()) { CompactTitle(stringResource(R.string.home_recent)) } }
                         item(key = "recent") { Box(Modifier.animateItem()) { SessionGroup(state.recent, onOpen) } }
+                        if (state.historyCount > MAX_RECENT_ROWS) {
+                            item(key = "all-recent") {
+                                Box(Modifier.animateItem().fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
+                                    LinkButton(stringResource(R.string.home_see_all_sessions), { onSelectTab(Tab.SESSIONS) })
+                                }
+                            }
+                        }
                     }
                 }
             }

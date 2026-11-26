@@ -11,6 +11,8 @@ import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.runtime.saveable.rememberSaveable
 
 import androidx.compose.ui.platform.testTag
 
@@ -120,13 +122,17 @@ private fun AppTabs(apps: List<String>, selected: String, onSelect: (String) -> 
 fun ProvidersScreen(onBack: () -> Unit) {
     val container = appContainer()
     val vm = containerViewModel { ProvidersViewModel(it.connection, it.management, it.stepUpGate) }
-    var credTarget by remember { mutableStateOf<Pair<ProviderView, io.github.tianli0.switchtether.remote.protocol.SecretFieldStatus>?>(null) }
+    // The dialog's target survives rotation (ids only); the typed secret itself is never put into
+    // saved state, which the system may write to disk.
+    var credProvider by rememberSaveable { mutableStateOf<String?>(null) }
+    var credField by rememberSaveable { mutableStateOf<String?>(null) }
     val credLabel = stringResource(R.string.provider_credential)
     val state by vm.state.collectAsStateWithLifecycle()
     val conn by container.connection.state.collectAsStateWithLifecycle()
     val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
     val busy by vm.commands.busy.collectAsStateWithLifecycle()
-    var confirmSwitch by remember { mutableStateOf<ProviderView?>(null) }
+    var confirmSwitchId by rememberSaveable { mutableStateOf<String?>(null) }
+    val confirmSwitch = confirmSwitchId?.let { id -> state.providers.valueOrNull?.providers?.firstOrNull { it.id == id } }
     val switchLabel = stringResource(R.string.provider_switch)
     val testLabel = stringResource(R.string.provider_test)
     Page(
@@ -147,9 +153,9 @@ fun ProvidersScreen(onBack: () -> Unit) {
                             current = p.id == view.currentId,
                             test = state.testResults[p.id],
                             busy = busy,
-                            onSwitch = { confirmSwitch = p },
+                            onSwitch = { confirmSwitchId = p.id },
                             onTest = { vm.test("$testLabel: ${p.name}", p.id) },
-                            onCredential = { f -> credTarget = p to f },
+                            onCredential = { f -> credProvider = p.id; credField = f.path },
                         )
                     }
                 }
@@ -164,24 +170,41 @@ fun ProvidersScreen(onBack: () -> Unit) {
         confirmText = stringResource(R.string.provider_switch),
         onConfirm = {
             confirmSwitch?.let { vm.switchTo("$switchLabel: ${it.name}", it.id) }
-            confirmSwitch = null
+            confirmSwitchId = null
         },
-        onDismiss = { confirmSwitch = null },
+        onDismiss = { confirmSwitchId = null },
     )
     CommandPromptDialog(prompt, vm.commands::checkStatus, vm.commands::retry, vm.commands::dismiss)
-    credTarget?.let { (p, f) ->
+    val credP = credProvider?.let { id -> state.providers.valueOrNull?.providers?.firstOrNull { it.id == id } }
+    val credF = credP?.secretFields?.firstOrNull { it.path == credField }
+    if (credP != null && credF != null) {
+        val p = credP
+        val f = credF
         var value by remember(p.id, f.path) { mutableStateOf("") }
+        var verifying by remember(p.id, f.path) { mutableStateOf(false) }
+        var stepUpFailed by remember(p.id, f.path) { mutableStateOf(false) }
+        val close = { credProvider = null; credField = null }
         FormDialog(
             show = true,
             title = "$credLabel · ${f.name}",
             confirmText = stringResource(R.string.files_save),
-            confirmEnabled = value.isNotBlank(),
-            onConfirm = { vm.setCredential("$credLabel: ${p.name}", p.id, f.path, value); credTarget = null },
-            onDismiss = { credTarget = null },
+            confirmEnabled = value.isNotBlank() && !verifying,
+            onConfirm = {
+                // The dialog stays open (with the typed value) until the biometric confirmation passed.
+                verifying = true
+                stepUpFailed = false
+                vm.setCredential("$credLabel: ${p.name}", p.id, f.path, value) { ok ->
+                    verifying = false
+                    if (ok) close() else stepUpFailed = true
+                }
+            },
+            onDismiss = close,
         ) {
             Text(stringResource(R.string.provider_credential_note, p.name), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
-            io.github.tianli0.coui17.patterns.TextInput(value = value, onValueChange = { value = it }, label = f.name, showPasswordToggle = true)
-
+            io.github.tianli0.coui17.patterns.TextInput(value = value, onValueChange = { value = it; stepUpFailed = false }, label = f.name, showPasswordToggle = true)
+            if (stepUpFailed) {
+                Text(stringResource(R.string.provider_credential_not_verified), style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger)
+            }
         }
     }
 }
@@ -203,10 +226,40 @@ private fun ProviderCard(
                 Text(p.name, style = COUITheme.textStyles.body1, fontWeight = FontWeight.SemiBold, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (current) StatusPill(stringResource(R.string.provider_current), dev.ok)
             }
-            listOfNotNull(p.category, p.websiteUrl).takeIf { it.isNotEmpty() }?.let {
-                Text(it.joinToString(" · "), style = DevType.codeSmall, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            p.category?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = DevType.codeSmall, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            p.notes?.takeIf { it.isNotBlank() }?.let { Text(it, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 3) }
+            p.websiteUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                // Its own line, wrapped in full; tap opens it, long press copies it.
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val copied = stringResource(R.string.provider_url_copied)
+                Text(
+                    url,
+                    style = DevType.codeSmall,
+                    color = COUITheme.colorScheme.primary,
+                    modifier = Modifier.combinedClickable(
+                        onClick = { runCatching { uriHandler.openUri(url) } },
+                        onLongClick = {
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(url))
+                            android.widget.Toast.makeText(context, copied, android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                    ),
+                )
+            }
+            p.notes?.takeIf { it.isNotBlank() }?.let { notes ->
+                // Three lines with an ellipsis; a tap shows the whole note (and folds it again).
+                var expanded by rememberSaveable(p.id) { mutableStateOf(false) }
+                Text(
+                    notes,
+                    style = COUITheme.textStyles.footnote1,
+                    color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = if (expanded) Int.MAX_VALUE else 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { expanded = !expanded },
+                )
+            }
             // Secrets: only configured/hint as reported by the server; values are never requested.
             p.secretFields.forEach { s ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -401,7 +454,8 @@ internal fun <T> SmallLoadable(state: Loadable<T>, onRetry: () -> Unit, content:
 private fun SummaryHero(s: UsageSummary) {
     val empty = s.totalRequests == 0L
     fun dash(v: String) = if (empty) "—" else v
-    var open by remember { mutableStateOf(false) }
+    // Saveable: the hero is a LazyColumn item, so scrolling it away must not fold the details again.
+    var open by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column {
             Text(stringResource(R.string.usage_cost), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
@@ -487,7 +541,7 @@ private fun TrendChart(days: List<DailyUsage>, state: UsageState, onMetric: (Usa
         val grid = remember(days, metric, state.fromSec, state.toSec, state.zone, hourly, locale) {
             buildUsageHeatGrid(days, value, state.fromSec, state.toSec, state.zone, hourly, locale)
         }
-        var selected by remember(grid.buckets.map { it.start }) {
+        var selected by rememberSaveable(grid.buckets.map { it.start }) {
             mutableStateOf(grid.buckets.indexOfLast { it.usage.requests > 0 || it.usage.tokens > 0 }.takeIf { it >= 0 } ?: grid.buckets.lastIndex)
         }
         val summary = stringResource(R.string.usage_trend_a11y, grid.buckets.size) + " " +

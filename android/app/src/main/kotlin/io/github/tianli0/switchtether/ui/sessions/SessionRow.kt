@@ -63,7 +63,7 @@ fun SessionRow(
     BasicComponent(
         // Long-press rows get their press highlight clipped to the row's rounded card edges (never a square mask).
         modifier = if (onLongClick != null) marked.clip(groupRowShape(position)).combinedClickable(onClick = onClick, onLongClick = onLongClick) else marked,
-        title = title,
+        title = io.github.tianli0.switchtether.domain.SessionNaming.rowTitle(title),
         startAction = {
             // No extra end padding: the row's own icon gap is the same as every other list row's.
             AgentBadge(
@@ -118,7 +118,7 @@ fun PinMenuDialog(session: SessionSummary?, pinned: Boolean, onDismiss: () -> Un
     val context = androidx.compose.ui.platform.LocalContext.current
     io.github.tianli0.coui17.patterns.ConfirmDialog(
         show = session != null,
-        title = session?.let { sessionDisplayTitle(it) }.orEmpty(),
+        title = session?.let { io.github.tianli0.switchtether.domain.SessionNaming.rowTitle(sessionDisplayTitle(it)) }.orEmpty(),
         message = stringResource(if (pinned) R.string.pin_menu_unpin_body else R.string.pin_menu_pin_body),
         confirmText = stringResource(if (pinned) R.string.pin_remove else R.string.pin_add),
         onConfirm = {

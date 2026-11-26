@@ -1307,9 +1307,9 @@ mod tests {
             .expect("a free test port");
         let all = listening_ports(&[]);
         let excluded = listening_ports(&[port]);
-        if cfg!(any(windows, target_os = "linux")) {
+        if cfg!(any(windows, target_os = "linux", target_os = "macos")) {
             let me = all.iter().find(|p| p.port == port).expect("own listener");
-            if cfg!(windows) {
+            if cfg!(any(windows, target_os = "macos")) {
                 assert_eq!(me.pid, Some(std::process::id()));
                 assert!(me
                     .process

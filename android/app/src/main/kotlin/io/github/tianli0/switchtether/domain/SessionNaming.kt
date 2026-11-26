@@ -42,4 +42,20 @@ object SessionNaming {
         }
         return name?.trimEnd(':')?.takeIf { it.isNotEmpty() }
     }
+
+    /**
+     * A title for a list row: at most about two lines on a phone. Wide (CJK, emoji) characters count
+     * twice; longer titles are cut at [maxUnits] with "…". The full title stays on the session page.
+     */
+    fun rowTitle(title: String, maxUnits: Int = 64): String {
+        var units = 0
+        var i = 0
+        while (i < title.length) {
+            val cp = title.codePointAt(i)
+            units += if (cp >= 0x1100) 2 else 1
+            if (units > maxUnits) return title.substring(0, i).trimEnd() + "…"
+            i += Character.charCount(cp)
+        }
+        return title
+    }
 }

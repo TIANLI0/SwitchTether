@@ -247,6 +247,20 @@ fun OutgoingBubble(
 ) {
     val dev = LocalDevColors.current
     val pending = m.status == OutgoingStatus.SENDING || m.status == OutgoingStatus.WAITING_CONNECTION
+    // Deleting an unsent message drops its text for good (no undo): ask first when there is text.
+    var confirmDelete by remember(m.commandId) { mutableStateOf(false) }
+    io.github.tianli0.coui17.patterns.ConfirmDialog(
+        show = confirmDelete,
+        title = stringResource(R.string.outgoing_delete_title),
+        message = stringResource(R.string.outgoing_delete_body),
+        confirmText = stringResource(R.string.outgoing_delete_confirm),
+        cancelText = stringResource(R.string.action_cancel),
+        onConfirm = {
+            confirmDelete = false
+            onDelete(m.commandId)
+        },
+        onDismiss = { confirmDelete = false },
+    )
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).padding(top = 6.dp).testTag("outgoing-${m.commandId}"),
         horizontalAlignment = Alignment.End,
@@ -296,7 +310,9 @@ fun OutgoingBubble(
                         SmallAction(stringResource(R.string.outgoing_edit), "outgoing-edit") { onEdit(m.commandId) }
                     }
                     Spacer(Modifier.size(4.dp))
-                    SmallAction(stringResource(R.string.outgoing_delete), "outgoing-delete") { onDelete(m.commandId) }
+                    SmallAction(stringResource(R.string.outgoing_delete), "outgoing-delete") {
+                        if (m.text.isBlank()) onDelete(m.commandId) else confirmDelete = true
+                    }
                 }
             }
         }

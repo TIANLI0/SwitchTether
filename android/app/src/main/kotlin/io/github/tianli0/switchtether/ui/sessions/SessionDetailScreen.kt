@@ -277,6 +277,9 @@ fun SessionDetailScreen(
         onModel = { vm.setModel(it, switchLabel) },
         onEffort = { vm.setEffort(it, switchLabel) },
         modelNote = if (modelChangeable) null else stringResource(R.string.model_attached_note),
+        optionsLoading = state.modelOptionsLoading,
+        optionsFailed = state.modelOptionsFailed,
+        onRetryOptions = vm::loadModelOptions,
         onDismiss = {
             showModels = false
             vm.clearPermissionError()
@@ -1077,16 +1080,22 @@ private fun Composer(
                                 modifier = Modifier.fillMaxSize().clip(SquircleShape(8.dp)),
                             )
                         }
+                        // A 20dp mark in a 36dp touch area (the thumbnail's top-end corner).
                         Box(
                             Modifier
                                 .align(Alignment.TopEnd)
-                                .size(20.dp)
+                                .size(36.dp)
                                 .clip(androidx.compose.foundation.shape.CircleShape)
-                                .background(COUITheme.colorScheme.surface.copy(alpha = 0.85f))
-                                .clickable { onRemoveImage(idx) },
-                            contentAlignment = Alignment.Center,
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { onRemoveImage(idx) },
+                            contentAlignment = Alignment.TopEnd,
                         ) {
-                            Icon(AppIcons.Delete, contentDescription = stringResource(R.string.action_close), tint = COUITheme.colorScheme.onSurface, modifier = Modifier.size(12.dp))
+                            Box(
+                                Modifier.size(20.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(COUITheme.colorScheme.surface.copy(alpha = 0.85f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(AppIcons.Delete, contentDescription = stringResource(R.string.attach_remove), tint = COUITheme.colorScheme.onSurface, modifier = Modifier.size(12.dp))
+                            }
                         }
                     }
                 }
@@ -1286,13 +1295,19 @@ private fun DraftImageTile(a: DraftAttachment, onRemove: () -> Unit, onPreview: 
                 RotatingProgressIndicator(color = androidx.compose.ui.graphics.Color.White, size = 20.dp, ringDiameter = 16.dp, strokeWidth = 2.dp)
             }
         }
+        // A 20dp mark in a 36dp touch area (the thumbnail's top-end corner).
         Box(
-            Modifier.align(Alignment.TopEnd).padding(3.dp).size(20.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
+            Modifier.align(Alignment.TopEnd).size(36.dp).clip(androidx.compose.foundation.shape.CircleShape)
                 .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onRemove),
-            contentAlignment = Alignment.Center,
+            contentAlignment = Alignment.TopEnd,
         ) {
-            Icon(AppIcons.Close, contentDescription = stringResource(R.string.attach_remove), tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(11.dp))
+            Box(
+                Modifier.padding(3.dp).size(20.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(AppIcons.Close, contentDescription = stringResource(R.string.attach_remove), tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(11.dp))
+            }
         }
     }
 }
@@ -1430,7 +1445,8 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
 @Composable
 private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boolean, canFork: Boolean, enabled: Boolean, busy: Boolean, onConfirm: (fork: Boolean) -> Unit, onDismiss: () -> Unit) {
     PanelSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth()) {
+        // Scrolls so the continue / fork buttons stay reachable in landscape or with large text.
+        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 listOf(
                     stringResource(R.string.continue_point_context, agentLabel),

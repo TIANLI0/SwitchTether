@@ -36,6 +36,7 @@
     <string name="dsh_web_sign_in_action">Sign in</string>
     <string name="dsh_web_no_downloads">Downloads are not available in this view</string>
     <string name="dsh_web_no_app">No app can open this link</string>
-    <string name="dsh_web_exit_full_screen">Back again leaves full screen</string>
+    <string name="dsh_web_exit_full_screen">Back leaves full screen</string>
     <string name="dsh_web_chip">Web UI</string>
+    <string name="dsh_web_error_code">Error %1$d</string>
 </resources>

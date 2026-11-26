@@ -72,6 +72,15 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
     var confirmUnpair by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var stepUpResult by remember { mutableStateOf<String?>(null) }
+    var stepUpBusy by remember { mutableStateOf(false) }
+    val stepUpScopeConfig = stringResource(R.string.stepup_scope_config_write)
+    val stepUpReasonCanceled = stringResource(R.string.stepup_reason_canceled)
+    val stepUpReasonNoKey = stringResource(R.string.stepup_reason_no_key)
+    val stepUpReasonInvalidated = stringResource(R.string.stepup_reason_key_invalidated)
+    val stepUpReasonFailed = stringResource(R.string.stepup_reason_failed)
+    val toastContext = LocalContext.current.applicationContext
+    val clearedText = stringResource(R.string.settings_clear_cache_done)
+    val unpairLocalOnly = stringResource(R.string.settings_unpair_local_only)
     val activity = LocalContext.current as? FragmentActivity
     val stepUpTitle = stringResource(R.string.stepup_prompt_title)
     val stepUpSubtitle = stringResource(R.string.stepup_prompt_subtitle)
@@ -100,18 +109,32 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
                     ArrowPreference(
                         title = stringResource(R.string.settings_stepup_test),
                         summary = stepUpResult ?: if (stepUp) stringResource(R.string.settings_stepup_summary) else stringResource(R.string.settings_stepup_disabled),
-                        enabled = stepUp && conn is ConnectionState.Online && activity != null,
+                        // One prompt at a time: the row is disabled while a confirmation runs.
+                        enabled = stepUp && conn is ConnectionState.Online && activity != null && !stepUpBusy,
                         cardListPosition = CardListPosition.Full,
                         onClick = {
                             val act = activity ?: return@ArrowPreference
+                            if (stepUpBusy) return@ArrowPreference
+                            stepUpBusy = true
                             scope.launch {
                                 stepUpResult = try {
                                     val grant = container.stepUp(act, StepUpScopes.CONFIG_WRITE, stepUpTitle, stepUpSubtitle)
-                                    okFmt.format(grant.scope, grant.expiresAt)
+                                    val scopeLabel = if (grant.scope == StepUpScopes.CONFIG_WRITE) stepUpScopeConfig else grant.scope
+                                    val until = Formatters.parseInstant(grant.expiresAt)?.let { Formatters.dateTime(it.toEpochMilli()) } ?: grant.expiresAt
+                                    okFmt.format(scopeLabel, until)
                                 } catch (e: StepUpSignException) {
-                                    failFmt.format(e.reason.name + (e.message?.let { ": $it" } ?: ""))
+                                    failFmt.format(
+                                        when (e.reason) {
+                                            StepUpSignException.Reason.CANCELED -> stepUpReasonCanceled
+                                            StepUpSignException.Reason.NO_KEY -> stepUpReasonNoKey
+                                            StepUpSignException.Reason.KEY_INVALIDATED -> stepUpReasonInvalidated
+                                            StepUpSignException.Reason.FAILED -> stepUpReasonFailed
+                                        },
+                                    )
                                 } catch (e: Exception) {
                                     failFmt.format(ConnectionManager.describe(e))
+                                } finally {
+                                    stepUpBusy = false
                                 }
                             }
                         },
@@ -258,7 +281,12 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
         confirmText = stringResource(R.string.settings_unpair),
         onConfirm = {
             confirmUnpair = false
-            scope.launch { container.unpair() }
+            scope.launch {
+                // Offline: this phone forgets the computer, but the computer still lists the phone.
+                if (!container.unpair()) {
+                    android.widget.Toast.makeText(toastContext, unpairLocalOnly, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
         },
         onDismiss = { confirmUnpair = false },
     )
@@ -270,6 +298,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, manageItems: androidx.compose.founda
         onConfirm = {
             confirmClear = false
             container.clearCachesAndDrafts()
+            android.widget.Toast.makeText(toastContext, clearedText, android.widget.Toast.LENGTH_SHORT).show()
         },
         onDismiss = { confirmClear = false },
     )
@@ -297,7 +326,7 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
                         add(stringResource(R.string.field_step_up) to (if (d.stepUpEnabled) stringResource(R.string.stepup_enabled) else stringResource(R.string.stepup_disabled)))
                         add(stringResource(R.string.field_key_storage) to container.keys.securityLevel(d.identityAlias))
                         (conn as? ConnectionState.Online)?.status?.let { s ->
-                            add(stringResource(R.string.field_server_version) to "${s.serverVersion} · ${s.platform ?: ""}")
+                            add(stringResource(R.string.field_server_version) to listOfNotNull(s.serverVersion, s.platform?.takeIf { it.isNotBlank() }).joinToString(" · "))
                         }
                     }
                     rows.forEachIndexed { i, (label, value) -> KeyValueRow(label, value, cardListPosition = cardListPositionOf(i, rows.size)) }
@@ -378,6 +407,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                         onCheckedChange = { v -> update { it.copy(quietHoursEnabled = v) } },
                         title = stringResource(R.string.notif_quiet),
                         summary = stringResource(R.string.notif_quiet_summary, hm(prefs.quietStartMin), hm(prefs.quietEndMin)),
+                        cardListPosition = CardListPosition.Head,
                     )
                     // System time pickers (hours and minutes, 12/24 h as the phone is set) instead of typed numbers.
                     val is24h = android.text.format.DateFormat.is24HourFormat(context)
@@ -388,6 +418,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                         onClick = {
                             android.app.TimePickerDialog(context, { _, h, m -> update { it.copy(quietStartMin = h * 60 + m) } }, prefs.quietStartMin / 60, prefs.quietStartMin % 60, is24h).show()
                         },
+                        cardListPosition = CardListPosition.Middle,
                     )
                     ArrowPreference(
                         title = stringResource(R.string.notif_quiet_end),
@@ -449,8 +480,11 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                             }
                         },
                     )
-                    val pm = context.getSystemService(android.os.PowerManager::class.java)
-                    val unrestricted = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+                    var unrestricted by remember { mutableStateOf(false) }
+                    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+                        unrestricted = context.getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
+                        onPauseOrDispose { }
+                    }
                     ArrowPreference(
                         title = stringResource(R.string.notif_battery),
                         summary = stringResource(if (unrestricted) R.string.notif_battery_unrestricted else R.string.notif_battery_restricted),
@@ -495,6 +529,8 @@ fun LicensesScreen(onBack: () -> Unit) {
             item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
             item {
                 GroupCard {
+                  androidx.compose.foundation.text.selection.SelectionContainer {
+                   Column {
                     LICENSES.forEachIndexed { i, l ->
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -502,10 +538,12 @@ fun LicensesScreen(onBack: () -> Unit) {
                                 Spacer(Modifier.size(8.dp))
                                 Text(l.license, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.primary)
                             }
-                            Text(l.note, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(l.note, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                         }
                         if (i < LICENSES.lastIndex) io.github.suqi8.coui.kmp.basic.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     }
+                   }
+                  }
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
