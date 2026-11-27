@@ -52,9 +52,11 @@ Everything else (`agy` TUI, `--prompt-interactive`) is interactive; no PTY scrap
   CC Switch's session index, so SwitchTether's history shows them too.
 - agy does **not** keep the model, thinking level or mode with a conversation: a resumed one starts
   on agy's default model.
-- Model calls of the Gemini models failed on the test machine with `FAILED_PRECONDITION (code 400):
-  User location is not supported for the API use` (a regional restriction of Google's API, not of
-  SwitchTether); agy reports such errors as answer text. Claude Sonnet 5.5 through agy worked.
+- Gemini models answer where Google's API serves the region. On 2026-11-27 the test machine first
+  got `FAILED_PRECONDITION (code 400): User location is not supported for the API use` (agy reports
+  such errors as answer text); through a supported region the full smoke run (`agy_smoke --
+  gemini-3.8-flash low`: new, model/level change, mode, context usage, resume remembering the
+  first answer, interrupt) passed, as it did with Claude Sonnet 5.5 through agy.
 
 ## 2. Design
 

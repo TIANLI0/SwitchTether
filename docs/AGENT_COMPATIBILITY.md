@@ -192,7 +192,7 @@ Details and evidence: [AGY_REMOTE.md](AGY_REMOTE.md). agy 1.5.9, Windows, signed
 | Model / thinking level / mode | VERIFIED — set at start and changed while running | `session/set_config_option` (`model`, `thought_level`), `session/set_mode` (`default`, `accept-edits`, `auto`, `plan`); agy keeps none of them with the conversation |
 | Questions | BLOCKED | ACP has no question request; agy asks in its answer |
 | Images | UNTESTED | ACP `image` prompt blocks (agy advertises image prompts) |
-| Answers of Gemini models | not verified | Google's API refused the test machine's region (`FAILED_PRECONDITION … User location is not supported`); shown as agy's answer text. Claude Sonnet 5.5 through agy was used |
+| Answers of Gemini models | VERIFIED — `agy_smoke -- gemini-3.8-flash low` (new, change model/level, resume, interrupt) | Needs a region Google's API serves; otherwise agy answers with `User location is not supported`, shown as its answer text |
 
 ## 8. What would unblock in-place takeover
 
