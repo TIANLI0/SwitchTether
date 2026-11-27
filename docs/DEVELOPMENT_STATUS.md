@@ -880,3 +880,15 @@ on this machine, the phone UI on a device.
   Robolectric key injection; `SlashPanelTest` still green on the new field). Not verified: nothing was
   run on a device, tablet, DeX or emulator — real hardware keyboards, the Meta+/ helper, drag and drop
   between apps and its permission grant, keyboard GIF commit and clipboard image paste are unexercised.
+
+## Android: pdf viewer crash (2026-11-27)
+
+- 2026-11-27: every pdf crashed the app on open (`IllegalStateException: Document already closed`
+  from `PdfRenderer.getPageCount`). The `DisposableEffect(doc)` that closed the document read the
+  delegated `produceState` value in `onDispose`: when the document arrived, the effect for "not
+  loaded yet" was disposed, read the new value and closed the document just opened. The document
+  is now opened and closed inside the `produceState` producer (`awaitCancellation` + `finally`, so
+  leaving while it opens closes it too) and `PdfDoc.pageCount` is read once. Verified on the
+  emulator (CouCou_A17 image, API 37, headless, `dev_server`): the crash reproduced with the
+  0.1.28 build (logcat crash buffer); with the fix a 5-page pdf opens, scrolls, opens a page
+  zoomed, swipes to page 5, closes and reopens with an empty crash buffer.

@@ -101,6 +101,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.withContext
 
 /** What to show: the remote file's identity. The viewer resolves a local copy itself (download → cache → fetch). */
@@ -526,7 +527,9 @@ private fun ImageMessage(text: String) {
 private class PdfDoc(private val fd: ParcelFileDescriptor, private val renderer: PdfRenderer) {
     private val lock = Any()
     private var closed = false
-    val pageCount: Int get() = renderer.pageCount
+
+    /** Read once: `PdfRenderer.getPageCount` throws after close, and the UI may still ask while it goes. */
+    val pageCount: Int = renderer.pageCount
 
     fun render(index: Int, widthPx: Int): Bitmap? = synchronized(lock) {
         if (closed) return null
@@ -556,20 +559,30 @@ private class PdfDoc(private val fd: ParcelFileDescriptor, private val renderer:
 @Composable
 private fun PdfPages(file: LocalFile, modifier: Modifier) {
     val context = LocalContext.current
+    // The document lives exactly as long as this producer: opened here, closed when the file changes or
+    // the viewer leaves. (It used to be closed by a DisposableEffect whose onDispose read the delegated
+    // state: when the document arrived, the effect for "not loaded yet" was disposed, read the new value
+    // and closed the document just opened — every pdf crashed with "Document already closed".)
     val doc by produceState<Result<PdfDoc>?>(null, file.uri) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val fd = context.contentResolver.openFileDescriptor(file.uri, "r") ?: error("cannot open")
-                try {
-                    PdfDoc(fd, PdfRenderer(fd)) // SecurityException for a password-protected pdf, IOException for a damaged one
-                } catch (t: Throwable) {
-                    runCatching { fd.close() }
-                    throw t
+        // Set where it is opened: leaving while it opens (cancelled withContext) still closes it.
+        var opened: PdfDoc? = null
+        try {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val fd = context.contentResolver.openFileDescriptor(file.uri, "r") ?: error("cannot open")
+                    try {
+                        PdfDoc(fd, PdfRenderer(fd)).also { opened = it } // SecurityException for a password-protected pdf, IOException for a damaged one
+                    } catch (t: Throwable) {
+                        runCatching { fd.close() }
+                        throw t
+                    }
                 }
             }
+            awaitCancellation()
+        } finally {
+            opened?.close()
         }
     }
-    DisposableEffect(doc) { onDispose { doc?.getOrNull()?.close() } }
     val d = doc
     when {
         d == null -> Box(modifier, contentAlignment = Alignment.Center) { Text(stringResource(R.string.state_loading), color = COUITheme.colorScheme.onSurfaceVariantSummary) }
