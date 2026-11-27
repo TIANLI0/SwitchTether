@@ -290,7 +290,12 @@ export const handlers = [
   // SwitchTether: the Remote status button in the app header.
   http.post(`${TAURI_ENDPOINT}/remote_status`, () =>
     success({
-      config: { enabled: false, port: 47600, networkMode: "lan", relayEnabled: false },
+      config: {
+        enabled: false,
+        port: 47600,
+        networkMode: "lan",
+        relayEnabled: false,
+      },
       running: false,
       fingerprint: "",
       fingerprintDisplay: "",
