@@ -944,3 +944,31 @@ on this machine, the phone UI on a device.
   `:link` process; port forwards and DSH Web across the split (need a biometric step-up key the
   emulator cannot have); revocation seen first by the `:link` process; companion presence; the
   periodic `ReconnectWorker` → `LinkReceiver` hand-over and boot.
+
+## Google Antigravity (`agy`) on the phone (2026-11-27, branch `dev/upstream-v4.0.43-agy`)
+
+- Upstream CC Switch v4.0.43 supports Antigravity on the desktop (accounts, quota, sessions,
+  models, MCP / skills / prompts). Providers, prompts, MCP and skills already reached the phone
+  (`agy` is in the bridge's app list).
+- Remote: `GET /v1/usage/quota/agy` now takes the desktop's fast path (the signed-in account's
+  quota, `AgyAccountState`), as the desktop's `get_subscription_quota` command does, and falls back
+  to the CLI path when the account manager is not available. Content search covers Antigravity
+  conversations through CC Switch's session parser (`CcSwitchBackend::session_messages`). The
+  capability matrix lists `agy` / `cli` honestly as history only (read `PARTIAL`, live events
+  absent, send / approve / interrupt `BLOCKED`, no continue), with its own reason. The models
+  endpoint answers `agy` with `agy models` through the new `CcSwitchBackend::agent_models`.
+- Android: `agy` in the quota tools (Home and Usage; hidden when the desktop hides the app), the
+  usage app filter and the MCP / Skills / Prompts tabs follow the desktop's app list and
+  `visibleApps` (`DEFAULT_APPS` only offline; Claude Desktop / OpenClaw left out where CC Switch has
+  no such setting), label "Antigravity", a badge (the mark's silhouette in its blue, LobeHub Icons
+  MIT) also used for conversation notifications, the five quota tier labels (en, zh-CN), a localized
+  history-only reason on the session page.
+- Verified: `cargo test -p switchtether-core` (new `agy_history_is_searchable_and_honestly_read_only`
+  against a fake backend, `plain_transcripts_are_searched_by_user_and_assistant_text`); Android unit
+  tests (new `AgyAppsTest`, `AgentBadgeTest` renders the agy badge). Not verified against a real
+  Antigravity installation or account: the fast quota path, `agy models` through the Remote API and
+  searching real Antigravity trajectories were not exercised (no sandboxed agy login on this machine).
+- Not supported, and why: starting, continuing or controlling Antigravity sessions (no managed
+  adapter; agy exposes no control protocol SwitchTether uses), so no live view, approvals, model /
+  effort changes or permission modes for agy, and the phone's model picker is never shown for it
+  (it belongs to the new-session launcher and running sessions).

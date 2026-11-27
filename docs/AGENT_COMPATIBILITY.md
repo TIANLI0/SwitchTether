@@ -175,6 +175,12 @@ conversation resolves to the attached session.
 History from CC Switch's session index is shown read-only (`readHistory: PARTIAL`, plain
 role/text). No live control.
 
+Google Antigravity (`agy`) is one of these: its conversations (JSONL transcripts and trajectory
+databases) are read with CC Switch's parser and are also covered by content search; quota comes
+from the desktop's signed-in Antigravity account and the models endpoint from `agy models`. No live
+view, no control and no continue (capability matrix `agy` / `cli`). Not yet exercised against a real
+Antigravity installation through the Remote API.
+
 ## 8. What would unblock in-place takeover
 
 | Client | Interface that would be needed | Status upstream |

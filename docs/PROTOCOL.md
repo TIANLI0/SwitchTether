@@ -196,7 +196,12 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `GET /v1/usage/summary?from&to&app` · `GET /v1/usage/trends?from&to&app` ·
   `GET /v1/usage/models?…` · `GET /v1/usage/providers?…` ·
   `GET /v1/usage/quota/{tool}` (subscription quota; `available:false` + `reason` when the
-  upstream service does not expose it — never fabricated).
+  upstream service does not expose it — never fabricated). `tool` is a CC Switch app id: the phone
+  asks for `claude`, `codex` and `agy` (Google Antigravity). Antigravity is read the way the
+  desktop's own quota footer reads it: from the signed-in account (`AgyAccountManager::live_quota`),
+  else through the `agy` CLI. Its tiers are `agy_gemini_five_hour`, `agy_gemini_weekly`,
+  `agy_gemini_argon_weekly` (Gemini models), `agy_third_party_five_hour` and
+  `agy_third_party_weekly` (Claude / GPT models in Antigravity).
 - Usage ranges are epoch seconds; buckets and "today" use the **desktop's time zone**
   (`GET /v1/status` → `timeZone` (IANA, may be null) and `utcOffsetMinutes`). Trend buckets carry
   `date` (RFC 3339, desktop offset), `startMs` and `realTotalTokens`; the response has `timeZone`.
@@ -479,7 +484,10 @@ revocation, and changes are audited (`push.register` with the endpoint's host on
 Full-text search over what the user and the agents **said** (the `user_message` /
 `assistant_message` text the transcript parsers produce; tool calls and their output are not
 searched) in Claude Code, Codex and DeepSeek Harness transcripts known to the desktop (the same set
-as `GET /v1/sessions`). `q`: 1–200 characters, matched case-insensitively character by character (CJK
+as `GET /v1/sessions`), and in Antigravity (`agy`) conversations, which are read with CC Switch's
+own session parser (JSONL transcripts and trajectory databases; `user` / `assistant` messages).
+Antigravity sessions are searched after the transcript files, within the same budget, and the
+results are merged newest first. `q`: 1–200 characters, matched case-insensitively character by character (CJK
 and other scripts work; no word splitting). `agent` filters like the session list. `limit` 1–50,
 default 20. Sessions are scanned newest first (at most the last 64 MiB of each transcript) within a
 3 s budget; `partial: true` means the budget ran out before every session was searched. Results come
@@ -659,7 +667,9 @@ this change used `managed:<random>` ids that disappeared with the process.
     `isSynthetic`, transcript `isMeta`); the summary a `/compact` leaves is a `system` `compact_summary`.
   - **Models** (`GET /v1/agents/{agent}/models?session=`): the agent's own list — from the running session, else read by a
     short SwitchTether-owned probe (Claude Code `initialize` with no MCP servers, Codex app-server `model/list`; no
-    message, no conversation) and cached 30 min. With an official list the built-in aliases are not added, hidden Codex
+    message, no conversation) and cached 30 min. Antigravity (`agy`): the signed-in CLI's own list (`agy models`, as
+    the desktop's provider form reads it; nothing is written), ids being agy's display names, no effort levels and no
+    permission modes; there is no running Antigravity session to ask (history only). With an official list the built-in aliases are not added, hidden Codex
     models are left out, and a model without effort levels has `efforts: []`. `source`: `agent` | `builtin`.
   - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
     when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`, Codex thread settings);
