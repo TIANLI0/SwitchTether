@@ -49,8 +49,13 @@ fun SessionRow(
     onLongClick: (() -> Unit)? = null,
     /** Lines under the row inside the same card slot (Home: what runs inside the session). */
     bottom: (@Composable () -> Unit)? = null,
+    /** Sub-agents / background tasks the phone saw running itself, for desktops without `activeTasks`. */
+    activeFallback: Int? = null,
 ) {
     val dev = LocalDevColors.current
+    // A finished turn with sub-agents or background tasks still running reads as working.
+    val work = session.backgroundWork(activeFallback)
+    val shownStatus = session.displayStatus(activeFallback)
     val agent = Formatters.agentLabel(session.agent)
     val title = sessionDisplayTitle(session)
     // Two-pane layout: the session open beside the list keeps the press layer, as a selected COUI
@@ -74,8 +79,8 @@ fun SessionRow(
             AgentBadge(
                 session.agent,
                 size = if (compact) 32.dp else 40.dp,
-                statusColor = if (session.isLive) sessionStatusColor(session.status) else null,
-                running = session.isLive && session.status == "busy",
+                statusColor = if (session.isLive) sessionStatusColor(shownStatus) else null,
+                running = session.isLive && shownStatus == "busy",
             )
         },
         // Attached sessions name their client here ("Codex · Codex Desktop"), so the tag stays short
@@ -94,6 +99,8 @@ fun SessionRow(
                 Text(relativeTime(session.lastActiveAtMs), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
                 val tag: Pair<String, androidx.compose.ui.graphics.Color>? = when {
                     session.waitingFor != null -> waitingLabel(session.waitingFor!!) to dev.warn
+                    // Home lists what runs under the row ([bottom]); elsewhere the tag says it.
+                    work > 0 && bottom == null -> androidx.compose.ui.res.pluralStringResource(R.plurals.live_background_running, work, work) to dev.info
                     pinned -> stringResource(R.string.pin_tag) to COUITheme.colorScheme.primary
                     session.isAttached -> stringResource(R.string.attached_tag) to COUITheme.colorScheme.primary
                     session.managed -> stringResource(R.string.session_managed_chip) to COUITheme.colorScheme.primary
@@ -107,6 +114,16 @@ fun SessionRow(
         bottomAction = bottom,
         onClick = if (onLongClick != null) null else onClick,
     )
+}
+
+/**
+ * Status line of a live session: "N background tasks running" while its turn has ended but
+ * sub-agents or background tasks still run, else [statusLabel].
+ */
+@Composable
+fun sessionStatusLabel(session: SessionSummary, activeFallback: Int? = null): String {
+    val work = session.backgroundWork(activeFallback)
+    return if (work > 0) androidx.compose.ui.res.pluralStringResource(R.plurals.live_background_running, work, work) else statusLabel(session.status)
 }
 
 @Composable

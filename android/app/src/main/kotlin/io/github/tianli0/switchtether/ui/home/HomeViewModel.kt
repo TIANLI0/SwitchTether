@@ -42,10 +42,17 @@ data class HomeState(
     val attention: List<SessionSummary> get() = live.filter { it.status == "waiting" || it.waitingFor != null }
     val waitingCount: Int get() = attention.size
     private val notWaiting: List<SessionSummary> get() = live.filter { it.status != "waiting" && it.waitingFor == null }
-    /** Live sessions that are actually working (not waiting, not idle). */
-    val running: List<SessionSummary> get() = notWaiting.filter { !it.isIdle }
-    /** Live sessions sitting idle (process open, turn finished): listed apart so "running" means running. */
-    val idle: List<SessionSummary> get() = notWaiting.filter { it.isIdle }
+    /**
+     * Live sessions that are actually working (not waiting, not idle). A finished turn with
+     * sub-agents or background tasks still running counts as working: the desktop's `activeTasks`,
+     * or what Home's own Agent map poll found (older desktops).
+     */
+    val running: List<SessionSummary> get() = notWaiting.filter { !it.isIdle(activeCount(it.id)) }
+    /** Live sessions sitting idle (process open, turn finished, nothing left running): listed apart so "running" means running. */
+    val idle: List<SessionSummary> get() = notWaiting.filter { it.isIdle(activeCount(it.id)) }
+
+    /** Sub-agents and background tasks Home saw running in a session (null: not polled). */
+    fun activeCount(id: String): Int? = activity[id]?.let { it.agents.size + it.tasks.size }
     val recent: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { !it.isLive }.sortedWith(RECENT_FIRST).take(MAX_RECENT_ROWS)
     /** Ended sessions in the list: more than [recent] shows → a link to the Sessions tab. */
     val historyCount: Int get() = sessions.valueOrNull.orEmpty().count { !it.isLive }
@@ -89,8 +96,6 @@ private const val MAX_ACTIVITY_SESSIONS = 8
 
 /** Ended sessions listed on Home under "Recent". */
 const val MAX_RECENT_ROWS = 5
-
-private val SessionSummary.isIdle: Boolean get() = status == "idle" || status == "completed"
 
 class HomeViewModel(
     private val conn: ConnectionController,
@@ -141,7 +146,7 @@ class HomeViewModel(
                             st.copy(sessions = Loadable.Ready(listOf(ch.session) + list.filter { it.id != ch.session.id }))
                         }
                         // A turn started or ended (agents and tasks start and finish with turns).
-                        if (ch.session.isLive && (before == null || before.status != ch.session.status)) {
+                        if (ch.session.isLive && (before == null || before.status != ch.session.status || before.activeTasks != ch.session.activeTasks)) {
                             activityFetchedAt.remove(ch.session.id)
                             refreshActivity(only = ch.session.id)
                         }

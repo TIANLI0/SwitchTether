@@ -170,4 +170,18 @@ class ProtocolFixturesTest {
         assertEquals(listOf("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"), o.permissionModes.map { it.id })
         assertEquals(listOf("bypassPermissions"), o.permissionModes.filter { it.dangerous }.map { it.id })
     }
+
+    @Test
+    fun sessionSummaryActiveTasksFixture() {
+        val o = ProtocolJson.parseToJsonElement(fixture("session_summary.json")).jsonObject
+        val withTasks = ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.protocol.SessionSummary.serializer(), o["idleWithTasks"]!!)
+        assertEquals(2, withTasks.activeTasks)
+        assertFalse(withTasks.isIdle())
+        assertEquals("busy", withTasks.displayStatus())
+        // An older desktop leaves the field out: idle, unless the phone saw work itself.
+        val old = ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.protocol.SessionSummary.serializer(), o["olderDesktop"]!!)
+        assertNull(old.activeTasks)
+        assertTrue(old.isIdle())
+        assertFalse(old.isIdle(fallback = 1))
+    }
 }

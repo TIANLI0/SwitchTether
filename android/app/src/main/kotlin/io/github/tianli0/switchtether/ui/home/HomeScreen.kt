@@ -224,16 +224,18 @@ private fun SessionGroup(
     val touch = io.github.suqi8.coui.kmp.basic.rememberPreciseClickState()
     io.github.tianli0.switchtether.ui.sessions.PinMenu(menuFor, menuFor?.id in pins, touch) { menuFor = null }
     GroupCard(Modifier.preciseClickAnchor(touch)) {
-        list.forEachIndexed { i, it ->
-            val running = activity[it.id]?.takeIf { a -> !a.isEmpty }
+        list.forEachIndexed { i, s ->
+            val running = activity[s.id]?.takeIf { a -> !a.isEmpty }
             SessionRow(
-                it,
-                onClick = { onOpen(Route.SessionDetail(it.id, it.title)) },
+                s,
+                onClick = { onOpen(Route.SessionDetail(s.id, s.title)) },
                 position = cardListPositionOf(i, list.size),
                 compact = true,
-                pinned = it.id in pins,
-                onLongClick = { menuFor = it },
-                bottom = running?.let { a -> { ActivityLines(a) { onOpen(Route.SubagentTree(it.id, it.agent)) } } },
+                pinned = s.id in pins,
+                onLongClick = { menuFor = s },
+                bottom = running?.let { a -> { ActivityLines(a) { onOpen(Route.SubagentTree(s.id, s.agent)) } } },
+                // Older desktops send no `activeTasks`: what Home's Agent map poll saw running.
+                activeFallback = activity[s.id]?.let { a -> a.agents.size + a.tasks.size },
             )
         }
     }

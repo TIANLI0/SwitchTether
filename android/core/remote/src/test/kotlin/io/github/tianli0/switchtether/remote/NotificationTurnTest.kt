@@ -42,6 +42,22 @@ class NotificationTurnTest {
     }
 
     @Test
+    fun finishedTurnSaysWhenBackgroundWorkStillRuns() {
+        val e = engine()
+        e.onSessionEvent(ev("st", 1, "status", """{"state":"running"}"""), S)
+        val done = e.onSessionEvent(ev("st", 2, "status", """{"state":"idle","backgroundTasks":2}"""), S)
+        assertEquals(NotifyType.TASK_COMPLETED, done?.type)
+        assertEquals("2 background tasks running", done!!.body)
+        // From the summary (`activeTasks`) when the turn's end comes as an upsert.
+        e.onSessionUpsert(S.copy(status = "busy"))
+        val viaUpsert = e.onSessionUpsert(S.copy(status = "idle", activeTasks = 1))
+        assertEquals("1 background task running", viaUpsert!!.body)
+        // Nothing left running: no hint.
+        e.onSessionUpsert(S.copy(status = "busy"))
+        assertEquals("", e.onSessionUpsert(S.copy(status = "idle", activeTasks = 0))!!.body)
+    }
+
+    @Test
     fun idleWithoutATurnIsSilent() {
         val e = engine()
         assertNull(e.onSessionEvent(ev("st", 1, "status", """{"state":"idle"}"""), S))

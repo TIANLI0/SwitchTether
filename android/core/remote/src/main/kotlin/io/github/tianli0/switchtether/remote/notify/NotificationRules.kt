@@ -6,6 +6,7 @@ import io.github.tianli0.switchtether.remote.protocol.SessionSummary
 import io.github.tianli0.switchtether.remote.protocol.ControlLevel
 import io.github.tianli0.switchtether.remote.protocol.arr
 import io.github.tianli0.switchtether.remote.protocol.bool
+import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.obj
 import io.github.tianli0.switchtether.remote.protocol.str
 import kotlinx.serialization.json.JsonObject
@@ -127,6 +128,9 @@ interface NotifyText {
     fun publicApproval(): String
     fun publicWaiting(): String
     fun publicActivity(): String
+
+    /** Body of a finished turn whose sub-agents / background tasks still run. */
+    fun backgroundRunning(n: Int): String = if (n == 1) "1 background task running" else "$n background tasks running"
 
     object English : NotifyText {
         override fun needsApproval(name: String) = "$name needs approval"
@@ -302,7 +306,10 @@ class NotificationEngine(
                         if (fresh) build(NotifyType.TASK_STARTED, "start:$sid:${turn[sid]}", session, sid, t.started(name), "") else null
                     }
                     "completed", "idle" -> closeTurn(sid)?.let { n ->
-                        settle(sid, build(NotifyType.TASK_COMPLETED, "done:$sid:$n", session, sid, t.finished(name), e.data.str("detail").orEmpty())
+                        // The turn is over but work it started may still run: the body says so.
+                        val work = e.data.long("backgroundTasks")?.toInt() ?: session?.activeTasks ?: 0
+                        val body = listOfNotNull(e.data.str("detail")?.takeIf { it.isNotBlank() }, work.takeIf { it > 0 }?.let { t.backgroundRunning(it) }).joinToString(" · ")
+                        settle(sid, build(NotifyType.TASK_COMPLETED, "done:$sid:$n", session, sid, t.finished(name), body)
                             ?.copy(replyable = canReply(session), atMs = eventMs(e)))
                     }
                     "error" -> failTurn(sid, session, name, e.data.str("detail").orEmpty(), eventMs(e))
@@ -437,7 +444,7 @@ class NotificationEngine(
             }
             s.status == "error" && prev != null -> failTurn(s.id, s, name, "", s.lastActiveAtMs)
             (s.status == "idle" || s.status == "completed") && (prevStatus == "busy" || prevStatus == "waiting" || s.id in openTurn) ->
-                closeTurn(s.id)?.let { n -> settle(s.id, build(NotifyType.TASK_COMPLETED, "done:${s.id}:$n", s, s.id, t.finished(name), "")?.copy(replyable = canReply(s), atMs = s.lastActiveAtMs)) }
+                closeTurn(s.id)?.let { n -> settle(s.id, build(NotifyType.TASK_COMPLETED, "done:${s.id}:$n", s, s.id, t.finished(name), s.backgroundWork().takeIf { it > 0 }?.let { t.backgroundRunning(it) }.orEmpty())?.copy(replyable = canReply(s), atMs = s.lastActiveAtMs)) }
             else -> null
         }
     }
