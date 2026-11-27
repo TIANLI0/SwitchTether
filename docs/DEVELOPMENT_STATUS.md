@@ -905,3 +905,12 @@ on this machine, the phone UI on a device.
   device or emulator — no job was scheduled, no real exit record read, the notifications, Cancel, Task
   Manager stop, ColorOS background behaviour, the process-death path and the share of the export are
   all unexercised.
+
+- 2026-11-27 (merged into main for 0.1.29): download verified on the emulator (API 37, `dev_server`):
+  "下载到手机" on a 408 KiB pdf ran as a user-initiated job in the `transfers` namespace
+  (`dumpsys jobscheduler`: START, then STOP "app called jobFinished") and saved
+  `Download/SwitchTether/LC3_U盘完整教程.pdf` with the original size (417829 bytes); crash buffer
+  empty. Uploads were not exercised (the emulator has no lock screen, so file writes and attachment
+  upload need biometric pairing it cannot have). Lint / detekt findings in the merged code fixed:
+  notification permission check, leftover namespace jobs cancelled on first use, obsolete API 30
+  guards removed.
