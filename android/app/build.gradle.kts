@@ -75,6 +75,14 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+    // Android Lint: findings already present are recorded in lint-baseline.xml; anything new fails
+    // the build (abortOnError). Regenerate with `./gradlew :app:updateLintBaseline` only when deliberately accepting.
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+        checkDependencies = false
+        lintConfig = rootProject.file("lint.xml")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
@@ -89,9 +97,12 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
-            // Robolectric's sandbox breaks JCE provider verification for later plain-JVM TLS tests in
-            // the same JVM (okhttp-tls key stores), so each test class gets its own JVM.
-            all { it.forkEvery = 1 }
+            // Test classes share JVMs. Robolectric's Conscrypt provider used to leak into the JVM-wide
+            // provider list and break JCE provider verification for later plain-JVM TLS / cipher
+            // tests (javax.crypto.JarVerifier); src/test/resources/robolectric.properties sets
+            // conscryptMode=OFF so it is never installed. Half the cores, capped: each Robolectric
+            // fork is memory-heavy and more forks stopped paying off locally.
+            all { it.maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 6) }
         }
     }
     packaging {

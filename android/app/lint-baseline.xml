@@ -1,0 +1,2728 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.5.2" type="baseline" client="gradle" dependencies="false" name="AGP (9.5.2)" variant="all" version="9.5.2">
+
+    <issue
+        id="EmptySuperCall"
+        message="No need to call `super.onCleared`; the super method is defined to be empty"
+        errorLine1="        super.onCleared()"
+        errorLine2="              ~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailViewModel.kt"
+            line="523"
+            column="15"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="        return runCatching { nm.notify(id, b.build()) }.isSuccess"
+        errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="116"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="        runCatching { nm.notify(id, n) }"
+        errorLine2="                      ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/NotifyActionReceiver.kt"
+            line="155"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 36 (current min is 35): `android.provider.Settings#ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS`"
+        errorLine1="    val promotion = Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS)"
+        errorLine2="                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/common/PinUi.kt"
+            line="39"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 37 (current min is 35): `android.app.HandoffActivityData.Builder()`"
+        errorLine1="        return android.app.HandoffActivityData.Builder(android.content.ComponentName(this, MainActivity::class.java))"
+        errorLine2="                                               ~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/MainActivity.kt"
+            line="70"
+            column="48"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 37 (current min is 35): `android.app.HandoffActivityData.Builder#setExtras`"
+        errorLine1="            .setExtras(android.os.PersistableBundle().apply {"
+        errorLine2="             ~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/MainActivity.kt"
+            line="71"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 37 (current min is 35): `android.app.HandoffActivityData.Builder#build`"
+        errorLine1="            .build()"
+        errorLine2="             ~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/MainActivity.kt"
+            line="75"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="BatteryLife"
+        message="Use of `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` violates the Play Store Content Policy regarding acceptable use cases, as described in https://developer.android.com/training/monitoring-device-state/doze-standby.html"
+        errorLine1="                                    ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse(&quot;package:&quot; + ctx.packageName)))"
+        errorLine2="                                                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/SettingsScreens.kt"
+            line="221"
+            column="104"/>
+    </issue>
+
+    <issue
+        id="NonObservableLocale"
+        message="Reading locale in a non-observable way in a composable function"
+        errorLine1="        else -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(Locale.getDefault())"
+        errorLine2="                                                                                ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/common/Localized.kt"
+            line="25"
+            column="81"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="ComponentActivity.dispatchKeyEvent can only be called from within the same library group prefix (referenced groupId=`androidx.core` with prefix androidx from groupId=`SwitchTether`)"
+        errorLine1="    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean ="
+        errorLine2="                 ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/MainActivity.kt"
+            line="38"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="ComponentActivity.dispatchKeyEvent can only be called from within the same library group prefix (referenced groupId=`androidx.core` with prefix androidx from groupId=`SwitchTether`)"
+        errorLine1="        shortcuts.onKeyEvent(event) { super.dispatchKeyEvent(it) }"
+        errorLine2="                                            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/MainActivity.kt"
+            line="39"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="ComponentActivity.dispatchKeyEvent can only be called from within the same library group prefix (referenced groupId=`androidx.core` with prefix androidx from groupId=`SwitchTether`)"
+        errorLine1="        shortcuts.onKeyEvent(event) { super.dispatchKeyEvent(it) }"
+        errorLine2="                                                             ~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/MainActivity.kt"
+            line="39"
+            column="62"/>
+    </issue>
+
+    <issue
+        id="ComposableNaming"
+        message="Composable functions that return Unit should start with an uppercase letter"
+        errorLine1="    private fun list() = SessionsContent("
+        errorLine2="                ~~~~">
+        <location
+            file="src/test/kotlin/io/github/tianli0/switchtether/TwoPaneTest.kt"
+            line="114"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenHeightDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="            val shortScreen = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp &lt; 480"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailScreen.kt"
+            line="679"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenHeightDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    val roomy = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/SettingsScreens.kt"
+            line="91"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenHeightDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="        large = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480,"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/WorkspaceScreen.kt"
+            line="132"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ContextCastToActivity"
+        message="LocalContext should not be cast to Activity, use LocalActivity instead"
+        errorLine1="        val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/App.kt"
+            line="120"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="ContextCastToActivity"
+        message="LocalContext should not be cast to Activity, use LocalActivity instead"
+        errorLine1="    val activity = LocalContext.current as? android.app.Activity"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/ComposerIntakeUi.kt"
+            line="128"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="ContextCastToActivity"
+        message="LocalContext should not be cast to Activity, use LocalActivity instead"
+        errorLine1="    val activity = LocalContext.current as? android.app.Activity"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/common/LocalNetworkUi.kt"
+            line="58"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="ContextCastToActivity"
+        message="LocalContext should not be cast to Activity, use LocalActivity instead"
+        errorLine1="    val activity = LocalContext.current as? FragmentActivity"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/SettingsScreens.kt"
+            line="84"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                        if (!container.liveUpdates.pin(s)) Toast.makeText(context, context.getString(R.string.pin_limit, io.github.tianli0.switchtether.notify.LiveUpdates.MAX_PINS), Toast.LENGTH_SHORT).show()"
+        errorLine2="                                                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/common/PinUi.kt"
+            line="88"
+            column="84"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                    if (m.listening == false) notice = context.getString(R.string.forward_not_listening, m.forward.remotePort)"
+        errorLine2="                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/PortForwardScreen.kt"
+            line="219"
+            column="56"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                    Toast.makeText(context, context.getString(R.string.forward_extended, timeOf(m.untilMs)), Toast.LENGTH_SHORT).show()"
+        errorLine2="                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/PortForwardScreen.kt"
+            line="223"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                    notice = context.getString(R.string.forward_local_busy, m.localPort)"
+        errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/PortForwardScreen.kt"
+            line="225"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                is ForwardMessage.Failed -> notice = context.getString(R.string.forward_failed, m.message)"
+        errorLine2="                                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/PortForwardScreen.kt"
+            line="228"
+            column="54"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                ForwardMessage.NoStepUpKey -> notice = context.getString(R.string.forward_no_stepup)"
+        errorLine2="                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/PortForwardScreen.kt"
+            line="229"
+            column="56"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                    Toast.makeText(context, context.getString(R.string.forward_ended, m.remotePort), Toast.LENGTH_SHORT).show()"
+        errorLine2="                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/PortForwardScreen.kt"
+            line="231"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="            Toast.makeText(ui, ui.getString(R.string.share_session_cannot_send), Toast.LENGTH_LONG).show()"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareUi.kt"
+            line="271"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="            Toast.makeText(ui, ui.getString(R.string.share_session_cannot_send), Toast.LENGTH_LONG).show()"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareUi.kt"
+            line="278"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="        if (plan.overflow.isNotEmpty()) Toast.makeText(ui, ui.getString(R.string.share_overflow_toast, plan.overflow.size, MAX_ATTACHMENTS), Toast.LENGTH_LONG).show()"
+        errorLine2="                                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareUi.kt"
+            line="285"
+            column="60"/>
+    </issue>
+
+    <issue
+        id="LocalContextResourcesRead"
+        message="Reading Resources using LocalContext.current.resources is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="            val px = (72 * context.resources.displayMetrics.density).toInt()"
+        errorLine2="                           ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/AboutScreen.kt"
+            line="141"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="LocalContextResourcesRead"
+        message="Reading Resources using LocalContext.current.resources is not configuration-aware and may return stale values if the Configuration changes"
+        errorLine1="                notice = if (failed > 0) context.resources.getQuantityString(R.plurals.downloads_delete_failed, failed, failed) else null"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/files/DownloadsScreen.kt"
+            line="320"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="fun rememberPredictiveBack(enabled: Boolean = true, onBack: () -> Unit): Modifier {"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/common/PredictiveBack.kt"
+            line="41"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="fun BranchLine(glyph: String, text: String, muted: Boolean = false, danger: Boolean = false, modifier: Modifier = Modifier) {"
+        errorLine2="                                                                                             ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/render/SubagentBranches.kt"
+            line="124"
+            column="94"/>
+    </issue>
+
+    <issue
+        id="StateFlowValueCalledInComposition"
+        message="StateFlow.value should not be called within composition"
+        errorLine1="    val show = ask != null &amp;&amp; access.required &amp;&amp; !access.granted.value"
+        errorLine2="                                                                 ~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/common/LocalNetworkUi.kt"
+            line="80"
+            column="66"/>
+    </issue>
+
+    <issue
+        id="UnusedBoxWithConstraintsScope"
+        message="BoxWithConstraints scope is not used"
+        errorLine1="    BoxWithConstraints(Modifier.fillMaxSize().testTag(&quot;image-lightbox&quot;)) {"
+        errorLine2="                                                                         ^">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/files/ImageLightbox.kt"
+            line="171"
+            column="74"/>
+    </issue>
+
+    <issue
+        id="UseAppTint"
+        message="Must use `app:tint` instead of `android:tint`"
+        errorLine1="            android:tint=&quot;@color/widget_accent&quot; />"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/widget_status.xml"
+            line="23"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;image&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;render_images&quot;>%1$d image(s) attached (not shown)&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="166"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;more&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;render_show_more_lines&quot;>Show %1$d more lines&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="171"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;done&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;render_plan&quot;>Plan · %1$d/%2$d done&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="173"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;days&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;usage_trend_a11y&quot;>Daily token usage for %1$d days.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="241"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;blocked&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;new_session_listing_note&quot;>Some entries are not shown (%1$d blocked by the desktop\&apos;s file policy).&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="331"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;requests&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;usage_requests_n&quot;>%1$d requests&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="373"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;waiting&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;widget_counts&quot;>%1$d waiting · %2$d running&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="397"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;live&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;home_see_all_live&quot;>All %1$d live sessions&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="456"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;files&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;share_too_many&quot;>%1$d files were shared, but one message takes at most %2$d. The first %2$d will be attached; the other %3$d will not.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="532"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;item&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;share_rejected&quot;>%1$d item(s) could not be read and are left out.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="533"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;shared&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;share_overflow_toast&quot;>%1$d shared files were not attached: a message takes at most %2$d.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="544"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;file&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;drop_files_offline&quot;>Attachments need the connection to your computer: %1$d file(s) left out.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="553"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;file&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;drop_files_text_only&quot;>This session takes text only: %1$d file(s) left out.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="554"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;file&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;drop_overflow&quot;>%1$d file(s) not attached: a message takes at most %2$d.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="555"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;connected&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;tools_mcp_connected_count&quot;>%d connected&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_claude_tools.xml"
+            line="60"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;need&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;tools_mcp_failing_count&quot;>%d need attention&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_claude_tools.xml"
+            line="61"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;lines&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;rewind_stats&quot;>+%1$d / −%2$d lines&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_claude_tools.xml"
+            line="112"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;turns&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;cost_chart_a11y&quot;>Per-turn chart, %1$d turns. %2$s&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_cost.xml"
+            line="20"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;sessions&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;usage_project_sessions&quot;>%1$s · %2$d sessions&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_cost.xml"
+            line="32"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;downloaded&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;downloads_delete_all_confirm&quot;>All %1$d downloaded files will be removed from this phone. The files on your computer are not affected.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_files.xml"
+            line="49"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;other&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;forward_show_other_ports&quot;>Show %1$d other ports&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_forward.xml"
+            line="56"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;files&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;git_turn_summary&quot;>The latest turn edited %1$d files in this repository; %2$d still changed&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_git.xml"
+            line="7"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;files&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;git_turn_summary_clean&quot;>The latest turn edited %1$d files in this repository; all committed&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_git.xml"
+            line="8"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;more&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;git_branches_more&quot;>%1$d more. Type a name to filter&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_git.xml"
+            line="32"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;uncommitted&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;git_checkout_dirty_body&quot;>%1$d uncommitted change(s). Git refuses a switch that would overwrite them; other changes come along to %2$s.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_git.xml"
+            line="71"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;slots&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;pin_limit&quot;>All %1$d slots are held by tasks you follow. Stop following one first.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_notify.xml"
+            line="87"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;steps&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;live_steps_many&quot;>%1$d steps&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_notify.xml"
+            line="125"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;files&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;live_files_changed&quot;>%1$d files changed&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_notify.xml"
+            line="128"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;matches&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;search_content_matches&quot;>%1$d matches&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_push_search.xml"
+            line="11"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;failed&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;session_steps_failed&quot;>%1$d failed&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="8"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;done&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;render_plan_progress&quot;>%1$d of %2$d done&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="30"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;earlier&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sessions_related&quot;>%1$d earlier related sessions&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="142"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;steps&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;stat_steps&quot;>%1$d steps&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="145"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;files&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;stat_files&quot;>%1$d files&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="146"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;tool&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;subagent_tool_uses&quot;>%1$d tool calls&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="148"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;steps&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;subagent_view_process_steps&quot;>View process · %1$d steps&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="158"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;columns&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;term_cols_fixed&quot;>Width: %1$d columns, scroll sideways&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="12"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;loaded&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;term_scrollback&quot;>Load earlier output (%1$d loaded)&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="22"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;results&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;files_results&quot;>%1$d results&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="29"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;folders&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;files_count&quot;>%1$d folders · %2$d files&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="92"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;lines&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;files_lines&quot;>%1$d lines&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="114"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;copied&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;files_line_copied&quot;>Line %1$d copied&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="124"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;characters&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;files_line_shortened&quot;>… (line shortened, %1$d characters)&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="128"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;lines&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;files_line_count&quot;>%1$d lines&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="138"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="StringFormatCount"
+        message="Formatting string &apos;`conn_online`&apos; is not referencing numbered arguments [1]"
+        errorLine1="    &lt;string name=&quot;conn_online&quot;>已连接 · %2$s&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-zh-rCN/strings.xml"
+            line="83"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="StringFormatCount"
+        message="Formatting string &apos;`conn_online`&apos; is not referencing numbered arguments [1]"
+        errorLine1="    &lt;string name=&quot;conn_online&quot;>Connected · %2$s&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="91"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="StringFormatCount"
+        message="Formatting string &apos;`conn_online`&apos; is not referencing numbered arguments [1]"
+        errorLine1="    &lt;string name=&quot;conn_online&quot;>Connected · %2$s&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="91"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedQuantity"
+        message="For language &quot;zh&quot; (Chinese) the following quantities are not relevant: `one`"
+        errorLine1="    &lt;plurals name=&quot;live_background_running&quot;>"
+        errorLine2="    ^">
+        <location
+            file="src/main/res/values-zh-rCN/strings_notify.xml"
+            line="64"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ChromeOsAbiSupport"
+        message="Missing x86_64 ABI support for ChromeOS"
+        errorLine1="        ndk { abiFilters += &quot;arm64-v8a&quot; }"
+        errorLine2="                            ~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="25"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="        if (android.os.Build.VERSION.SDK_INT >= 33 &amp;&amp;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/App.kt"
+            line="177"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="    val canObservePresence: Boolean get() = cdm != null &amp;&amp; Build.VERSION.SDK_INT >= 31"
+        errorLine2="                                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="61"
+            column="60"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            if (Build.VERSION.SDK_INT >= 33) {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="101"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is never &lt; 35"
+        errorLine1="        Build.VERSION.SDK_INT &lt; 31 ||"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="116"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            if (Build.VERSION.SDK_INT >= 33) {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="160"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is never &lt; 35"
+        errorLine1="        if (Build.VERSION.SDK_INT &lt; 31) return"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="174"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            if (Build.VERSION.SDK_INT >= 33 &amp;&amp; a.id != null) {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="192"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 31"
+        errorLine1="@RequiresApi(Build.VERSION_CODES.S)"
+        errorLine2="~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionPresenceService.kt"
+            line="17"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 33"
+        errorLine1="    @RequiresApi(Build.VERSION_CODES.TIRAMISU)"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionPresenceService.kt"
+            line="39"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 33"
+        errorLine1="    @RequiresApi(Build.VERSION_CODES.TIRAMISU)"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionPresenceService.kt"
+            line="43"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            val needsBt = !btGranted &amp;&amp; Build.VERSION.SDK_INT >= 31"
+        errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/CompanionUi.kt"
+            line="159"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            val confirm = if (Build.VERSION.SDK_INT >= 33) {"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/update/InstallResultReceiver.kt"
+            line="15"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="        if (Build.VERSION.SDK_INT >= 33 &amp;&amp;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/LiveActivityChannel.kt"
+            line="68"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="        val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/MonitorService.kt"
+            line="117"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is never &lt; 35"
+        errorLine1="        if (Build.VERSION.SDK_INT &lt; Build.VERSION_CODES.O) return"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Notifier.kt"
+            line="354"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="        if (Build.VERSION.SDK_INT >= 33 &amp;&amp;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Notifier.kt"
+            line="391"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            val hosts = if (Build.VERSION.SDK_INT >= 34) {"
+        errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/NsdDiscovery.kt"
+            line="48"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="                if (Build.VERSION.SDK_INT >= 34) {"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/NsdDiscovery.kt"
+            line="68"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            if (Build.VERSION.SDK_INT >= 34) infoCallbacks.values.forEach { runCatching { manager.unregisterServiceInfoCallback(it) } }"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/NsdDiscovery.kt"
+            line="110"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is never &lt; 35"
+        errorLine1="        val canStartFgsFromBg = Build.VERSION.SDK_INT &lt; 31 ||"
+        errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/ReconnectWorker.kt"
+            line="41"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="            if (android.os.Build.VERSION.SDK_INT >= 33) {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/SettingsScreens.kt"
+            line="177"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 35"
+        errorLine1="                if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/update/UpdateManager.kt"
+            line="215"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 35. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="UseCompoundDrawables"
+        message="This tag and its children can be replaced by one `&lt;TextView/>` and a compound drawable"
+        errorLine1="    &lt;LinearLayout"
+        errorLine2="     ~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/widget_status.xml"
+            line="12"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="FrequentlyChangingValue"
+        message="Reading a value annotated with @FrequentlyChangingValue inside composition"
+        errorLine1="                PageBadge(stringResource(R.string.viewer_pdf_page, listState.firstVisibleItemIndex + 1, pdf.pageCount), Modifier.align(Alignment.BottomCenter))"
+        errorLine2="                                                                             ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/files/FileViewers.kt"
+            line="601"
+            column="78"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="            mutableStateOf(grid.buckets.indexOfLast { it.usage.requests > 0 || it.usage.tokens > 0 }.takeIf { it >= 0 } ?: grid.buckets.lastIndex)"
+        errorLine2="            ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/manage/ManageScreens.kt"
+            line="545"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="        var composerHeightPx by remember { mutableStateOf(0) }"
+        errorLine2="                                           ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailScreen.kt"
+            line="724"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="        var topOverlayPx by remember { mutableStateOf(0) }"
+        errorLine2="                                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailScreen.kt"
+            line="725"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="        var slashPanelPx by remember { mutableStateOf(0) }"
+        errorLine2="                                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailScreen.kt"
+            line="727"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var quietPick by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) }"
+        errorLine2="                                                                          ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/SettingsScreens.kt"
+            line="373"
+            column="75"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var value by androidx.compose.runtime.saveable.rememberSaveable(minutes) { mutableStateOf((minutes ?: 0)) }"
+        errorLine2="                                                                               ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/SettingsScreens.kt"
+            line="628"
+            column="80"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.home_live_sessions` appears to be unused"
+        errorLine1="    &lt;string name=&quot;home_live_sessions&quot;>Live sessions&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="101"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.home_waiting` appears to be unused"
+        errorLine1="    &lt;string name=&quot;home_waiting&quot;>Waiting for you&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="102"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.home_quick_links` appears to be unused"
+        errorLine1="    &lt;string name=&quot;home_quick_links&quot;>Quick links&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="106"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sessions_live` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sessions_live&quot;>Live&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="110"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.badge_live` appears to be unused"
+        errorLine1="    &lt;string name=&quot;badge_live&quot;>LIVE&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="118"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.badge_managed` appears to be unused"
+        errorLine1="    &lt;string name=&quot;badge_managed&quot;>PHONE&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="120"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.session_untitled` appears to be unused"
+        errorLine1="    &lt;string name=&quot;session_untitled&quot;>Session&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="133"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.composer_unavailable` appears to be unused"
+        errorLine1="    &lt;string name=&quot;composer_unavailable&quot;>Sending messages to this session is not possible (%1$s). Sessions started outside SwitchTether can only be observed.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="153"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.render_you` appears to be unused"
+        errorLine1="    &lt;string name=&quot;render_you&quot;>You&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="160"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.render_assistant` appears to be unused"
+        errorLine1="    &lt;string name=&quot;render_assistant&quot;>Assistant&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="161"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.render_reasoning` appears to be unused"
+        errorLine1="    &lt;string name=&quot;render_reasoning&quot;>Thinking&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="163"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.render_plan` appears to be unused"
+        errorLine1="    &lt;string name=&quot;render_plan&quot;>Plan · %1$d/%2$d done&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="173"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.render_resolved` appears to be unused"
+        errorLine1="    &lt;string name=&quot;render_resolved&quot;>%1$s · by %2$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="176"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.composer_attach_image` appears to be unused"
+        errorLine1="    &lt;string name=&quot;composer_attach_image&quot;>Attach image&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="182"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_today` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_today&quot;>Today&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="232"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_month` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_month&quot;>This month&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="233"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_7d` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_7d&quot;>7 days&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="234"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_30d` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_30d&quot;>30 days&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="235"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_tokens` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_tokens&quot;>%1$s tokens&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="236"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_summary` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_summary&quot;>Summary&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="238"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_trend` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_trend&quot;>Daily trend&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="239"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_tokens_per_day` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_tokens_per_day&quot;>Tokens per day&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="240"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.usage_tokens_label` appears to be unused"
+        errorLine1="    &lt;string name=&quot;usage_tokens_label&quot;>Tokens&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="246"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notifications_phase_b` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notifications_phase_b&quot;>Notification delivery arrives with background connection in the next version. Your choices are saved now.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="298"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notif_approval` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notif_approval&quot;>Approval requested&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="299"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notif_waiting` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notif_waiting&quot;>Session waiting for input&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="300"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notif_finished` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notif_finished&quot;>Session finished&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="301"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notif_error` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notif_error&quot;>Session error&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="302"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notif_connection` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notif_connection&quot;>Connection lost&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="303"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_version` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_version&quot;>Version&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="311"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.workspace_coming` appears to be unused"
+        errorLine1="    &lt;string name=&quot;workspace_coming&quot;>Terminal, files and git&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="318"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.workspace_coming_detail` appears to be unused"
+        errorLine1="    &lt;string name=&quot;workspace_coming_detail&quot;>Arriving in the next version.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="319"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_subtitle` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_subtitle&quot;>New Claude Code / Codex session on the computer&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="324"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_explainer` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_explainer&quot;>Starts a new session on the computer the official way: it is an ordinary Claude Code / Codex conversation, listed by claude --resume and in VS Code\&apos;s history. Send messages, answer approvals, interrupt and switch the model from the phone; after the computer or SwitchTether restarts, just send a message to continue. Sessions open in a terminal or VS Code are not taken over.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="325"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_agent` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_agent&quot;>Agent&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="326"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_prompt` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_prompt&quot;>First message (optional)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="333"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_model` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_model&quot;>Model (optional)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="335"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_permission` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_permission&quot;>Permission mode&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="337"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_confirm_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_confirm_title&quot;>Start a new session?&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="343"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_confirm_body` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_confirm_body&quot;>Start %1$s in %2$s on the computer.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="344"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.new_session_model_default` appears to be unused"
+        errorLine1="    &lt;string name=&quot;new_session_model_default&quot;>Default model&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="428"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.tools_open_summary` appears to be unused"
+        errorLine1="    &lt;string name=&quot;tools_open_summary&quot;>Permission mode, context, plan, MCP, side question, rename, export&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_claude_tools.xml"
+            line="6"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.plurals.cost_turns` appears to be unused"
+        errorLine1="    &lt;plurals name=&quot;cost_turns&quot;>"
+        errorLine2="             ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_cost.xml"
+            line="8"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.dsh_web_external_hint` appears to be unused"
+        errorLine1="    &lt;string name=&quot;dsh_web_external_hint&quot;>Started outside SwitchTether: it keeps running when you leave.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_dsh_web.xml"
+            line="30"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.viewer_text_truncated` appears to be unused"
+        errorLine1="    &lt;string name=&quot;viewer_text_truncated&quot;>Only the beginning of this large file is shown.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_files.xml"
+            line="60"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.command_copy` appears to be unused"
+        errorLine1="    &lt;string name=&quot;command_copy&quot;>Copy full command&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_files.xml"
+            line="63"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.git_branch_ahead_behind` appears to be unused"
+        errorLine1="    &lt;string name=&quot;git_branch_ahead_behind&quot;>↑%1$d ↓%2$d&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_git.xml"
+            line="57"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.git_choose_repo_short` appears to be unused"
+        errorLine1="    &lt;string name=&quot;git_choose_repo_short&quot;>Repository&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_git.xml"
+            line="78"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.git_sync_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;git_sync_title&quot;>Sync&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_git.xml"
+            line="79"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notif_muted_hint` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notif_muted_hint&quot;>Comma-separated, e.g. codex, my-project&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_notify.xml"
+            line="23"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.notif_battery_summary` appears to be unused"
+        errorLine1="    &lt;string name=&quot;notif_battery_summary&quot;>Some phones stop background connections. Allow SwitchTether to run unrestricted if notifications arrive late.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_notify.xml"
+            line="26"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.continue_point_busy` appears to be unused"
+        errorLine1="    &lt;string name=&quot;continue_point_busy&quot;>This isn\&apos;t possible while the original session is busy or waiting on the computer (or, for Codex, while its thread is open elsewhere).&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="95"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.continue_fork_hint` appears to be unused"
+        errorLine1="    &lt;string name=&quot;continue_fork_hint&quot;>A copy (Claude only) leaves the original session\&apos;s transcript untouched.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="101"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.stat_plan` appears to be unused"
+        errorLine1="    &lt;string name=&quot;stat_plan&quot;>Plan %1$d/%2$d&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="144"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.stat_steps` appears to be unused"
+        errorLine1="    &lt;string name=&quot;stat_steps&quot;>%1$d steps&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="145"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.stat_files` appears to be unused"
+        errorLine1="    &lt;string name=&quot;stat_files&quot;>%1$d files&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="146"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.subagent_tree_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;subagent_tree_title&quot;>Sub-agents&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="167"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.subagent_tree_note` appears to be unused"
+        errorLine1="    &lt;string name=&quot;subagent_tree_note&quot;>Read only: sub-agents take no input. Branches show which agent started which.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="169"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.session_menu` appears to be unused"
+        errorLine1="    &lt;string name=&quot;session_menu&quot;>Session&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="243"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.menu_tools_hint` appears to be unused"
+        errorLine1="    &lt;string name=&quot;menu_tools_hint&quot;>Permission mode, context, plan, MCP, export&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="244"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.menu_info_hint` appears to be unused"
+        errorLine1="    &lt;string name=&quot;menu_info_hint&quot;>Status, project, branch, how it is connected&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_session.xml"
+            line="245"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.update_current` appears to be unused"
+        errorLine1="    &lt;string name=&quot;update_current&quot;>Current version %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_update.xml"
+            line="6"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.term_scrollback` appears to be unused"
+        errorLine1="    &lt;string name=&quot;term_scrollback&quot;>Load earlier output (%1$d loaded)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="22"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.files_search` appears to be unused"
+        errorLine1="    &lt;string name=&quot;files_search&quot;>Search files&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="27"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.git_changes` appears to be unused"
+        errorLine1="    &lt;string name=&quot;git_changes&quot;>Changes (%1$d)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="54"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.git_log` appears to be unused"
+        errorLine1="    &lt;string name=&quot;git_log&quot;>Recent commits&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="56"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.files_count` appears to be unused"
+        errorLine1="    &lt;string name=&quot;files_count&quot;>%1$d folders · %2$d files&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="92"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.files_up` appears to be unused"
+        errorLine1="    &lt;string name=&quot;files_up&quot;>Up one folder&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="105"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.files_sort` appears to be unused"
+        errorLine1="    &lt;string name=&quot;files_sort&quot;>Sort&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_workspace.xml"
+            line="106"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.color.launcher_background` appears to be unused"
+        errorLine1="    &lt;color name=&quot;launcher_background&quot;>#FF1F6BFF&lt;/color>"
+        errorLine2="           ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/themes.xml"
+            line="9"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.color.widget_warn` appears to be unused"
+        errorLine1="    &lt;color name=&quot;widget_warn&quot;>#FFE8A23B&lt;/color>"
+        errorLine2="           ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/widget.xml"
+            line="7"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="        if (size > 0 &amp;&amp; root.apply { mkdirs() }.usableSpace &lt; size + FREE_MARGIN) return item"
+        errorLine2="                                                ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareAndroid.kt"
+            line="105"
+            column="49"/>
+    </issue>
+
+    <issue
+        id="TypographyDashes"
+        message="Replace &quot;--&quot; with an &quot;em dash&quot; character (—, &amp;#8212;) ?"
+        errorLine1="    &lt;string name=&quot;new_session_explainer&quot;>用官方方式在电脑上新建会话：它就是一个普通的 Claude Code / Codex 会话，claude --resume 和 VS Code 的历史里都能找到。可以从手机发消息、审批、中断、切换模型；电脑或 SwitchTether 重启后，直接发消息即可继续。不会接管你在终端或 VS Code 里开着的会话。&lt;/string>"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-zh-rCN/strings.xml"
+            line="309"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="TypographyDashes"
+        message="Replace &quot;--&quot; with an &quot;em dash&quot; character (—, &amp;#8212;) ?"
+        errorLine1="    &lt;string name=&quot;new_session_explainer&quot;>Starts a new session on the computer the official way: it is an ordinary Claude Code / Codex conversation, listed by claude --resume and in VS Code\&apos;s history. Send messages, answer approvals, interrupt and switch the model from the phone; after the computer or SwitchTether restarts, just send a message to continue. Sessions open in a terminal or VS Code are not taken over.&lt;/string>"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="325"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="TypographyDashes"
+        message="Replace &quot;--&quot; with an &quot;em dash&quot; character (—, &amp;#8212;) ?"
+        errorLine1="    &lt;string name=&quot;new_session_note&quot;>在电脑上新建一个普通会话（claude --resume、VS Code 历史里也能找到）；你在终端或 VS Code 里开着的会话不受影响。&lt;/string>"
+        errorLine2="                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-zh-rCN/strings.xml"
+            line="413"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="TypographyDashes"
+        message="Replace &quot;--&quot; with an &quot;em dash&quot; character (—, &amp;#8212;) ?"
+        errorLine1="    &lt;string name=&quot;new_session_note&quot;>Starts an ordinary session on the computer (it shows up in claude --resume / VS Code history too). Sessions you have open in a terminal or VS Code stay as they are.&lt;/string>"
+        errorLine2="                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="429"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="TypographyDashes"
+        message="Replace &quot;--&quot; with an &quot;em dash&quot; character (—, &amp;#8212;) ?"
+        errorLine1="    &lt;string name=&quot;dsh_web_starting_detail&quot;>SwitchTether 以 dsh web --no-open 启动，使用你现有的 web 配置。首次启动可能需要一分钟。&lt;/string>"
+        errorLine2="                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-zh-rCN/strings_dsh_web.xml"
+            line="11"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="TypographyDashes"
+        message="Replace &quot;--&quot; with an &quot;em dash&quot; character (—, &amp;#8212;) ?"
+        errorLine1="    &lt;string name=&quot;dsh_web_starting_detail&quot;>SwitchTether runs dsh web --no-open with your existing web profile. The first start can take a minute.&lt;/string>"
+        errorLine2="                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings_dsh_web.xml"
+            line="11"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            runCatching { context.startActivity(android.content.Intent(action, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }"
+        errorLine2="                                                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/AboutScreen.kt"
+            line="129"
+            column="80"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="            val bmp = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)"
+        errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/AboutScreen.kt"
+            line="142"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putBoolean(KEY_NEARBY_ONLY, value).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="77"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putBoolean(KEY_PRESENT, value).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/CompanionLink.kt"
+            line="82"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_ENTRIES, ConversationPolicy.encode(entries.values)).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="153"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_ENTRIES, ConversationPolicy.encode(entries.values)).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="199"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_ENTRIES, ConversationPolicy.encode(entries.filter { it.sessionId !in evict })).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="209"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_SERVER, serverId).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="219"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().remove(KEY_SERVER).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="226"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().remove(KEY_ENTRIES).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="232"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="                val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)"
+        errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/Conversations.kt"
+            line="255"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)"
+        errorLine2="                                            ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/DshWebScreen.kt"
+            line="364"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        index.prune { exists(Uri.parse(it.uri)) }"
+        errorLine2="                             ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/files/FileStore.kt"
+            line="65"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                index.find(server, path).firstOrNull { exists(Uri.parse(it.uri)) }?.let { return@withContext asLocal(it) }"
+        errorLine2="                                                              ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/files/FileStore.kt"
+            line="117"
+            column="63"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            index.find(server, path).firstOrNull { it.matchesRemote(knownSize, knownTime) &amp;&amp; exists(Uri.parse(it.uri)) }"
+        errorLine2="                                                                                                    ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/files/FileStore.kt"
+            line="123"
+            column="101"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    fun asLocal(r: DownloadRecord): LocalFile = LocalFile(Uri.parse(r.uri), r.name, r.mime.takeIf { it != FileTypes.GENERIC_MIME } ?: mimeOf(r.name), r.size, fromDownload = true)"
+        errorLine2="                                                          ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/files/FileStore.kt"
+            line="283"
+            column="59"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        return index.find(server, path).firstOrNull { exists(Uri.parse(it.uri)) }"
+        errorLine2="                                                             ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/files/FileStore.kt"
+            line="288"
+            column="62"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            val uri = Uri.parse(r.uri)"
+        errorLine2="                      ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/files/FileStore.kt"
+            line="301"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)"
+        errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/files/FileViewers.kt"
+            line="536"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        set(v) = prefs.edit().putBoolean(&quot;auto_pin_new&quot;, v).apply()"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/LiveUpdates.kt"
+            line="149"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            prefs.edit()"
+        errorLine2="            ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/LiveUpdates.kt"
+            line="377"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putStringSet(key(currentServerId), p).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/LiveUpdates.kt"
+            line="671"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putStringSet(prefKey, trimmed).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/notify/LiveUpdates.kt"
+            line="677"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        set(v) = prefs.edit().putBoolean(&quot;rationale_shown&quot;, v).apply()"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/connection/LocalNetworkAccess.kt"
+            line="37"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse(&quot;package:${context.packageName}&quot;)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))"
+        errorLine2="                                                                                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/common/LocalNetworkUi.kt"
+            line="110"
+            column="108"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                        startSafely(context, Intent(Intent.ACTION_VIEW, Uri.parse(uri)), noApp)"
+        errorLine2="                                                                        ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/files/MarkdownDocView.kt"
+            line="62"
+            column="73"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(&quot;currency&quot;, d.currency).putString(&quot;rate&quot;, d.rate.toString()).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/domain/MoneySettings.kt"
+            line="38"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().clear().apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/domain/MoneySettings.kt"
+            line="49"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        set(v) = p.edit().putString(&quot;agent&quot;, v).apply()"
+        errorLine2="                 ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/NewSessionScreen.kt"
+            line="230"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        set(v) = p.edit().putString(&quot;cwd&quot;, v).apply()"
+        errorLine2="                 ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/NewSessionScreen.kt"
+            line="233"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        set(v) = p.edit().putString(&quot;permission_mode&quot;, v).apply()"
+        errorLine2="                 ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/NewSessionScreen.kt"
+            line="236"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        p.edit().putString(&quot;permission_mode.$agent&quot;, mode).apply()"
+        errorLine2="        ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/NewSessionScreen.kt"
+            line="240"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        p.edit().putString(&quot;model.$agent&quot;, model).putString(&quot;recent_models.$agent&quot;, recent.joinToString(&quot;\n&quot;)).apply()"
+        errorLine2="        ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/NewSessionScreen.kt"
+            line="245"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        p.edit().putString(&quot;effort.$agent&quot;, effort).apply()"
+        errorLine2="        ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/NewSessionScreen.kt"
+            line="251"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)"
+        errorLine2="                                            ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/PortForwardScreen.kt"
+            line="187"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="                    hints?.edit()?.putBoolean(&quot;readonly_tip_dismissed&quot;, true)?.apply()"
+        errorLine2="                    ~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailScreen.kt"
+            line="686"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { decodeThumbnail(context, android.net.Uri.parse(uri), 256) }"
+        errorLine2="                                                                                                             ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailScreen.kt"
+            line="1394"
+            column="110"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                            context.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { it.readBytes() }"
+        errorLine2="                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/sessions/SessionDetailScreen.kt"
+            line="1403"
+            column="69"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                                    ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse(&quot;package:&quot; + ctx.packageName)))"
+        errorLine2="                                                                                                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/settings/SettingsScreens.kt"
+            line="221"
+            column="149"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            return Triple(item.cachedName ?: f.name, f.length(), item.mimeType ?: context.contentResolver.getType(Uri.parse(item.uri)))"
+        errorLine2="                                                                                                                  ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareAndroid.kt"
+            line="70"
+            column="115"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val uri = Uri.parse(item.uri)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareAndroid.kt"
+            line="72"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        item.cachedPath?.let { File(it).inputStream() } ?: context.contentResolver.openInputStream(Uri.parse(item.uri))"
+        errorLine2="                                                                                                   ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareAndroid.kt"
+            line="90"
+            column="100"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val uri = Uri.parse(item.uri)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareAndroid.kt"
+            line="94"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putStringSet(KEY_PERSISTED, held.filter { it in keepUris }.toSet()).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareAndroid.kt"
+            line="145"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putStringSet(KEY_PERSISTED, prefs.getStringSet(KEY_PERSISTED, emptySet()).orEmpty() + uri).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/share/ShareAndroid.kt"
+            line="156"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            prefs.edit().putBoolean(KEY_BETA, v).remove(KEY_ETAG).remove(KEY_BODY).apply()"
+        errorLine2="            ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/update/UpdateManager.kt"
+            line="80"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        set(v) = prefs.edit().putString(KEY_NOTIFIED, v).apply()"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/update/UpdateManager.kt"
+            line="91"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="                    200 -> r.body.also { prefs.edit().putString(KEY_ETAG, r.etag).putString(KEY_BODY, it).apply() }"
+        errorLine2="                                         ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/update/UpdateManager.kt"
+            line="102"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse(&quot;package:${context.packageName}&quot;))"
+        errorLine2="                                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/update/UpdateManager.kt"
+            line="195"
+            column="60"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            if (!r.isSuccessful) throw IOException(&quot;HTTP ${r.code} for ${Uri.parse(url).lastPathSegment}&quot;)"
+        errorLine2="                                                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/update/UpdateManager.kt"
+            line="257"
+            column="74"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            saveFontSp = { sp -> c.terminalPrefs.edit().putInt(&quot;font_sp&quot;, sp).apply() },"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/WorkspaceScreen.kt"
+            line="91"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            saveColumns = { n -> c.terminalPrefs.edit().putInt(&quot;columns&quot;, n).apply() },"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/workspace/WorkspaceScreen.kt"
+            line="93"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="ByteOrderMark"
+        message="Found byte-order-mark in the middle of a file"
+        errorLine1="        text = if (binary) null else bytes.toString(Charsets.UTF_8).removePrefix(&quot;﻿&quot;),"
+        errorLine2="                                                                                  ~">
+        <location
+            file="src/main/kotlin/io/github/tianli0/switchtether/ui/files/LocalFileViewer.kt"
+            line="103"
+            column="83"/>
+    </issue>
+
+</issues>

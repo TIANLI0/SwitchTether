@@ -14,6 +14,14 @@ android {
     defaultConfig {
         minSdk = 35
     }
+    // Android Lint: findings already present are recorded in lint-baseline.xml; anything new fails
+    // the build (abortOnError). Regenerate with `./gradlew :core:ui:updateLintBaseline` only when deliberately accepting.
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+        checkDependencies = false
+        lintConfig = rootProject.file("lint.xml")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

@@ -40,6 +40,7 @@ cargo test -p switchtether-core
 cargo test --lib switchtether
 cd .. && pnpm typecheck && pnpm vitest run tests/config
 cd android && ./gradlew testDebugUnitTest :app:assembleDebug
+./gradlew :app:lintDebug :core:ui:lintDebug :core:security:lintDebug detekt
 ```
 
 New UI strings must be added to all eight desktop locales (`tests/config/localeParity.test.ts`).
