@@ -673,16 +673,23 @@ Updates only (no OPPO SDK).
 - `AppNavHost` (`ui/nav/AppNavHost.kt`): one coui-nav `NavDisplay` per tab (COUI17 `coui-nav`,
   from upstream coui17), cross-faded between tabs; each page's UI state is saved while it is in the
   stack, also while another tab shows. Push, pop, the system predictive back gesture and an in-page
-  swipe to the right all drive one position, so the ColorOS slide (§30) follows the finger 1:1:
+  swipe in the reading direction all drive one position. The ColorOS slide (§30) follows the actual
+  edge of the system gesture, revealing the previous page on that side:
   release finishes the pop from there, cancel slides back, a programmatic push / pop runs 280ms.
-  The in-page swipe is the fallback for systems that do not hand the app the gesture's progress;
-  it starts anywhere on the page but only on drags nothing in the page claims first (horizontal
-  code / chip scrollers, selection keep theirs; COUI17 patch 0011). Settings → Appearance →
+  The in-page swipe is the fallback for systems that do not hand the app the gesture's progress.
+  A swipe in the reading direction can start anywhere. The opposite swipe starts just inside its
+  screen edge. Both yield to horizontal code / chip scrollers and text selection. Settings → Appearance →
   predictive back off: no swipe, back is a plain pop once committed. Pages keep the activity's
   ViewModels; the page under the top one stays composed (lifecycle STARTED) and is the one revealed
-  by the gesture. Back at a tab root returns to Home; at Home with nothing to pop no handler is
-  enabled, so the system "back to home" animation runs.
+  by the gesture. Back at a tab root previews Home with a crossfade driven by the gesture. Only
+  the selected tab handles back while the preview is visible. Home with an empty stack leaves
+  back to the system for its launcher animation.
+  In-page back actions such as leaving a folder, closing a file, leaving a Git diff or navigating
+  WebView history animate the current content during the drag and run the existing action on commit.
   `enableOnBackInvokedCallback="true"`; edge-to-edge via `enableEdgeToEdge()`.
+  On a PKJ110 running ColorOS 17, a minimal Android `OnBackAnimationCallback` test reported
+  only zero progress during ADB edge swipes on both sides with target SDK 34 and 37. The in-page
+  right swipe was checked on the same device, including preview, cancellation, and commit.
 - Per-app language: `locales_config` (en, zh-CN) and Settings → 语言 opens the system page
   (Android 13+).
 

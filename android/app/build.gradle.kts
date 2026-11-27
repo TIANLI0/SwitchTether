@@ -139,6 +139,7 @@ dependencies {
     implementation(project(":core:ui"))
 
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.navigationevent)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.fragment)
     implementation(libs.androidx.lifecycle.runtime.compose)

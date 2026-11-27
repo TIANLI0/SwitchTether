@@ -1,6 +1,5 @@
 package io.github.tianli0.switchtether.ui.workspace
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -66,6 +65,7 @@ import io.github.tianli0.switchtether.ui.code.CodeBlockView
 import io.github.tianli0.switchtether.ui.code.SyntaxHighlighter
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
+import io.github.tianli0.switchtether.ui.common.rememberPredictiveBack
 import io.github.tianli0.switchtether.ui.diff.DiffView
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.DevColors
@@ -221,16 +221,15 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel, ui: GitUi = rememberGitUi()
     if (state.git == null && state.repo != null) LaunchedEffect(state.repo) { vm.loadGit() }
     GitNoticeHost(state, vm)
     val detail = state.gitDiff ?: state.gitShow
-    when {
-        detail != null -> {
-            BackHandler { vm.closeGitDetail() }
-            GitDetailBody(state, vm, detail)
+    val back = rememberPredictiveBack(enabled = detail != null || state.gitCommit != null) {
+        if (detail != null) vm.closeGitDetail() else vm.closeCommit()
+    }
+    Box(Modifier.fillMaxSize().then(back)) {
+        when {
+            detail != null -> GitDetailBody(state, vm, detail)
+            state.gitCommit != null -> CommitDetailBody(state, vm)
+            else -> GitMain(state, vm, ui)
         }
-        state.gitCommit != null -> {
-            BackHandler { vm.closeCommit() }
-            CommitDetailBody(state, vm)
-        }
-        else -> GitMain(state, vm, ui)
     }
 }
 
