@@ -29,6 +29,10 @@ import io.github.tianli0.switchtether.remote.protocol.parseAppTypes
 import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.str
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
@@ -159,8 +163,26 @@ data class NewSessionRequest(
     val effort: String? = null,
 )
 
+/** Tools whose subscription quota Home and the Usage page show (`GET /v1/usage/quota/{tool}`). */
+val QUOTA_TOOLS = listOf("claude", "codex")
+
+/** One usage total: Home's "today" and the Usage page's "today" (all apps) share a key. */
+data class UsageSummaryKey(val fromSec: Long, val app: String?)
+
+private val NO_QUOTAS: StateFlow<Map<String, QuotaView>> = MutableStateFlow(emptyMap())
+private val NO_SUMMARIES: StateFlow<Map<UsageSummaryKey, UsageSummary>> = MutableStateFlow(emptyMap())
+
 interface ManagementRepository {
     val changes: Flow<String>
+
+    /**
+     * Last quota read per tool by any screen: Home and the Usage page show the same numbers, and
+     * a page opened after the other starts from them instead of a spinner.
+     */
+    val quotas: StateFlow<Map<String, QuotaView>> get() = NO_QUOTAS
+
+    /** Last [usageSummary] answer per range start and app (same sharing as [quotas]). */
+    val summaries: StateFlow<Map<UsageSummaryKey, UsageSummary>> get() = NO_SUMMARIES
     suspend fun apps(): List<String>
     suspend fun providers(app: String): ProvidersView
     suspend fun switchProvider(app: String, id: String, commandId: String = newCommandId()): CommandOutcome
@@ -380,11 +402,38 @@ class RemoteManagementRepository(private val conn: ConnectionController) : Manag
     override suspend fun testProvider(app: String, id: String, commandId: String) = conn.command(commandId) { api, c -> api.testProvider(app, id, c) }
     override suspend fun setCredential(app: String, id: String, field: String, value: String, commandId: String) =
         conn.command(commandId) { api, c -> api.setProviderCredential(app, id, field, value, c) }
-    override suspend fun usageSummary(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageSummary.parse(it.usage("summary", fromSec, toSec, app)) }
+    private val _quotas = MutableStateFlow<Map<String, QuotaView>>(emptyMap())
+    override val quotas: StateFlow<Map<String, QuotaView>> = _quotas.asStateFlow()
+    private val _summaries = MutableStateFlow<Map<UsageSummaryKey, UsageSummary>>(emptyMap())
+    override val summaries: StateFlow<Map<UsageSummaryKey, UsageSummary>> = _summaries.asStateFlow()
+
+    /** Range end of each kept summary: an answer for an earlier "now" never replaces a later one. */
+    private val summaryTo = HashMap<UsageSummaryKey, Long>()
+
+    override suspend fun usageSummary(fromSec: Long, toSec: Long, app: String?): UsageSummary {
+        val summary = conn.withApi { UsageSummary.parse(it.usage("summary", fromSec, toSec, app)) }
+        val key = UsageSummaryKey(fromSec, app)
+        synchronized(summaryTo) {
+            if ((summaryTo[key] ?: Long.MIN_VALUE) <= toSec) {
+                summaryTo[key] = toSec
+                _summaries.update { old ->
+                    // A handful of keys (ranges × apps); keep the newest few so it cannot grow.
+                    val kept = if (old.size >= MAX_SHARED_SUMMARIES && key !in old) old.entries.drop(1).associate { it.key to it.value } else old
+                    summaryTo.keys.retainAll(kept.keys + key)
+                    (kept - key) + (key to summary)
+                }
+            }
+        }
+        return summary
+    }
     override suspend fun usageTrend(fromSec: Long, toSec: Long, app: String?) = conn.withApi { DailyUsage.parseList(it.usage("trends", fromSec, toSec, app)) }
     override suspend fun usageModels(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageBreakdownRow.parseModels(it.usage("models", fromSec, toSec, app)) }
     override suspend fun usageProviders(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageBreakdownRow.parseProviders(it.usage("providers", fromSec, toSec, app)) }
-    override suspend fun quota(tool: String) = conn.withApi { QuotaView.parse(it.quota(tool), tool) }
+    override suspend fun quota(tool: String): QuotaView {
+        val q = conn.withApi { QuotaView.parse(it.quota(tool), tool) }
+        _quotas.update { it + (tool to q) }
+        return q
+    }
     override suspend fun usageLogs(fromSec: Long, toSec: Long, app: String?, page: Int, pageSize: Int) =
         conn.withApi { io.github.tianli0.switchtether.remote.protocol.RequestLogPage.parse(it.usageLogs(fromSec, toSec, app, page, pageSize)) }
     override suspend fun usageLog(requestId: String) =
@@ -413,3 +462,5 @@ class RemoteManagementRepository(private val conn: ConnectionController) : Manag
         return Commands.status(commandId) { api.command(it) }
     }
 }
+
+private const val MAX_SHARED_SUMMARIES = 16

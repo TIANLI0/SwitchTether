@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import io.github.tianli0.switchtether.connection.ConnectionController
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.domain.ManagementRepository
+import io.github.tianli0.switchtether.domain.QUOTA_TOOLS
+import io.github.tianli0.switchtether.domain.UsageSummaryKey
 import io.github.tianli0.switchtether.domain.SessionChange
 import io.github.tianli0.switchtether.domain.SessionQuery
 import io.github.tianli0.switchtether.domain.SessionRepository
@@ -88,16 +90,14 @@ private const val MAX_ACTIVITY_SESSIONS = 8
 /** Ended sessions listed on Home under "Recent". */
 const val MAX_RECENT_ROWS = 5
 
-private val QUOTA_TOOLS = listOf("claude", "codex")
-
 private val SessionSummary.isIdle: Boolean get() = status == "idle" || status == "completed"
 
 class HomeViewModel(
     private val conn: ConnectionController,
     private val sessions: SessionRepository,
     private val management: ManagementRepository,
+    /** Fallback when the desktop does not report its zone; "today" is the computer's day otherwise. */
     private val zone: ZoneId = ZoneId.systemDefault(),
-    private val today: () -> LocalDate = { LocalDate.now(zone) },
     private val nowSec: () -> Long = { System.currentTimeMillis() / 1000 },
 ) : ViewModel() {
     private val _state = MutableStateFlow(HomeState(connection = conn.state.value))
@@ -159,6 +159,22 @@ class HomeViewModel(
             }
         }
         viewModelScope.launch { management.changes.collect { refreshUsage() } }
+        // Usage and quotas read by any screen (the Usage page included) show here too.
+        viewModelScope.launch {
+            management.quotas.collect { m ->
+                _state.update { it.copy(quotas = QUOTA_TOOLS.mapNotNull { t -> m[t]?.takeIf { q -> q.available && q.tiers.isNotEmpty() } }) }
+            }
+        }
+        viewModelScope.launch {
+            management.summaries.collect { m ->
+                _state.update { s ->
+                    s.copy(
+                        usageToday = todayKey?.let { m[it] }?.let { Loadable.Ready(it) } ?: s.usageToday,
+                        usageMonth = monthKey?.let { m[it] }?.let { Loadable.Ready(it) } ?: s.usageMonth,
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -255,27 +271,35 @@ class HomeViewModel(
         }
     }
 
+    /** Range keys of the totals Home shows, set by [refreshUsage] (read by the shared-summary collector). */
+    @Volatile private var todayKey: UsageSummaryKey? = null
+    @Volatile private var monthKey: UsageSummaryKey? = null
+
     private fun refreshUsage() {
         viewModelScope.launch {
-            val d = today()
-            val startToday = d.atStartOfDay(zone).toEpochSecond()
-            val startMonth = d.withDayOfMonth(1).atStartOfDay(zone).toEpochSecond()
+            // Same day boundaries as the Usage page (the desktop's zone), so both show the same totals.
+            val status = (conn.state.value as? ConnectionState.Online)?.status
+            val z = io.github.tianli0.switchtether.remote.protocol.desktopZone(status?.timeZone, status?.utcOffsetMinutes, zone)
             val now = nowSec()
+            val d = java.time.Instant.ofEpochSecond(now).atZone(z).toLocalDate()
+            val startToday = d.atStartOfDay(z).toEpochSecond()
+            val startMonth = d.withDayOfMonth(1).atStartOfDay(z).toEpochSecond()
+            todayKey = UsageSummaryKey(startToday, null)
+            monthKey = UsageSummaryKey(startMonth, null)
             val t = loadable { management.usageSummary(startToday, now) }
             val m = loadable { management.usageSummary(startMonth, now) }
             _state.update { it.copy(usageToday = t, usageMonth = m) }
         }
         viewModelScope.launch {
-            val q = QUOTA_TOOLS.mapNotNull { tool ->
+            // Each answer lands in management.quotas, which fills state.quotas; a failed read keeps the last one.
+            for (tool in QUOTA_TOOLS) {
                 try {
-                    management.quota(tool).takeIf { it.available && it.tiers.isNotEmpty() }
+                    management.quota(tool)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (_: Exception) {
-                    null
                 }
             }
-            _state.update { it.copy(quotas = q) }
         }
     }
 

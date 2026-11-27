@@ -211,6 +211,10 @@ class UsageViewModel(
         logsJob?.cancel()
         _state.update { it.copy(fromSec = from, toSec = to, zone = z, logs = if (it.logs == null) null else emptyList(), logsTotal = 0, logsPage = -1, logsLoading = false, logsError = false) }
         loadMoreLogs()
+        // The total another screen (Home) already read for this range shows until the fresh one is back.
+        repo.summaries.value[io.github.tianli0.switchtether.domain.UsageSummaryKey(from, app)]?.let { cached ->
+            _state.update { if (gen == rangeGen) it.copy(summary = Loadable.Ready(cached)) else it }
+        }
         viewModelScope.launch { val r = loadable { repo.usageSummary(from, to, app) }; _state.update { if (gen == rangeGen) it.copy(summary = r) else it } }
         viewModelScope.launch { val r = loadable { repo.usageTrend(from, to, app) }; _state.update { if (gen == rangeGen) it.copy(trend = r) else it } }
         // The desktop sorts both tables by request count (descending) by default.
@@ -221,7 +225,12 @@ class UsageViewModel(
             _state.update { if (gen == rangeGen) it.copy(projects = r) else it }
         }
         viewModelScope.launch {
-            val tools = listOf("claude", "codex")
+            val tools = io.github.tianli0.switchtether.domain.QUOTA_TOOLS
+            // Start from the quotas Home already read; replace each as its fresh answer arrives.
+            val known = repo.quotas.value
+            if (_state.value.quotas.isEmpty()) {
+                _state.update { it.copy(quotas = tools.map { t -> t to (known[t]?.let { q -> Loadable.Ready(q) } ?: Loadable.Loading) }) }
+            }
             val quotas = tools.map { t -> t to loadable { repo.quota(t) } }
             _state.update { it.copy(quotas = quotas) }
         }
