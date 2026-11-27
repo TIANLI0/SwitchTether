@@ -914,3 +914,33 @@ on this machine, the phone UI on a device.
   upload need biometric pairing it cannot have). Lint / detekt findings in the merged code fixed:
   notification permission check, leftover namespace jobs cancelled on first use, obsolete API 30
   guards removed.
+
+## Android: background work in its own `:link` process; thumbnails at slot size (2026-11-27)
+
+- Why: exit records from the user's OPPO PKJ110 (0.1.29) showed the single process at ~200 MB RSS when
+  ColorOS ended it (`o-kill`), and 350–450 MB before some updates. Now the background connection,
+  notifications, Live Updates, widget, port forwards and the monitor service run in a `:link` process;
+  the UI process connects only while the app is in use (+45 s) and can be reclaimed afterwards
+  (ANDROID_UI.md §38). Conversation / composer thumbnails are decoded at slot size off the main thread.
+- Verified: `testDebugUnitTest` 481 tests, 0 failures (new: `LinkBridgeIpcTest` 6 over a real
+  `Messenger` binding, `LinkProtocolTest` 4, `ThumbnailsTest` 5, one `ExitRecordsTest` case);
+  `assembleDebug`, `assembleRelease` (R8). On the emulator (CouCou_A17, API 37, `dev_server`), debug
+  and release builds: pairing; `MonitorService` started by the `:link` process while the app is in
+  front (also right after pairing); 45 s after leaving, `LinkBridgeService` unbound and one established
+  connection left at the desktop (two-plus while open); `am kill` of the UI process leaves `:link`
+  alone with its connection, and a pinned task's Live Update kept updating from live events; a cold
+  UI start shows the pin (state mirror), unpin removes the card; unpair stops the monitor, clears
+  notifications and leaves no connection; crash buffer empty throughout.
+- Memory, release builds on the same emulator, 60 s after leaving the app with the monitor running
+  and one pinned task: 0.1.29 one process PSS 72–77 MB (private dirty 45 MB, RSS 206 MB), all held by
+  the foreground service; now `:link` PSS 29–39 MB (private dirty 16 MB, RSS 142–147 MB) and the UI
+  process 60–72 MB as a cached process, which `am kill` reclaimed.
+- On the user's PKJ110 (ColorOS, Android 17), local release build 0.1.30-link, `adb dumpsys`:
+  in front, UI process PSS 164 MB and `:link` 21 MB; two minutes after leaving (bridge unbound),
+  `:link` PSS 19–22 MB in the perceptible / FGS band, the UI process PSS 75–81 MB of which 57–63 MB
+  swapped, kept by ColorOS at heavy-weight adj (`oplus-recent`), not frozen. The UI's unbind came
+  15–50 s later than the 45 s grace (handler time does not advance while the CPU sleeps).
+- Not verified: whether ColorOS's `o-kill` policy treats the smaller process differently; notification buttons (approve / answer / reply) from the
+  `:link` process; port forwards and DSH Web across the split (need a biometric step-up key the
+  emulator cannot have); revocation seen first by the `:link` process; companion presence; the
+  periodic `ReconnectWorker` → `LinkReceiver` hand-over and boot.

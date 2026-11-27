@@ -50,6 +50,26 @@ class ExitRecordsTest {
     }
 
     @Test
+    fun recordsNameTheirProcessAndTheUiProcessNeverHostsTheMonitor() {
+        val pkg = "io.github.tianli0.switchtether"
+        assertEquals("ui", processLabel(pkg, pkg))
+        assertEquals("link", processLabel("$pkg:link", pkg))
+        assertNull(processLabel(null, pkg))
+        assertNull(processLabel("", pkg))
+        assertNull(processLabel("com.other.app", pkg))
+
+        val link = mapExit(raw(importance = 125).copy(process = "link"))
+        assertEquals("link", link.process)
+        assertEquals(MonitorState.RUNNING, link.monitor)
+        // A UI process at foreground-service importance (e.g. a transfer) is not the monitor.
+        val ui = mapExit(raw(importance = 125).copy(process = "ui"))
+        assertEquals(MonitorState.NOT_RUNNING, ui.monitor)
+        assertEquals("process", ui.monitorSource)
+        val text = formatReport(listOf(link), emptyList()) { it.toString() }
+        assertTrue(text.contains("pid 42  process link"))
+    }
+
+    @Test
     fun summaryRoundTripsFitsTheSystemLimitAndRejectsGarbage() {
         val s = ProcessSummary(foreground = true, monitor = false, online = true, transfers = 250)
         val bytes = s.encode()

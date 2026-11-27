@@ -401,12 +401,13 @@ private fun MarkdownImageBlock(alt: String, url: String, ctx: RenderContext) {
 
 @Composable
 private fun ImageThumb(bytes: ByteArray?, label: String?, onClick: () -> Unit) {
-            val bmp = remember(bytes) {
-        bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
-    }
-    if (bmp != null) {
+    val thumb = io.github.tianli0.switchtether.ui.common.rememberThumbnail(bytes, 120.dp).value
+    if (thumb is io.github.tianli0.switchtether.ui.common.Thumb.Decoding) {
+        // Keeps the slot while decoding off the main thread, so the conversation does not jump.
+        Box(Modifier.size(120.dp).clip(SquircleShape(10.dp)).background(LocalDevColors.current.codeBackground))
+    } else if (thumb is io.github.tianli0.switchtether.ui.common.Thumb.Ready) {
         androidx.compose.foundation.Image(
-            bitmap = bmp,
+            bitmap = thumb.bitmap,
             contentDescription = label ?: stringResource(R.string.render_image_preview),
             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             modifier = Modifier

@@ -39,6 +39,8 @@ data class ExitRecord(
     val trace: String? = null,
     /** Size of the system's trace / tombstone, when there is one (its content is never stored otherwise). */
     val traceBytes: Long? = null,
+    /** `ui` or `link` (docs/ANDROID_UI.md §38); null in records of builds with one process. */
+    val process: String? = null,
 )
 
 /** What `ApplicationExitInfo` says, read on the Android side (kept plain for tests). */
@@ -56,6 +58,8 @@ data class RawExit(
     val traceBytes: Long? = null,
     /** The trace as text, read only for an ANR and only up to [TRACE_READ_MAX] bytes. */
     val traceText: String? = null,
+    /** `ui` / `link` (see [processLabel]). */
+    val process: String? = null,
 )
 
 const val MAX_EXIT_RECORDS = 50
@@ -228,10 +232,20 @@ fun anrMainThreadExcerpt(trace: String, maxBytes: Int = TRACE_EXCERPT_MAX): Stri
     return out.toString().takeIf { it.isNotBlank() }
 }
 
+/** `ui` for the app's main process, the suffix after `:` for another (`link`), null when unknown. */
+fun processLabel(processName: String?, packageName: String): String? = when {
+    processName.isNullOrEmpty() -> null
+    processName == packageName -> "ui"
+    processName.startsWith("$packageName:") -> processName.substringAfter(':')
+    else -> null
+}
+
 /** One `ApplicationExitInfo` → the stored record. */
 fun mapExit(raw: RawExit): ExitRecord {
     val summary = ProcessSummary.decode(raw.processStateSummary)
     val (monitor, source) = when {
+        // Since the split (docs/ANDROID_UI.md §38) the monitor service runs in the `:link` process only.
+        raw.process == "ui" -> MonitorState.NOT_RUNNING to "process"
         summary != null -> (if (summary.monitor) MonitorState.RUNNING else MonitorState.NOT_RUNNING) to "summary"
         // A foreground-service importance with no summary: the only foreground service is MonitorService.
         raw.importance == 125 -> MonitorState.RUNNING to "importance"
@@ -240,6 +254,7 @@ fun mapExit(raw: RawExit): ExitRecord {
     val trace = if (raw.reason == ExitReasons.ANR) raw.traceText?.let { anrMainThreadExcerpt(it) } else null
     return ExitRecord(
         timestampMs = raw.timestampMs,
+        process = raw.process,
         pid = raw.pid,
         reason = raw.reason,
         reasonName = reasonName(raw.reason),
@@ -271,7 +286,7 @@ fun formatReport(records: List<ExitRecord>, header: List<Pair<String, String>>, 
     appendLine("records: ${records.size} (newest first, at most $MAX_EXIT_RECORDS)")
     appendLine()
     records.forEach { r ->
-        appendLine("== ${formatTime(r.timestampMs)}  pid ${r.pid}")
+        appendLine("== ${formatTime(r.timestampMs)}  pid ${r.pid}${r.process?.let { "  process $it" } ?: ""}")
         appendLine("reason: ${r.reasonName} (${r.reason})")
         appendLine("status: ${r.status}${r.statusName?.let { " $it" } ?: ""}")
         appendLine("importance: ${r.importanceName} (${r.importance})")

@@ -1,8 +1,6 @@
 package io.github.tianli0.switchtether.connection
 
 import android.content.Context
-import android.os.Build
-import android.os.PowerManager
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -14,44 +12,20 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import io.github.tianli0.switchtether.SwitchTetherApp
-import io.github.tianli0.switchtether.notify.MonitorService
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.flow.first
 
 /**
  * Background recovery worker (boot, app update, periodic network-connected check).
  *
- * Respects Android 12-16+ foreground-service restrictions: only starts [MonitorService] from
- * background when exempt (API < 31 or battery optimization ignored). Otherwise performs a bounded
- * pinned-mTLS check of live sessions so pending approvals/questions/status still notify the user.
+ * WorkManager runs in the UI process; the connection lives in the `:link` process (docs/ANDROID_UI.md
+ * §38), so the work is handed over there ([LinkContainer.recover]): start the monitor service when
+ * the system allows it from the background, otherwise one bounded pinned-mTLS check so pending
+ * approvals / questions / finished tasks are still notified. Respects Android 12+
+ * foreground-service start restrictions.
  */
 class ReconnectWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val app = applicationContext as? SwitchTetherApp ?: return Result.success()
-        val container = app.container
-        if (container.pairingStore.current() == null) {
-            cancel(applicationContext)
-            return Result.success()
-        }
-        val bg = container.settingsStore.backgroundConnection.first()
-        val hasPins = container.liveUpdates.pins.value.isNotEmpty()
-        if (!bg && !hasPins) return Result.success()
-
-        val canStartFgsFromBg = Build.VERSION.SDK_INT < 31 ||
-            applicationContext.getSystemService(PowerManager::class.java)
-                ?.isIgnoringBatteryOptimizations(applicationContext.packageName) == true
-        // With a bound computer that is away ("nearby only"), a bounded probe is enough: the
-        // presence service starts the monitor again when the computer comes back.
-        if (canStartFgsFromBg && container.wantsMonitor()) {
-            MonitorService.start(applicationContext)
-        }
-
-        // Probe once over pinned mTLS (HostRace + NSD + Relay) so even without a persistent FGS,
-        // pending approvals/questions or newly completed tasks are surfaced.
-        if (container.connection.state.value !is ConnectionState.Online) {
-            container.connection.probeOnce(timeoutMs = 15_000L)
-        }
+        io.github.tianli0.switchtether.link.LinkReceiver.recover(applicationContext)
         return Result.success()
     }
 

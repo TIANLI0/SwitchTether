@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** A forward running on this phone (`localhost:[localPort]` → the computer's [remotePort]). */
+@kotlinx.serialization.Serializable
 data class ActiveForward(
     val leaseId: String,
     val remotePort: Int,
@@ -54,17 +55,78 @@ sealed interface StartResult {
     data class Failed(val message: String) : StartResult
 }
 
+/** The port forwards as the screens see them (UI process: [io.github.tianli0.switchtether.link.LinkedForwards]). */
+interface Forwards {
+    val active: StateFlow<List<ActiveForward>>
+
+    /** Remote ports whose forward the computer ended (stopped there, expired, device revoked). */
+    val ended: SharedFlow<Int>
+
+    /** Biometric confirmation, then a lease on the computer, then the local listener. */
+    suspend fun start(remotePort: Int, localPort: Int = remotePort, process: String? = null, ttlMinutes: Int = PortForwards.DEFAULT_TTL_MINUTES): StartResult
+
+    /** Asks the computer for more time (needs a fresh confirmation once the grant expired). */
+    suspend fun extend(leaseId: String, ttlMinutes: Int = PortForwards.DEFAULT_TTL_MINUTES): StartResult
+
+    /** Starts listening for an existing lease (no step-up: the lease is the authorisation). */
+    suspend fun attach(lease: ForwardView, localPort: Int = lease.port, process: String? = null, listening: Boolean? = null): StartResult
+
+    /** Leases on the computer that this phone does not serve right now (resumable). */
+    suspend fun resumable(): List<ForwardView>
+
+    fun stop(leaseId: String)
+}
+
+/** A new lease, or why there is none. */
+sealed interface LeaseOutcome {
+    data class Ok(val lease: ForwardView) : LeaseOutcome
+    data class Err(val result: StartResult) : LeaseOutcome
+}
+
+/**
+ * A lease for [remotePort] (step-up `port_forward`, asked again once if the cached grant expired
+ * on the computer). Runs where the biometric prompt can be shown: the UI process.
+ */
+suspend fun createForwardLease(
+    conn: ConnectionController,
+    gate: StepUpGate,
+    stepUpAvailable: () -> Boolean,
+    remotePort: Int,
+    ttlMinutes: Int,
+): LeaseOutcome {
+    if (conn.apiOrNull() == null) return LeaseOutcome.Err(StartResult.Failed(PortForwards.OFFLINE))
+    if (!stepUpAvailable()) return LeaseOutcome.Err(StartResult.NoStepUpKey)
+    repeat(2) { attempt ->
+        if (gate.ensure(StepUpScopes.PORT_FORWARD).isFailure) return LeaseOutcome.Err(StartResult.NotConfirmed)
+        val api = conn.apiOrNull() ?: return LeaseOutcome.Err(StartResult.Failed(PortForwards.OFFLINE))
+        try {
+            return LeaseOutcome.Ok(api.createForward(remotePort, ttlMinutes))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ApiException) {
+            // The cached grant expired on the computer: confirm once more.
+            if (e.code == ErrorCodes.STEP_UP_REQUIRED && attempt == 0) {
+                gate.invalidate(StepUpScopes.PORT_FORWARD)
+            } else {
+                return LeaseOutcome.Err(StartResult.Failed("${e.code}: ${e.body.message}"))
+            }
+        } catch (e: Exception) {
+            return LeaseOutcome.Err(StartResult.Failed(e.message ?: e.javaClass.simpleName))
+        }
+    }
+    return LeaseOutcome.Err(StartResult.NotConfirmed)
+}
+
 /**
  * The phone's port forwards (docs/PROTOCOL.md §7.11): one [LocalForwarder] per lease, listening on
- * the phone's loopback. Starting needs step-up `port_forward`; a lease that still exists on the
- * computer (e.g. after the app was closed) can be resumed without it. Forwards live in memory only:
- * nothing listens on the phone after the process ends, and leases end on the computer by expiry.
+ * the phone's loopback. Lives in the `:link` process (docs/ANDROID_UI.md §38), so a browser on the
+ * phone keeps its forward while the UI process is gone; the UI asks for leases (step-up) and hands
+ * them over. Forwards live in memory only: nothing listens on the phone after the process ends,
+ * and leases end on the computer by expiry.
  */
 class PortForwards(
     private val scope: CoroutineScope,
     private val conn: ConnectionController,
-    private val gate: StepUpGate,
-    private val stepUpAvailable: () -> Boolean,
     /** HTML shown to a browser when nothing listens on the computer / the computer is unreachable. */
     private val errorPage: (LocalForwarder.ErrorKind, Int) -> String,
 ) {
@@ -134,58 +196,10 @@ class PortForwards(
 
     fun isForwarded(remotePort: Int): Boolean = entries.values.any { it.lease.port == remotePort }
 
-    /** Biometric confirmation, then a lease on the computer, then the local listener. */
-    suspend fun start(remotePort: Int, localPort: Int = remotePort, process: String? = null, ttlMinutes: Int = DEFAULT_TTL_MINUTES): StartResult {
-        entries.values.firstOrNull { it.lease.port == remotePort && it.localPort == localPort }?.let { e ->
-            return StartResult.Started(viewOf(e), null)
-        }
-        val lease = when (val r = createLease(remotePort, ttlMinutes)) {
-            is LeaseOutcome.Ok -> r.lease
-            is LeaseOutcome.Err -> return r.result
-        }
-        return attach(lease, localPort, process, lease.listening)
-    }
-
-    /** Asks the computer for more time (needs a fresh confirmation once the grant expired). */
-    suspend fun extend(leaseId: String, ttlMinutes: Int = DEFAULT_TTL_MINUTES): StartResult {
-        val e = entries[leaseId] ?: return StartResult.Failed("unknown forward")
-        return when (val r = createLease(e.lease.port, ttlMinutes)) {
-            is LeaseOutcome.Ok -> {
-                e.lease = r.lease
-                refresh()
-                StartResult.Started(viewOf(e), r.lease.listening)
-            }
-            is LeaseOutcome.Err -> r.result
-        }
-    }
-
-    private sealed interface LeaseOutcome {
-        class Ok(val lease: ForwardView) : LeaseOutcome
-        class Err(val result: StartResult) : LeaseOutcome
-    }
-
-    private suspend fun createLease(remotePort: Int, ttlMinutes: Int): LeaseOutcome {
-        if (conn.apiOrNull() == null) return LeaseOutcome.Err(StartResult.Failed(OFFLINE))
-        if (!stepUpAvailable()) return LeaseOutcome.Err(StartResult.NoStepUpKey)
-        repeat(2) { attempt ->
-            if (gate.ensure(StepUpScopes.PORT_FORWARD).isFailure) return LeaseOutcome.Err(StartResult.NotConfirmed)
-            val api = conn.apiOrNull() ?: return LeaseOutcome.Err(StartResult.Failed(OFFLINE))
-            try {
-                return LeaseOutcome.Ok(api.createForward(remotePort, ttlMinutes))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: ApiException) {
-                // The cached grant expired on the computer: confirm once more.
-                if (e.code == ErrorCodes.STEP_UP_REQUIRED && attempt == 0) {
-                    gate.invalidate(StepUpScopes.PORT_FORWARD)
-                } else {
-                    return LeaseOutcome.Err(StartResult.Failed("${e.code}: ${e.body.message}"))
-                }
-            } catch (e: Exception) {
-                return LeaseOutcome.Err(StartResult.Failed(e.message ?: e.javaClass.simpleName))
-            }
-        }
-        return LeaseOutcome.Err(StartResult.NotConfirmed)
+    /** The computer extended [lease] (a new expiry); unknown leases are ignored. */
+    fun updateLease(lease: ForwardView) {
+        entries[lease.id]?.let { it.lease = lease }
+        refresh()
     }
 
     /** Starts listening for an existing lease (no step-up: the lease is the authorisation). */
@@ -221,12 +235,6 @@ class PortForwards(
         return StartResult.Started(viewOf(entry), listening)
     }
 
-    /** Leases on the computer that this phone does not serve right now (resumable). */
-    suspend fun resumable(): List<ForwardView> {
-        val api = conn.apiOrNull() ?: return emptyList()
-        return runCatching { api.forwards().forwards }.getOrDefault(emptyList()).filter { !entries.containsKey(it.id) }
-    }
-
     fun stop(leaseId: String) {
         removeLocal(leaseId)
         scope.launch { runCatching { conn.apiOrNull()?.stopForward(leaseId) } }
@@ -254,6 +262,6 @@ class PortForwards(
 
     companion object {
         const val DEFAULT_TTL_MINUTES = 120
-        private const val OFFLINE = "not connected to the computer"
+        const val OFFLINE = "not connected to the computer"
     }
 }

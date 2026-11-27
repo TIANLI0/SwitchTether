@@ -26,7 +26,7 @@ import kotlinx.serialization.json.put
  */
 class NotifyActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val container = (context.applicationContext as? SwitchTetherApp)?.container ?: return
+        val container = (context.applicationContext as? SwitchTetherApp)?.link ?: return
         val session = intent.getStringExtra(EXTRA_SESSION) ?: return
         val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION, 0)
         val typed = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)?.toString()?.trim().orEmpty()
@@ -78,7 +78,7 @@ class NotifyActionReceiver : BroadcastReceiver() {
      * says so and tapping it opens the session in the app. The conversation then shows the sent
      * message or why it was not sent.
      */
-    private suspend fun reply(context: Context, container: io.github.tianli0.switchtether.AppContainer, session: String, notificationId: Int, typed: String) {
+    private suspend fun reply(context: Context, container: io.github.tianli0.switchtether.link.LinkContainer, session: String, notificationId: Int, typed: String) {
         val commandId = io.github.tianli0.switchtether.remote.command.newCommandId()
         val outcome = withTimeoutOrNull(BUDGET_MS) {
             if (!container.awaitOnline(CONNECT_MS)) null else container.sessions.sendMessage(session, typed, commandId)

@@ -204,8 +204,8 @@ fun MainShell() {
             },
             onCreated = { id, title ->
                 // "从手机发起的任务自动钉住": the phone started it, so following it is user-initiated.
-                if (container.liveUpdates.autoPinPhoneSessions) {
-                    container.liveUpdates.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true), manual = false)
+                if (container.livePins.autoPinPhoneSessions) {
+                    container.livePins.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true), manual = false)
                 }
                 // A share that chose "new session" brings its files into this session's input box.
                 container.shareInbox.sessionCreated(id)
@@ -395,7 +395,7 @@ private fun Destination(nav: NavViewModel, tab: Tab, route: Route?, onOpenRoot: 
             val container = appContainer()
             androidx.compose.runtime.LaunchedEffect(top.sessionId) {
                 // Seen: its "已完成" result notification has done its job.
-                container.liveUpdates.onSessionOpened(top.sessionId)
+                container.livePins.onSessionOpened(top.sessionId)
             }
             // Handed off only while this page is the one on top (the page under a pushed page
             // stays composed, paused).

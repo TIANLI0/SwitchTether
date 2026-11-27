@@ -106,8 +106,7 @@ class KeepAlive(
 
     class Receiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val container = (context.applicationContext as? SwitchTetherApp)?.container ?: return
-            container.keepAliveTick()
+            (context.applicationContext as? SwitchTetherApp)?.link?.keepAliveTick()
         }
     }
 

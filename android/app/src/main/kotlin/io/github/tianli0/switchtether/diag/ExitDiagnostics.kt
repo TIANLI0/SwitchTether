@@ -38,7 +38,8 @@ class ExitDiagnostics(private val context: Context) {
         val stored = load()
         val incoming = runCatching { am?.getHistoricalProcessExitReasons(context.packageName, 0, MAX_EXIT_RECORDS).orEmpty() }
             .getOrDefault(emptyList())
-            .filter { it.processName == context.packageName || it.processName.isNullOrEmpty() }
+            // Both processes: the UI one and `:link` (docs/ANDROID_UI.md §38).
+            .filter { it.processName.isNullOrEmpty() || it.processName == context.packageName || it.processName.startsWith(context.packageName + ":") }
             .map { mapExit(raw(it)) }
         val merged = mergeExits(stored, incoming)
         if (merged != stored) save(merged)
@@ -113,6 +114,7 @@ class ExitDiagnostics(private val context: Context) {
             }
         }
         return RawExit(
+            process = processLabel(info.processName, context.packageName),
             timestampMs = info.timestamp,
             pid = info.pid,
             reason = info.reason,

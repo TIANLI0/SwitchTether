@@ -393,7 +393,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
             item { SectionHeader(stringResource(R.string.live_settings_title)) }
             item {
                 val ctx = androidx.compose.ui.platform.LocalContext.current
-                val live = container.liveUpdates
+                val live = container.livePins
                 var autoPin by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(live.autoPinPhoneSessions) }
                 var promotable by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(live.canPromote()) }
                 androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -423,7 +423,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     }
                     SwitchPreference(
                         checked = autoPin,
-                        onCheckedChange = { v -> autoPin = v; live.autoPinPhoneSessions = v },
+                        onCheckedChange = { v -> autoPin = v; live.setAutoPinPhoneSessions(v) },
                         title = stringResource(R.string.live_auto_pin),
                         summary = stringResource(R.string.live_auto_pin_summary),
                         cardListPosition = CardListPosition.Tail,

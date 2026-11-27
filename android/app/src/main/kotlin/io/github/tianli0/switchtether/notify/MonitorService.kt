@@ -108,7 +108,11 @@ class MonitorService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        val container = (application as SwitchTetherApp).container
+        // Runs in the `:link` process (docs/ANDROID_UI.md §38).
+        val container = (application as SwitchTetherApp).link ?: run {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_STOP_FORWARDS) {
             container.portForwards.stopAll()
             if (watching) return START_STICKY
@@ -142,7 +146,7 @@ class MonitorService : Service() {
     override fun onDestroy() {
         setAwake(false)
         scope.cancel()
-        (application as SwitchTetherApp).container.onServiceStopped()
+        (application as SwitchTetherApp).link?.onServiceStopped()
         super.onDestroy()
     }
 

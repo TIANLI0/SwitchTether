@@ -54,7 +54,7 @@ fun fluidCloudSettingsIntent(context: Context): Intent? =
  * app's notifications, explains it first; the pin still works as a normal ongoing notification.
  */
 fun togglePin(context: Context, summary: SessionSummary) {
-    val live = (context.applicationContext as io.github.tianli0.switchtether.SwitchTetherApp).container.liveUpdates
+    val live = (context.applicationContext as io.github.tianli0.switchtether.SwitchTetherApp).container.livePins
     if (live.isPinned(summary.id)) {
         live.unpin(summary.id)
         return
@@ -63,7 +63,7 @@ fun togglePin(context: Context, summary: SessionSummary) {
         pinExplain.value = summary
         return
     }
-    if (!live.pin(summary)) Toast.makeText(context, context.getString(R.string.pin_limit, io.github.tianli0.switchtether.notify.LiveUpdates.MAX_PINS), Toast.LENGTH_SHORT).show()
+    live.pin(summary) { ok -> if (!ok) Toast.makeText(context, context.getString(R.string.pin_limit, io.github.tianli0.switchtether.notify.LiveUpdates.MAX_PINS), Toast.LENGTH_SHORT).show() }
 }
 
 @Composable
@@ -85,7 +85,7 @@ fun PinExplainSheet() {
                 text = stringResource(R.string.pin_anyway),
                 onClick = {
                     pending?.let { s ->
-                        if (!container.liveUpdates.pin(s)) Toast.makeText(context, context.getString(R.string.pin_limit, io.github.tianli0.switchtether.notify.LiveUpdates.MAX_PINS), Toast.LENGTH_SHORT).show()
+                        container.livePins.pin(s) { ok -> if (!ok) Toast.makeText(context, context.getString(R.string.pin_limit, io.github.tianli0.switchtether.notify.LiveUpdates.MAX_PINS), Toast.LENGTH_SHORT).show() }
                     }
                     pinExplain.value = null
                 },

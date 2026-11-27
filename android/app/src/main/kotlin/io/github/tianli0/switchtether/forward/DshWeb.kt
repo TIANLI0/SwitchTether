@@ -136,7 +136,7 @@ class DshWebViewModel(
     private val conn: ConnectionController,
     private val gate: StepUpGate,
     private val stepUpAvailable: () -> Boolean,
-    private val forwards: PortForwards,
+    private val forwards: Forwards,
 ) : ViewModel() {
     private val _ui = MutableStateFlow<DshWebUi>(DshWebUi.Checking)
     val ui: StateFlow<DshWebUi> = _ui.asStateFlow()
