@@ -287,6 +287,22 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/restart_app`, () => success(true)),
 
   http.post(`${TAURI_ENDPOINT}/get_settings`, () => success(getSettings())),
+  // SwitchTether: the Remote status button in the app header.
+  http.post(`${TAURI_ENDPOINT}/remote_status`, () =>
+    success({
+      config: { enabled: false, port: 47600, networkMode: "lan", relayEnabled: false },
+      running: false,
+      fingerprint: "",
+      fingerprintDisplay: "",
+      serverName: "Test",
+      secretBackend: "memory",
+      hosts: [],
+      connections: [],
+      pairedDevices: 0,
+      terminals: 0,
+      managedSessions: 0,
+    }),
+  ),
   http.post(`${TAURI_ENDPOINT}/get_copilot_vscode_targets`, () => success([])),
   http.post(`${TAURI_ENDPOINT}/sync_copilot_vscode`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/get_copilot_vscode_sync_status`, () =>
