@@ -52,6 +52,8 @@ class FileStore(
     private val api: () -> RemoteApi?,
     val cache: FileCache = FileCache(File(context.cacheDir, "remote-files")),
     val index: DownloadIndex = DownloadIndex(File(context.filesDir, "downloads-index.json")),
+    /** Explicit downloads run as user-initiated data transfer jobs (docs/ANDROID_UI.md §36). */
+    private val transfers: io.github.tianli0.switchtether.transfer.TransferRunner = io.github.tianli0.switchtether.transfer.DirectTransfers,
 ) {
     private val resolver: ContentResolver get() = context.contentResolver
 
@@ -216,6 +218,19 @@ class FileStore(
         size: Long? = null,
         modifiedMs: Long? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): DownloadRecord = transfers.run(io.github.tianli0.switchtether.transfer.TransferKind.FILE_DOWNLOAD, name, size?.takeIf { it > 0 }) { ticket ->
+        downloadNow(path, name, size, modifiedMs, { n, total -> ticket.progress(n, total); onProgress(n, total) }) { uri ->
+            ticket.ref(io.github.tianli0.switchtether.transfer.RemoteRef(pendingUri = uri.toString()))
+        }
+    }
+
+    private suspend fun downloadNow(
+        path: String,
+        name: String,
+        size: Long?,
+        modifiedMs: Long?,
+        onProgress: (Long, Long?) -> Unit,
+        onPending: (Uri) -> Unit,
     ): DownloadRecord = withContext(Dispatchers.IO) {
         val server = serverId() ?: throw NotConnectedForFilesException()
         var knownSize = size?.takeIf { it > 0 }
@@ -228,7 +243,7 @@ class FileStore(
         }
         val cached = cachedCopy(server, path, knownSize, knownTime)
         val a = if (cached == null) api() ?: throw NotConnectedForFilesException() else null
-        writeDownload(name, server, path) { out ->
+        writeDownload(name, server, path, onPending) { out ->
             if (cached != null) {
                 val total = cached.length()
                 var done = 0L
@@ -250,7 +265,7 @@ class FileStore(
     }
 
     /** One new entry in `Downloads/SwitchTether`, filled by [write], recorded in the index; nothing is left behind on failure. */
-    private suspend fun writeDownload(name: String, server: String, remotePath: String, write: suspend (java.io.OutputStream) -> Long): DownloadRecord {
+    private suspend fun writeDownload(name: String, server: String, remotePath: String, onPending: (Uri) -> Unit = {}, write: suspend (java.io.OutputStream) -> Long): DownloadRecord {
         val safe = FileTypes.safeFileName(name)
         val mime = mimeOf(safe)
         val values = ContentValues().apply {
@@ -260,6 +275,8 @@ class FileStore(
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IOException("cannot create download")
+        // Recorded so a download cut by process death leaves no pending entry behind (removed at the next start).
+        onPending(uri)
         try {
             val written = (resolver.openOutputStream(uri) ?: throw IOException("cannot write download")).use { write(it) }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)

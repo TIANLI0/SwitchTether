@@ -82,7 +82,14 @@ fun AboutScreen(onBack: () -> Unit, onOpen: (Route) -> Unit) {
                     ArrowPreference(
                         title = stringResource(R.string.settings_licenses),
                         onClick = { onOpen(Route.Licenses) },
+                        cardListPosition = CardListPosition.Middle,
+                    )
+                    ArrowPreference(
+                        title = stringResource(R.string.about_diagnostics),
+                        summary = stringResource(R.string.about_diagnostics_summary),
+                        onClick = { onOpen(Route.Diagnostics) },
                         cardListPosition = CardListPosition.Tail,
+                        modifier = Modifier.testTag("about-diagnostics"),
                     )
                 }
             }

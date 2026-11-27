@@ -91,8 +91,14 @@ Data already stored on a lost phone cannot be wiped remotely. The app stores no 
 credentials persistently: the offline snapshot keeps conversations in memory only and persists
 just the session list metadata (titles, folders, state), sealed with a non-exportable Keystore key
 that is destroyed on unpair / revoke (docs/ANDROID_UI.md §33). Previewed and downloaded files are
-the exception the user chose (ANDROID_UI.md §13.13). Keys are hardware-bound, so a revoked phone
-holds nothing that grants further access.
+the exception the user chose (ANDROID_UI.md §13.13). Two small app-private stores hold no content and
+no secrets: the transfer journal (`filesDir/transfers/journal.json`: kind, file name, size, start
+time and the ids needed to clean up a transfer cut by process death; empty when nothing runs,
+ANDROID_UI.md §36) and the diagnostics log (`filesDir/diagnostics/exits.json`: the last 50
+process-exit records — reason, status, importance, memory, redacted system description, the app's own
+state flags and at most a filtered, redacted main-thread stack excerpt of an ANR; §37). The
+diagnostics text leaves the phone only when the user exports and shares it. Keys are hardware-bound,
+so a revoked phone holds nothing that grants further access.
 
 ## 6. Secrets never leave the desktop
 

@@ -168,6 +168,8 @@ class FilesViewModel(
     private val gate: StepUpGate,
     private val resolverProvider: () -> ContentResolver,
     private val store: FileStore? = null,
+    /** Uploads run as user-initiated data transfer jobs (docs/ANDROID_UI.md §36); downloads do so inside [FileStore]. */
+    private val transfers: io.github.tianli0.switchtether.transfer.TransferRunner = io.github.tianli0.switchtether.transfer.DirectTransfers,
     private val defaultRepo: suspend () -> String?,
 ) : ViewModel() {
     private val _state = MutableStateFlow(FilesUiState())
@@ -550,7 +552,9 @@ class FilesViewModel(
                 return@launch
             }
             try {
-                withContext(Dispatchers.IO) {
+                transfers.run(io.github.tianli0.switchtether.transfer.TransferKind.FILE_UPLOAD, name, size) { ticket ->
+                  ticket.ref(io.github.tianli0.switchtether.transfer.RemoteRef(uploadId = uploadId))
+                  withContext(Dispatchers.IO) {
                     resolver.openInputStream(uri)!!.use { input ->
                         for ((offset, len) in UploadPlan.chunks(size)) {
                             ensureActive()
@@ -564,9 +568,11 @@ class FilesViewModel(
                             // The document ended before the size it reported: never report a truncated upload as done.
                             if (read < len) throw java.io.IOException("file ended after ${offset + read} of $size bytes")
                             api.uploadChunk(uploadId, offset, if (read == buf.size) buf else buf.copyOf(read))
+                            ticket.progress(offset + read, size)
                             _state.update { it.copy(transfer = it.transfer?.copy(done = offset + read)) }
                         }
                     }
+                  }
                 }
                 _state.update { it.copy(transfer = it.transfer?.copy(finished = true)) }
                 refreshAfterOp(dir)
@@ -574,6 +580,8 @@ class FilesViewModel(
                 // The job is already cancelled: without NonCancellable the request would never be sent and the
                 // partial upload would stay on the computer.
                 withContext(NonCancellable) { runCatching { api.cancelUpload(uploadId) } }
+                // Also when cancelled from the transfer notification: the card must not stay "in progress".
+                _state.update { it.copy(transfer = it.transfer?.takeIf { t -> t.error == null }?.copy(error = UiText(R.string.files_err_cancelled)) ?: it.transfer) }
                 throw e
             } catch (e: Exception) {
                 runCatching { api.cancelUpload(uploadId) }

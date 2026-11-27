@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only the temporary preview cache is shareable through FileProvider; downloads are MediaStore content:// URIs. -->
+<!-- Only the temporary preview cache and the exported diagnostics text are shareable through FileProvider;
+     downloads are MediaStore content:// URIs. -->
 <paths>
     <cache-path name="remote_files" path="remote-files/" />
+    <cache-path name="diagnostics" path="diagnostics/" />
 </paths>

@@ -248,6 +248,41 @@ class ViewModelTest {
     }
 
     @Test
+    fun anAttachmentCancelledFromItsTransferNotificationStopsAndIsDiscarded() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList()) }
+        val ended = mutableListOf<io.github.tianli0.switchtether.transfer.TransferEntry>()
+        val envelope = object : io.github.tianli0.switchtether.transfer.TransferEnvelope {
+            override fun begin(entry: io.github.tianli0.switchtether.transfer.TransferEntry) = true
+            override fun update(entry: io.github.tianli0.switchtether.transfer.TransferEntry) = Unit
+            override fun end(entry: io.github.tianli0.switchtether.transfer.TransferEntry) { ended += entry }
+        }
+        val transfers = io.github.tianli0.switchtether.transfer.TransferManager(io.github.tianli0.switchtether.transfer.InMemoryTransferJournal(), envelope)
+        val vm = SessionDetailViewModel("s1", FakeConnection(), repo, FakeDrafts(), ioDispatcher = dispatcher, transfers = transfers)
+        advanceUntilIdle()
+        repo.chunkGate = kotlinx.coroutines.CompletableDeferred()
+        val big = ByteArray(9 * 1024 * 1024) { 1 }
+        vm.addAttachment("video.mp4", big.size.toLong(), "video/mp4") { big.inputStream() }
+        advanceUntilIdle()
+        val running = transfers.active.value.values.single()
+        assertEquals("att-1", running.ref?.attachmentId)
+        assertEquals(io.github.tianli0.switchtether.transfer.TransferKind.ATTACHMENT_UPLOAD, running.kind)
+        // The notification's Cancel.
+        assertTrue(transfers.cancel(running.id))
+        advanceUntilIdle()
+        assertTrue("the chip is gone", vm.state.value.draftAttachments.isEmpty())
+        assertEquals("the partial upload is discarded once", listOf("att-1"), repo.cancelledAttachments)
+        assertEquals("no chunk landed", 0, repo.uploads.getValue("att-1").size)
+        assertEquals(io.github.tianli0.switchtether.transfer.TransferPhase.CANCELLED, ended.single().phase)
+        assertTrue(transfers.active.value.isEmpty())
+        // A normal upload through the manager still completes and is reported as succeeded.
+        repo.chunkGate = null
+        vm.addAttachment("a.txt", 3, "text/plain") { byteArrayOf(1, 2, 3).inputStream() }
+        advanceUntilIdle()
+        assertTrue(vm.state.value.draftAttachments.single().ready)
+        assertEquals(io.github.tianli0.switchtether.transfer.TransferPhase.SUCCEEDED, ended.last().phase)
+    }
+
+    @Test
     fun echoWithClientIdReplacesTheBubbleWithoutDuplicates() = runTest(dispatcher) {
         val repo = FakeSessionRepository().apply { detail = SessionDetail(summary(control = "full"), caps(send = "VERIFIED"), emptyList()) }
         val vm = detailVm(repo)

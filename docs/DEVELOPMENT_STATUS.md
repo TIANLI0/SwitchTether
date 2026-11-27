@@ -880,3 +880,16 @@ on this machine, the phone UI on a device.
   Robolectric key injection; `SlashPanelTest` still green on the new field). Not verified: nothing was
   run on a device, tablet, DeX or emulator — real hardware keyboards, the Meta+/ helper, drag and drop
   between apps and its permission grant, keyboard GIF commit and clipboard image paste are unexercised.
+
+## Android: process-exit diagnostics, large transfers as user-initiated jobs (2026-11-27, branch android/diag-2026-11-27)
+
+- 2026-11-27: About → 诊断记录 (last 50 `getHistoricalProcessExitReasons` records, monitor-service state
+  via `setProcessStateSummary`, redacted descriptions, ANR main-thread excerpt only, export through the
+  FileProvider; ANDROID_UI.md §37) and attachment uploads / folder uploads / downloads as Android 14+
+  user-initiated data transfer jobs with a progress notification and Cancel, process death reported and
+  never resumed (§36). Verified: `./gradlew testDebugUnitTest :app:assembleDebug` green in the
+  `SwitchTether-diag` worktree (app 465 unit tests, 0 failures, incl. 21 new: `TransferTest` 12,
+  `ExitRecordsTest` 8, one attachment-cancel case in `ViewModelTest`). Not verified: nothing was run on a
+  device or emulator — no job was scheduled, no real exit record read, the notifications, Cancel, Task
+  Manager stop, ColorOS background behaviour, the process-death path and the share of the export are
+  all unexercised.

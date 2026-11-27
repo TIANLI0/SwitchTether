@@ -240,6 +240,8 @@ class SessionDetailViewModel(
     private val liveDispatcher: kotlinx.coroutines.CoroutineDispatcher? = null,
     /** Biometric step-up for a scope (true = granted); null (tests) leaves it to the desktop. */
     private val stepUp: (suspend (String) -> Boolean)? = null,
+    /** Attachment uploads run as user-initiated data transfer jobs in the app (docs/ANDROID_UI.md §36). */
+    private val transfers: io.github.tianli0.switchtether.transfer.TransferRunner = io.github.tianli0.switchtether.transfer.DirectTransfers,
 ) : ViewModel() {
     /** Streamed events waiting for the next batch (see [liveDispatcher]). */
     private val liveInbox = kotlinx.coroutines.channels.Channel<AgentEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
@@ -294,43 +296,61 @@ class SessionDetailViewModel(
         }
         _state.update { it.copy(draftAttachments = it.draftAttachments + a) }
         uploadJobs[a.localId] = viewModelScope.launch {
-            try {
-                val begun = repo.beginAttachment(sessionId, a.name, size, mediaType)
-                updateAttachment(a.localId) { it.copy(attachmentId = begun.attachmentId) }
-                var complete = false
-                kotlinx.coroutines.withContext(ioDispatcher) {
-                    (open() ?: throw java.io.IOException("cannot read the file")).use { input ->
-                        val buf = ByteArray(ATTACHMENT_CHUNK)
-                        var offset = 0L
-                        while (true) {
-                            var n = 0
-                            while (n < buf.size) {
-                                val r = input.read(buf, n, buf.size - n)
-                                if (r < 0) break
-                                n += r
+            transfers.run(io.github.tianli0.switchtether.transfer.TransferKind.ATTACHMENT_UPLOAD, a.name, size) { ticket ->
+                var attachmentId: String? = null
+                try {
+                    val begun = repo.beginAttachment(sessionId, a.name, size, mediaType)
+                    attachmentId = begun.attachmentId
+                    ticket.ref(io.github.tianli0.switchtether.transfer.RemoteRef(sessionId = sessionId, attachmentId = begun.attachmentId))
+                    updateAttachment(a.localId) { it.copy(attachmentId = begun.attachmentId) }
+                    var complete = false
+                    kotlinx.coroutines.withContext(ioDispatcher) {
+                        (open() ?: throw java.io.IOException("cannot read the file")).use { input ->
+                            val buf = ByteArray(ATTACHMENT_CHUNK)
+                            var offset = 0L
+                            while (true) {
+                                var n = 0
+                                while (n < buf.size) {
+                                    val r = input.read(buf, n, buf.size - n)
+                                    if (r < 0) break
+                                    n += r
+                                }
+                                if (n == 0) break
+                                val v = repo.uploadAttachmentChunk(sessionId, begun.attachmentId, offset, buf.copyOf(n))
+                                offset = v.received
+                                complete = v.complete
+                                ticket.progress(v.received, size)
+                                updateAttachment(a.localId) { it.copy(sent = v.received) }
+                                if (complete || n < buf.size) break
                             }
-                            if (n == 0) break
-                            val v = repo.uploadAttachmentChunk(sessionId, begun.attachmentId, offset, buf.copyOf(n))
-                            offset = v.received
-                            complete = v.complete
-                            updateAttachment(a.localId) { it.copy(sent = v.received) }
-                            if (complete || n < buf.size) break
                         }
                     }
+                    updateAttachment(a.localId) {
+                        if (complete) it.copy(ready = true) else it.copy(failure = AttachmentFailure.FAILED, detail = "the file changed while it was read")
+                    }
+                    if (!complete) ticket.fail("the file changed while it was read")
+                } catch (e: CancellationException) {
+                    // Cancelled from outside the chip (the transfer notification, the system stopping the job,
+                    // the page going away): drop the chip and the partial upload. A chip the user removed is
+                    // already gone and its upload already discarded.
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dropCancelledUpload(a.localId, attachmentId) }
+                    throw e
+                } catch (e: Exception) {
+                    val old = (e as? io.github.tianli0.switchtether.remote.api.ApiException)?.httpStatus == 404
+                    val detail = UiError.from(e).detail ?: e.message
+                    updateAttachment(a.localId) { it.copy(failure = if (old) AttachmentFailure.OLD_DESKTOP else AttachmentFailure.FAILED, detail = detail) }
+                    ticket.fail(e.javaClass.simpleName)
+                } finally {
+                    uploadJobs.remove(a.localId)
                 }
-                updateAttachment(a.localId) {
-                    if (complete) it.copy(ready = true) else it.copy(failure = AttachmentFailure.FAILED, detail = "the file changed while it was read")
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                val old = (e as? io.github.tianli0.switchtether.remote.api.ApiException)?.httpStatus == 404
-                val detail = UiError.from(e).detail ?: e.message
-                updateAttachment(a.localId) { it.copy(failure = if (old) AttachmentFailure.OLD_DESKTOP else AttachmentFailure.FAILED, detail = detail) }
-            } finally {
-                uploadJobs.remove(a.localId)
             }
         }
+    }
+
+    private suspend fun dropCancelledUpload(localId: String, attachmentId: String?) {
+        if (_state.value.draftAttachments.none { it.localId == localId }) return
+        _state.update { st -> st.copy(draftAttachments = st.draftAttachments.filterNot { it.localId == localId }) }
+        if (attachmentId != null) runCatching { repo.cancelAttachment(sessionId, attachmentId) }
     }
 
     fun removeAttachment(localId: String) {

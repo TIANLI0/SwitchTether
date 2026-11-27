@@ -249,7 +249,7 @@ class SessionToolsViewModel(private val sessionId: String, private val repo: Ses
  */
 @Composable
 fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
-    val detailVm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }) }
+    val detailVm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }, transfers = it.transfers) }
     val vm = containerViewModel(key = "session-tools:$sessionId") { SessionToolsViewModel(sessionId, it.sessions) }
     val detail by detailVm.state.collectAsStateWithLifecycle()
     val st by vm.state.collectAsStateWithLifecycle()
