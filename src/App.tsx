@@ -97,6 +97,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { OpenTerminalDialog } from "@/components/providers/OpenTerminalDialog";
 import { discardUnsavedChanges, hasUnsavedChanges } from "@/lib/unsavedChanges";
 import { RefreshAllQuotaButton } from "@/components/settings/auth/RefreshAllQuotaButton";
+import { RemoteStatusButton } from "@/components/remote/RemoteStatusButton";
 import {
   checkToolUpdatesInBackground,
   useToolUpdatesAvailable,
@@ -1571,6 +1572,10 @@ function App() {
               {t("appPage.webUi")}
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
+          )}
+          {/* SwitchTether: Remote status entry on the home page */}
+          {currentView === "providers" && (
+            <RemoteStatusButton onOpen={() => openSettings("remote")} />
           )}
           {currentView === "providers" &&
             (settingsData?.showProviderSearch ?? true) && (

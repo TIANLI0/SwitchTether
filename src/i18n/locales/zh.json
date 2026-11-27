@@ -5539,6 +5539,18 @@
   "remote": {
     "title": "远程访问",
     "help": "允许 SwitchTether 安卓 App 与这台电脑配对，并查看或控制 Agent、终端和文件。连接使用 TLS 1.3 双向证书认证，电脑证书通过二维码固定。除非选择“所有网络”，否则不会暴露到公网。",
+    "home": {
+      "label": "远程",
+      "running": "远程 · 已配对 {{count}} 台",
+      "off": "远程 · 已关闭",
+      "error": "远程 · 出错",
+      "starting": "远程",
+      "unavailable": "远程",
+      "tipRunning": "远程服务运行中，端口 {{port}} · 已配对 {{count}} 台设备 · 当前连接 {{connections}} 个。点击打开远程设置。",
+      "tipOff": "远程服务已关闭。点击开启并配对手机。",
+      "tipStarting": "远程服务正在启动…",
+      "tipUnavailable": "远程服务不可用。点击打开远程设置。"
+    },
     "refresh": "刷新",
     "initializing": "远程服务正在启动…",
     "enable": "启用远程访问",

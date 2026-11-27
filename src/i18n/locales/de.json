@@ -5539,6 +5539,18 @@
   "remote": {
     "title": "Fernzugriff",
     "help": "Ermöglicht der SwitchTether-Android-App, sich mit diesem Computer zu koppeln und Agenten, Terminals und Dateien zu überwachen oder zu steuern. Verbindungen nutzen TLS 1.3 mit gegenseitiger Zertifikatsauthentifizierung; das Desktop-Zertifikat wird über den QR-Code fixiert. Ohne die Auswahl „Alle Netzwerke“ ist nichts aus dem Internet erreichbar.",
+    "home": {
+      "label": "Remote",
+      "running": "Remote · {{count}} gekoppelt",
+      "off": "Remote · Aus",
+      "error": "Remote · Fehler",
+      "starting": "Remote",
+      "unavailable": "Remote",
+      "tipRunning": "Remote-Dienst läuft auf Port {{port}} · {{count}} gekoppelte(s) Gerät(e) · {{connections}} verbunden. Klicken, um die Remote-Einstellungen zu öffnen.",
+      "tipOff": "Der Remote-Dienst ist aus. Klicken, um ihn einzuschalten und dein Handy zu koppeln.",
+      "tipStarting": "Der Remote-Dienst startet…",
+      "tipUnavailable": "Remote-Dienst nicht verfügbar. Klicken, um die Remote-Einstellungen zu öffnen."
+    },
     "refresh": "Aktualisieren",
     "initializing": "Der Remote-Dienst wird gestartet…",
     "enable": "Fernzugriff aktivieren",

@@ -5539,6 +5539,18 @@
   "remote": {
     "title": "Remote access",
     "help": "Lets the SwitchTether Android app pair with this computer and monitor or control agents, terminals and files. Connections use TLS 1.3 with mutual certificate authentication; the desktop certificate is pinned through the QR code. Nothing is exposed to the Internet unless you choose \"All networks\".",
+    "home": {
+      "label": "Remote",
+      "running": "Remote · {{count}} paired",
+      "off": "Remote · Off",
+      "error": "Remote · Error",
+      "starting": "Remote",
+      "unavailable": "Remote",
+      "tipRunning": "Remote service running on port {{port}} · {{count}} paired device(s) · {{connections}} connected. Click to open Remote settings.",
+      "tipOff": "Remote service is off. Click to turn it on and pair your phone.",
+      "tipStarting": "The Remote service is starting…",
+      "tipUnavailable": "Remote service unavailable. Click to open Remote settings."
+    },
     "refresh": "Refresh",
     "initializing": "The remote service is starting…",
     "enable": "Enable remote access",

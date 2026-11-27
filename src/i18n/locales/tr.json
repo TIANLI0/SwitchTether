@@ -5539,6 +5539,18 @@
   "remote": {
     "title": "Uzaktan erişim",
     "help": "SwitchTether Android uygulamasının bu bilgisayarla eşleşmesine ve ajanları, terminalleri ve dosyaları izlemesine veya yönetmesine izin verir. Bağlantılar karşılıklı sertifika doğrulamalı TLS 1.3 kullanır; masaüstü sertifikası QR kod ile sabitlenir. \"Tüm ağlar\" seçilmedikçe hiçbir şey İnternet'e açılmaz.",
+    "home": {
+      "label": "Uzak",
+      "running": "Uzak · {{count}} eşleşmiş",
+      "off": "Uzak · Kapalı",
+      "error": "Uzak · Hata",
+      "starting": "Uzak",
+      "unavailable": "Uzak",
+      "tipRunning": "Uzak hizmeti {{port}} portunda çalışıyor · {{count}} eşleşmiş cihaz · {{connections}} bağlı. Uzak ayarlarını açmak için tıkla.",
+      "tipOff": "Uzak hizmeti kapalı. Açmak ve telefonunu eşleştirmek için tıkla.",
+      "tipStarting": "Uzak hizmeti başlatılıyor…",
+      "tipUnavailable": "Uzak hizmeti kullanılamıyor. Uzak ayarlarını açmak için tıkla."
+    },
     "refresh": "Yenile",
     "initializing": "Uzak hizmet başlatılıyor…",
     "enable": "Uzaktan erişimi etkinleştir",
