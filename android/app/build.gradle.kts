@@ -89,9 +89,12 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
-            // Robolectric's sandbox breaks JCE provider verification for later plain-JVM TLS tests in
-            // the same JVM (okhttp-tls key stores), so each test class gets its own JVM.
-            all { it.forkEvery = 1 }
+            // Test classes share JVMs. Robolectric's Conscrypt provider used to leak into the JVM-wide
+            // provider list and break JCE provider verification for later plain-JVM TLS / cipher
+            // tests (javax.crypto.JarVerifier); src/test/resources/robolectric.properties sets
+            // conscryptMode=OFF so it is never installed. Half the cores, capped: each Robolectric
+            // fork is memory-heavy and more forks stopped paying off locally.
+            all { it.maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 6) }
         }
     }
     packaging {
