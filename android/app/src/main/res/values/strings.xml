@@ -441,6 +441,11 @@
     <string name="quota_tier_week">Weekly</string>
     <string name="quota_tier_month">Monthly</string>
     <string name="quota_tier_credits">Credits</string>
+    <string name="quota_tier_agy_gemini_5h">Gemini 5-hour</string>
+    <string name="quota_tier_agy_gemini_week">Gemini weekly</string>
+    <string name="quota_tier_agy_argon_week">Argon weekly</string>
+    <string name="quota_tier_agy_third_party_5h">Claude/GPT 5-hour</string>
+    <string name="quota_tier_agy_third_party_week">Claude/GPT weekly</string>
     <string name="quota_day_today">today %1$s</string>
     <string name="quota_day_tomorrow">tomorrow %1$s</string>
     <string name="quota_resets_at">Resets %1$s · in %2$s</string>

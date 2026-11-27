@@ -1570,6 +1570,8 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
                     "dsh" -> stringResource(R.string.cap_reason_observed_dsh, stringResource(R.string.continue_action))
                     else -> null
                 }
+            } else if (s.agent == "agy") {
+                stringResource(R.string.cap_reason_history_agy)
             } else {
                 null
             }

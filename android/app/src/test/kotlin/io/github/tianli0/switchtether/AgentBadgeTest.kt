@@ -35,10 +35,12 @@ class AgentBadgeTest {
                     AgentBadge("claude_code", size = 48.dp)
                     AgentBadge("codex", size = 48.dp)
                     AgentBadge("dsh", size = 48.dp)
+                    AgentBadge("agy", size = 48.dp)
                 }
             }
         }
         rule.onNodeWithContentDescription("DeepSeek Harness", substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithContentDescription("Antigravity", substring = true, useUnmergedTree = true).assertExists()
         val view = rule.activity.window.decorView
         val bitmap = Bitmap.createBitmap(view.width, 300, Bitmap.Config.ARGB_8888)
         rule.runOnUiThread { view.draw(android.graphics.Canvas(bitmap)) }

@@ -65,6 +65,7 @@ object Formatters {
         "dsh" -> "DeepSeek Harness"
         "gemini" -> "Gemini"
         "opencode" -> "OpenCode"
+        "agy" -> "Antigravity"
         else -> agent.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 }

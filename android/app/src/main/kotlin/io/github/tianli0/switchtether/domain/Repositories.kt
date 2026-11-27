@@ -170,7 +170,7 @@ data class NewSessionRequest(
 )
 
 /** Tools whose subscription quota Home and the Usage page show (`GET /v1/usage/quota/{tool}`). */
-val QUOTA_TOOLS = listOf("claude", "codex")
+val QUOTA_TOOLS = listOf("claude", "codex", "agy")
 
 /** One usage total: Home's "today" and the Usage page's "today" (all apps) share a key. */
 data class UsageSummaryKey(val fromSec: Long, val app: String?)

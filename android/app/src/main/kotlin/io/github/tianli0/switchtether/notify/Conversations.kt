@@ -247,6 +247,7 @@ class ConversationNotifier(private val context: Context) {
             "claude_code", "claude" -> R.drawable.ic_agent_claude
             "codex" -> R.drawable.ic_agent_openai
             "dsh" -> R.drawable.ic_agent_deepseek
+            "agy" -> R.drawable.ic_agent_antigravity
             else -> null
         } ?: return IconCompat.createWithResource(context, R.mipmap.ic_launcher)
         return icons.getOrPut(agent!!) {
