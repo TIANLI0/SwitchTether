@@ -387,6 +387,27 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon :app:assembleDebug
 
+      # Android Lint and detekt over SwitchTether's own modules (third_party/ is not analysed).
+      # Existing findings are in the committed baselines; only new ones fail.
+      - name: Android Lint
+        working-directory: android
+        run: ./gradlew --no-daemon :app:lintDebug :core:ui:lintDebug :core:security:lintDebug
+
+      - name: detekt
+        working-directory: android
+        run: ./gradlew --no-daemon detekt
+
+      - name: Upload lint and detekt reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: switchtether-android-static-analysis
+          path: |
+            android/app/build/reports/lint-results-debug.*
+            android/core/*/build/reports/lint-results-debug.*
+            android/build/reports/detekt/
+          if-no-files-found: ignore
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

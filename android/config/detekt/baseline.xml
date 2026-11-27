@@ -1,0 +1,65 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>EmptyElseBlock:DshWeb.kt$DshWebViewModel$if (_ui.value is DshWebUi.Confirming) _ui.value = idleFrom(before)</ID>
+    <ID>ExplicitItLambdaParameter:HomeScreen.kt${ i, it -&gt; val running = activity[it.id]?.takeIf { a -&gt; !a.isEmpty } SessionRow( it, onClick = { onOpen(Route.SessionDetail(it.id, it.title)) }, position = cardListPositionOf(i, list.size), compact = true, pinned = it.id in pins, onLongClick = { menuFor = it }, bottom = running?.let { a -&gt; { ActivityLines(a) { onOpen(Route.SubagentTree(it.id, it.agent)) } } }, ) }</ID>
+    <ID>ExplicitItLambdaParameter:ManageScreens.kt${ i, it -&gt; val on = it.apps[state.app] == true // The switch shows the desktop state; a tap only opens the confirm dialog. SwitchPreference( checked = on, onCheckedChange = { _ -&gt; pending = Triple(it.id, it.name, !on) }, title = it.name, summary = it.description, enabled = busy == null, cardListPosition = cardListPositionOf(i, items.size), ) }</ID>
+    <ID>ExplicitItLambdaParameter:Timeline.kt${ k, it -&gt; out += TimelineRow.Event(it, if (k == run.lastIndex) SegmentPosition.Last else SegmentPosition.Middle) }</ID>
+    <ID>InstanceOfCheckForException:HostRace.kt$HostRace$e is kotlinx.coroutines.TimeoutCancellationException</ID>
+    <ID>InstanceOfCheckForException:PairingRepository.kt$DefaultPairingRepository$e is CancellationException</ID>
+    <ID>InstanceOfCheckForException:PairingRepository.kt$DefaultPairingRepository$e is PairingException</ID>
+    <ID>SpreadOperator:Localized.kt$(res, *resolved.toTypedArray())</ID>
+    <ID>SpreadOperator:RemoteApi.kt$RemoteApi.&lt;no name provided&gt;$(*frame)</ID>
+    <ID>SwallowedException:PairingLink.kt$PairingLink.Companion$e: IllegalArgumentException</ID>
+    <ID>SwallowedException:PortForward.kt$LocalForwarder$e: IOException</ID>
+    <ID>SwallowedException:PortForwards.kt$PortForwards$e: BindException</ID>
+    <ID>SwallowedException:Repositories.kt$RemoteSessionRepository$e: Exception</ID>
+    <ID>SwallowedException:Repositories.kt$SessionRepository$e: Exception</ID>
+    <ID>SwallowedException:SessionDetailViewModel.kt$SessionDetailViewModel$e: Exception</ID>
+    <ID>SwallowedException:SessionsViewModel.kt$SessionsViewModel$e: Exception</ID>
+    <ID>SwallowedException:ShareAndroid.kt$ShareFiles$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:Commands.kt$Commands$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:CompanionLink.kt$CompanionLink$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ConnectionManager.kt$ConnectionManager$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ConnectionManager.kt$ConnectionManager$re: Exception</ID>
+    <ID>TooGenericExceptionCaught:ContentSearch.kt$ContentSearch$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DshWeb.kt$DshWebViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FileStore.kt$FileStore$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:FileViewers.kt$SaveController$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FileViewers.kt$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FileViewers.kt$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:FilesViewModel.kt$FilesViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:HostRace.kt$HostRace$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ImageLightbox.kt$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:Loadable.kt$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PairingRepository.kt$DefaultPairingRepository$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PairingViewModel.kt$PairingViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PortForward.kt$LocalForwarder$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PortForwards.kt$PortForwards$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:Repositories.kt$RemoteSessionRepository$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:Repositories.kt$SessionRepository$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SessionDetailViewModel.kt$SessionDetailViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SessionToolsScreen.kt$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SessionsViewModel.kt$SessionsViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SettingsScreens.kt$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ShareAndroid.kt$ShareFiles$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StepUpGate.kt$StepUpGate$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:TerminalViewModel.kt$TerminalViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:UpdateManager.kt$UpdateManager$e: Exception</ID>
+    <ID>TooGenericExceptionThrown:StepUpGateTest.kt$StepUpGateTest$throw Exception("user cancelled")</ID>
+    <ID>UnusedParameter:NotificationRules.kt$NotificationEngine$name: String</ID>
+    <ID>UnusedParameter:Renderers.kt$ctx: RenderContext</ID>
+    <ID>UnusedParameter:SessionDetailScreen.kt$busy: String?</ID>
+    <ID>UnusedPrivateMember:LiveActivityChannel.kt$AndroidLiveUpdateChannel$private fun trackerIcon(agent: String): IconCompat</ID>
+    <ID>UnusedPrivateProperty:Dialogs.kt$val s = prompt.status</ID>
+    <ID>UnusedPrivateProperty:FilesViewModel.kt$FilesViewModel$attempt</ID>
+    <ID>UnusedPrivateProperty:ImageLightbox.kt$val density = LocalDensity.current</ID>
+    <ID>UseCheckOrError:AppContainer.kt$AppContainer$throw IllegalStateException("no step-up key")</ID>
+    <ID>UseCheckOrError:Fakes.kt$FakeSessionRepository$throw IllegalStateException("no detail")</ID>
+    <ID>UseCheckOrError:OfflineSnapshotTest.kt$OfflineSnapshotTest$throw IllegalStateException("backend unavailable")</ID>
+    <ID>UseCheckOrError:SessionListOrderTest.kt$SessionListOrderTest$throw IllegalStateException("backend unavailable")</ID>
+    <ID>VariableNaming:EdgeCasesTest.kt$NotificationEdgeTest$private val S = SessionSummary(id = "managed:1", agent = "claude_code", project = "app", title = "Fix bug", liveness = "live", status = "idle", control = "full", managed = true)</ID>
+    <ID>VariableNaming:NotificationTurnTest.kt$NotificationTurnTest$private val S = SessionSummary(id = "managed:1", agent = "claude_code", project = "app", title = "Fix bug", liveness = "live", status = "idle", control = "full", managed = true)</ID>
+  </CurrentIssues>
+</SmellBaseline>

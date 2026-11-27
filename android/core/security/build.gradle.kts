@@ -13,6 +13,14 @@ android {
         minSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    // Android Lint: findings already present are recorded in lint-baseline.xml; anything new fails
+    // the build (abortOnError). Regenerate with `./gradlew :core:security:updateLintBaseline` only when deliberately accepting.
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+        checkDependencies = false
+        lintConfig = rootProject.file("lint.xml")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

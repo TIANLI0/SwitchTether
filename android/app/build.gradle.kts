@@ -75,6 +75,14 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+    // Android Lint: findings already present are recorded in lint-baseline.xml; anything new fails
+    // the build (abortOnError). Regenerate with `./gradlew :app:updateLintBaseline` only when deliberately accepting.
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+        checkDependencies = false
+        lintConfig = rootProject.file("lint.xml")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
