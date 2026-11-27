@@ -120,3 +120,78 @@ Living log so work survives context limits. Newest entries at the bottom of each
   aborts if an expected test row isn't on screen. One unguarded dark-mode run opened a real session;
   those images were deleted, never copied into the repo.
 - Tests: 80 green (2 new Compose tests: attached session + task-first Home).
+
+## Performance (2026-11-27): Baseline Profile, Macrobenchmark, Compose stability
+- `:baselineprofile` (one `com.android.test` module, as in Android Studio's template) holds the
+  Baseline Profile generator and the Macrobenchmarks; `androidx.baselineprofile` 1.5.0,
+  benchmark-macro 1.5.0, uiautomator 2.4.1. `:app` applies the plugin with
+  `automaticGenerationDuringBuild = false`, so `assembleRelease` (CI) needs no device; the committed
+  profile is `app/src/release/generated/baselineProfiles/{baseline,startup}-prof.txt` and
+  `profileinstaller` installs it for sideloaded APKs. The plugin adds `nonMinifiedRelease` and
+  `benchmarkRelease` (debug-signed) variants to `:app`.
+- Journeys (`Journeys.kt`): cold start to Home; Sessions tab with the list flung down / up;
+  opening "Long benchmark conversation" and flinging back through it. They find elements by
+  Compose test tags (`home-list`, `session-list`, `event-list`), exposed to UiAutomator by
+  `testTagsAsResourceId` on the app root (semantics only). Not paired → only cold start runs.
+  Gestures keep clear of the floating navigation capsule / composer (a swipe starting on them
+  does not scroll the list).
+- Sandbox desktop for real data (nothing of the user's is read):
+  1. Start N idle processes (e.g. `sleep 86400 &` in Git Bash, Windows pid from `/proc/<pid>/winpid`).
+  2. `python -I android/baselineprofile/sandbox/gen_sessions.py <scratch>\claude-sb <winpids…>`
+     (24 live sessions; the first has 120 turns).
+  3. `CLAUDE_CONFIG_DIR=<scratch>\claude-sb CODEX_HOME=<scratch>\codex-sb dev_server.exe --port 47691
+     --data-dir <scratch>\ds-data` (`claude agents --json` reads the sandbox dir too).
+  4. On the emulator: install `app-benchmarkRelease.apk`, set the app locale
+     (`cmd locale set-app-locales io.github.tianli0.switchtether --locales zh-CN`), open the
+     printed link with `am start -a android.intent.action.VIEW -d '<link>'`, tap `pair`, then
+     `verify-done` (adb `input tap` from a `uiautomator dump`). The pairing survives reinstalls of
+     the debug-signed variants as long as Gradle does not uninstall them (flag below).
+- Emulator: own AVD (`st_perf_api37`, API 37 google_apis_playstore x86_64, scratch
+  `ANDROID_AVD_HOME`), `emulator -avd st_perf_api37 -port 5590 -no-window -gpu host`. Disable its
+  Bluetooth (`svc bluetooth disable`): a "Bluetooth keeps stopping" system dialog covered the app.
+- Commands (always pin the device; another session may own emulator-5554):
+  - Generate: `ANDROID_SERIAL=emulator-5590 ./gradlew :app:generateBaselineProfile
+    -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
+    -Pandroid.testInstrumentationRunnerArguments.class=io.github.tianli0.switchtether.baselineprofile.BaselineProfileGenerator`
+  - Benchmarks: `ANDROID_SERIAL=emulator-5590 ./gradlew :baselineprofile:connectedBenchmarkReleaseAndroidTest
+    -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
+    [-Pandroid.testInstrumentationRunnerArguments.class=…StartupBenchmarks]`; results in
+    `baselineprofile/build/outputs/connected_android_test_additional_output/`.
+  - Scroll benchmarks launch in `setupBlock` with `startupMode = null`: with `COLD` Macrobenchmark
+    kills the process after `setupBlock`, so the measured block started on the launcher.
+- Measured 2026-11-27 on that emulator (x86_64, the arm64-only APK; numbers are indicative only,
+  not a device): `StartupBenchmarks` timeToInitialDisplay median, 10 iterations each —
+  run 1: None 1129 ms, Partial(BaselineProfile) 1371 ms; run 2: None 1646 ms,
+  Partial(BaselineProfile) 1124 ms. Too noisy to claim a gain; measure on a phone.
+  TTID is the first frame, which on a cold start draws only the background while the pairing is
+  read from DataStore (`LOADING_SENTINEL` in App.kt), so it does not cover Home's content; the app
+  has no `reportFullyDrawn()`, so there is no timeToFullDisplay yet.
+  `ScrollBenchmarks` (5 iterations, frameDurationCpuMs P50/P90): sessions list None 43.9/57.6,
+  BaselineProfile 45.2/60.7; conversation None 43.8/69.9, BaselineProfile 58.2/78.2. Emulator
+  frame times are dominated by the emulator itself.
+- Compose compiler reports / metrics (off by default):
+  `./gradlew :app:compileReleaseKotlin -PcomposeCompilerReports=true --rerun` → `<module>/build/compose_compiler/`
+  (`app-composables.txt`: parameter stability per composable; `release/app-module.json`: totals).
+  Applies to every module with the Compose compiler plugin (root build.gradle.kts).
+- Stability findings and fixes (no visual or behaviour change):
+  - `RenderItem` and `SessionSummary` (from `:core:remote`, a plain JVM module without the Compose
+    compiler) were `unstable`, so with strong skipping they were compared by identity.
+    `AgentEventLog.renderItems()` builds new RenderItems on every event and the session list is
+    re-fetched as new objects, so every visible chat row (TimelineEventRow, UserMessage,
+    AssistantMessage, ToolCall, …) and every SessionRow recomposed on each streamed event /
+    refresh. `app/compose-stability.conf` (wired in app/build.gradle.kts) declares the immutable
+    `remote.protocol.*` models, `RenderItem` and kotlinx JSON elements stable; they are now
+    compared with `equals()`. Report: knownUnstableArguments 425 → 356, skippable composables
+    940 → 970; `TimelineRow.Event` became stable.
+  - `EventList` and `NewMessagesPill` rebuilt `chatRows(state)` (a copy of the whole timeline)
+    and counted its messages on every recomposition, and the detail state changes on each
+    composer keystroke (`draft`): now `remember(timeline, outgoing, typing)` / `remember(rows)`.
+  - `UserMessage` / `AssistantMessage` parsed `imageItems` from the event JSON on every
+    recomposition: now `remember(item.event)`.
+  - SessionsScreen: the group card's row list is `remember(grouped, expanded)`.
+  - Already fine: chat `items` have `key` and `contentType`; `RenderContext` is remembered and
+    `@Immutable`; Markdown parsing is remembered.
+- Gaps: each Sessions group (running / idle / history) is ONE lazy item holding all of its rows in
+  a GroupCard, so a long group composes every row at once and scrolling it is not lazy; fixing that
+  means splitting the card into per-row items (left for the planned file split). Benchmark numbers
+  above are emulator-only; no physical-device measurements yet.

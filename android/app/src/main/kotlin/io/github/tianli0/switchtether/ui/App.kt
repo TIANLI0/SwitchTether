@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.blur.LocalBackdrop
 import io.github.suqi8.coui.kmp.blur.LocalBlurEnabled
@@ -122,7 +123,8 @@ fun SwitchTetherRoot() {
             if (activity != null) container.stepUpGate.requests.collect { container.stepUpGate.handle(activity, it) }
         }
         // COUI pages sit on `surface` (light grey); cards use `surfaceContainer`.
-        Box(Modifier.fillMaxSize().background(pageContainerColor())) {
+        // testTagsAsResourceId: UiAutomator (the :baselineprofile journeys) finds elements by test tag.
+        Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }.background(pageContainerColor())) {
             when {
                 desktop === LOADING_SENTINEL -> Unit // first DataStore read (a few ms): draw background only
                 desktop == null || pending != null -> OnboardingScreen(revokedReason = (conn as? ConnectionState.Revoked)?.let { it.reason to it.desktopName })

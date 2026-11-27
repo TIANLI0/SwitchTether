@@ -236,11 +236,13 @@ fun SessionsContent(
                                 // One row per conversation: resumed / continued sessions fold under the newest one.
                                 val grouped = androidx.compose.runtime.remember(list) { io.github.tianli0.switchtether.domain.SessionGrouping.group(list) }
                                 GroupCard(Modifier.animateItem()) {
-                                    val rows = buildList<Pair<io.github.tianli0.switchtether.remote.protocol.SessionSummary?, io.github.tianli0.switchtether.domain.SessionGroup>> {
-                                        grouped.forEach { g ->
-                                            add(g.primary to g)
-                                            if (g.others.isNotEmpty()) add(null to g) // fold toggle
-                                            if (g.primary.id in expanded) g.others.forEach { add(it to g) }
+                                    val rows = androidx.compose.runtime.remember(grouped, expanded) {
+                                        buildList<Pair<io.github.tianli0.switchtether.remote.protocol.SessionSummary?, io.github.tianli0.switchtether.domain.SessionGroup>> {
+                                            grouped.forEach { g ->
+                                                add(g.primary to g)
+                                                if (g.others.isNotEmpty()) add(null to g) // fold toggle
+                                                if (g.primary.id in expanded) g.others.forEach { add(it to g) }
+                                            }
                                         }
                                     }
                                     rows.forEachIndexed { i, (s, g) ->

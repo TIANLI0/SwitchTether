@@ -176,7 +176,7 @@ private fun OutputBlock(eventId: String, text: String, truncated: Boolean, isErr
 @Composable
 fun UserMessage(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
-    val imageItems = d["imageItems"].arr().orEmpty().mapNotNull { it.obj() }
+    val imageItems = remember(item.event) { d["imageItems"].arr().orEmpty().mapNotNull { it.obj() } }
     val cleaned = remember(item.event) { InjectedText.clean(d.str("text").orEmpty()) }
     val text = cleaned.text
     // IDE context (opened file / selected lines): desktop-provided, else recovered from old events.
@@ -284,7 +284,7 @@ fun AttachmentNames(files: List<Pair<String, String?>>, onOpen: ((String) -> Uni
 @Composable
 fun AssistantMessage(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
-    val imageItems = d["imageItems"].arr().orEmpty().mapNotNull { it.obj() }
+    val imageItems = remember(item.event) { d["imageItems"].arr().orEmpty().mapNotNull { it.obj() } }
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             io.github.tianli0.switchtether.ui.common.AgentBadge(ctx.agent, size = 24.dp)

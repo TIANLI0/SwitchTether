@@ -34,6 +34,8 @@ include(":app")
 include(":core:remote")
 include(":core:security")
 include(":core:ui")
+// Baseline Profile generator + Macrobenchmarks for :app (android/DEV_NOTES.md "Performance").
+include(":baselineprofile")
 
 // COUI17 (github.com/TIANLI0/COUI17) as a git submodule, built from source at the pinned commit;
 // see third_party/coui17/UPSTREAM.md. Run `git submodule update --init` after cloning.

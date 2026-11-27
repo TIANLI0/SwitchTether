@@ -104,7 +104,7 @@ fun rememberFollowState() = androidx.compose.runtime.saveable.rememberSaveable(
 /** Wires [listState] to [follow]; call once per list. [sendTick] changes on every send. */
 @Composable
 fun FollowBottomEffects(listState: LazyListState, follow: FollowState, rows: List<TimelineRow>, sendTick: Int) {
-    val messages = rows.count { it.isMessage() }
+    val messages = remember(rows) { rows.count { it.isMessage() } }
     val messagesNow by rememberUpdatedState(messages)
     val atEnd by remember { derivedStateOf { !listState.canScrollForward } }
     // Moving the viewport UP (finger, fling, TalkBack / programmatic scroll) stops following;
@@ -219,7 +219,8 @@ private const val SEND_SETTLE_FRAMES = 15
 @Composable
 fun BoxScope.NewMessagesPill(listState: LazyListState, follow: FollowState, rows: List<TimelineRow>, bottomInset: androidx.compose.ui.unit.Dp = 0.dp) {
     val scope = rememberCoroutineScope()
-    val newCount = (rows.count { it.isMessage() } - follow.baseMessages).coerceAtLeast(0)
+    val messages = remember(rows) { rows.count { it.isMessage() } }
+    val newCount = (messages - follow.baseMessages).coerceAtLeast(0)
     AnimatedVisibility(
         visible = !follow.following,
         enter = fadeIn() + scaleIn(initialScale = 0.9f),
