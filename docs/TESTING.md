@@ -44,6 +44,9 @@ cargo run -p switchtether-core --example managed_smoke -- claude haiku
 SMOKE_INTERRUPT=1 SMOKE_PROMPT="Use the Bash tool to run exactly: sleep 40 && mkdir late_dir . Then reply DONE." \
   cargo run -p switchtether-core --example managed_smoke -- claude haiku
 CODEX_HOME=/tmp/isolated-codex cargo run -p switchtether-core --example managed_smoke -- codex
+# Google Antigravity (signed-in agy): new / options / stop + resume / interrupt through the hub;
+# with AGY_SMOKE_APPROVAL_BIN (a wrapper running `agy.exe %* --gemini_dir=<empty scratch dir>`) also an approval.
+cargo run -p switchtether-core --example agy_smoke -- claude-sonnet-5-5 low
 ```
 
 Never point a test Codex app-server at a `CODEX_HOME` used by a running Codex Desktop of a

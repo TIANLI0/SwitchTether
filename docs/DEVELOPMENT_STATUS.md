@@ -968,7 +968,29 @@ on this machine, the phone UI on a device.
   tests (new `AgyAppsTest`, `AgentBadgeTest` renders the agy badge). Not verified against a real
   Antigravity installation or account: the fast quota path, `agy models` through the Remote API and
   searching real Antigravity trajectories were not exercised (no sandboxed agy login on this machine).
-- Not supported, and why: starting, continuing or controlling Antigravity sessions (no managed
-  adapter; agy exposes no control protocol SwitchTether uses), so no live view, approvals, model /
-  effort changes or permission modes for agy, and the phone's model picker is never shown for it
-  (it belongs to the new-session launcher and running sessions).
+- Not supported at the time, and why: starting, continuing or controlling Antigravity sessions
+  (superseded by the next section: agy has an ACP server).
+
+## Google Antigravity sessions from the phone (2026-11-27, branch `dev/upstream-v4.0.43-agy`)
+
+- Research (docs/AGY_REMOTE.md): agy 1.5.9 ships an Agent Client Protocol server (`agy acp`,
+  JSON-RPC over stdio) with sessions (`new`, `resume`, `load`, `list`, `close`), streamed updates,
+  cancel, permission requests, config options (model, thinking level, mode) and modes. Recorded
+  with eight short real runs in scratch directories; the redacted recordings are test fixtures.
+- Core: `agents/agy` — `ManagedAgy` (ACP client, `ManagedSession`), `AcpMapper` (updates → generic
+  event kinds), `agy models` reader, model grouping (tiers → model + thinking levels) and
+  resolution, agy permission modes (`default`, `acceptEdits`, `auto`, `plan`), session tools
+  (`commands`, `permission_mode`, `context_usage`). Hub: `POST /v1/sessions {agent: "agy"}`, continue
+  (`session/resume`, history preloaded, `continued` row), resume on send (model / level / mode carried
+  over), `agy` / `managed` row in the capability matrix, feature `managed_agy`.
+- Android: Antigravity tab in the new-session launcher (only when the desktop lists `managed_agy`),
+  thinking levels for the model picker before the desktop's list arrives, a localized "continue on
+  phone" reason, Antigravity in the notification mute list. Event rendering is unchanged (generic kinds).
+- Verified against real agy (Claude Sonnet 5.5 through agy): new session with model / level / mode,
+  live answer and tool calls, live model and level change, mode change, session tools, stop and
+  resume under the same id with the earlier turn remembered, interrupt, approval (isolated
+  `--gemini_dir`) with first answer wins; the conversation is in agy's own history. Unit tests
+  replay the recordings through the mapper and through the adapter against a fake agy.
+- Not verified: Gemini model answers (Google's API refused the machine's region), image prompts,
+  ACP `plan` / thought updates (not sent in these runs), the phone UI on a device, macOS / Linux,
+  CC Switch API-key profile conversations.

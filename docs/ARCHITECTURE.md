@@ -65,7 +65,8 @@ from the CC Switch database so upstream schema migrations never interact with it
 - `agents/` — `AgentHub` merges live Claude sessions, managed sessions and CC Switch's session
   index; per-session `SessionLog` (seq, in-place updates, bounded payload store); transcript
   tailers; `ManagedSession` trait with `ManagedClaude` (stream-json control protocol) and
-  `ManagedCodex` (own `codex app-server`).
+  `ManagedCodex` (own `codex app-server`), `ManagedDsh` / `ManagedAgy` (ACP servers `dsh --profile acp`,
+  `agy acp`; docs/AGY_REMOTE.md).
 
 ### 2.3 Lifecycle
 - Remote access is **on by default** for new installs (no `remote/config.json` yet); turning it

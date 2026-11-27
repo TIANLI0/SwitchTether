@@ -175,11 +175,24 @@ conversation resolves to the attached session.
 History from CC Switch's session index is shown read-only (`readHistory: PARTIAL`, plain
 role/text). No live control.
 
-Google Antigravity (`agy`) is one of these: its conversations (JSONL transcripts and trajectory
-databases) are read with CC Switch's parser and are also covered by content search; quota comes
-from the desktop's signed-in Antigravity account and the models endpoint from `agy models`. No live
-view, no control and no continue (capability matrix `agy` / `cli`). Not yet exercised against a real
-Antigravity installation through the Remote API.
+Google Antigravity (`agy`) history is read the same way (JSONL transcripts and trajectory
+databases through CC Switch's parser, also covered by content search); unlike the others it can be
+started and continued from the phone, see the next section.
+
+### Google Antigravity (`agy`)
+
+Details and evidence: [AGY_REMOTE.md](AGY_REMOTE.md). agy 1.5.9, Windows, signed-in account.
+
+| Capability | Status | How |
+|---|---|---|
+| History / search of the user's conversations | PARTIAL | CC Switch's parser (role and text only); no live view of an Antigravity window (agy offers no interface to watch one) |
+| Managed sessions: new, send, live events, interrupt | VERIFIED — real agy through the hub (`examples/agy_smoke.rs`): answer streamed, tool calls, cancel mid-answer → `interrupted` | SwitchTether's own `agy acp` process (Agent Client Protocol v1, stdio): `session/new`, `session/prompt`, `session/cancel`; the user's normal agy login and settings, nothing written |
+| Continue a conversation (`resumeFrom`, or a message to history) | VERIFIED — stopped run resumed under the same `agy:<id>`, the answer used the earlier turn | `session/resume` in a new `agy acp`; history preloaded from CC Switch's parser; a `continued` row says that an Antigravity window still showing it does not see the new turns. Conversations of CC Switch API-key profiles (private `--gemini_dir`) are not covered |
+| Approvals | VERIFIED — permission request (agy with default permission settings in an isolated `--gemini_dir`) approved from the phone path, second answer `409` | `session/request_permission` → `approval_request`; agy asks only where its own permission settings say so (`toolPermission: always-proceed` asks nothing) |
+| Model / thinking level / mode | VERIFIED — set at start and changed while running | `session/set_config_option` (`model`, `thought_level`), `session/set_mode` (`default`, `accept-edits`, `auto`, `plan`); agy keeps none of them with the conversation |
+| Questions | BLOCKED | ACP has no question request; agy asks in its answer |
+| Images | UNTESTED | ACP `image` prompt blocks (agy advertises image prompts) |
+| Answers of Gemini models | not verified | Google's API refused the test machine's region (`FAILED_PRECONDITION … User location is not supported`); shown as agy's answer text. Claude Sonnet 5.5 through agy was used |
 
 ## 8. What would unblock in-place takeover
 

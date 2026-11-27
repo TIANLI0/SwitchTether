@@ -247,10 +247,13 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   It is an ordinary conversation of the agent, created the official way, and its **id is the agent's own conversation id**:
   `claude:<uuid>` (Claude Code gets `--session-id <uuid>`; its transcript is Claude Code's own
   `~/.claude/projects/<dir>/<uuid>.jsonl`, listed by `claude --resume` and the IDE's history), `codex:<thread id>`,
-  `dsh:<session id>`. The same id names the conversation as history after the process ends or the desktop restarts.
+  `dsh:<session id>`, `agy:<session id>` (Google Antigravity through its ACP server `agy acp`, feature `managed_agy`;
+  see [AGY_REMOTE.md](AGY_REMOTE.md); the conversation is agy's own and stays in its history). The same id names the
+  conversation as history after the process ends or the desktop restarts.
   `effort`: Claude Code `low|medium|high|xhigh|max` (`--effort`), Codex `none|minimal|low|medium|high|xhigh`
-  (`turn/start` `effort`); `model` and `effort` are validated (plain names only).
-  With `resumeFrom` (an existing `claude:`/`codex:` session) it **continues that conversation** ("接续会话"):
+  (`turn/start` `effort`), Antigravity `low|medium|high|xhigh` (its `thought_level` session option; a level the chosen
+  model does not offer is `422`); `model` and `effort` are validated (plain names only).
+  With `resumeFrom` (an existing `claude:`/`codex:`/`dsh:`/`agy:` session) it **continues that conversation** ("接续会话"):
   `mode: "continue"` (default) keeps the same session/thread id; `mode: "fork"` (Claude only) starts a fork. `cwd` defaults
   to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
   while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
@@ -260,15 +263,19 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   readOnly | untrusted | bypassPermissions` — `default` = workspace-write + `on-request`, `plan` = collaboration mode
   `plan` on each `turn/start`, `auto` = `approvalsReviewer: "auto_review"`, `readOnly` = read-only sandbox, `untrusted` =
   approval policy `untrusted`, `bypassPermissions` = `danger-full-access` + `never` ("full access"). Codex also accepts
-  `on-request` / `acceptEdits` (= `default`), `read-only`, `never` / `danger-full-access`. An unknown mode is `422`.
+  `on-request` / `acceptEdits` (= `default`), `read-only`, `never` / `danger-full-access`. Antigravity `default |
+  acceptEdits | auto | plan` (agy's ACP session modes `default`, `accept-edits`, `auto`, `plan`, `session/set_mode`; agy's
+  own spelling `accept-edits` is accepted; no full-access mode). An unknown mode is `422`.
   **`bypassPermissions` (any spelling) needs the `terminal` step-up grant** (`403 step_up_required`, `details.scope:
   "terminal"`) here, in `POST …/options` and in the `permission_mode` session tool: it is as powerful as a remote
   terminal. Managed Claude Code processes start with `--allow-dangerously-skip-permissions` (not as root, which Claude
   Code refuses) so the mode can be chosen mid-session; nothing is skipped until it is.
 - `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}], attachments?: [attachmentId]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event; fixture `send_message_attachments.json`).
-  Feature `resume_on_send`: a Claude Code / Codex / dsh conversation that is **not running anywhere** (history, or a run that
-  ended, e.g. with a desktop restart) takes messages too: the desktop first resumes it the official way (`claude --resume <id>`,
-  `thread/resume`, `session/resume`) under the same id, then delivers the message. Such sessions advertise
+  Feature `resume_on_send`: a Claude Code / Codex / dsh / Antigravity conversation that is **not running anywhere** (history,
+  or a run that ended, e.g. with a desktop restart) takes messages too: the desktop first resumes it the official way (`claude
+  --resume <id>`, `thread/resume`, `session/resume`) under the same id, then delivers the message. Antigravity keeps no model,
+  level or mode with a conversation: a run that ended in this desktop process passes its own on, otherwise agy's default
+  applies. Such sessions advertise
   `sendMessage: "PARTIAL"` with `approve`/`interrupt` `BLOCKED` until they run. A session live in a window on the computer is
   never resumed implicitly (observe-only; `continueSession` explains the explicit way).
 - `POST /v1/sessions/{id}/options` `{commandId, model?, effort?, permissionMode?}` (feature `session_options`, fixture
@@ -278,7 +285,9 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   `set_permission_mode` control requests (as the Agent SDK and the VS Code extension; in an attached panel they go through
   switchtether-shim, and changes made in the IDE are followed); Codex: sent with the next `turn/start` (`model`, `effort`,
   `approvalPolicy`, `sandboxPolicy`, `approvalsReviewer`, `collaborationMode`), which Codex keeps for the following turns;
-  `thread/settings/updated` (also from Codex Desktop) updates what the detail shows. Answers the updated `SessionSummary`.
+  `thread/settings/updated` (also from Codex Desktop) updates what the detail shows; Antigravity: ACP
+  `session/set_config_option` (`model`, `thought_level`) and `session/set_mode`, applied at once (`""`/`default` keeps the
+  current model: agy has no "default" value to return to). Answers the updated `SessionSummary`.
   `409` when the session is not running anywhere and cannot be resumed, `422 capability_unavailable` for sessions owned by
   a window SwitchTether does not control (observed ones, mirrored terminals) and for dsh.
   Advertised per session as `capabilities.changeModel`: `PARTIAL` where this request is accepted, `BLOCKED` (with
@@ -557,7 +566,9 @@ line dsh printed (or works directly when the WebView still holds a valid cookie)
   "features": ["terminal", "files", "git", "providers", "usage", "mcp", "skills", "prompts", "managed_sessions"] }
 ```
 
-Further features: `push_wake` (§7.12), `session_search` (§7.13), `dsh_web` (§7.14).
+Further features: `push_wake` (§7.12), `session_search` (§7.13), `dsh_web` (§7.14), `managed_agy` (the desktop starts
+and continues Google Antigravity sessions, `POST /v1/sessions {agent: "agy"}`; the phone offers Antigravity in its launcher
+only when this is listed).
 
 Session-level `capabilities` override the agent defaults (e.g. a managed session has
 `sendMessage: "VERIFIED"`).
@@ -593,7 +604,7 @@ Session-level `capabilities` override the agent defaults (e.g. a managed session
 and `"pendingRequests": [AgentEvent]` (open approvals/questions).
 
 Session ids are opaque; the prefix is informative only. Sessions SwitchTether starts use the agent's own conversation id
-(`claude:<uuid>`, `codex:<thread>`, `dsh:<id>`), so one conversation keeps one id across process restarts; desktops before
+(`claude:<uuid>`, `codex:<thread>`, `dsh:<id>`, `agy:<id>`), so one conversation keeps one id across process restarts; desktops before
 this change used `managed:<random>` ids that disappeared with the process.
 
 ### 10.2 AgentEvent
@@ -668,9 +679,12 @@ this change used `managed:<random>` ids that disappeared with the process.
     `isSynthetic`, transcript `isMeta`); the summary a `/compact` leaves is a `system` `compact_summary`.
   - **Models** (`GET /v1/agents/{agent}/models?session=`): the agent's own list — from the running session, else read by a
     short SwitchTether-owned probe (Claude Code `initialize` with no MCP servers, Codex app-server `model/list`; no
-    message, no conversation) and cached 30 min. Antigravity (`agy`): the signed-in CLI's own list (`agy models`, as
-    the desktop's provider form reads it; nothing is written), ids being agy's display names, no effort levels and no
-    permission modes; there is no running Antigravity session to ask (history only). With an official list the built-in aliases are not added, hidden Codex
+    message, no conversation) and cached 30 min. Antigravity (`agy`): the signed-in CLI's own list (`agy models`, nothing
+    written; a running session answers from its ACP `availableModels`), its tiered ids (`gemini-4-neon-high` "Gemini 4 Neon
+    (High)") grouped into one model per base id with its thinking levels as `efforts` (fixture `model_options_agy.json`);
+    `efforts` `low|medium|high|xhigh`, `permissionModes` agy's four modes. When the desktop cannot run `agy` itself the
+    desktop's own list is served (display names as ids, no levels). A model is accepted as the grouped id (+ effort), a
+    tiered id or a display name. With an official list the built-in aliases are not added, hidden Codex
     models are left out, and a model without effort levels has `efforts: []`. `source`: `agent` | `builtin`.
   - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
     when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`, Codex thread settings);
@@ -679,6 +693,11 @@ this change used `managed:<random>` ids that disappeared with the process.
     next message resumes the conversation in a process SwitchTether starts, **under the same session id** (the
     `attached:` key is taken over), so the page the phone has open keeps following it. A session running in a window
     SwitchTether does not control stays observe-only (`capability_unavailable`).
+  - **Antigravity session tools** (an `agy acp` session SwitchTether runs; detail `sessionTools: ["commands",
+    "permission_mode", "context_usage"]`): `commands` lists what agy reported (`available_commands_update`: its slash
+    commands and skills; a command is sent as the text `/name args`), `permission_mode` is `session/set_mode`,
+    `context_usage` comes from the last `usage_update` (`used` of `size`, no categories). Approvals are agy's
+    `session/request_permission` (options `allow` / `deny`; first answer wins); ACP has no question request.
   - **Codex session tools** (a Codex thread SwitchTether runs or one attached from Codex Desktop; detail `sessionTools:
     ["commands", "permission_mode", "context_usage", "mcp_status", "rename"]`): the same `POST …/claude/{action}` paths
     and reply shapes as Claude Code's. `commands` lists Codex's own commands (`compact`, `review`, `goal`, `plan`,
