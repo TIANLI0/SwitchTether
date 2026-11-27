@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.BasicTextField
@@ -56,6 +55,7 @@ import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUITheme
+import io.github.tianli0.coui17.patterns.ComposerFieldShape
 import io.github.tianli0.coui17.patterns.ComposerKey
 import io.github.tianli0.coui17.patterns.ComposerKeyGap
 import io.github.tianli0.coui17.patterns.ComposerKeySize
@@ -258,7 +258,7 @@ fun DraftInputPill(
             Modifier
                 .weight(1f)
                 .heightIn(min = ComposerKeySize)
-                .glassSurface(RoundedCornerShape(ComposerKeySize / 2), halo = true)
+                .glassSurface(ComposerFieldShape)
                 .padding(horizontal = 16.dp, vertical = 9.dp),
             contentAlignment = Alignment.CenterStart,
         ) {

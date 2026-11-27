@@ -49,6 +49,9 @@ import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
+import io.github.suqi8.coui.kmp.input.couiLongPressSelection
+import io.github.suqi8.coui.kmp.input.couiLongPressSelectionItem
+import io.github.suqi8.coui.kmp.input.rememberCOUILongPressSelectionState
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.ConnectionManager
@@ -520,23 +523,26 @@ fun PermissionModeOptions(
 ) {
     val ids = modes.map { it.id }.ifEmpty { ClaudeTools.PERMISSION_MODES }
     var confirm by remember { mutableStateOf<String?>(null) }
-    GroupCard {
+    val selection = rememberCOUILongPressSelectionState()
+    GroupCard(Modifier.couiLongPressSelection(selection)) {
         ids.forEachIndexed { i, mode ->
+            val choose = {
+                if (enabled && pending == null && mode != (current ?: "default")) {
+                    if (isDangerousPermissionMode(mode, modes)) confirm = mode else onSelect(mode)
+                }
+            }
             io.github.suqi8.coui.kmp.preference.RadioButtonPreference(
                 title = permissionModeLabel(mode, agent),
                 summary = permissionModeSummary(mode, agent, modes.firstOrNull { it.id == mode }?.description),
-                selected = (current ?: "default") == mode,
-                onClick = {
-                    if (pending == null && mode != (current ?: "default")) {
-                        if (isDangerousPermissionMode(mode, modes)) confirm = mode else onSelect(mode)
-                    }
-                },
+                selected = (selection.previewKey ?: (current ?: "default")) == mode,
+                onClick = choose,
                 enabled = enabled && pending == null,
                 startAction = if (pending == mode) {
                     { RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp, modifier = Modifier.padding(end = 10.dp)) }
                 } else null,
                 cardListPosition = cardListPositionOf(i, ids.size),
-                modifier = Modifier.testTag("perm-$mode"),
+                modifier = Modifier.testTag("perm-$mode")
+                    .couiLongPressSelectionItem(selection, mode, enabled && pending == null, choose),
             )
         }
     }

@@ -1,5 +1,9 @@
 package io.github.tianli0.switchtether
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -22,6 +26,7 @@ import io.github.tianli0.switchtether.remote.session.AgentEventLog
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.onboarding.OnboardingContent
 import io.github.tianli0.switchtether.ui.onboarding.PairingUiState
+import io.github.tianli0.switchtether.ui.sessions.EffortSlider
 import io.github.tianli0.switchtether.ui.sessions.SessionDetailContent
 import io.github.tianli0.switchtether.ui.sessions.SessionDetailState
 import io.github.tianli0.switchtether.ui.sessions.render.AgentEventRegistry
@@ -140,6 +145,25 @@ class ComposeScreensTest {
         onboarding(PairingUiState.Done(PairingResult(TEST_DESKTOP, serverCode = "111111", localCode = "222222", stepUpEnabled = false)))
         rule.onNodeWithTag("verify-done").assertIsNotEnabled()
         rule.onNodeWithText("The code reported by the desktop differs", substring = true).assertExists()
+    }
+
+    @Test
+    fun effortTrackTapsCommitTheNearestStopOnce() {
+        val selected = mutableStateOf("")
+        val commits = mutableListOf<String>()
+        rule.setContent {
+            SwitchTetherTheme {
+                EffortSlider(listOf("low", "medium", "high"), selected.value, onEffort = {
+                    selected.value = it
+                    commits += it
+                })
+            }
+        }
+
+        val slider = rule.onNodeWithTag("effort-slider")
+        slider.performTouchInput { click(Offset(width * 0.34f, centerY)) }
+        slider.performTouchInput { click(Offset(width * 0.96f, centerY)) }
+        rule.runOnIdle { assertEquals(listOf("low", "high"), commits) }
     }
 
     private fun renderCtx(approve: CapStatus) = RenderContext(

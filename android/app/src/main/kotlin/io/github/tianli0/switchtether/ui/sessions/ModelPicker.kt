@@ -1,13 +1,10 @@
 package io.github.tianli0.switchtether.ui.sessions
 
 import io.github.tianli0.coui17.patterns.PageDefaults
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.pointerInput
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.tianli0.coui17.patterns.LinkButton
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +15,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import io.github.suqi8.coui.kmp.basic.Slider
+import io.github.suqi8.coui.kmp.basic.SliderDefaults
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
 import io.github.tianli0.coui17.patterns.GroupCard
@@ -206,8 +204,6 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
             Text(stringResource(R.string.effort_title), style = COUITheme.textStyles.body1, color = COUITheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
             Text(effortLabel(stops[index]), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.primary)
         }
-        // Where the stops are: inside the track's rounded ends (half the slider's height).
-        var stopInset by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
         Slider(
             value = pos,
             onValueChange = { pos = it },
@@ -224,19 +220,6 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 6.dp)
-                .onSizeChanged { stopInset = (it.height / 2f).coerceAtMost(it.width / 4f) }
-                // The slider itself only follows a drag: a tap lands on the nearest stop.
-                .pointerInput(stops, enabled) {
-                    if (!enabled) return@pointerInput
-                    detectTapGestures { offset ->
-                        val w = size.width.toFloat()
-                        if (w <= 0f || stops.size < 2) return@detectTapGestures
-                        // The stops sit inside the track's rounded ends (half the track height).
-                        val inset = (size.height / 2f).coerceAtMost(w / 4f)
-                        val f = ((offset.x - inset) / (w - 2 * inset)).coerceIn(0f, 1f)
-                        pick((f * stops.lastIndex).roundToInt().coerceIn(0, stops.lastIndex))
-                    }
-                }
                 .testTag("effort-slider"),
         )
         androidx.compose.ui.layout.Layout(
@@ -260,8 +243,9 @@ fun EffortSlider(efforts: List<String>, effort: String, onEffort: (String) -> Un
             val w = constraints.maxWidth
             val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, maxWidth = (w / stops.size.coerceAtLeast(1)) * 2)) }
             val h = placeables.maxOfOrNull { it.height } ?: 0
+            val stopInset = SliderDefaults.HorizontalTrackInset.toPx().coerceAtMost(w / 2f)
             layout(w, h) {
-                val span = (w - 2 * stopInset).coerceAtLeast(0f)
+                val span = w - 2 * stopInset
                 placeables.forEachIndexed { i, pl ->
                     val centre = stopInset + if (stops.size > 1) span * i / stops.lastIndex else span / 2f
                     // Centred under its stop, kept inside the card at both ends.
