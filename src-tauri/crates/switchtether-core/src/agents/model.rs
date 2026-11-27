@@ -57,6 +57,11 @@ pub struct SessionSummary {
     /// Mirrored terminal of a session running in a terminal window (`st-claude`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
+    /// Sub-agents and background tasks (shells, background agents) still running in a live
+    /// session. A session whose turn ended (`idle`) with work still going on is not idle for
+    /// lists. Absent when unknown (ended sessions, observed sessions whose log is not loaded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_tasks: Option<u32>,
     #[serde(skip)]
     pub source_path: Option<String>,
 }
@@ -333,6 +338,25 @@ pub fn diff_stats(diff: &str) -> (u32, u32) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn session_summary_fixture_active_tasks() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../protocol/fixtures/session_summary.json");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let busy: SessionSummary = serde_json::from_value(v["idleWithTasks"].clone()).unwrap();
+        assert_eq!(busy.status, "idle");
+        assert_eq!(busy.active_tasks, Some(2));
+        // Round trip keeps the field.
+        assert_eq!(serde_json::to_value(&busy).unwrap()["activeTasks"], 2);
+        // A desktop that does not know the field: absent, and not written back.
+        let old: SessionSummary = serde_json::from_value(v["olderDesktop"].clone()).unwrap();
+        assert_eq!(old.active_tasks, None);
+        assert!(serde_json::to_value(&old)
+            .unwrap()
+            .get("activeTasks")
+            .is_none());
+    }
 
     #[test]
     fn categories_and_titles() {

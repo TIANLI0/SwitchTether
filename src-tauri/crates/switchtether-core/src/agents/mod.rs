@@ -526,6 +526,7 @@ impl AgentHub {
                 pid: None,
                 managed: false,
                 terminal_id: terminal.then(String::new),
+                active_tasks: None,
                 source_path: None,
             };
             attached_caps(&s)
@@ -668,6 +669,8 @@ impl AgentHub {
             pid: None,
             managed: m.origin() == "managed",
             terminal_id: m.terminal_id(),
+            active_tasks: (m.liveness() == Liveness::Live)
+                .then(|| active_task_count(&m.log().lock())),
             source_path: None,
         }
     }
@@ -714,8 +717,18 @@ impl AgentHub {
             .map(|d| d.as_millis() as i64)
             .unwrap_or_else(crate::util::now_ms);
         let title = transcript.as_deref().and_then(|p| self.claude_title(p));
+        // Only from a log that is already loaded and followed (open on the phone, or its Agent
+        // map polled): a transcript is never parsed just to list sessions.
+        let id = format!("claude:{}", l.session_id);
+        let loaded_log = self
+            .loaded
+            .lock()
+            .get(&id)
+            .filter(|x| x.tail.is_some())
+            .map(|x| x.log.clone());
+        let active_tasks = loaded_log.map(|log| active_task_count(&log.lock()));
         Some(SessionSummary {
-            id: format!("claude:{}", l.session_id),
+            id,
             agent: "claude_code".into(),
             origin: l.origin(),
             native_id: l.session_id.clone(),
@@ -734,6 +747,7 @@ impl AgentHub {
             pid: l.pid,
             managed: false,
             terminal_id: None,
+            active_tasks,
             source_path: transcript.map(|p| p.to_string_lossy().into_owned()),
         })
     }
@@ -835,6 +849,7 @@ impl AgentHub {
                 pid: None,
                 managed: false,
                 terminal_id: None,
+                active_tasks: None,
                 source_path: s.source_path.clone(),
             });
         }
@@ -1072,6 +1087,7 @@ impl AgentHub {
             pid: None,
             managed: false,
             terminal_id: None,
+            active_tasks: None,
             source_path: Some(path.to_string_lossy().into_owned()),
         })
     }
@@ -2772,7 +2788,7 @@ impl AgentHub {
     ) {
         let hub = Arc::downgrade(self);
         tokio::spawn(async move {
-            type ObservedState = (Option<String>, Option<String>, Option<String>);
+            type ObservedState = (Option<String>, Option<String>, Option<String>, Option<u32>);
             let mut prev: HashMap<String, ObservedState> = HashMap::new();
             // Since when a published session has been missing. Registry files are rewritten often and
             // a read can land mid-write, so one miss is not an exit (it showed up on phones as a
@@ -2843,6 +2859,7 @@ impl AgentHub {
                         l.status.clone(),
                         l.waiting_for.clone(),
                         summary.title.clone(),
+                        summary.active_tasks,
                     );
                     if prev.get(&id) != Some(&state) {
                         if !prev.contains_key(&id) {
@@ -2935,8 +2952,8 @@ impl AgentHub {
         let hub = Arc::downgrade(self);
         let mut rx = self.bus.subscribe();
         tokio::spawn(async move {
-            let mut last: HashMap<String, (String, Option<String>, Option<String>)> =
-                HashMap::new();
+            type RelayKey = (String, Option<String>, Option<String>, Option<u32>);
+            let mut last: HashMap<String, RelayKey> = HashMap::new();
             loop {
                 let frame = tokio::select! {
                     _ = cancel.cancelled() => break,
@@ -2947,13 +2964,21 @@ impl AgentHub {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,
                 };
+                // Sub-agent rows and background shells change `activeTasks`.
+                let background_call =
+                    frame.data.pointer("/data/background") == Some(&Value::Bool(true));
                 if frame.topic != "session.event"
-                    || !matches!(
+                    || !(matches!(
                         frame.data.get("kind").and_then(|k| k.as_str()),
                         Some(
-                            "status" | "approval_request" | "question" | "user_message" | "system"
+                            "status"
+                                | "approval_request"
+                                | "question"
+                                | "user_message"
+                                | "system"
+                                | "subagent"
                         )
-                    )
+                    ) || background_call)
                 {
                     continue;
                 }
@@ -2973,6 +2998,7 @@ impl AgentHub {
                             summary.status.clone(),
                             summary.waiting_for.clone(),
                             summary.title.clone(),
+                            summary.active_tasks,
                         );
                         if last.get(id) != Some(&key) {
                             last.insert(id.to_string(), key);
@@ -2987,6 +3013,7 @@ impl AgentHub {
                         summary.status.clone(),
                         summary.waiting_for.clone(),
                         summary.title.clone(),
+                        summary.active_tasks,
                     );
                     if last.get(id) != Some(&key) {
                         last.insert(id.to_string(), key);
@@ -3431,6 +3458,31 @@ fn agent_map_state(lg: &SessionLog) -> (HashMap<String, Value>, Vec<Value>) {
     (live, tasks)
 }
 
+/// Work still running in a session log: sub-agents whose row is `running` and background shells
+/// (`tool_call` with `background`) not finished yet. A managed Claude Code process also reports
+/// its background tasks (agents and shells) in the rolling status event (`backgroundTasks`, from
+/// stream-json `background_tasks_changed`); the larger of the two counts wins, as the same
+/// background agent shows up in both.
+fn active_task_count(lg: &SessionLog) -> u32 {
+    let running =
+        |e: &model::AgentEvent| e.data.get("status").and_then(Value::as_str) == Some("running");
+    let from_rows = lg
+        .iter()
+        .filter(|e| {
+            (e.kind == "subagent"
+                || (e.kind == "tool_call"
+                    && e.data.get("background").and_then(Value::as_bool) == Some(true)))
+                && running(e)
+        })
+        .count();
+    let reported = lg
+        .get("status:current")
+        .and_then(|e| e.data.get("backgroundTasks"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    u32::try_from(from_rows.max(reported)).unwrap_or(u32::MAX)
+}
+
 /// `subagent` rows of a session log as tree nodes; the parent is the nearest enclosing
 /// `subagent` row (a sub-agent started by a sub-agent).
 fn log_subagent_nodes(lg: &SessionLog) -> Vec<Value> {
@@ -3611,6 +3663,7 @@ fn dsh_summary_from_log(id: &str) -> Option<SessionSummary> {
         pid: None,
         managed: false,
         terminal_id: None,
+        active_tasks: None,
         source_path: Some(path.to_string_lossy().into_owned()),
     })
 }
@@ -4048,6 +4101,51 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["taskId"], "b9");
         assert_eq!(tasks[0]["status"], "running");
+    }
+
+    #[test]
+    fn active_task_count_counts_running_subagents_and_background_shells() {
+        let mut lg = SessionLog::new("claude:m", None);
+        let mut p = ClaudeParser::new();
+        let recs = [
+            json!({"type":"assistant","message":{"id":"m1","content":[
+                {"type":"tool_use","id":"toolu_a","name":"Agent","input":{"description":"Scan","prompt":"Look","subagent_type":"Explore","run_in_background":true}},
+                {"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"cargo build","run_in_background":true}},
+                {"type":"tool_use","id":"toolu_c","name":"Bash","input":{"command":"ls"}}]}}),
+            json!({"type":"system","subtype":"task_started","task_id":"a1","tool_use_id":"toolu_a","task_type":"local_agent","is_backgrounded":true}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"started"}]},"tool_use_result":{"stdout":"","backgroundTaskId":"b9"}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_c","content":"a.txt"}]}}),
+        ];
+        for r in &recs {
+            for d in p.feed(r) {
+                lg.upsert(d, false);
+            }
+        }
+        // One background agent, one background shell; the finished foreground Bash is not work.
+        assert_eq!(active_task_count(&lg), 2);
+        // The shell reports back.
+        for d in p.feed(
+            &json!({"type":"user","message":{"content":"<task-notification>
+<task-id>b9</task-id>
+<tool-use-id>toolu_b</tool-use-id>
+<status>completed</status>
+<summary>Background command \"cargo build\" completed (exit code 0)</summary>
+</task-notification>"}}),
+        ) {
+            lg.upsert(d, false);
+        }
+        assert_eq!(active_task_count(&lg), 1);
+        // A managed process reporting more background tasks (stream-json) than the log shows.
+        lg.upsert(
+            EventDraft::new(
+                "status:current",
+                "status",
+                "2026-11-27T00:00:00Z",
+                json!({"state":"idle","backgroundTasks":3}),
+            ),
+            false,
+        );
+        assert_eq!(active_task_count(&lg), 3);
     }
 
     #[test]

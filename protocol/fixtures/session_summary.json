@@ -1,0 +1,41 @@
+{
+  "idleWithTasks": {
+    "id": "claude:2b1c0f3e-0000-4000-8000-000000000001",
+    "agent": "claude_code",
+    "origin": "managed",
+    "nativeId": "2b1c0f3e-0000-4000-8000-000000000001",
+    "title": "Fix login bug",
+    "cwd": "D:/proj/app",
+    "project": "app",
+    "liveness": "live",
+    "status": "idle",
+    "waitingFor": null,
+    "control": "full",
+    "createdAtMs": 1731500000000,
+    "lastActiveAtMs": 1731503600000,
+    "model": "claude-sonnet-4-5",
+    "gitBranch": null,
+    "pid": null,
+    "managed": true,
+    "activeTasks": 2
+  },
+  "olderDesktop": {
+    "id": "codex:0199a1b2-0000-7000-8000-000000000002",
+    "agent": "codex",
+    "origin": "managed",
+    "nativeId": "0199a1b2-0000-7000-8000-000000000002",
+    "title": "Refactor parser",
+    "cwd": "/home/u/proj",
+    "project": "proj",
+    "liveness": "live",
+    "status": "idle",
+    "waitingFor": null,
+    "control": "full",
+    "createdAtMs": 1731500000000,
+    "lastActiveAtMs": 1731503600000,
+    "model": null,
+    "gitBranch": null,
+    "pid": null,
+    "managed": true
+  }
+}
