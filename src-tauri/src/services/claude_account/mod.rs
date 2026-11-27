@@ -722,6 +722,8 @@ fn auth_status(config_dir: &Path) -> Option<identity::AuthStatus> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
     let mut child = cmd.spawn().ok()?;
+    // SwitchTether: a helper process, not a session to show on the phone.
+    let _owned = switchtether_core::agents::owned_pids::OwnedPid::new(child.id());
     let started = std::time::Instant::now();
     loop {
         match child.try_wait() {

@@ -197,6 +197,8 @@ pub async fn start(
     let mut child = spawn
         .await
         .map_err(|error| AppError::Message(error.to_string()))??;
+    // SwitchTether: a helper process, not a session to show on the phone.
+    let owned = switchtether_core::agents::owned_pids::OwnedPid::new(child.id());
 
     let stdin = Arc::new(Mutex::new(child.stdin.take()));
     let cancel = Arc::new(AtomicBool::new(false));
@@ -232,6 +234,7 @@ pub async fn start(
         let last_line = Arc::clone(&last_line);
         std::thread::spawn(move || {
             let outcome = supervise(&mut child, &cancel, timeout);
+            drop(owned);
             exited.store(true, Ordering::SeqCst);
             // 关掉 stdin，读输出的线程会在管道关闭后结束
             stdin.lock_recover().take();

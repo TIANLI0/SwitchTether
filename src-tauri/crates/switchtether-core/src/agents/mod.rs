@@ -17,6 +17,7 @@ pub mod dsh;
 pub mod managed;
 pub mod model;
 pub mod model_probe;
+pub mod owned_pids;
 pub mod permission;
 pub mod search;
 pub mod store;
@@ -688,6 +689,10 @@ impl AgentHub {
     /// that has not been used yet (no transcript, idle): it often switches to a resumed
     /// conversation right after starting, so there is nothing to show yet.
     fn observed_live_summary(&self, l: &claude::live::LiveClaudeSession) -> Option<SessionSummary> {
+        // A helper SwitchTether started itself (`claude -p /usage`, model probe): not a session.
+        if l.pid.is_some_and(owned_pids::is_owned) {
+            return None;
+        }
         let cwd = l.cwd.clone();
         // The registry `name` is an auto-generated project slug ("myapp-3f"), not the task
         // title; the real title (`/rename` or Claude's generated one) lives in the transcript.

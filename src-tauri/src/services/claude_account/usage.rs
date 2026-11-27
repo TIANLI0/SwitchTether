@@ -111,6 +111,8 @@ fn run_usage(config_dir: Option<&Path>) -> Result<(), String> {
     let mut child = cmd
         .spawn()
         .map_err(|error| format!("无法启动 claude: {error}"))?;
+    // SwitchTether: Claude Code registers this helper in ~/.claude/sessions; keep it off the phone.
+    let _owned = switchtether_core::agents::owned_pids::OwnedPid::new(child.id());
     let started = Instant::now();
     loop {
         match child.try_wait() {
