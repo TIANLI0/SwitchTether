@@ -5,6 +5,32 @@ use tauri::Manager;
 static LIGHTWEIGHT_MODE: AtomicBool = AtomicBool::new(false);
 
 pub fn enter_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
+    enter(app, true)
+}
+
+/// 主窗口被关到托盘后释放它的 WebView（Windows 上只要还剩一个 WebView，WebView2 进程就都留着）。
+/// 与轻量模式同一套：销毁主窗口和收着的托盘面板，托盘 / 深链接 / 再次启动时重建。
+/// 不写进设置：下次启动照常按「静默启动」决定，只有用户自己选的轻量模式才跨重启保留。
+/// 在关闭事件回调里调用，先挪出当前调用栈再回主线程销毁；期间窗口又被唤回就不动它。
+pub fn release_main_window_after_close(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let Some(window) = handle.get_webview_window("main") else {
+                return;
+            };
+            if is_lightweight_mode() || window.is_visible().unwrap_or(false) {
+                return;
+            }
+            if let Err(e) = enter(&handle, false) {
+                log::warn!("关闭到托盘后释放主窗口失败: {e}");
+            }
+        });
+    });
+}
+
+fn enter(app: &tauri::AppHandle, persist: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         if let Some(window) = app.get_webview_window("main") {
@@ -26,7 +52,9 @@ pub fn enter_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
 
     LIGHTWEIGHT_MODE.store(true, Ordering::Release);
     crate::session_manager::cache::global().set_enabled(false);
-    persist_lightweight_mode(true);
+    if persist {
+        persist_lightweight_mode(true);
+    }
     // 托盘面板也是一个 WebView：收着的当场释放，开着的（在面板里点的轻量模式）收起时释放。
     crate::tray_panel::release_if_lightweight(app);
     crate::tray::refresh_tray_menu(app);

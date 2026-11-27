@@ -564,7 +564,9 @@ pub fn run() {
                     if window.label() == "main" && macos_tray_window::close_to_tray(window) {
                         return;
                     }
-                    tray::hide_main_to_tray(window);
+                    if tray::hide_main_to_tray(window) && window.label() == "main" {
+                        crate::lightweight::release_main_window_after_close(window.app_handle());
+                    }
                 } else {
                     api.prevent_close();
                     log::info!("关闭请求已处理：退出应用");
