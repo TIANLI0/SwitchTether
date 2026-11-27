@@ -41,7 +41,7 @@ class SessionListOrderTest {
     private val noManagement = java.lang.reflect.Proxy.newProxyInstance(
         ManagementRepository::class.java.classLoader, arrayOf(ManagementRepository::class.java),
     ) { _, m, _ ->
-        if (m.name == "getChanges") kotlinx.coroutines.flow.emptyFlow<String>() else throw IllegalStateException("backend unavailable")
+        when (m.name) { "getChanges" -> kotlinx.coroutines.flow.emptyFlow<String>(); "getQuotas", "getSummaries" -> kotlinx.coroutines.flow.MutableStateFlow(emptyMap<Any, Any>()); else -> throw IllegalStateException("backend unavailable") }
     } as ManagementRepository
 
     @Test

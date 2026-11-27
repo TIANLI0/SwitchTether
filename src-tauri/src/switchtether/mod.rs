@@ -99,6 +99,8 @@ pub fn setup_remote(app: &tauri::App) {
         }
         // Keep the shim used by enabled takeover hooks up to date.
         let _ = tokio::task::spawn_blocking(takeover::refresh_installed_shim).await;
+        // One-time default of the takeover hooks (marker-guarded; may run `dsh plugin`).
+        tokio::task::spawn_blocking(takeover::apply_first_run_defaults);
         match remote::RemoteRuntime::init(handle.clone()).await {
             Ok(rt) => {
                 if let Some(state) = handle.try_state::<remote::RemoteState>() {

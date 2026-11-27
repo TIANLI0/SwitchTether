@@ -21,8 +21,8 @@ SwitchTether surfaces three kinds of sessions and never presents one as another:
 
 | Kind | Origin label | What the phone can do |
 |---|---|---|
-| A session you started yourself (terminal CLI, VS Code panel, Codex Desktop) | `cli` / `vscode` / `desktop_app` | **Observe**: discover, read history, near-real-time events. In-place control is **BLOCKED** upstream — unless the opt-in takeover hook for that client is on (§6b). |
-| A session you started yourself **with the opt-in takeover hook on** (§6b) | `cli` / `vscode` / `desktop_app`, `control: full`, `managed: false` | Send, approve, interrupt (terminal: through the mirrored terminal) |
+| A session you started yourself (terminal CLI, VS Code panel, Codex Desktop) | `cli` / `vscode` / `desktop_app` | **Observe**: discover, read history, near-real-time events. In-place control is **BLOCKED** upstream — unless the takeover hook for that client is on (§6b). |
+| A session you started yourself **with the takeover hook on** (§6b) | `cli` / `vscode` / `desktop_app`, `control: full`, `managed: false` | Send, approve, interrupt (terminal: through the mirrored terminal) |
 | History indexed by CC Switch (all supported agents) | `unknown`, liveness `ended` | Read |
 | A **new session started by SwitchTether** on your request (optionally continuing an old Claude history as a fork) | `managed` | Full control: send, approve, answer, interrupt |
 
@@ -142,9 +142,16 @@ legitimate alternative: the **same conversation** continues in a new SwitchTethe
 | Safety guard | refused while the original is `busy`/`waiting` (unit test `continuing_a_busy_external_session_is_refused`) | Codex itself refuses while the thread is open elsewhere ("active writer"), surfaced as 409 |
 | Limitations | the original window (terminal / VS Code panel) does not show the phone's turns and must not be used at the same time; it is not an in-place takeover | the original client cannot write to the thread while SwitchTether holds it |
 
-## 6b. Opt-in takeover of sessions you start yourself ("接管")
+## 6b. Takeover of sessions you start yourself ("接管")
 
-Turned on per client in Settings → Remote → "Take over sessions I start myself". Each switch
+On by default, under the user's control per client in Settings → Remote → "Take over sessions I
+start myself". At first run (new installs, and once for existing installs that never used the
+switches) SwitchTether turns on every hook whose target is present and unset, through the same
+code path as the switches: it backs up first, never replaces a value the user set (an existing
+wrapper or `CODEX_CLI_PATH` is skipped), and skips missing clients. A marker
+(`~/.switchtether/remote/takeover-defaults.json`) makes this happen once: a switch the user
+turns off stays off. If `~/.switchtether/remote/takeover.json` already exists the user's
+switches are kept as they are. Not run under `CC_SWITCH_TEST_HOME`. Each switch
 points the client at `switchtether-shim`, a pass-through wrapper shipped with SwitchTether
 (copied to `~/.switchtether/bin`). The shim starts the real agent, forwards everything between
 the client and the agent unchanged, and mirrors the traffic to SwitchTether's local attach
@@ -152,7 +159,7 @@ broker; the phone's input is injected into the same stream. If SwitchTether is n
 shim only passes through. Nothing is injected into running processes: the hook applies to
 sessions started after it is turned on.
 
-| Client | Hook (opt-in, backed up, removed exactly) | Phone can | Status / evidence (2026-11-14) |
+| Client | Hook (on by default once, backed up, unset values only, removed exactly) | Phone can | Status / evidence (2026-11-14) |
 |---|---|---|---|
 | Claude Code in VS Code (and Insiders, Cursor, Windsurf, VSCodium) | `claudeCode.claudeProcessWrapper` in the editor's user `settings.json`; never replaces an existing wrapper | send, approve / deny (first answer wins; the IDE dialog is dismissed with `control_cancel_request`), interrupt; prompts typed in the IDE appear on the phone; model, effort and permission mode from the phone (the IDE's own control requests, through the shim) and changes made in the IDE followed on the phone; answers chosen in the IDE shown on the phone's card (test `attached_claude_session_changes_model_and_follows_the_ide`). Switching the panel to `bypassPermissions` works only if the extension launched it with "allow dangerously skip permissions"; otherwise Claude Code's refusal is shown. When the panel is closed, the next phone message resumes the conversation under the same id | **PARTIAL** — verified live with the shim wrapping real `claude` and a test harness speaking the extension's stream-json protocol: phone approval ran the command and dismissed the host's dialog, a phone message produced a turn whose output reached the host, the session ended when the host closed. Inside the real VS Code extension: UNTESTED (needs the user to open a new panel). Interrupt: implemented, not exercised live. |
 | Codex Desktop (Windows) | user environment variable `CODEX_CLI_PATH` (refused if already set); restart Codex Desktop | every thread loaded in Desktop: send (`turn/start`, `turn/steer`), approve (Desktop gets `serverRequest/resolved`), interrupt, model / effort / permission mode for the phone's turns, Codex commands and skills; approvals and answers given in Desktop show their decision on the phone; settings changed in Desktop (`thread/settings/updated`) are followed. After Desktop is closed the next phone message resumes the thread under the same id (unit-tested) | **PARTIAL** — verified live with Codex Desktop's own bundled `codex.exe` 0.167 behind the shim and a harness playing Desktop: phone approval ran the command, a phone message produced a turn streamed to the host. Real Codex Desktop launching the shim: UNTESTED (needs a Desktop restart). |
@@ -167,6 +174,25 @@ conversation resolves to the attached session.
 
 History from CC Switch's session index is shown read-only (`readHistory: PARTIAL`, plain
 role/text). No live control.
+
+Google Antigravity (`agy`) history is read the same way (JSONL transcripts and trajectory
+databases through CC Switch's parser, also covered by content search); unlike the others it can be
+started and continued from the phone, see the next section.
+
+### Google Antigravity (`agy`)
+
+Details and evidence: [AGY_REMOTE.md](AGY_REMOTE.md). agy 1.5.9, Windows, signed-in account.
+
+| Capability | Status | How |
+|---|---|---|
+| History / search of the user's conversations | PARTIAL | CC Switch's parser (role and text only); no live view of an Antigravity window (agy offers no interface to watch one) |
+| Managed sessions: new, send, live events, interrupt | VERIFIED — real agy through the hub (`examples/agy_smoke.rs`): answer streamed, tool calls, cancel mid-answer → `interrupted` | SwitchTether's own `agy acp` process (Agent Client Protocol v1, stdio): `session/new`, `session/prompt`, `session/cancel`; the user's normal agy login and settings, nothing written |
+| Continue a conversation (`resumeFrom`, or a message to history) | VERIFIED — stopped run resumed under the same `agy:<id>`, the answer used the earlier turn | `session/resume` in a new `agy acp`; history preloaded from CC Switch's parser; a `continued` row says that an Antigravity window still showing it does not see the new turns. Conversations of CC Switch API-key profiles (private `--gemini_dir`) are not covered |
+| Approvals | VERIFIED — permission request (agy with default permission settings in an isolated `--gemini_dir`) approved from the phone path, second answer `409` | `session/request_permission` → `approval_request`; agy asks only where its own permission settings say so (`toolPermission: always-proceed` asks nothing) |
+| Model / thinking level / mode | VERIFIED — set at start and changed while running | `session/set_config_option` (`model`, `thought_level`), `session/set_mode` (`default`, `accept-edits`, `auto`, `plan`); agy keeps none of them with the conversation |
+| Questions | BLOCKED | ACP has no question request; agy asks in its answer |
+| Images | UNTESTED | ACP `image` prompt blocks (agy advertises image prompts) |
+| Answers of Gemini models | not verified | Google's API refused the test machine's region (`FAILED_PRECONDITION … User location is not supported`); shown as agy's answer text. Claude Sonnet 5.5 through agy was used |
 
 ## 8. What would unblock in-place takeover
 
@@ -184,5 +210,5 @@ role/text). No live control.
 | History / live view of the user's own sessions | PARTIAL — checked read-only against real sessions on the development machine | `$DSH_HOME/sessions/<project>/<session>/session.vN.jsonl[.zstd]`, independent zstd frames tailed frame by frame. Live (observe) state comes from the log's last turn, read incrementally: an open turn (`turn/start` without `turn/end`) is busy while the log was written in the last 10 min (long tool calls write nothing for a while); an ended turn is idle (or `error`) for 2 min after the last write, then the session counts as ended. `turn/end` kinds seen in real logs: `completed`, `interrupted`, `aborted` (`reason.kind: "user"`, a stop in the dsh UI) and `error` (e.g. 402 quota) — `interrupted` / `aborted` add an "interrupted" marker, `error` an error row; managed and plugin-attached sessions take busy / idle from the same turn state (unit tests `every_turn_end_kind_is_reported`, `observed_dsh_status_follows_the_last_turn`). Model-only context (`time-context`, `skill-catalog`, …) and `surfaceOp: replace` copies are skipped. |
 | Sub-agent branches | PARTIAL — real session with a `subagent_fork` child | Children are sessions of their own (`parentSession`, `delegationDepth`); listed only under their parent. |
 | Managed sessions (new / continue) | PARTIAL — live: `session/new` + `session/prompt` through SwitchTether's own `dsh --profile acp`, user message read back from the log; the model call itself failed with "Insufficient Balance" on the freshly initialised `acp` profile (account routing), so a full answer, approvals and cancel are not yet verified | ACP v1 over stdio: `initialize`, `session/new` / `session/resume`, `session/prompt` (one at a time), `session/cancel`, `session/request_permission` → approval cards. The timeline is the persisted log. Uses the user's existing `acp` profile (initialised by dsh on first use; CC Switch adds providers to initialised profiles). |
-| Control of the user's own `dsh web` sessions | PARTIAL — opt-in plugin installed and removed in a sandbox `DSH_HOME` with dsh's own plugin manager; it loaded in `dsh web` and connected to the attach broker; plugin logic (prompt, cancel, phone-first and web-first approvals, disconnect fallback) tested with a fake host; broker side covered by `dsh_bridge_plugin_sessions_are_controllable`. A message or approval through a real dsh web session is not yet verified, nor whether the dsh UI withdraws its approval card when the phone answers first | Settings → Remote → "DeepSeek Harness · Web" (§6b): writes `switchtether-dsh-bridge` to `~/.switchtether/dsh-plugin`, backs up the `web` profile's `package.json`, `cordis.patch.yml`, `pnpm-lock.yaml`, `compatibility.json`, runs `dsh plugin --profile web add link:…` (dsh enables the bundle); off runs `dsh plugin --profile web remove` and puts the manifest back byte for byte when nothing else changed. The plugin reports live sessions, races each `approval/request` between the phone and the dsh UI (first answer wins) and calls `sessionController.prompt` / `cancel`. dsh refuses CLI plugin management of its Desktop profile: the desktop app is not covered. |
+| Control of the user's own `dsh web` sessions | PARTIAL — bridge plugin installed and removed in a sandbox `DSH_HOME` with dsh's own plugin manager; it loaded in `dsh web` and connected to the attach broker; plugin logic (prompt, cancel, phone-first and web-first approvals, disconnect fallback) tested with a fake host; broker side covered by `dsh_bridge_plugin_sessions_are_controllable`. A message or approval through a real dsh web session is not yet verified, nor whether the dsh UI withdraws its approval card when the phone answers first | Settings → Remote → "DeepSeek Harness · Web" (§6b): writes `switchtether-dsh-bridge` to `~/.switchtether/dsh-plugin`, backs up the `web` profile's `package.json`, `cordis.patch.yml`, `pnpm-lock.yaml`, `compatibility.json`, runs `dsh plugin --profile web add link:…` (dsh enables the bundle); off runs `dsh plugin --profile web remove` and puts the manifest back byte for byte when nothing else changed. The plugin reports live sessions, races each `approval/request` between the phone and the dsh UI (first answer wins) and calls `sessionController.prompt` / `cancel`. dsh refuses CLI plugin management of its Desktop profile: the desktop app is not covered. |
 | DeepSeek Harness Web on the phone | PARTIAL — real `dsh web` started, found, forwarded-port sign-in checked with `curl`, and stopped (process tree gone) in a sandbox `DSH_HOME`; the phone's WebView not yet run on a device | PROTOCOL §7.14: the desktop reuses a running `dsh web` (found by its `401` answer) or starts `dsh web --no-open --host 127.0.0.1 --port 0` as its own child — the command the user would run, with the existing `web` profile, nothing written to it — and the phone opens it in a WebView over a port forward. Only an instance SwitchTether started is stopped (on request or when SwitchTether exits); one the user started is never touched. Unlike the bridge plugin this needs no change to the user's dsh profile, but it is dsh's own UI, not SwitchTether's session view. |

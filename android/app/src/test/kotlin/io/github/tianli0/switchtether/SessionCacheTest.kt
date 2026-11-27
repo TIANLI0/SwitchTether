@@ -132,4 +132,54 @@ class SessionCacheTest {
         assertFalse(st.canChangeModel)
         assertTrue("a Claude history can still be forked", st.canFork)
     }
+
+    @Test
+    fun peekListOnlyReturnsWhatIsAlreadyInMemory() {
+        val dir = Files.createTempDirectory("st-cache").toFile()
+        val cipher = testCipher()
+        SessionCache(dir, cipher).saveList("srv", listOf(summary("claude:a")))
+        val fresh = SessionCache(dir, cipher)
+        assertNull("peek never reads the disk", fresh.peekList("srv"))
+        assertEquals(listOf("claude:a"), fresh.loadList("srv")!!.items.map { it.id })
+        assertEquals(listOf("claude:a"), fresh.peekList("srv")!!.items.map { it.id })
+        assertNull(fresh.peekList("other-desktop"))
+    }
+
+    @Test
+    fun theRepositoryHandsOverTheListItAlreadyRead() = runTest(dispatcher) {
+        val cache = SessionCache(Files.createTempDirectory("st-cache").toFile(), testCipher())
+        cache.saveList("srv", listOf(summary("claude:a")))
+        val repo = io.github.tianli0.switchtether.domain.RemoteSessionRepository(FakeConnection(offline), cache) { "srv" }
+        assertNull("nothing read in this process yet", repo.peekList())
+        repo.cachedList()
+        assertEquals(listOf("claude:a"), repo.peekList()!!.items.map { it.id })
+    }
+
+    /**
+     * The Sessions tab's first frame (Home -> Sessions): the list Home already holds is there before
+     * any coroutine runs, so no "loading" frame flashes between Home and the list.
+     */
+    @Test
+    fun theSessionsTabStartsWithTheListAlreadyHeld() = runTest(dispatcher) {
+        val fake = FakeSessionRepository().apply {
+            listHandler = { _, _ -> kotlinx.coroutines.awaitCancellation() } // the live load is still on its way
+        }
+        val held = io.github.tianli0.switchtether.data.ListSnapshot(listOf(summary("claude:a"), summary("claude:old", live = false)), 5_000L)
+        val repo = object : io.github.tianli0.switchtether.domain.SessionRepository by fake {
+            override fun peekList() = held
+            override suspend fun cachedList() = kotlinx.coroutines.awaitCancellation()
+        }
+        val vm = SessionsViewModel(FakeConnection(), repo)
+        val first = vm.state.value
+        assertTrue("first state is the held list, not Loading", first.items is Loadable.Ready)
+        assertEquals(listOf("claude:a", "claude:old"), first.visible.map { it.id })
+        assertNull("connected: not labelled as an offline snapshot", first.snapshotAtMs)
+        assertEquals(listOf("claude_code"), first.knownAgents)
+
+        // Nothing held yet (first start): the usual Loading until the snapshot or the live list.
+        val empty = object : io.github.tianli0.switchtether.domain.SessionRepository by fake {
+            override suspend fun cachedList() = kotlinx.coroutines.awaitCancellation()
+        }
+        assertEquals(Loadable.Loading, SessionsViewModel(FakeConnection(), empty).state.value.items)
+    }
 }

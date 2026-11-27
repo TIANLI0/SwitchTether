@@ -425,6 +425,11 @@
     <string name="quota_tier_week">每周额度</string>
     <string name="quota_tier_month">每月额度</string>
     <string name="quota_tier_credits">点数</string>
+    <string name="quota_tier_agy_gemini_5h">Gemini 5 小时</string>
+    <string name="quota_tier_agy_gemini_week">Gemini 每周</string>
+    <string name="quota_tier_agy_argon_week">Argon 每周</string>
+    <string name="quota_tier_agy_third_party_5h">Claude/GPT 5 小时</string>
+    <string name="quota_tier_agy_third_party_week">Claude/GPT 每周</string>
     <string name="quota_day_today">今天 %1$s</string>
     <string name="quota_day_tomorrow">明天 %1$s</string>
     <string name="quota_resets_at">%1$s 重置 · 还有 %2$s</string>

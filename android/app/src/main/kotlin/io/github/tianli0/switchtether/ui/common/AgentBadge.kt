@@ -15,6 +15,7 @@ import io.github.tianli0.switchtether.ui.icons.AppIcons
 /** Claude's brand colour (Anthropic "Claude" orange). */
 val ClaudeBrand = Color(0xFFD97757)
 private val DeepSeekBrand = androidx.compose.ui.graphics.Color(0xFF4D6BFE)
+private val AntigravityBrand = Color(0xFF3186FF)
 
 /**
  * Agent avatar with the real brand mark: Claude (orange) for Claude Code, the OpenAI mark
@@ -32,6 +33,7 @@ fun AgentBadge(agent: String, modifier: Modifier = Modifier, size: Dp = 28.dp, s
             "claude_code", "claude" -> AgentAvatar(painterResource(R.drawable.ic_agent_claude), ClaudeBrand, label, Modifier, size, statusColor)
             "codex" -> AgentAvatar(painterResource(R.drawable.ic_agent_openai), COUITheme.colorScheme.onSurface, label, Modifier, size, statusColor)
             "dsh" -> AgentAvatar(painterResource(R.drawable.ic_agent_deepseek), DeepSeekBrand, label, Modifier, size, statusColor)
+            "agy" -> AgentAvatar(painterResource(R.drawable.ic_agent_antigravity), AntigravityBrand, label, Modifier, size, statusColor)
             else -> AgentAvatar(rememberVectorPainter(AppIcons.SubAgent), COUITheme.colorScheme.primary, label, Modifier, size, statusColor)
         }
     }

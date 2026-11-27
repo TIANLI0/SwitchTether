@@ -228,8 +228,31 @@ data class SessionSummary(
     val managed: Boolean = false,
     /** Set when the session is mirrored from a SwitchTether terminal (`GET /v1/terminals/{id}`). */
     val terminalId: String? = null,
+    /**
+     * Sub-agents and background tasks (shells, background agents) still running in a live session
+     * (§10.1). Null when the desktop does not know (older desktops, observed sessions not loaded).
+     */
+    val activeTasks: Int? = null,
 ) {
     val isLive: Boolean get() = liveness == "live"
+
+    /** The agent's turn is over (`idle` / `completed`), whether or not work still runs inside. */
+    val turnEnded: Boolean get() = status == "idle" || status == "completed"
+
+    /**
+     * Work still running in a live session whose turn ended: [activeTasks] from the desktop, else
+     * [fallback] (what the phone counted itself, e.g. from the Agent map); 0 while the turn runs.
+     */
+    fun backgroundWork(fallback: Int? = null): Int = if (isLive && turnEnded) (activeTasks ?: fallback ?: 0).coerceAtLeast(0) else 0
+
+    /**
+     * Idle for lists and groups: the turn ended and no sub-agent or background task still runs.
+     * A session with work left counts as running.
+     */
+    fun isIdle(fallback: Int? = null): Boolean = turnEnded && backgroundWork(fallback) == 0
+
+    /** Status to show: `busy` while an ended turn still has work running inside, else [status]. */
+    fun displayStatus(fallback: Int? = null): String = if (backgroundWork(fallback) > 0) "busy" else status
 
     /**
      * The user's own process (VS Code, desktop app, CLI) that SwitchTether is attached to through the

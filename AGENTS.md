@@ -8,9 +8,11 @@ Read `docs/ARCHITECTURE.md`, `docs/PROTOCOL.md` and `docs/DEVELOPMENT_STATUS.md`
 1. Never change how users launch Claude Code or Codex, never write their agent configuration,
    hooks, plugins or MCP settings to gain control, never inject into or restart their
    processes. Externally started sessions are observe-only (docs/AGENT_COMPATIBILITY.md).
-   The single exception is the opt-in takeover hooks in `src-tauri/src/switchtether/takeover.rs`
-   (§6b of AGENT_COMPATIBILITY): they run only when the user turns them on, back up first,
-   never replace a value the user set, and are removed exactly when turned off.
+   The single exception is the takeover hooks in `src-tauri/src/switchtether/takeover.rs`
+   (§6b of AGENT_COMPATIBILITY): they are turned on once by default at first run (marker
+   `~/.switchtether/remote/takeover-defaults.json`; skipped when the target is missing or the
+   user already set a value), back up first, set only values that are unset, are removed
+   exactly when turned off, and a switch the user turns off stays off — never re-enable it.
 2. Never present a SwitchTether-managed session as the user's existing session.
 3. Never write to `~/.cc-switch`. SwitchTether data lives in `~/.switchtether`
    (`crate::config::get_app_home_dir()`); route any new path through it.

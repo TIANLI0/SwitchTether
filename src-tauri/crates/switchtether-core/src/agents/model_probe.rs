@@ -48,6 +48,8 @@ pub async fn claude_models(bin: &Path) -> Option<Value> {
     .env_remove("CLAUDE_CODE_ENTRYPOINT");
     let run = async {
         let mut child = cmd.spawn().ok()?;
+        // Not a session: hidden from the live-session observer while it runs.
+        let _owned = super::owned_pids::OwnedPid::from_option(child.id());
         let mut stdin = child.stdin.take()?;
         let mut lines = BufReader::new(child.stdout.take()?).lines();
         let req = json!({ "type": "control_request", "request_id": "st_models",
@@ -61,14 +63,14 @@ pub async fn claude_models(bin: &Path) -> Option<Value> {
             if v.get("type").and_then(Value::as_str) == Some("control_response")
                 && v.pointer("/response/request_id").and_then(Value::as_str) == Some("st_models")
             {
-                let _ = child.start_kill();
+                let _ = child.kill().await;
                 return v
                     .pointer("/response/response/models")
                     .filter(|m| m.as_array().is_some_and(|a| !a.is_empty()))
                     .cloned();
             }
         }
-        let _ = child.start_kill();
+        let _ = child.kill().await;
         None
     };
     tokio::time::timeout(PROBE_TIMEOUT, run)
@@ -83,6 +85,8 @@ pub async fn codex_models(bin: &Path) -> Option<Value> {
     cmd.arg("app-server");
     let run = async {
         let mut child = cmd.spawn().ok()?;
+        // Not a session: hidden from the live-session observer while it runs.
+        let _owned = super::owned_pids::OwnedPid::from_option(child.id());
         let mut stdin = child.stdin.take()?;
         let mut lines = BufReader::new(child.stdout.take()?).lines();
         let version = env!("CARGO_PKG_VERSION");
@@ -100,14 +104,14 @@ pub async fn codex_models(bin: &Path) -> Option<Value> {
                 continue;
             };
             if v.get("id").and_then(Value::as_i64) == Some(2) {
-                let _ = child.start_kill();
+                let _ = child.kill().await;
                 return v
                     .pointer("/result/data")
                     .filter(|m| m.as_array().is_some_and(|a| !a.is_empty()))
                     .cloned();
             }
         }
-        let _ = child.start_kill();
+        let _ = child.kill().await;
         None
     };
     tokio::time::timeout(PROBE_TIMEOUT, run)

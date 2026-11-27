@@ -28,7 +28,8 @@ const RELAY_KEY_SECRET: &str = "relay-key";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RemoteConfig {
-    /// Off by default: the remote server never starts without explicit consent.
+    /// On by default for new installs (no `config.json` yet). A saved `false` is
+    /// kept: the server stays off once the user turns it off.
     pub enabled: bool,
     pub port: u16,
     pub network_mode: NetworkMode,
@@ -42,7 +43,7 @@ pub struct RemoteConfig {
 impl Default for RemoteConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             port: switchtether_core::DEFAULT_PORT,
             network_mode: NetworkMode::Lan,
             server_name: None,
@@ -62,10 +63,19 @@ fn config_path() -> PathBuf {
 }
 
 fn load_config() -> RemoteConfig {
-    std::fs::read_to_string(config_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    parse_config(std::fs::read_to_string(config_path()).ok().as_deref())
+}
+
+/// No file: defaults (server on). A file that cannot be read as a config keeps the
+/// server off rather than turning it on behind a choice the user may have saved.
+fn parse_config(text: Option<&str>) -> RemoteConfig {
+    match text {
+        None => RemoteConfig::default(),
+        Some(s) => serde_json::from_str(s).unwrap_or(RemoteConfig {
+            enabled: false,
+            ..RemoteConfig::default()
+        }),
+    }
 }
 
 fn save_config(c: &RemoteConfig) -> Result<(), String> {
@@ -103,7 +113,7 @@ pub struct RemoteRuntime {
     handle: tokio::sync::Mutex<Option<RemoteServerHandle>>,
     last_error: Mutex<Option<String>>,
     cancel: CancellationToken,
-    /// Loopback endpoint for switchtether-shim (opt-in takeover hooks).
+    /// Loopback endpoint for switchtether-shim (takeover hooks).
     attach: Mutex<Option<switchtether_core::attach::AttachBroker>>,
 }
 
@@ -472,5 +482,26 @@ impl RemoteState {
             .get()
             .cloned()
             .ok_or_else(|| "remote service is still initialising".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_is_on_for_new_installs_and_a_saved_choice_is_kept() {
+        assert!(parse_config(None).enabled, "new install: on by default");
+        let off = serde_json::to_string(&RemoteConfig {
+            enabled: false,
+            ..RemoteConfig::default()
+        })
+        .unwrap();
+        assert!(!parse_config(Some(&off)).enabled, "saved off stays off");
+        assert!(
+            !parse_config(Some("not json")).enabled,
+            "unreadable file: off"
+        );
+        assert!(parse_config(Some(r#"{"enabled":true}"#)).enabled);
     }
 }

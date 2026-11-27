@@ -5,13 +5,13 @@ TODO list. Each item says what the user experiences.
 
 ## Agent control
 
-1. **Sessions you started yourself are controllable only with the opt-in takeover hooks.**
+1. **Sessions you started yourself are controllable only with the takeover hooks.**
    Without them there is no supported interface for another program to send input, answer a
    permission prompt or interrupt an existing session, and the phone shows them read-only.
    With a hook on (Settings → Remote, docs/AGENT_COMPATIBILITY.md §6b) only sessions started
    *after* turning it on are controllable; already running VS Code panels, Codex Desktop
    windows and terminals stay observe-only. Codex Desktop takeover is Windows-only. DeepSeek
-   Harness: the opt-in plugin covers `dsh web` (restart it after turning the switch on), not the
+   Harness: the bridge plugin covers `dsh web` (restart it after turning the switch on), not the
    DeepSeek Harness desktop app; managed dsh sessions use the `acp` profile. Terminal
    sessions (`st-claude` / `st-codex`) answer prompts in the mirrored terminal view, not with
    approval cards. Turns sent from the phone into a VS Code panel run in that panel's process,

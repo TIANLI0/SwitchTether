@@ -101,7 +101,17 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** Agents that support SwitchTether-managed sessions (desktop: `create_managed`). */
-val MANAGED_AGENTS = listOf("claude_code", "codex", "dsh")
+val MANAGED_AGENTS = listOf("claude_code", "codex", "dsh", "agy")
+
+/** Agents every desktop with managed sessions can start; the others need a desktop feature ([AGENT_FEATURES]). */
+val BASE_MANAGED_AGENTS = listOf("claude_code", "codex", "dsh")
+
+/** The `GET /v1/capabilities` feature a desktop lists when it can start [MANAGED_AGENTS] beyond the base ones. */
+val AGENT_FEATURES = mapOf("agy" to "managed_agy")
+
+/** The agents the launcher offers on a desktop with [features]. */
+fun launcherAgents(features: Set<String>): List<String> =
+    MANAGED_AGENTS.filter { it in BASE_MANAGED_AGENTS || AGENT_FEATURES[it] in features }
 
 /** Claude Code permission modes an older desktop accepts at start (a current one sends its own list). */
 val CLAUDE_PERMISSION_MODES = listOf("default", "acceptEdits", "plan")
@@ -145,6 +155,8 @@ fun resumeCandidates(sessions: List<SessionSummary>, agent: String, cwd: String?
 
 data class NewSessionState(
     val agent: String = MANAGED_AGENTS.first(),
+    /** Agents the connected desktop can start (tabs). */
+    val agents: List<String> = BASE_MANAGED_AGENTS,
     val cwd: String? = null,
     val recent: List<RecentProject> = emptyList(),
     /** The session list the recent folders came from; [resumable] picks the conversations to continue from it. */
@@ -284,6 +296,7 @@ class NewSessionViewModel(
                     if (_state.value.roots !is Loadable.Ready) loadRoots()
                     loadRecent()
                     loadModelOptions()
+                    loadAgents()
                 }
             }
         }
@@ -303,6 +316,16 @@ class NewSessionViewModel(
                 // A conversation that went live (or left the list) meanwhile can no longer be continued.
                 next.copy(resume = next.resume?.let { r -> next.resumable.firstOrNull { it.id == r.id } })
             }
+        }
+    }
+
+    /** Which agents this desktop can start (Antigravity needs a desktop that lists `managed_agy`). */
+    private fun loadAgents() {
+        viewModelScope.launch {
+            val features = runCatching { conn.apiOrNull()?.features() }.getOrNull() ?: return@launch
+            val agents = launcherAgents(features)
+            _state.update { it.copy(agents = agents) }
+            if (_state.value.agent !in agents) setAgent(agents.first())
         }
     }
 
@@ -469,9 +492,9 @@ fun NewSessionContent(
     var options by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
         TabRowWithContour(
-            tabs = MANAGED_AGENTS.map { io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(it) },
-            selectedTabIndex = MANAGED_AGENTS.indexOf(state.agent).coerceAtLeast(0),
-            onTabSelected = { onAgent(MANAGED_AGENTS[it]) },
+            tabs = state.agents.map { io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(it) },
+            selectedTabIndex = state.agents.indexOf(state.agent).coerceAtLeast(0),
+            onTabSelected = { onAgent(state.agents[it]) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
         )
         if (state.agent == "dsh" && onOpenDshWeb != null) {

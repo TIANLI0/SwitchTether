@@ -647,5 +647,25 @@ mod tests {
             crate::agents::permission::modes("claude_code"),
             fixture["permissionModes"]
         );
+        // Antigravity: `agy models` tiers grouped into models with thinking levels.
+        let fixture: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("model_options_agy.json")).unwrap(),
+        )
+        .unwrap();
+        let pairs = crate::agents::agy::parse_models_output(
+            "gemini-4-neon-high	Gemini 4 Neon (High)
+gemini-4-neon-xhigh	Gemini 4 Neon (XHigh)
+             gemini-4-neon-medium	Gemini 4 Neon (Medium)
+gemini-4-neon-low	Gemini 4 Neon (Low)
+             gemini-pro-orchestrator	Orchestrator (Carbon)
+             claude-sonnet-5-5-low	Claude Sonnet 5.5 (Low)
+claude-sonnet-5-5-medium	Claude Sonnet 5.5 (Medium)
+             claude-sonnet-5-5-high	Claude Sonnet 5.5 (High)
+",
+        );
+        let mut built =
+            crate::agents::model_catalog("agy", &crate::agents::agy::group_models(&pairs));
+        built["permissionModes"] = crate::agents::permission::modes("agy");
+        assert_eq!(built, fixture);
     }
 }

@@ -9,6 +9,7 @@
 //! - **Managed sessions** explicitly created by SwitchTether (clearly labelled
 //!   `origin: managed`), which are fully controllable.
 
+pub mod agy;
 pub mod attached_tty;
 pub mod attachments;
 pub mod claude;
@@ -17,6 +18,7 @@ pub mod dsh;
 pub mod managed;
 pub mod model;
 pub mod model_probe;
+pub mod owned_pids;
 pub mod permission;
 pub mod search;
 pub mod store;
@@ -228,6 +230,7 @@ fn valid_effort(agent: &str, e: &str) -> bool {
     match agent {
         "claude_code" => matches!(e, "low" | "medium" | "high" | "xhigh" | "max"),
         "codex" => matches!(e, "none" | "minimal" | "low" | "medium" | "high" | "xhigh"),
+        "agy" => agy::LEVELS.contains(&e),
         _ => false,
     }
 }
@@ -247,6 +250,7 @@ pub struct AgentHub {
     managed: RwLock<HashMap<String, Arc<dyn ManagedSession>>>,
     codex_bin: Option<PathBuf>,
     dsh_bin: Option<PathBuf>,
+    agy_bin: Option<PathBuf>,
     loaded: Mutex<HashMap<String, Loaded>>,
     /// DeepSeek Harness log path -> (len, is a sub-agent session) from its header.
     dsh_children: Mutex<HashMap<String, (u64, bool)>>,
@@ -301,6 +305,12 @@ impl AgentHub {
             managed: RwLock::new(HashMap::new()),
             codex_bin: codex::managed::find_codex_bin(),
             dsh_bin: dsh::managed::find_dsh_bin(),
+            // Unit tests never depend on (or start) an agy installed on the machine.
+            agy_bin: if cfg!(test) {
+                None
+            } else {
+                agy::find_agy_bin()
+            },
             loaded: Mutex::new(HashMap::new()),
             subagent_logs: Mutex::new(HashMap::new()),
             next_start: Mutex::new(HashMap::new()),
@@ -491,6 +501,7 @@ impl AgentHub {
             "claude" => "claude_code",
             "codex" => "codex",
             "dsh" => "dsh",
+            "agy" => "agy",
             _ => return None,
         };
         m.iter()
@@ -525,6 +536,7 @@ impl AgentHub {
                 pid: None,
                 managed: false,
                 terminal_id: terminal.then(String::new),
+                active_tasks: None,
                 source_path: None,
             };
             attached_caps(&s)
@@ -540,6 +552,8 @@ impl AgentHub {
             { "agent": "codex", "origin": "desktop_app", "capabilities": observed_caps("codex"), "notes": "Without the opt-in hook: observation of rollouts only." },
             { "agent": "codex", "origin": "desktop_app", "takeover": "CODEX_CLI_PATH", "capabilities": attached(false), "notes": "With the opt-in CODEX_CLI_PATH hook: every thread loaded in Codex Desktop can be messaged, approved and interrupted from the phone." },
             { "agent": "dsh", "origin": "cli", "capabilities": observed_caps("dsh"), "notes": "DeepSeek Harness session logs ($DSH_HOME/sessions, zstd frames) tailed read-only; a log written in the last two minutes counts as live. Sub-agents are their own sessions (parentSession)." },
+            { "agent": "agy", "origin": "cli", "capabilities": history_caps("agy"), "notes": "Google Antigravity (agy CLI / IDE) conversations from CC Switch's session index, read with its parser (JSONL transcripts and trajectory databases): history and content search, no live view of a window on the computer. \"Continue on phone\" resumes the conversation on SwitchTether's own `agy acp` process." },
+            { "agent": "agy", "origin": "managed", "capabilities": agy_managed_caps(), "notes": "New or resumed conversations on SwitchTether's own `agy acp` process (Agent Client Protocol v1 over stdio) with the user's normal agy login and settings: prompt, cancel, permission requests, model / thinking level (session config options) and agy's modes (default, accept edits, auto, plan). Stored by agy in its usual history." },
             { "agent": "dsh", "origin": "managed", "capabilities": managed_caps(), "notes": "New or resumed sessions on SwitchTether's own `dsh --profile acp` process (ACP v1 over stdio): prompt, cancel and permission requests; the timeline is read from the persisted session log." },
         ])
     }
@@ -553,6 +567,7 @@ impl AgentHub {
             "codexBin": self.codex_bin.as_ref().map(|p| p.to_string_lossy().into_owned()),
             "dshBin": self.dsh_bin.as_ref().map(|p| p.to_string_lossy().into_owned()),
             "dshHome": dsh::dsh_home().exists(),
+            "agyBin": self.agy_bin.as_ref().map(|p| p.to_string_lossy().into_owned()),
             "loadedSessions": self.loaded.lock().len(),
         })
     }
@@ -666,6 +681,8 @@ impl AgentHub {
             pid: None,
             managed: m.origin() == "managed",
             terminal_id: m.terminal_id(),
+            active_tasks: (m.liveness() == Liveness::Live)
+                .then(|| active_task_count(&m.log().lock())),
             source_path: None,
         }
     }
@@ -688,6 +705,10 @@ impl AgentHub {
     /// that has not been used yet (no transcript, idle): it often switches to a resumed
     /// conversation right after starting, so there is nothing to show yet.
     fn observed_live_summary(&self, l: &claude::live::LiveClaudeSession) -> Option<SessionSummary> {
+        // A helper SwitchTether started itself (`claude -p /usage`, model probe): not a session.
+        if l.pid.is_some_and(owned_pids::is_owned) {
+            return None;
+        }
         let cwd = l.cwd.clone();
         // The registry `name` is an auto-generated project slug ("myapp-3f"), not the task
         // title; the real title (`/rename` or Claude's generated one) lives in the transcript.
@@ -708,8 +729,18 @@ impl AgentHub {
             .map(|d| d.as_millis() as i64)
             .unwrap_or_else(crate::util::now_ms);
         let title = transcript.as_deref().and_then(|p| self.claude_title(p));
+        // Only from a log that is already loaded and followed (open on the phone, or its Agent
+        // map polled): a transcript is never parsed just to list sessions.
+        let id = format!("claude:{}", l.session_id);
+        let loaded_log = self
+            .loaded
+            .lock()
+            .get(&id)
+            .filter(|x| x.tail.is_some())
+            .map(|x| x.log.clone());
+        let active_tasks = loaded_log.map(|log| active_task_count(&log.lock()));
         Some(SessionSummary {
-            id: format!("claude:{}", l.session_id),
+            id,
             agent: "claude_code".into(),
             origin: l.origin(),
             native_id: l.session_id.clone(),
@@ -728,6 +759,7 @@ impl AgentHub {
             pid: l.pid,
             managed: false,
             terminal_id: None,
+            active_tasks,
             source_path: transcript.map(|p| p.to_string_lossy().into_owned()),
         })
     }
@@ -829,6 +861,7 @@ impl AgentHub {
                 pid: None,
                 managed: false,
                 terminal_id: None,
+                active_tasks: None,
                 source_path: s.source_path.clone(),
             });
         }
@@ -900,6 +933,11 @@ impl AgentHub {
             }
         }
         all.sort_by_key(|s| std::cmp::Reverse(s.last_active_at_ms.unwrap_or(0)));
+        // Antigravity keeps conversations in JSONL transcripts and trajectory databases; only
+        // CC Switch's own parser reads both, so those are searched through the backend below.
+        let (via_backend, all): (Vec<SessionSummary>, Vec<SessionSummary>) = all
+            .into_iter()
+            .partition(|s| s.agent == "agy" && s.source_path.is_some());
         let mut seen = std::collections::HashSet::new();
         let targets: Vec<(SessionSummary, PathBuf)> = all
             .into_iter()
@@ -924,8 +962,10 @@ impl AgentHub {
             })
             .collect();
         let limit = limit.clamp(1, 50);
-        tokio::task::spawn_blocking(move || {
-            let deadline = Instant::now() + budget;
+        let deadline = Instant::now() + budget;
+        let folded_files = folded.clone();
+        let (mut out, mut partial) = tokio::task::spawn_blocking(move || {
+            let folded = folded_files;
             let mut out = Vec::new();
             let mut partial = false;
             for (s, path) in targets {
@@ -962,7 +1002,49 @@ impl AgentHub {
             (out, partial)
         })
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+        for s in via_backend {
+            // Newest first: once the page is full, an older session cannot make it in.
+            let oldest = out.iter().map(|r| r.time_ms.unwrap_or(0)).min();
+            if out.len() >= limit && s.last_active_at_ms.unwrap_or(0) <= oldest.unwrap_or(0) {
+                break;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                partial = true;
+                break;
+            }
+            let Some(src) = s.source_path.as_deref() else {
+                continue;
+            };
+            let messages = match tokio::time::timeout(
+                left,
+                self.backend.session_messages(&s.agent, src),
+            )
+            .await
+            {
+                Ok(Ok(v)) => v,
+                Ok(Err(_)) => continue,
+                Err(_) => {
+                    partial = true;
+                    break;
+                }
+            };
+            if let Some(h) = search::search_messages(&messages, &folded) {
+                out.push(search::SearchResult {
+                    session_id: s.id,
+                    agent: s.agent,
+                    title: s.title,
+                    cwd: s.cwd,
+                    time_ms: s.last_active_at_ms,
+                    snippet: h.snippet,
+                    match_count: h.count,
+                });
+            }
+        }
+        out.sort_by_key(|r| std::cmp::Reverse(r.time_ms.unwrap_or(0)));
+        out.truncate(limit);
+        (out, partial)
     }
 
     /// Fallback for Claude sessions that are not (yet) in CC Switch's index:
@@ -1017,6 +1099,7 @@ impl AgentHub {
             pid: None,
             managed: false,
             terminal_id: None,
+            active_tasks: None,
             source_path: Some(path.to_string_lossy().into_owned()),
         })
     }
@@ -1071,7 +1154,11 @@ impl AgentHub {
         }
         let live = s.liveness == Liveness::Live;
         if s.managed && live {
-            let mut c = managed_caps();
+            let mut c = if s.agent == "agy" {
+                agy_managed_caps()
+            } else {
+                managed_caps()
+            };
             let switchable = self
                 .find_managed(&s.id)
                 .is_some_and(|(_, m)| m.can_change_model());
@@ -1166,39 +1253,7 @@ impl AgentHub {
                     provider
                 };
                 if let Ok(v) = self.backend.session_messages(provider, src).await {
-                    let mut lg = log.lock();
-                    for (i, m) in v.as_array().cloned().unwrap_or_default().iter().enumerate() {
-                        let role = m
-                            .get("role")
-                            .and_then(|r| r.as_str())
-                            .unwrap_or("assistant");
-                        let text = m
-                            .get("content")
-                            .and_then(|c| c.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let kind = if role == "user" {
-                            "user_message"
-                        } else if role == "tool" {
-                            "tool_result"
-                        } else {
-                            "assistant_message"
-                        };
-                        let ts = m
-                            .get("ts")
-                            .and_then(|t| t.as_i64())
-                            .map(crate::util::ms_to_rfc3339)
-                            .unwrap_or_default();
-                        lg.upsert(
-                            EventDraft::new(
-                                format!("m{i}"),
-                                kind,
-                                ts,
-                                json!({ "text": text, "source": "unknown" }),
-                            ),
-                            false,
-                        );
-                    }
+                    backend_messages_into_log(&v, &log);
                 }
             }
         }
@@ -2155,6 +2210,31 @@ impl AgentHub {
                     log::warn!("[agents] could not preload history: {e}");
                 }
             }
+            if s.agent == "agy" {
+                // Antigravity keeps conversations in transcripts and trajectory databases that
+                // only CC Switch's parser reads.
+                if let Some(src) = &s.source_path {
+                    match self.backend.session_messages("agy", src).await {
+                        Ok(v) => backend_messages_into_log(&v, &log),
+                        Err(e) => log::warn!("[agents] could not preload agy history: {e}"),
+                    }
+                }
+                // Antigravity windows on the computer cannot be seen from here: say where the new
+                // turns run whether or not one still has this conversation open.
+                log.lock().upsert(
+                    EventDraft::new(
+                        "continued",
+                        "system",
+                        crate::util::now_rfc3339(),
+                        json!({
+                            "subtype": "continued",
+                            "text": "Continued from the phone in SwitchTether's own Antigravity process (agy acp). The conversation stays in Antigravity's history; an Antigravity window that still has it open does not show these turns.",
+                            "from": s.id,
+                        }),
+                    ),
+                    false,
+                );
+            }
             if s.liveness == Liveness::Live {
                 // The original window is still open on the computer: it will not show these turns.
                 log.lock().upsert(
@@ -2278,6 +2358,49 @@ impl AgentHub {
                 .await
                 .map_err(|e| ApiError::internal("start dsh", format!("{e:#}")))?
             }
+            "agy" => {
+                if matches!(&continue_from, Some((_, true))) {
+                    return Err(ApiError::validation(
+                        "fork is not supported for Antigravity",
+                    ));
+                }
+                let bin = self.agy_bin.clone().ok_or_else(|| {
+                    ApiError::validation(
+                        "Google Antigravity (`agy`) was not found on this computer",
+                    )
+                })?;
+                let permission_mode = match req.permission_mode.as_deref() {
+                    None => None,
+                    Some(m) => Some(
+                        permission::normalize("agy", m)
+                            .ok_or_else(|| {
+                                ApiError::validation("unknown permissionMode for Antigravity")
+                            })?
+                            .to_string(),
+                    ),
+                };
+                let add_dirs: Vec<PathBuf> = self
+                    .attachments
+                    .read()
+                    .as_ref()
+                    .map(|a| vec![a.root().to_path_buf()])
+                    .unwrap_or_default();
+                agy::managed::ManagedAgy::spawn(
+                    id.clone(),
+                    agy::managed::ManagedAgyOptions {
+                        agy_bin: bin,
+                        cwd,
+                        resume_session: continue_from.as_ref().map(|(s, _)| s.native_id.clone()),
+                        model: req.model.clone(),
+                        effort: req.effort.clone(),
+                        permission_mode,
+                        add_dirs,
+                    },
+                    log.clone(),
+                )
+                .await
+                .map_err(|e| ApiError::internal("start agy", format!("{e:#}")))?
+            }
             other => {
                 return Err(ApiError::unavailable_capability(
                     "UNTESTED",
@@ -2320,7 +2443,16 @@ impl AgentHub {
         }
         if let Some(s) = self.resumable(id).await {
             // What the phone chose while it was not running.
-            let next = self.next_start.lock().remove(id).unwrap_or_default();
+            let mut next = self.next_start.lock().remove(id).unwrap_or_default();
+            // Antigravity keeps no model or mode with the conversation: a run of it that ended
+            // here passes its own choices on.
+            if let Some((_, m)) = self.find_managed(id).filter(|(_, m)| m.agent() == "agy") {
+                next.model = next.model.or_else(|| m.model());
+                next.effort = next.effort.or_else(|| m.effort());
+                next.permission_mode = next
+                    .permission_mode
+                    .or_else(|| m.permission_mode().filter(|p| p != "default"));
+            }
             let summary = self
                 .create_managed(CreateSession {
                     agent: s.agent.clone(),
@@ -2361,6 +2493,7 @@ impl AgentHub {
             "claude_code" => self.claude.claude_bin.is_some(),
             "codex" => self.codex_bin.is_some(),
             "dsh" => self.dsh_bin.is_some(),
+            "agy" => self.agy_bin.is_some(),
             _ => false,
         };
         installed && !s.native_id.is_empty()
@@ -2516,6 +2649,24 @@ impl AgentHub {
                 Some(b) => model_probe::codex_models(b).await,
                 None => None,
             },
+            // Agents this crate does not launch: the desktop asks them (e.g. `agy models`).
+            // The signed-in CLI's own list (`agy models`), its tiered ids grouped into models
+            // with thinking levels; without a binary here, the desktop's list.
+            "agy" => {
+                let own = match &self.agy_bin {
+                    Some(b) => agy::list_models(b).await,
+                    None => None,
+                };
+                match own {
+                    Some(pairs) => Some(agy::group_models(&pairs)),
+                    None => self
+                        .backend
+                        .agent_models(agent)
+                        .await
+                        .ok()
+                        .filter(|v| !model_list(v).is_empty()),
+                }
+            }
             _ => None,
         };
         let mut lists = self.model_lists.lock();
@@ -2710,7 +2861,7 @@ impl AgentHub {
     ) {
         let hub = Arc::downgrade(self);
         tokio::spawn(async move {
-            type ObservedState = (Option<String>, Option<String>, Option<String>);
+            type ObservedState = (Option<String>, Option<String>, Option<String>, Option<u32>);
             let mut prev: HashMap<String, ObservedState> = HashMap::new();
             // Since when a published session has been missing. Registry files are rewritten often and
             // a read can land mid-write, so one miss is not an exit (it showed up on phones as a
@@ -2781,6 +2932,7 @@ impl AgentHub {
                         l.status.clone(),
                         l.waiting_for.clone(),
                         summary.title.clone(),
+                        summary.active_tasks,
                     );
                     if prev.get(&id) != Some(&state) {
                         if !prev.contains_key(&id) {
@@ -2873,8 +3025,8 @@ impl AgentHub {
         let hub = Arc::downgrade(self);
         let mut rx = self.bus.subscribe();
         tokio::spawn(async move {
-            let mut last: HashMap<String, (String, Option<String>, Option<String>)> =
-                HashMap::new();
+            type RelayKey = (String, Option<String>, Option<String>, Option<u32>);
+            let mut last: HashMap<String, RelayKey> = HashMap::new();
             loop {
                 let frame = tokio::select! {
                     _ = cancel.cancelled() => break,
@@ -2885,13 +3037,21 @@ impl AgentHub {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,
                 };
+                // Sub-agent rows and background shells change `activeTasks`.
+                let background_call =
+                    frame.data.pointer("/data/background") == Some(&Value::Bool(true));
                 if frame.topic != "session.event"
-                    || !matches!(
+                    || !(matches!(
                         frame.data.get("kind").and_then(|k| k.as_str()),
                         Some(
-                            "status" | "approval_request" | "question" | "user_message" | "system"
+                            "status"
+                                | "approval_request"
+                                | "question"
+                                | "user_message"
+                                | "system"
+                                | "subagent"
                         )
-                    )
+                    ) || background_call)
                 {
                     continue;
                 }
@@ -2911,6 +3071,7 @@ impl AgentHub {
                             summary.status.clone(),
                             summary.waiting_for.clone(),
                             summary.title.clone(),
+                            summary.active_tasks,
                         );
                         if last.get(id) != Some(&key) {
                             last.insert(id.to_string(), key);
@@ -2925,6 +3086,7 @@ impl AgentHub {
                         summary.status.clone(),
                         summary.waiting_for.clone(),
                         summary.title.clone(),
+                        summary.active_tasks,
                     );
                     if last.get(id) != Some(&key) {
                         last.insert(id.to_string(), key);
@@ -2979,12 +3141,20 @@ impl AgentHub {
     }
 }
 
+/// Capabilities of a history-only agent's (not live) session, as `capabilities_for` reports it.
+fn history_caps(agent: &str) -> Capabilities {
+    let mut c = observed_caps(agent);
+    c.live_events = None;
+    c
+}
+
 fn observed_caps(agent: &str) -> Capabilities {
     let known = agent == "claude_code" || agent == "codex";
-    let dsh = agent == "dsh";
+    // Agents whose conversations SwitchTether can continue in a process of its own.
+    let dsh = agent == "dsh" || agent == "agy";
     Capabilities {
         read_history: Some(if known { CapStatus::Verified } else { CapStatus::Partial }),
-        live_events: Some(if known || dsh { CapStatus::Partial } else { CapStatus::Blocked }),
+        live_events: Some(if known || agent == "dsh" { CapStatus::Partial } else { CapStatus::Blocked }),
         send_message: Some(CapStatus::Blocked),
         approve: Some(CapStatus::Blocked),
         answer_question: Some(CapStatus::Blocked),
@@ -2995,6 +3165,7 @@ fn observed_caps(agent: &str) -> Capabilities {
             "claude_code" => "The original Claude Code process (CLI / VS Code) cannot be controlled from another program. Use \"Continue on phone\": the same conversation continues in a SwitchTether process (only while the original is idle; the original window will not show the new turns).".into(),
             "codex" => "The original Codex process (CLI / Desktop) cannot be controlled from another program. Use \"Continue on phone\": the thread continues on SwitchTether's own app-server, which Codex allows only when the thread is not open elsewhere.".into(),
             "dsh" => "A DeepSeek Harness window (web / desktop / terminal) cannot be controlled from another program without the opt-in plugin. Use \"Continue on phone\": the session is resumed on SwitchTether's own `dsh --profile acp` process once it is no longer active elsewhere.".into(),
+            "agy" => "An Antigravity window (agy CLI / IDE) cannot be watched or controlled from another program. Use \"Continue on phone\": the conversation is resumed on SwitchTether's own `agy acp` process (Antigravity's Agent Client Protocol server) and stays in Antigravity's history.".into(),
             _ => "History only.".into(),
         }),
     }
@@ -3050,6 +3221,7 @@ fn resumable_caps(agent: &str) -> Capabilities {
     let how = match agent {
         "claude_code" => "claude --resume",
         "codex" => "codex resume",
+        "agy" => "agy acp, session/resume",
         _ => "dsh resume",
     };
     Capabilities {
@@ -3168,6 +3340,7 @@ pub fn model_catalog(agent: &str, reported: &Value) -> Value {
             &["low", "medium", "high", "xhigh", "max"]
         }
         "codex" => &["minimal", "low", "medium", "high", "xhigh"],
+        "agy" => &agy::LEVELS,
         _ => &[],
     };
     json!({
@@ -3176,6 +3349,60 @@ pub fn model_catalog(agent: &str, reported: &Value) -> Value {
         "efforts": efforts,
         "source": if official { "agent" } else { "builtin" },
     })
+}
+
+/// Messages read by CC Switch's own session parser (`[{role, content, ts}]`) as history events.
+fn backend_messages_into_log(v: &Value, log: &Mutex<SessionLog>) {
+    let mut lg = log.lock();
+    for (i, m) in v.as_array().into_iter().flatten().enumerate() {
+        let role = m
+            .get("role")
+            .and_then(|r| r.as_str())
+            .unwrap_or("assistant");
+        let text = m
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let kind = if role == "user" {
+            "user_message"
+        } else if role == "tool" {
+            "tool_result"
+        } else {
+            "assistant_message"
+        };
+        let ts = m
+            .get("ts")
+            .and_then(|t| t.as_i64())
+            .map(crate::util::ms_to_rfc3339)
+            .unwrap_or_default();
+        lg.upsert(
+            EventDraft::new(
+                format!("m{i}"),
+                kind,
+                ts,
+                json!({ "text": text, "source": "unknown" }),
+            ),
+            false,
+        );
+    }
+}
+
+/// A conversation on SwitchTether's own `agy acp` process (docs/AGY_REMOTE.md, verification).
+fn agy_managed_caps() -> Capabilities {
+    Capabilities {
+        // History of a continued conversation comes from CC Switch's parser (answers it keeps).
+        read_history: Some(CapStatus::Partial),
+        live_events: Some(CapStatus::Verified),
+        send_message: Some(CapStatus::Verified),
+        approve: Some(CapStatus::Verified),
+        // ACP has no question request; agy asks in its answer text.
+        answer_question: Some(CapStatus::Blocked),
+        interrupt: Some(CapStatus::Verified),
+        continue_session: None,
+        change_model: None,
+        reason: None,
+    }
 }
 
 fn managed_caps() -> Capabilities {
@@ -3361,6 +3588,31 @@ fn agent_map_state(lg: &SessionLog) -> (HashMap<String, Value>, Vec<Value>) {
     (live, tasks)
 }
 
+/// Work still running in a session log: sub-agents whose row is `running` and background shells
+/// (`tool_call` with `background`) not finished yet. A managed Claude Code process also reports
+/// its background tasks (agents and shells) in the rolling status event (`backgroundTasks`, from
+/// stream-json `background_tasks_changed`); the larger of the two counts wins, as the same
+/// background agent shows up in both.
+fn active_task_count(lg: &SessionLog) -> u32 {
+    let running =
+        |e: &model::AgentEvent| e.data.get("status").and_then(Value::as_str) == Some("running");
+    let from_rows = lg
+        .iter()
+        .filter(|e| {
+            (e.kind == "subagent"
+                || (e.kind == "tool_call"
+                    && e.data.get("background").and_then(Value::as_bool) == Some(true)))
+                && running(e)
+        })
+        .count();
+    let reported = lg
+        .get("status:current")
+        .and_then(|e| e.data.get("backgroundTasks"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    u32::try_from(from_rows.max(reported)).unwrap_or(u32::MAX)
+}
+
 /// `subagent` rows of a session log as tree nodes; the parent is the nearest enclosing
 /// `subagent` row (a sub-agent started by a sub-agent).
 fn log_subagent_nodes(lg: &SessionLog) -> Vec<Value> {
@@ -3541,6 +3793,7 @@ fn dsh_summary_from_log(id: &str) -> Option<SessionSummary> {
         pid: None,
         managed: false,
         terminal_id: None,
+        active_tasks: None,
         source_path: Some(path.to_string_lossy().into_owned()),
     })
 }
@@ -3978,6 +4231,51 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["taskId"], "b9");
         assert_eq!(tasks[0]["status"], "running");
+    }
+
+    #[test]
+    fn active_task_count_counts_running_subagents_and_background_shells() {
+        let mut lg = SessionLog::new("claude:m", None);
+        let mut p = ClaudeParser::new();
+        let recs = [
+            json!({"type":"assistant","message":{"id":"m1","content":[
+                {"type":"tool_use","id":"toolu_a","name":"Agent","input":{"description":"Scan","prompt":"Look","subagent_type":"Explore","run_in_background":true}},
+                {"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"cargo build","run_in_background":true}},
+                {"type":"tool_use","id":"toolu_c","name":"Bash","input":{"command":"ls"}}]}}),
+            json!({"type":"system","subtype":"task_started","task_id":"a1","tool_use_id":"toolu_a","task_type":"local_agent","is_backgrounded":true}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"started"}]},"tool_use_result":{"stdout":"","backgroundTaskId":"b9"}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_c","content":"a.txt"}]}}),
+        ];
+        for r in &recs {
+            for d in p.feed(r) {
+                lg.upsert(d, false);
+            }
+        }
+        // One background agent, one background shell; the finished foreground Bash is not work.
+        assert_eq!(active_task_count(&lg), 2);
+        // The shell reports back.
+        for d in p.feed(
+            &json!({"type":"user","message":{"content":"<task-notification>
+<task-id>b9</task-id>
+<tool-use-id>toolu_b</tool-use-id>
+<status>completed</status>
+<summary>Background command \"cargo build\" completed (exit code 0)</summary>
+</task-notification>"}}),
+        ) {
+            lg.upsert(d, false);
+        }
+        assert_eq!(active_task_count(&lg), 1);
+        // A managed process reporting more background tasks (stream-json) than the log shows.
+        lg.upsert(
+            EventDraft::new(
+                "status:current",
+                "status",
+                "2026-11-27T00:00:00Z",
+                json!({"state":"idle","backgroundTasks":3}),
+            ),
+            false,
+        );
+        assert_eq!(active_task_count(&lg), 3);
     }
 
     #[test]
@@ -4728,5 +5026,171 @@ mod tests {
         assert!(lg.iter().all(|e| e.session_id == "codex:th-1"));
         assert_eq!(public_id("claude_code", "x"), "claude:x");
         assert_eq!(public_id("codex", "th"), "codex:th");
+    }
+
+    /// Antigravity sessions only exist in CC Switch's index; the backend reads them.
+    struct AgyBackend;
+
+    type R = crate::backend::BackendResult<Value>;
+    type Q = crate::backend::UsageQuery;
+
+    #[async_trait::async_trait]
+    impl CcSwitchBackend for AgyBackend {
+        async fn app_types(&self) -> R {
+            Ok(json!(["agy"]))
+        }
+        async fn providers(&self, a: &str) -> R {
+            UnavailableBackend.providers(a).await
+        }
+        async fn switch_provider(&self, a: &str, i: &str) -> R {
+            UnavailableBackend.switch_provider(a, i).await
+        }
+        async fn test_provider(&self, a: &str, i: &str) -> R {
+            UnavailableBackend.test_provider(a, i).await
+        }
+        async fn set_provider_credential(&self, a: &str, i: &str, f: &str, v: &str) -> R {
+            UnavailableBackend.set_provider_credential(a, i, f, v).await
+        }
+        async fn usage_summary(&self, q: Q) -> R {
+            UnavailableBackend.usage_summary(q).await
+        }
+        async fn usage_trends(&self, q: Q) -> R {
+            UnavailableBackend.usage_trends(q).await
+        }
+        async fn usage_models(&self, q: Q) -> R {
+            UnavailableBackend.usage_models(q).await
+        }
+        async fn usage_providers(&self, q: Q) -> R {
+            UnavailableBackend.usage_providers(q).await
+        }
+        async fn usage_log(&self, id: &str) -> R {
+            UnavailableBackend.usage_log(id).await
+        }
+        async fn usage_first_date(&self, q: Q) -> R {
+            UnavailableBackend.usage_first_date(q).await
+        }
+        async fn usage_last_sync(&self) -> R {
+            UnavailableBackend.usage_last_sync().await
+        }
+        async fn usage_logs(&self, q: Q, s: Option<u16>, p: u32, ps: u32) -> R {
+            UnavailableBackend.usage_logs(q, s, p, ps).await
+        }
+        async fn quota(&self, t: &str) -> R {
+            UnavailableBackend.quota(t).await
+        }
+        async fn mcp_servers(&self) -> R {
+            UnavailableBackend.mcp_servers().await
+        }
+        async fn mcp_toggle(&self, i: &str, a: &str, e: bool) -> R {
+            UnavailableBackend.mcp_toggle(i, a, e).await
+        }
+        async fn skills(&self) -> R {
+            UnavailableBackend.skills().await
+        }
+        async fn skill_toggle(&self, i: &str, a: &str, e: bool) -> R {
+            UnavailableBackend.skill_toggle(i, a, e).await
+        }
+        async fn prompts(&self, a: &str) -> R {
+            UnavailableBackend.prompts(a).await
+        }
+        async fn prompt_enable(&self, a: &str, i: &str) -> R {
+            UnavailableBackend.prompt_enable(a, i).await
+        }
+        async fn settings(&self) -> R {
+            UnavailableBackend.settings().await
+        }
+        async fn proxy_status(&self) -> R {
+            UnavailableBackend.proxy_status().await
+        }
+        async fn health(&self) -> R {
+            UnavailableBackend.health().await
+        }
+        async fn session_index(&self) -> crate::backend::BackendResult<Vec<IndexedSession>> {
+            let s = |id: &str, at: i64| IndexedSession {
+                provider_id: "agy".into(),
+                session_id: id.into(),
+                title: Some(format!("Conversation {id}")),
+                summary: None,
+                project_dir: Some("/w".into()),
+                created_at_ms: Some(at),
+                last_active_at_ms: Some(at),
+                source_path: Some(format!("/agy/{id}.jsonl")),
+                resume_command: None,
+            };
+            Ok(vec![s("a1", 1_000), s("a2", 2_000)])
+        }
+        async fn session_messages(&self, p: &str, src: &str) -> R {
+            assert_eq!(p, "agy");
+            Ok(match src {
+                "/agy/a1.jsonl" => json!([
+                    {"role": "user", "content": "Plan the Orbit release"},
+                    {"role": "tool", "content": "orbit in tool output only"},
+                    {"role": "assistant", "content": "Orbit is ready"},
+                ]),
+                _ => json!([{"role": "user", "content": "something else"}]),
+            })
+        }
+        async fn agent_models(&self, agent: &str) -> R {
+            Ok(match agent {
+                "agy" => json!([{"id": "Gemini 3.5 Pro", "displayName": "Gemini 3.5 Pro"}]),
+                _ => Value::Null,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn agy_history_is_searchable_and_honestly_read_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(64),
+            Arc::new(AgyBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        let (hits, partial) = hub
+            .search("orbit", Some("agy"), 20, Duration::from_secs(3))
+            .await;
+        assert!(!partial);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].session_id, "agy:a1");
+        assert_eq!(hits[0].agent, "agy");
+        // Tool output is not searched: one user and one assistant match.
+        assert_eq!(hits[0].match_count, 2);
+        assert!(hits[0].snippet.contains("Orbit is ready"));
+
+        // History of a window on the computer: no live view, no control in place; it can be
+        // continued in SwitchTether's own `agy acp` process (resumable once agy is installed).
+        let s = hub.summary("agy:a1").await.unwrap();
+        let caps = hub.capabilities_for(&s);
+        assert_eq!(caps.read_history, Some(CapStatus::Partial));
+        assert_eq!(caps.live_events, None);
+        assert_eq!(caps.send_message, Some(CapStatus::Blocked));
+        assert_eq!(caps.continue_session, Some(CapStatus::Partial));
+        let matrix = hub.capability_matrix();
+        let agy = matrix
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["agent"] == "agy")
+            .unwrap();
+        assert_eq!(agy["capabilities"], json!(caps));
+
+        assert!(matrix
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["agent"] == "agy" && e["origin"] == "managed"));
+
+        // Without agy on this computer: the desktop's list; agy's thinking levels and modes.
+        let m = hub.model_options("agy", None).await;
+        assert_eq!(m["source"], "agent");
+        assert_eq!(m["models"][0]["id"], "Gemini 3.5 Pro");
+        assert_eq!(m["efforts"], json!(["low", "medium", "high", "xhigh"]));
+        let modes: Vec<&str> = m["permissionModes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(modes, ["default", "acceptEdits", "auto", "plan"]);
     }
 }

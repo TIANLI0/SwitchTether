@@ -32,7 +32,7 @@ in docs/research), **UNTESTED**, **TODO**.
 | Claude Code managed sessions (message, tool call, approval, 409 second answer, interrupt) | DONE | live run with model `haiku` |
 | Codex managed sessions | PARTIAL | protocol to `turn/start` verified in an isolated home; approvals/interrupt untested live |
 | In-place control of externally started Claude Code / Codex sessions (no hook) | BLOCKED | docs/AGENT_COMPATIBILITY.md |
-| Opt-in takeover: shim + attach broker (VS Code wrapper, Codex Desktop `CODEX_CLI_PATH`, `st-claude`/`st-codex`) | PARTIAL | shim unit tests (router, resolve, args); `tests/attach_broker.rs`; live: real claude via simulated VS Code host, Desktop-bundled codex 0.167 via simulated Desktop, real claude TUI mirrored. Real VS Code / Codex Desktop launches untested |
+| Takeover (on by default once, marker-guarded): shim + attach broker (VS Code wrapper, Codex Desktop `CODEX_CLI_PATH`, `st-claude`/`st-codex`) | PARTIAL | shim unit tests (router, resolve, args); `tests/attach_broker.rs`; live: real claude via simulated VS Code host, Desktop-bundled codex 0.167 via simulated Desktop, real claude TUI mirrored. Real VS Code / Codex Desktop launches untested |
 | Codex managed/attached sessions, approvals | PARTIAL → approvals and phone turns verified live through the attach path with codex 0.167 | live harness |
 
 ## Desktop app
@@ -944,3 +944,53 @@ on this machine, the phone UI on a device.
   `:link` process; port forwards and DSH Web across the split (need a biometric step-up key the
   emulator cannot have); revocation seen first by the `:link` process; companion presence; the
   periodic `ReconnectWorker` → `LinkReceiver` hand-over and boot.
+
+## Google Antigravity (`agy`) on the phone (2026-11-27, branch `dev/upstream-v4.0.43-agy`)
+
+- Upstream CC Switch v4.0.43 supports Antigravity on the desktop (accounts, quota, sessions,
+  models, MCP / skills / prompts). Providers, prompts, MCP and skills already reached the phone
+  (`agy` is in the bridge's app list).
+- Remote: `GET /v1/usage/quota/agy` now takes the desktop's fast path (the signed-in account's
+  quota, `AgyAccountState`), as the desktop's `get_subscription_quota` command does, and falls back
+  to the CLI path when the account manager is not available. Content search covers Antigravity
+  conversations through CC Switch's session parser (`CcSwitchBackend::session_messages`). The
+  capability matrix lists `agy` / `cli` honestly as history only (read `PARTIAL`, live events
+  absent, send / approve / interrupt `BLOCKED`, no continue), with its own reason. The models
+  endpoint answers `agy` with `agy models` through the new `CcSwitchBackend::agent_models`.
+- Android: `agy` in the quota tools (Home and Usage; hidden when the desktop hides the app), the
+  usage app filter and the MCP / Skills / Prompts tabs follow the desktop's app list and
+  `visibleApps` (`DEFAULT_APPS` only offline; Claude Desktop / OpenClaw left out where CC Switch has
+  no such setting), label "Antigravity", a badge (the mark's silhouette in its blue, LobeHub Icons
+  MIT) also used for conversation notifications, the five quota tier labels (en, zh-CN), a localized
+  history-only reason on the session page.
+- Verified: `cargo test -p switchtether-core` (new `agy_history_is_searchable_and_honestly_read_only`
+  against a fake backend, `plain_transcripts_are_searched_by_user_and_assistant_text`); Android unit
+  tests (new `AgyAppsTest`, `AgentBadgeTest` renders the agy badge). Not verified against a real
+  Antigravity installation or account: the fast quota path, `agy models` through the Remote API and
+  searching real Antigravity trajectories were not exercised (no sandboxed agy login on this machine).
+- Not supported at the time, and why: starting, continuing or controlling Antigravity sessions
+  (superseded by the next section: agy has an ACP server).
+
+## Google Antigravity sessions from the phone (2026-11-27, branch `dev/upstream-v4.0.43-agy`)
+
+- Research (docs/AGY_REMOTE.md): agy 1.5.9 ships an Agent Client Protocol server (`agy acp`,
+  JSON-RPC over stdio) with sessions (`new`, `resume`, `load`, `list`, `close`), streamed updates,
+  cancel, permission requests, config options (model, thinking level, mode) and modes. Recorded
+  with eight short real runs in scratch directories; the redacted recordings are test fixtures.
+- Core: `agents/agy` — `ManagedAgy` (ACP client, `ManagedSession`), `AcpMapper` (updates → generic
+  event kinds), `agy models` reader, model grouping (tiers → model + thinking levels) and
+  resolution, agy permission modes (`default`, `acceptEdits`, `auto`, `plan`), session tools
+  (`commands`, `permission_mode`, `context_usage`). Hub: `POST /v1/sessions {agent: "agy"}`, continue
+  (`session/resume`, history preloaded, `continued` row), resume on send (model / level / mode carried
+  over), `agy` / `managed` row in the capability matrix, feature `managed_agy`.
+- Android: Antigravity tab in the new-session launcher (only when the desktop lists `managed_agy`),
+  thinking levels for the model picker before the desktop's list arrives, a localized "continue on
+  phone" reason, Antigravity in the notification mute list. Event rendering is unchanged (generic kinds).
+- Verified against real agy (Claude Sonnet 5.5 through agy): new session with model / level / mode,
+  live answer and tool calls, live model and level change, mode change, session tools, stop and
+  resume under the same id with the earlier turn remembered, interrupt, approval (isolated
+  `--gemini_dir`) with first answer wins; the conversation is in agy's own history. Unit tests
+  replay the recordings through the mapper and through the adapter against a fake agy.
+- Not verified: Gemini model answers (Google's API refused the machine's region), image prompts,
+  ACP `plan` / thought updates (not sent in these runs), the phone UI on a device, macOS / Linux,
+  CC Switch API-key profile conversations.

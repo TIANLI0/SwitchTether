@@ -53,7 +53,9 @@ git branch -f upstream-base v4.0.32
 | `src-tauri/src/tray.rs` | quit → `switchtether::request_quit` | re-apply |
 | `src-tauri/src/config.rs`, `settings.rs`, `live/engine.rs`, `panic_hook.rs`, `services/backup_storage.rs`, `services/env_manager.rs`, `mode/controller.rs` | `~/.cc-switch` → `get_app_home_dir()` | after merging, `grep -rn '".cc-switch"' src-tauri/src` — every **non-test** new occurrence must use `crate::config::get_app_home_dir()` |
 | `src/lib/navigation.ts`, `Sidebar.tsx`, `SettingsPage.tsx` | `remote` settings section | re-apply |
+| `src/App.tsx` | `RemoteStatusButton` import and one header action on the providers page (marked `SwitchTether`) | re-apply |
 | `src/i18n/locales/*.json` | `remote.*` keys | keep both |
+| `src-tauri/src/services/claude_account/{usage,mod,login}.rs` | `OwnedPid` guard right after spawning `claude` (helper hidden from the live-session observer) | re-apply after the `spawn()` |
 | `.github/workflows/*` | SwitchTether workflows | keep ours; review upstream changes for useful CI improvements |
 | `README*.md` | SwitchTether README | keep ours; upstream README kept as `README_UPSTREAM.md` (refresh it) |
 

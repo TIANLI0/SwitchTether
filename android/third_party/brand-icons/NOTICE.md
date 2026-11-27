@@ -5,6 +5,7 @@
 | `app/src/main/res/drawable/ic_agent_claude.xml` | LobeHub Icons, `icons/claude.svg` | `@lobehub/icons-static-svg` 1.102.0 | MIT |
 | `app/src/main/res/drawable/ic_agent_openai.xml` | LobeHub Icons, `icons/openai.svg` | `@lobehub/icons-static-svg` 1.102.0 | MIT |
 | `app/src/main/res/drawable/ic_agent_deepseek.xml` | LobeHub Icons `deepseek.svg`, via the desktop's `src/icons/extracted/deepseek.svg` | — | MIT |
+| `app/src/main/res/drawable/ic_agent_antigravity.xml` | LobeHub Icons `antigravity.svg` (its mask path, the mark's silhouette), via the desktop's `src/icons/extracted/antigravity.svg` | — | MIT |
 
 - Upstream: https://github.com/lobehub/lobe-icons (npm `@lobehub/icons-static-svg`, tarball
   sha256 `ad3f2ab605d59f3968b9ea57c9b2aab941ee3608da72fca57ac6e0ded301f5a2`).
@@ -12,8 +13,11 @@
   VectorDrawable (`fill-rule="evenodd"` → `android:fillType="evenOdd"`); no geometry was edited.
   Claude is filled with its brand colour `#D97757`; the OpenAI mark is monochrome and tinted at
   runtime (`COUITheme.colorScheme.onSurface`) so it follows light/dark mode.
+  The Antigravity mark is drawn with blurred colour fields clipped to its silhouette, which a
+  VectorDrawable cannot express: only the silhouette (the SVG's mask path, verbatim) is used, filled
+  with the mark's blue `#3186FF`.
 - The marks identify which agent a session belongs to (nominative use). "Claude" is a trademark of
-  Anthropic PBC and "OpenAI" a trademark of OpenAI, "DeepSeek" a trademark of its owner; SwitchTether is not affiliated with either.
+  Anthropic PBC and "OpenAI" a trademark of OpenAI, "DeepSeek" a trademark of its owner, "Antigravity" a trademark of Google LLC; SwitchTether is not affiliated with either.
 
 ## MIT License (LobeHub Icons)
 

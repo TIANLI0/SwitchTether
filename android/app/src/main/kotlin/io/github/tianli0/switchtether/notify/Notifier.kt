@@ -515,4 +515,5 @@ private class ResourceNotifyText(private val c: Context) : io.github.tianli0.swi
     override fun publicApproval() = s(R.string.ntf_public_approval)
     override fun publicWaiting() = s(R.string.ntf_public_waiting)
     override fun publicActivity() = s(R.string.ntf_public_activity)
+    override fun backgroundRunning(n: Int): String = c.resources.getQuantityString(R.plurals.live_background_running, n, n)
 }

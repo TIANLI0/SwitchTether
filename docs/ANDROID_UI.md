@@ -501,7 +501,7 @@ Settings → Licenses.
 ### 12.4 Attached sessions (wire change)
 - `SessionSummary.terminalId: String?` is new. `isAttached` means `control == "full"` while the
   session is neither managed nor `origin == "managed"`, i.e. the user's own process attached
-  through the opt-in wrapper.
+  through the takeover wrapper.
 - Full-control sessions always get the normal composer and approval UI. Sending is still enabled
   only when `sendMessage` is VERIFIED. The read-only bar, the read-only TopTips and **接续** are
   never shown for `control == "full"`.
@@ -791,6 +791,12 @@ Claude data; managed test session in `android/build/e2e-cwd`).
 
 - **Home:** "运行中" now means working (busy); live-but-idle sessions are a separate "空闲" group
   capped at 3 rows, with "查看全部 N 个活动会话" → Sessions tab. Pull-to-refresh.
+  A live session whose turn ended but whose sub-agents or background tasks still run is working,
+  not idle (Home, the Sessions tab's 运行中 / 空闲 groups, the row's status dot, the detail's status
+  chip and info sheet): the summary's `activeTasks` (PROTOCOL §10.1), else Home's own Agent map poll
+  (older desktops), else idle as before (`SessionSummary.isIdle(fallback)` / `displayStatus`). The
+  row then shows "后台 N 个任务运行中" (`live_background_running`; not on Home, whose lines under the
+  row already list the work), and a "finished" notification says it in its body.
 - **Session times (desktop):** observed live Claude sessions report the transcript's last write
   as `lastActiveAtMs` (was "now", so every row read 刚刚 and the order was arbitrary).
 - **Session detail:** long titles scroll as a marquee (coui patch 0004, `LocalTopAppBarTitleMarquee`,

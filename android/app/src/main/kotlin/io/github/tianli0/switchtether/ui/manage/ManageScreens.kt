@@ -311,7 +311,7 @@ fun UsageScreen(onBack: () -> Unit, onOpen: (io.github.tianli0.switchtether.ui.n
             modifier = Modifier.padding(vertical = 4.dp).testTag("usage-range"),
         )
         // Apps switched off on the desktop (`visibleApps`) are not offered here either.
-        val apps = listOf<String?>(null) + DEFAULT_APPS.filter { it !in state.hiddenApps }
+        val apps = listOf<String?>(null) + state.apps
         io.github.suqi8.coui.kmp.basic.ChipTabGroup(
             tabs = apps.map { io.github.suqi8.coui.kmp.basic.ChipTabData(if (it == null) stringResource(R.string.usage_all_apps) else Formatters.agentLabel(it)) },
             selectedIndex = apps.indexOf(state.app).coerceAtLeast(0),
@@ -356,7 +356,8 @@ fun UsageContent(
         // Remaining quota right under the totals: it is what one checks first, not after every table.
         if (state.quotas.isNotEmpty()) {
             item { SectionHeader(stringResource(R.string.usage_quota)) }
-            items(state.quotas, key = { it.first }) { (_, q) ->
+            // A tool switched off on the desktop (`visibleApps`) is not shown here either.
+            items(state.quotas.filter { it.first !in state.hiddenApps }, key = { it.first }) { (_, q) ->
                 Box(Modifier.animateItem()) { GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } } }
             }
         }
@@ -657,6 +658,12 @@ internal fun quotaTierLabel(name: String): String {
     val model = name.substringAfter("seven_day_", "").takeIf { it.isNotEmpty() }
         ?.replaceFirstChar { it.uppercase() }
     return when {
+        // Antigravity (CC Switch's agy tiers): Gemini models, Claude / GPT models.
+        name == "agy_gemini_five_hour" -> stringResource(R.string.quota_tier_agy_gemini_5h)
+        name == "agy_gemini_weekly" -> stringResource(R.string.quota_tier_agy_gemini_week)
+        name == "agy_gemini_argon_weekly" -> stringResource(R.string.quota_tier_agy_argon_week)
+        name == "agy_third_party_five_hour" -> stringResource(R.string.quota_tier_agy_third_party_5h)
+        name == "agy_third_party_weekly" -> stringResource(R.string.quota_tier_agy_third_party_week)
         name == "five_hour" -> stringResource(R.string.quota_tier_5h)
         name == "seven_day" || name == "weekly_limit" -> stringResource(R.string.quota_tier_week)
         model != null -> stringResource(R.string.quota_tier_week) + " · " + model
@@ -745,7 +752,7 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
     )
     Page(title = title, onBack = onBack, actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) }) {
         ConnectionBanner(conn, { container.connection.retryNow() })
-        AppTabs(DEFAULT_APPS, state.app, vm::selectApp)
+        AppTabs(state.apps, state.app, vm::selectApp)
         if (kind == ToggleListKind.PROMPTS) {
             LoadableContent(state.prompts, onRetry = vm::load) { prompts ->
                 LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {

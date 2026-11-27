@@ -33,6 +33,22 @@ import kotlinx.coroutines.launch
 /** Default app tabs when the desktop cannot list app types (e.g. backend unavailable). */
 val DEFAULT_APPS = listOf("claude", "codex", "gemini")
 
+/**
+ * App tabs / filters: the desktop's app list (`GET /v1/providers` app types, [DEFAULT_APPS] when it
+ * cannot be read) without the apps switched off there (`visibleApps`) and, for MCP / skills /
+ * prompts, without the apps CC Switch has no such setting for (Claude Desktop has none, OpenClaw no
+ * MCP servers or skills).
+ */
+internal fun appChoices(desktopApps: List<String>?, hidden: Set<String>, kind: ToggleListKind? = null): List<String> {
+    val unsupported = when (kind) {
+        null -> emptySet()
+        ToggleListKind.PROMPTS -> setOf("claude-desktop")
+        ToggleListKind.MCP, ToggleListKind.SKILLS -> setOf("claude-desktop", "openclaw")
+    }
+    val apps = desktopApps?.takeIf { it.isNotEmpty() } ?: DEFAULT_APPS
+    return apps.filter { it !in hidden && it !in unsupported }.ifEmpty { DEFAULT_APPS }
+}
+
 /** Common: refresh when the connection comes online. */
 private fun ViewModel.onOnline(conn: ConnectionController, block: () -> Unit) {
     viewModelScope.launch {
@@ -143,6 +159,8 @@ data class UsageState(
     val lastSyncMs: Long? = null,
     /** Apps the desktop hides (`visibleApps` false) are not offered as filters. */
     val hiddenApps: Set<String> = emptySet(),
+    /** App filters (see [appChoices]). */
+    val apps: List<String> = DEFAULT_APPS,
     /** Zone the ranges and labels use: the desktop's (falls back to the phone's). */
     val zone: ZoneId = ZoneId.systemDefault(),
     /** Usage per project; null = the desktop has no project API (section hidden). */
@@ -193,7 +211,9 @@ class UsageViewModel(
         viewModelScope.launch {
             val sync = runCatching { repo.usageLastSyncMs() }.getOrNull()
             val visible = runCatching { repo.visibleApps() }.getOrDefault(emptyMap())
-            _state.update { it.copy(lastSyncMs = sync, hiddenApps = visible.filterValues { v -> !v }.keys) }
+            val hidden = visible.filterValues { v -> !v }.keys
+            val apps = appChoices(runCatching { repo.apps() }.getOrNull(), hidden)
+            _state.update { it.copy(lastSyncMs = sync, hiddenApps = hidden, apps = apps) }
         }
     }
 
@@ -211,6 +231,10 @@ class UsageViewModel(
         logsJob?.cancel()
         _state.update { it.copy(fromSec = from, toSec = to, zone = z, logs = if (it.logs == null) null else emptyList(), logsTotal = 0, logsPage = -1, logsLoading = false, logsError = false) }
         loadMoreLogs()
+        // The total another screen (Home) already read for this range shows until the fresh one is back.
+        repo.summaries.value[io.github.tianli0.switchtether.domain.UsageSummaryKey(from, app)]?.let { cached ->
+            _state.update { if (gen == rangeGen) it.copy(summary = Loadable.Ready(cached)) else it }
+        }
         viewModelScope.launch { val r = loadable { repo.usageSummary(from, to, app) }; _state.update { if (gen == rangeGen) it.copy(summary = r) else it } }
         viewModelScope.launch { val r = loadable { repo.usageTrend(from, to, app) }; _state.update { if (gen == rangeGen) it.copy(trend = r) else it } }
         // The desktop sorts both tables by request count (descending) by default.
@@ -221,7 +245,12 @@ class UsageViewModel(
             _state.update { if (gen == rangeGen) it.copy(projects = r) else it }
         }
         viewModelScope.launch {
-            val tools = listOf("claude", "codex")
+            val tools = io.github.tianli0.switchtether.domain.QUOTA_TOOLS
+            // Start from the quotas Home already read; replace each as its fresh answer arrives.
+            val known = repo.quotas.value
+            if (_state.value.quotas.isEmpty()) {
+                _state.update { it.copy(quotas = tools.map { t -> t to (known[t]?.let { q -> Loadable.Ready(q) } ?: Loadable.Loading) }) }
+            }
             val quotas = tools.map { t -> t to loadable { repo.quota(t) } }
             _state.update { it.copy(quotas = quotas) }
         }
@@ -266,6 +295,8 @@ enum class ToggleListKind { MCP, SKILLS, PROMPTS }
 
 data class ToggleListState(
     val kind: ToggleListKind,
+    /** App tabs (see [appChoices]). */
+    val apps: List<String> = DEFAULT_APPS,
     val app: String = DEFAULT_APPS.first(),
     val items: Loadable<List<AppToggleItem>> = Loadable.Loading,
     val prompts: Loadable<List<PromptView>> = Loadable.Loading,
@@ -281,7 +312,19 @@ class ToggleListViewModel(
     val commands = CommandTracker(viewModelScope) { repo.commandStatus(it) }
 
     init {
-        onOnline(conn) { load() }
+        onOnline(conn) { loadApps(); load() }
+    }
+
+    private fun loadApps() {
+        viewModelScope.launch {
+            val desktop = runCatching { repo.apps() }.getOrNull() ?: return@launch
+            val hidden = runCatching { repo.visibleApps() }.getOrDefault(emptyMap()).filterValues { !it }.keys
+            val apps = appChoices(desktop, hidden, kind)
+            val before = _state.value.app
+            _state.update { st -> st.copy(apps = apps, app = if (st.app in apps) st.app else apps.first()) }
+            // Prompts are per app: reload when the selected tab had to change.
+            if (kind == ToggleListKind.PROMPTS && _state.value.app != before) load()
+        }
     }
 
     fun selectApp(app: String) {

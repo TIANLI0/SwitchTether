@@ -138,8 +138,9 @@ class StatusWidgetUpdater(
                 },
                 online = state is ConnectionState.Online,
                 waiting = waiting,
-                // "运行中" means a turn in flight, not merely an open (idle) session.
-                running = all.count { it.status == "busy" && it !in waiting },
+                // "运行中" means a turn in flight (or sub-agents / background tasks it left running),
+                // not merely an open (idle) session.
+                running = all.count { it.displayStatus() == "busy" && it !in waiting },
             )
             push()
         }

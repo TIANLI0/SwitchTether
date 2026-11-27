@@ -126,7 +126,7 @@ pub fn find_dsh_bin() -> Option<PathBuf> {
 }
 
 /// ACP permission option for a SwitchTether decision (`allow`, `allow_session`, `deny`).
-fn option_for(options: &[Value], decision: &str) -> Option<String> {
+pub(crate) fn option_for(options: &[Value], decision: &str) -> Option<String> {
     let kinds: &[&str] = match decision {
         "allow" | "answer" => &["allow_once", "allow_always"],
         "allow_session" => &["allow_always", "allow_once"],
@@ -143,7 +143,7 @@ fn option_for(options: &[Value], decision: &str) -> Option<String> {
 }
 
 /// SwitchTether approval options from the ACP ones.
-fn approval_options(options: &[Value]) -> Vec<Value> {
+pub(crate) fn approval_options(options: &[Value]) -> Vec<Value> {
     let mut out = Vec::new();
     let has = |k: &str| {
         options

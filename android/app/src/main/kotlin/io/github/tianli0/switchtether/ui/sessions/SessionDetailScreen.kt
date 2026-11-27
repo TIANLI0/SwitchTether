@@ -826,6 +826,7 @@ fun SessionDetailContent(
         show = showInfo,
         detail = state.detail.valueOrNull,
         activity = state.rollingStatus?.data?.takeIf { it.str("state") !in setOf("idle", "completed", null) }?.let { listOfNotNull(statusStateLabel(it.str("state")).ifEmpty { null }, it.str("detail")).joinToString(" · ") },
+        activeFallback = subagentRunning + backgroundTasks.second,
         onDismiss = { showInfo = false },
         // The sheet closes first: the confirmation is a dialog of the page, not of the sheet.
         onEndSession = onEndSession?.let { end -> { showInfo = false; end() } },
@@ -879,7 +880,10 @@ private fun StatusChipRow(
     ) {
         val chipScroll = rememberScrollState()
         Row(Modifier.edgeFade(chipScroll).horizontalScroll(chipScroll).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (s.isLive) InfoChip(statusLabel(s.status), dot = sessionStatusColor(s.status), backdrop = bg)
+            // A finished turn with sub-agents / background tasks still running is not idle: it says
+            // so (the desktop's `activeTasks`, else what this page's log shows running).
+            val activeFallback = subagentRunning + backgroundTasks.second
+            if (s.isLive) InfoChip(sessionStatusLabel(s, activeFallback), dot = sessionStatusColor(s.displayStatus(activeFallback)), backdrop = bg)
             else InfoChip(stringResource(R.string.badge_ended), dot = dev.neutral, backdrop = bg)
             s.waitingFor?.let { InfoChip(waitingLabel(it), dot = dev.warn, backdrop = bg) }
             if (s.isAttached) InfoChip(io.github.tianli0.switchtether.ui.common.attachedLabel(s), dot = COUITheme.colorScheme.primary, backdrop = bg)
@@ -1508,7 +1512,7 @@ private fun pickedFileInfo(context: android.content.Context, uri: android.net.Ur
 
 /** Bottom sheet with everything about the session that does not fit the chip row. */
 @Composable
-private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: String?, onDismiss: () -> Unit, onEndSession: (() -> Unit)? = null) {
+private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: String?, onDismiss: () -> Unit, onEndSession: (() -> Unit)? = null, activeFallback: Int? = null) {
     PanelSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss) {
         val d = detail ?: return@PanelSheet
         val s = d.summary
@@ -1516,7 +1520,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
             val rows = listOfNotNull(
                 stringResource(R.string.session_info_agent) to Formatters.agentLabel(s.agent),
                 s.model?.let { stringResource(R.string.session_info_model) to it },
-                stringResource(R.string.session_info_status) to (if (s.isLive) statusLabel(s.status) else stringResource(R.string.badge_ended)),
+                stringResource(R.string.session_info_status) to (if (s.isLive) sessionStatusLabel(s, activeFallback) else stringResource(R.string.badge_ended)),
                 activity?.takeIf { it.isNotBlank() }?.let { stringResource(R.string.session_info_activity) to it },
                 stringResource(R.string.session_info_control) to controlLabel(s.controlLevel),
                 stringResource(R.string.session_info_origin) to (if (s.isAttached) io.github.tianli0.switchtether.ui.common.attachedLabel(s) else originLabel(s.origin, s.managed)),
@@ -1568,8 +1572,12 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
                     "claude_code" -> stringResource(R.string.cap_reason_observed_claude, stringResource(R.string.continue_action))
                     "codex" -> stringResource(R.string.cap_reason_observed_codex, stringResource(R.string.continue_action))
                     "dsh" -> stringResource(R.string.cap_reason_observed_dsh, stringResource(R.string.continue_action))
+                    "agy" -> stringResource(R.string.cap_reason_observed_agy, stringResource(R.string.continue_action))
                     else -> null
                 }
+            } else if (s.agent == "agy" && d.capabilities.continueSession == null) {
+                // A desktop that cannot continue Antigravity conversations (before managed agy).
+                stringResource(R.string.cap_reason_history_agy)
             } else {
                 null
             }

@@ -454,7 +454,13 @@ impl CcSwitchBackend for CcSwitchBridge {
     }
 
     async fn quota(&self, tool: &str) -> BackendResult<Value> {
-        let q = crate::services::subscription::get_subscription_quota(tool).await?;
+        // Same routing as the desktop's `get_subscription_quota` command: Antigravity reads its
+        // signed-in account's quota directly (falling back to the CLI path inside `agy_quota`);
+        // the CLI path is only used when the account manager is not available.
+        let q = match self.app.try_state::<crate::commands::AgyAccountState>() {
+            Some(agy) if tool == "agy" => crate::commands::agy_quota(&agy.0, None).await?,
+            _ => crate::services::subscription::get_subscription_quota(tool).await?,
+        };
         to_json(q)
     }
 
@@ -596,6 +602,24 @@ impl CcSwitchBackend for CcSwitchBridge {
         })
         .await
         .map_err(|e| e.to_string())?
+    }
+
+    async fn agent_models(&self, agent: &str) -> BackendResult<Value> {
+        match agent {
+            // The signed-in agy's own list, read the way the desktop's provider form does
+            // (`agy models`; no key, no settings written). Ids are agy's display names, which
+            // are also what its settings store.
+            "agy" => {
+                let models = crate::commands::get_agy_models(None, None).await?;
+                Ok(Value::Array(
+                    models
+                        .into_iter()
+                        .map(|m| json!({ "id": m.id, "displayName": m.id }))
+                        .collect(),
+                ))
+            }
+            _ => Ok(Value::Null),
+        }
     }
 }
 

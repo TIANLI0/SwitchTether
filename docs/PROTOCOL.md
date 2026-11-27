@@ -196,7 +196,12 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
 - `GET /v1/usage/summary?from&to&app` · `GET /v1/usage/trends?from&to&app` ·
   `GET /v1/usage/models?…` · `GET /v1/usage/providers?…` ·
   `GET /v1/usage/quota/{tool}` (subscription quota; `available:false` + `reason` when the
-  upstream service does not expose it — never fabricated).
+  upstream service does not expose it — never fabricated). `tool` is a CC Switch app id: the phone
+  asks for `claude`, `codex` and `agy` (Google Antigravity). Antigravity is read the way the
+  desktop's own quota footer reads it: from the signed-in account (`AgyAccountManager::live_quota`),
+  else through the `agy` CLI. Its tiers are `agy_gemini_five_hour`, `agy_gemini_weekly`,
+  `agy_gemini_argon_weekly` (Gemini models), `agy_third_party_five_hour` and
+  `agy_third_party_weekly` (Claude / GPT models in Antigravity).
 - Usage ranges are epoch seconds; buckets and "today" use the **desktop's time zone**
   (`GET /v1/status` → `timeZone` (IANA, may be null) and `utcOffsetMinutes`). Trend buckets carry
   `date` (RFC 3339, desktop offset), `startMs` and `realTotalTokens`; the response has `timeZone`.
@@ -242,10 +247,13 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   It is an ordinary conversation of the agent, created the official way, and its **id is the agent's own conversation id**:
   `claude:<uuid>` (Claude Code gets `--session-id <uuid>`; its transcript is Claude Code's own
   `~/.claude/projects/<dir>/<uuid>.jsonl`, listed by `claude --resume` and the IDE's history), `codex:<thread id>`,
-  `dsh:<session id>`. The same id names the conversation as history after the process ends or the desktop restarts.
+  `dsh:<session id>`, `agy:<session id>` (Google Antigravity through its ACP server `agy acp`, feature `managed_agy`;
+  see [AGY_REMOTE.md](AGY_REMOTE.md); the conversation is agy's own and stays in its history). The same id names the
+  conversation as history after the process ends or the desktop restarts.
   `effort`: Claude Code `low|medium|high|xhigh|max` (`--effort`), Codex `none|minimal|low|medium|high|xhigh`
-  (`turn/start` `effort`); `model` and `effort` are validated (plain names only).
-  With `resumeFrom` (an existing `claude:`/`codex:` session) it **continues that conversation** ("接续会话"):
+  (`turn/start` `effort`), Antigravity `low|medium|high|xhigh` (its `thought_level` session option; a level the chosen
+  model does not offer is `422`); `model` and `effort` are validated (plain names only).
+  With `resumeFrom` (an existing `claude:`/`codex:`/`dsh:`/`agy:` session) it **continues that conversation** ("接续会话"):
   `mode: "continue"` (default) keeps the same session/thread id; `mode: "fork"` (Claude only) starts a fork. `cwd` defaults
   to the original session's. The original history is preloaded into the new session's events. Refused with `409 conflict`
   while the original is `busy`/`waiting` on the computer, or (Codex) while the thread is open in another Codex client.
@@ -255,25 +263,31 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   readOnly | untrusted | bypassPermissions` — `default` = workspace-write + `on-request`, `plan` = collaboration mode
   `plan` on each `turn/start`, `auto` = `approvalsReviewer: "auto_review"`, `readOnly` = read-only sandbox, `untrusted` =
   approval policy `untrusted`, `bypassPermissions` = `danger-full-access` + `never` ("full access"). Codex also accepts
-  `on-request` / `acceptEdits` (= `default`), `read-only`, `never` / `danger-full-access`. An unknown mode is `422`.
+  `on-request` / `acceptEdits` (= `default`), `read-only`, `never` / `danger-full-access`. Antigravity `default |
+  acceptEdits | auto | plan` (agy's ACP session modes `default`, `accept-edits`, `auto`, `plan`, `session/set_mode`; agy's
+  own spelling `accept-edits` is accepted; no full-access mode). An unknown mode is `422`.
   **`bypassPermissions` (any spelling) needs the `terminal` step-up grant** (`403 step_up_required`, `details.scope:
   "terminal"`) here, in `POST …/options` and in the `permission_mode` session tool: it is as powerful as a remote
   terminal. Managed Claude Code processes start with `--allow-dangerously-skip-permissions` (not as root, which Claude
   Code refuses) so the mode can be chosen mid-session; nothing is skipped until it is.
 - `POST /v1/sessions/{id}/messages` `{commandId, text, images?: [{mediaType, dataBase64, name?}], attachments?: [attachmentId]}` (the `commandId` comes back as `clientId` on the resulting `user_message` event; fixture `send_message_attachments.json`).
-  Feature `resume_on_send`: a Claude Code / Codex / dsh conversation that is **not running anywhere** (history, or a run that
-  ended, e.g. with a desktop restart) takes messages too: the desktop first resumes it the official way (`claude --resume <id>`,
-  `thread/resume`, `session/resume`) under the same id, then delivers the message. Such sessions advertise
+  Feature `resume_on_send`: a Claude Code / Codex / dsh / Antigravity conversation that is **not running anywhere** (history,
+  or a run that ended, e.g. with a desktop restart) takes messages too: the desktop first resumes it the official way (`claude
+  --resume <id>`, `thread/resume`, `session/resume`) under the same id, then delivers the message. Antigravity keeps no model,
+  level or mode with a conversation: a run that ended in this desktop process passes its own on, otherwise agy's default
+  applies. Such sessions advertise
   `sendMessage: "PARTIAL"` with `approve`/`interrupt` `BLOCKED` until they run. A session live in a window on the computer is
   never resumed implicitly (observe-only; `continueSession` explains the explicit way).
 - `POST /v1/sessions/{id}/options` `{commandId, model?, effort?, permissionMode?}` (feature `session_options`, fixture
   `session_options.json`) — changes model, effort and / or permission mode of a **running** session the phone controls
-  (started by SwitchTether, or attached through an opt-in takeover hook: VS Code panel, Codex Desktop); absent =
+  (started by SwitchTether, or attached through a takeover hook: VS Code panel, Codex Desktop); absent =
   unchanged, `""` or `"default"` = the agent's default. Claude Code: `set_model`, `apply_flag_settings {effortLevel}` and
   `set_permission_mode` control requests (as the Agent SDK and the VS Code extension; in an attached panel they go through
   switchtether-shim, and changes made in the IDE are followed); Codex: sent with the next `turn/start` (`model`, `effort`,
   `approvalPolicy`, `sandboxPolicy`, `approvalsReviewer`, `collaborationMode`), which Codex keeps for the following turns;
-  `thread/settings/updated` (also from Codex Desktop) updates what the detail shows. Answers the updated `SessionSummary`.
+  `thread/settings/updated` (also from Codex Desktop) updates what the detail shows; Antigravity: ACP
+  `session/set_config_option` (`model`, `thought_level`) and `session/set_mode`, applied at once (`""`/`default` keeps the
+  current model: agy has no "default" value to return to). Answers the updated `SessionSummary`.
   `409` when the session is not running anywhere and cannot be resumed, `422 capability_unavailable` for sessions owned by
   a window SwitchTether does not control (observed ones, mirrored terminals) and for dsh.
   Advertised per session as `capabilities.changeModel`: `PARTIAL` where this request is accepted, `BLOCKED` (with
@@ -479,7 +493,10 @@ revocation, and changes are audited (`push.register` with the endpoint's host on
 Full-text search over what the user and the agents **said** (the `user_message` /
 `assistant_message` text the transcript parsers produce; tool calls and their output are not
 searched) in Claude Code, Codex and DeepSeek Harness transcripts known to the desktop (the same set
-as `GET /v1/sessions`). `q`: 1–200 characters, matched case-insensitively character by character (CJK
+as `GET /v1/sessions`), and in Antigravity (`agy`) conversations, which are read with CC Switch's
+own session parser (JSONL transcripts and trajectory databases; `user` / `assistant` messages).
+Antigravity sessions are searched after the transcript files, within the same budget, and the
+results are merged newest first. `q`: 1–200 characters, matched case-insensitively character by character (CJK
 and other scripts work; no word splitting). `agent` filters like the session list. `limit` 1–50,
 default 20. Sessions are scanned newest first (at most the last 64 MiB of each transcript) within a
 3 s budget; `partial: true` means the budget ran out before every session was searched. Results come
@@ -549,7 +566,9 @@ line dsh printed (or works directly when the WebView still holds a valid cookie)
   "features": ["terminal", "files", "git", "providers", "usage", "mcp", "skills", "prompts", "managed_sessions"] }
 ```
 
-Further features: `push_wake` (§7.12), `session_search` (§7.13), `dsh_web` (§7.14).
+Further features: `push_wake` (§7.12), `session_search` (§7.13), `dsh_web` (§7.14), `managed_agy` (the desktop starts
+and continues Google Antigravity sessions, `POST /v1/sessions {agent: "agy"}`; the phone offers Antigravity in its launcher
+only when this is listed).
 
 Session-level `capabilities` override the agent defaults (e.g. a managed session has
 `sendMessage: "VERIFIED"`).
@@ -572,19 +591,20 @@ Session-level `capabilities` override the agent defaults (e.g. a managed session
 | `title` | The task title: Codex's thread name (including initial resume metadata and subsequent renames), else its indexed title / first prompt. Claude Code's `/rename` title (`custom-title`), else its generated `ai-title`, else the first prompt; `null` when none exists yet. Never the project name and never the registry slug in `~/.claude/sessions/<pid>.json`. Records written by sub-agents are ignored. Sub-agent work is nested under its tool call and is not a session |
 | `project` | Folder of `cwd`; an agent worktree (`<project>/.claude/worktrees/<name>`) maps to its containing project |
 | `origin` | `cli`, `vscode`, `desktop_app`, `managed` (started by SwitchTether), `unknown` |
-| `managed` | `true` only for sessions SwitchTether started. A session of the user's own process that SwitchTether is attached to through an opt-in takeover hook has its real origin, `managed: false` and `control: "full"` |
+| `managed` | `true` only for sessions SwitchTether started. A session of the user's own process that SwitchTether is attached to through a takeover hook has its real origin, `managed: false` and `control: "full"` |
 | `effort` | optional; effort / reasoning level chosen for a session SwitchTether runs (`low` … `max`), absent when the agent's default applies |
 | `terminalId` | optional; set for sessions running in the user's terminal window (`st-claude` / `st-codex`). The id of an **external** terminal (`/v1/terminals`, `external: true`) mirroring that window; prompts are answered there |
 | `liveness` | `live` (process running), `ended`, `unknown` |
 | `status` | `busy`, `idle`, `waiting`, `completed`, `error`, `unknown` |
 | `waitingFor` | `permission prompt`, `input needed`, … (as reported by the agent), or `null` |
 | `control` | `full` (SwitchTether can send/approve/interrupt), `observe` (read-only live view), `history` (ended / transcript only) |
+| `activeTasks` | optional integer; sub-agents and background tasks (background shells, background agents) still running in a **live** session. A session whose turn ended (`idle` / `completed`) with `activeTasks > 0` is still working: clients list and label it as running ("2 background tasks running"), not idle. Counted from the session log (`subagent` rows and `background` tool calls still `running`; for a Claude Code process SwitchTether runs, at least the stream-json `backgroundTasks` count). Present for every live managed / attached session (also `0`) and for a live observed Claude Code session whose log the desktop already follows (opened, or its Agent map read); absent otherwise and from older desktops — clients then fall back to their own Agent map poll, else treat the session as idle. A change of the count publishes `session.upserted` (managed / attached at once, observed within the 4 s live refresh). Fixture `protocol/fixtures/session_summary.json` |
 
 `GET /v1/sessions/{id}` adds `"capabilities": { "sendMessage": "VERIFIED|PARTIAL|BLOCKED|UNTESTED", "approve": …, "interrupt": …, "answerQuestion": …, "liveEvents": …, "readHistory": … }`
 and `"pendingRequests": [AgentEvent]` (open approvals/questions).
 
 Session ids are opaque; the prefix is informative only. Sessions SwitchTether starts use the agent's own conversation id
-(`claude:<uuid>`, `codex:<thread>`, `dsh:<id>`), so one conversation keeps one id across process restarts; desktops before
+(`claude:<uuid>`, `codex:<thread>`, `dsh:<id>`, `agy:<id>`), so one conversation keeps one id across process restarts; desktops before
 this change used `managed:<random>` ids that disappeared with the process.
 
 ### 10.2 AgentEvent
@@ -615,7 +635,7 @@ this change used `managed:<random>` ids that disappeared with the process.
     and audited like `interrupt`; any other session → `422 capability_unavailable` (sessions started elsewhere are
     observe-only).
   - **Claude Code session tools** (the IDE extension's session features, for a Claude Code process SwitchTether started
-    or one attached through the opt-in takeover hook — sent through switchtether-shim like messages and approvals; the
+    or one attached through the takeover hook — sent through switchtether-shim like messages and approvals; the
     session detail then has `claudeTools: true` and `permissionMode`; Stop in the Agent map likewise): `POST /v1/sessions/{id}/claude/{action}`
     with the action's parameters and an optional `commandId` (idempotent, audited as `session.claude.<action>`). Each is
     one whitelisted control request; replies are reduced to these fields, texts redacted, MCP configuration never sent:
@@ -659,15 +679,25 @@ this change used `managed:<random>` ids that disappeared with the process.
     `isSynthetic`, transcript `isMeta`); the summary a `/compact` leaves is a `system` `compact_summary`.
   - **Models** (`GET /v1/agents/{agent}/models?session=`): the agent's own list — from the running session, else read by a
     short SwitchTether-owned probe (Claude Code `initialize` with no MCP servers, Codex app-server `model/list`; no
-    message, no conversation) and cached 30 min. With an official list the built-in aliases are not added, hidden Codex
+    message, no conversation) and cached 30 min. Antigravity (`agy`): the signed-in CLI's own list (`agy models`, nothing
+    written; a running session answers from its ACP `availableModels`), its tiered ids (`gemini-4-neon-high` "Gemini 4 Neon
+    (High)") grouped into one model per base id with its thinking levels as `efforts` (fixture `model_options_agy.json`);
+    `efforts` `low|medium|high|xhigh`, `permissionModes` agy's four modes. When the desktop cannot run `agy` itself the
+    desktop's own list is served (display names as ids, no levels). A model is accepted as the grouped id (+ effort), a
+    tiered id or a display name. With an official list the built-in aliases are not added, hidden Codex
     models are left out, and a model without effort levels has `efforts: []`. `source`: `agent` | `builtin`.
   - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
     when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`, Codex thread settings);
     the detail then has `resumable: true` and `nextStart {model, effort, permissionMode}`, and `changeModel` is `PARTIAL`.
-    This includes a session attached through the opt-in hook whose window was closed (VS Code panel, Codex Desktop): the
+    This includes a session attached through the takeover hook whose window was closed (VS Code panel, Codex Desktop): the
     next message resumes the conversation in a process SwitchTether starts, **under the same session id** (the
     `attached:` key is taken over), so the page the phone has open keeps following it. A session running in a window
     SwitchTether does not control stays observe-only (`capability_unavailable`).
+  - **Antigravity session tools** (an `agy acp` session SwitchTether runs; detail `sessionTools: ["commands",
+    "permission_mode", "context_usage"]`): `commands` lists what agy reported (`available_commands_update`: its slash
+    commands and skills; a command is sent as the text `/name args`), `permission_mode` is `session/set_mode`,
+    `context_usage` comes from the last `usage_update` (`used` of `size`, no categories). Approvals are agy's
+    `session/request_permission` (options `allow` / `deny`; first answer wins); ACP has no question request.
   - **Codex session tools** (a Codex thread SwitchTether runs or one attached from Codex Desktop; detail `sessionTools:
     ["commands", "permission_mode", "context_usage", "mcp_status", "rename"]`): the same `POST …/claude/{action}` paths
     and reply shapes as Claude Code's. `commands` lists Codex's own commands (`compact`, `review`, `goal`, `plan`,
@@ -705,7 +735,7 @@ this change used `managed:<random>` ids that disappeared with the process.
 | `approval_resolved` | `{ requestId, decision, by: "phone"|"desktop"|"other" }` |
 | `question` | `{ requestId, cancellable?, questions: [{ id, header, question, multiSelect, required?, allowOther?, isSecret?, options: [{ label, description, value? }] }], resolved, decision?, by?, answers? }` — once answered, `answers` maps question id → the chosen value(s) (secrets masked) wherever it was answered: on the phone, in the VS Code panel (its `updatedInput.answers`), in Codex Desktop (its reply to the request), or — read from a Claude Code transcript — the AskUserQuestion result (`toolUseResult.answers`; id `q:<tool use id>`, `decision: "answer"`, next to the tool row). Approvals answered in Codex Desktop carry its decision (`allow`, `allow_session`, `deny`, `abort`) with `by: "desktop"` |
 | `subagent` | `{ agentId, description, agentType?, model?, background, status: "running"|"completed"|"failed"|"interrupted", callId, summary?, result?, resultTruncated?, tokens?, toolUses?, durationMs?, activity?, agentPath?, finishedAt? }` — id `sa:<callId>` (Claude Code; Codex: `cx-sa-<child thread id>`), `parentId` = the Agent/Task (spawn) call. A sub-agent row exists from the moment the agent starts and is updated in place: live counters and `activity` from stream-json `task_progress`, the end from its task notification (transcript `<task-notification>` or stream-json `system` `task_notification`) or its result. Codex multi-agent v2 rows come from `SubAgentActivity` (rollout `item_completed` / legacy `sub_agent_activity`, app-server `subAgentActivity` items) and take the child's `FINAL_ANSWER` mail as `result`; a child rollout skips the parent history it inherited as a fork. A notification for anything else (unknown task, monitor) is a `system` event with `subtype: "task_notification"`, `{status?, text}`. Task notifications and messages the user typed while the agent was busy are read both from `user` records and from mid-turn `attachment` records (`queued_command`, `commandMode` `task-notification` / `prompt`; the latter becomes a normal `user_message`) |
-| `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail?, backgroundTasks? }` — `backgroundTasks` (managed Claude Code): background agents / shells still running; a session can be `idle` with work still going on |
+| `status` | `{ state: "idle"|"running"|"waiting_approval"|"waiting_input"|"completed"|"error"|"interrupted", detail?, backgroundTasks? }` — `backgroundTasks` (managed Claude Code): background agents / shells still running; a session can be `idle` with work still going on (the summary's `activeTasks`, §10.1) |
 | `error` | `{ message }` |
 | `system` | `{ subtype, text }` (compaction, retries, informational) |
 | `usage` | `{ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd? }` |

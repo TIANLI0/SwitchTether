@@ -1,0 +1,16 @@
+{
+  "agent": "agy",
+  "models": [
+    { "id": "gemini-4-neon", "label": "Gemini 4 Neon", "efforts": ["low", "medium", "high", "xhigh"] },
+    { "id": "gemini-pro-orchestrator", "label": "Orchestrator (Carbon)", "efforts": [] },
+    { "id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "efforts": ["low", "medium", "high"] }
+  ],
+  "efforts": ["low", "medium", "high", "xhigh"],
+  "source": "agent",
+  "permissionModes": [
+    {"id": "default", "label": "Default", "description": "Asks before edits and commands, per your Antigravity permission settings.", "dangerous": false},
+    {"id": "acceptEdits", "label": "Accept edits", "description": "Approves file edits in the workspace without asking.", "dangerous": false},
+    {"id": "auto", "label": "Auto", "description": "Approves edits and safe commands; asks before irreversible actions.", "dangerous": false},
+    {"id": "plan", "label": "Plan", "description": "Plans carefully before executing a task.", "dangerous": false}
+  ]
+}

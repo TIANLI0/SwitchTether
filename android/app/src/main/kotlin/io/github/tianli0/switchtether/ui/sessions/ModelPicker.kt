@@ -45,6 +45,8 @@ import io.github.tianli0.coui17.patterns.TextInput
 fun fallbackEfforts(agent: String): List<String> = when (agent) {
     "claude_code", "claude" -> listOf("low", "medium", "high", "xhigh", "max")
     "codex" -> listOf("minimal", "low", "medium", "high", "xhigh")
+    // Antigravity's thinking levels (its `thought_level` session option).
+    "agy" -> listOf("low", "medium", "high", "xhigh")
     else -> emptyList()
 }
 

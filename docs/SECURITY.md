@@ -45,8 +45,8 @@ desktop.
 
 ## 3. Pairing
 
-1. The desktop user clicks "Show QR code" (remote access must already be enabled — it is off
-   by default).
+1. The desktop user clicks "Show QR code" (remote access must be enabled — it is on by default
+   for new installs and stays off once the user turns it off).
 2. The QR contains host candidates, port, server fingerprint, a pairing id and a 256-bit
    one-time secret. TTL 5 minutes, single use, at most 4 active offers.
 3. The phone connects (pinned TLS + its client certificate) and sends the secret. The device
@@ -209,8 +209,9 @@ retries.
 
 - SwitchTether never edits Claude Code / Codex configuration, hooks, plugins, MCP settings or
   launch commands to gain control; externally started sessions are observe-only — except
-  through the opt-in takeover hooks the user turns on (AGENT_COMPATIBILITY §6b), which back up
-  first, never replace a value the user set and are removed exactly.
+  through the takeover hooks (AGENT_COMPATIBILITY §6b): turned on once by default at first run,
+  they back up first, set only unset values (never replace a value the user set), are removed
+  exactly when turned off, and stay off once the user turns them off.
 - Attach broker (takeover): listens on 127.0.0.1 only, random port; a 256-bit random token in
   `~/.switchtether/remote/attach.json` (owner-only file) must be presented in the first frame
   (constant-time compare, 5 s deadline, 32 MiB frame limit). It never kills or restarts the

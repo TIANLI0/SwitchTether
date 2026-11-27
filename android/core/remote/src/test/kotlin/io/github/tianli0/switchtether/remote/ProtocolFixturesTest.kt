@@ -169,5 +169,26 @@ class ProtocolFixturesTest {
         assertEquals(5, o.efforts.size)
         assertEquals(listOf("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"), o.permissionModes.map { it.id })
         assertEquals(listOf("bypassPermissions"), o.permissionModes.filter { it.dangerous }.map { it.id })
+        // Antigravity: models with their thinking levels, agy's own modes (none dangerous).
+        val agy = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.ModelOptions.serializer(), fixture("model_options_agy.json"))
+        assertEquals(listOf("gemini-4-neon", "gemini-pro-orchestrator", "claude-sonnet-5-5"), agy.models.map { it.id })
+        assertEquals(listOf("low", "medium", "high", "xhigh"), agy.models[0].efforts)
+        assertEquals(emptyList<String>(), agy.models[1].efforts)
+        assertEquals(listOf("default", "acceptEdits", "auto", "plan"), agy.permissionModes.map { it.id })
+        assertTrue(agy.permissionModes.none { it.dangerous })
+    }
+
+    @Test
+    fun sessionSummaryActiveTasksFixture() {
+        val o = ProtocolJson.parseToJsonElement(fixture("session_summary.json")).jsonObject
+        val withTasks = ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.protocol.SessionSummary.serializer(), o["idleWithTasks"]!!)
+        assertEquals(2, withTasks.activeTasks)
+        assertFalse(withTasks.isIdle())
+        assertEquals("busy", withTasks.displayStatus())
+        // An older desktop leaves the field out: idle, unless the phone saw work itself.
+        val old = ProtocolJson.decodeFromJsonElement(io.github.tianli0.switchtether.remote.protocol.SessionSummary.serializer(), o["olderDesktop"]!!)
+        assertNull(old.activeTasks)
+        assertTrue(old.isIdle())
+        assertFalse(old.isIdle(fallback = 1))
     }
 }

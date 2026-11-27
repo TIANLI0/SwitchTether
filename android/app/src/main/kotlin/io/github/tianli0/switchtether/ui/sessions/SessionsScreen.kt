@@ -212,9 +212,10 @@ fun SessionsContent(
                         }
                         // Live sessions split like Home: "运行中" only for those working or waiting,
                         // "空闲" for live ones with nothing to do. Under one "运行中" header an idle
-                        // session read as busy here while Home called it idle.
+                        // session read as busy here while Home called it idle. A finished turn with
+                        // sub-agents or background tasks still running (`activeTasks`) is working.
                         val (live, past) = visible.partition { it.isLive }
-                        val (idle, working) = live.partition { it.status == "idle" || it.status == "completed" }
+                        val (idle, working) = live.partition { it.isIdle() }
                         val groups: List<Pair<String, List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>>> = when (state.scope) {
                             SessionScope.HISTORY -> listOf("history" to past)
                             else -> listOf("running" to working, "idle" to idle) + if (state.scope == SessionScope.ALL) listOf("history" to past) else emptyList()
@@ -291,7 +292,7 @@ fun sessionRowOrder(
     expanded: Set<String>,
 ): List<Pair<String, String?>> {
     val (live, past) = visible.partition { it.isLive }
-    val (idle, working) = live.partition { it.status == "idle" || it.status == "completed" }
+    val (idle, working) = live.partition { it.isIdle() }
     val groups = when (scope) {
         SessionScope.HISTORY -> listOf(past)
         SessionScope.LIVE -> listOf(working, idle)
