@@ -5628,7 +5628,7 @@
     "cancel": "Cancel",
     "takeover": {
       "title": "Take over sessions I start myself",
-      "help": "Optional. Lets the phone control Claude Code / Codex sessions you start in VS Code, Codex Desktop or a terminal: SwitchTether's small pass-through wrapper sits between your program and the agent. When SwitchTether is not running the wrapper simply passes everything through. Each switch backs up what it changes (in ~/.switchtether/backups) and turning it off removes exactly that change.",
+      "help": "On by default: turned on once at first run where the program is installed and you have not set your own value; a switch you turn off stays off. Lets the phone control Claude Code / Codex sessions you start in VS Code, Codex Desktop or a terminal: SwitchTether's small pass-through wrapper sits between your program and the agent. When SwitchTether is not running the wrapper simply passes everything through. Each switch backs up what it changes (in ~/.switchtether/backups) and turning it off removes exactly that change.",
       "noShim": "The takeover wrapper is missing from this installation; reinstall SwitchTether to use these switches.",
       "skipped": "Skipped {{editors}}: a process wrapper is already configured there and SwitchTether will not replace it.",
       "disabledToast": "Takeover turned off. Restart the program to apply.",

@@ -501,7 +501,7 @@ Settings → Licenses.
 ### 12.4 Attached sessions (wire change)
 - `SessionSummary.terminalId: String?` is new. `isAttached` means `control == "full"` while the
   session is neither managed nor `origin == "managed"`, i.e. the user's own process attached
-  through the opt-in wrapper.
+  through the takeover wrapper.
 - Full-control sessions always get the normal composer and approval UI. Sending is still enabled
   only when `sendMessage` is VERIFIED. The read-only bar, the read-only TopTips and **接续** are
   never shown for `control == "full"`.

@@ -32,7 +32,7 @@ in docs/research), **UNTESTED**, **TODO**.
 | Claude Code managed sessions (message, tool call, approval, 409 second answer, interrupt) | DONE | live run with model `haiku` |
 | Codex managed sessions | PARTIAL | protocol to `turn/start` verified in an isolated home; approvals/interrupt untested live |
 | In-place control of externally started Claude Code / Codex sessions (no hook) | BLOCKED | docs/AGENT_COMPATIBILITY.md |
-| Opt-in takeover: shim + attach broker (VS Code wrapper, Codex Desktop `CODEX_CLI_PATH`, `st-claude`/`st-codex`) | PARTIAL | shim unit tests (router, resolve, args); `tests/attach_broker.rs`; live: real claude via simulated VS Code host, Desktop-bundled codex 0.167 via simulated Desktop, real claude TUI mirrored. Real VS Code / Codex Desktop launches untested |
+| Takeover (on by default once, marker-guarded): shim + attach broker (VS Code wrapper, Codex Desktop `CODEX_CLI_PATH`, `st-claude`/`st-codex`) | PARTIAL | shim unit tests (router, resolve, args); `tests/attach_broker.rs`; live: real claude via simulated VS Code host, Desktop-bundled codex 0.167 via simulated Desktop, real claude TUI mirrored. Real VS Code / Codex Desktop launches untested |
 | Codex managed/attached sessions, approvals | PARTIAL → approvals and phone turns verified live through the attach path with codex 0.167 | live harness |
 
 ## Desktop app

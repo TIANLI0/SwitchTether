@@ -5628,7 +5628,7 @@
     "cancel": "取消",
     "takeover": {
       "title": "接管我自己启动的会话",
-      "help": "可选功能。让手机能够控制你在 VS Code、Codex Desktop 或终端里启动的 Claude Code / Codex 会话：SwitchTether 的轻量转发器位于你的程序和 Agent 之间。SwitchTether 未运行时转发器只做原样转发。每个开关都会先备份它改动的内容（~/.switchtether/backups），关闭时只撤销这一处改动。",
+      "help": "默认开启：首次运行时，对已安装且你没有自己设置值的项开启一次；你关掉的开关会一直保持关闭。让手机能够控制你在 VS Code、Codex Desktop 或终端里启动的 Claude Code / Codex 会话：SwitchTether 的轻量转发器位于你的程序和 Agent 之间。SwitchTether 未运行时转发器只做原样转发。每个开关都会先备份它改动的内容（~/.switchtether/backups），关闭时只撤销这一处改动。",
       "noShim": "此安装缺少接管转发器，请重新安装 SwitchTether 后再使用这些开关。",
       "skipped": "已跳过 {{editors}}：那里已配置了其他进程包装器，SwitchTether 不会替换。",
       "disabledToast": "已关闭接管，重启对应程序后生效。",

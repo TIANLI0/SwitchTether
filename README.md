@@ -56,9 +56,10 @@ settings, plugins, MCP servers and hooks, exactly as you set them up.
 **🚀 Start and steer from the phone**
 - New sessions in any project folder; send text and pictures, interrupt, switch model, thinking
   effort and permission mode, run slash commands.
-- **Opt-in takeover** of windows you opened yourself: the VS Code Claude panel, Codex Desktop,
-  terminal sessions started with `st-claude` / `st-codex`, and `dsh web`. Off by default, backed
-  up first, removed exactly when turned off.
+- **Takeover** of windows you opened yourself: the VS Code Claude panel, Codex Desktop,
+  terminal sessions started with `st-claude` / `st-codex`, and `dsh web`. Turned on once at first
+  run (backed up first, values you set are never replaced); switch any of them off and it stays
+  off, removed exactly.
 - **DeepSeek Harness Web**: DSH's own web UI, full screen on the phone, through the same connection.
 
 **🔐 Private by design**
@@ -95,13 +96,13 @@ into processes you started.
 
 | Agent | Watch (history + live) | Control a session you started | New session from the phone |
 |---|:---:|---|---|
-| Claude Code CLI | ✅ | Opt-in: `st-claude` (mirrored terminal) | ✅ verified |
-| Claude Code for VS Code | ✅ | Opt-in: VS Code hook | ✅ verified |
-| Codex CLI | ✅ | Opt-in: `st-codex` | ✅ verified live |
-| Codex Desktop | ✅ | Opt-in: Codex Desktop hook | ✅ verified live |
-| DeepSeek Harness | ✅ | Opt-in: `dsh web` plugin · DSH Web on the phone | ⚠️ ACP, partial |
+| Claude Code CLI | ✅ | Takeover: `st-claude` (mirrored terminal) | ✅ verified |
+| Claude Code for VS Code | ✅ | Takeover: VS Code hook | ✅ verified |
+| Codex CLI | ✅ | Takeover: `st-codex` | ✅ verified live |
+| Codex Desktop | ✅ | Takeover: Codex Desktop hook | ✅ verified live |
+| DeepSeek Harness | ✅ | Takeover: `dsh web` plugin · DSH Web on the phone | ⚠️ ACP, partial |
 
-Without the opt-in hooks, sessions you started yourself are read-only — the agents offer no
+Without the takeover hooks, sessions you started yourself are read-only — the agents offer no
 supported way for another program to control a running session. Every claim above is backed by
 evidence in [AGENT_COMPATIBILITY](docs/AGENT_COMPATIBILITY.md).
 
@@ -109,7 +110,7 @@ evidence in [AGENT_COMPATIBILITY](docs/AGENT_COMPATIBILITY.md).
 
 1. **Install** the desktop app (Windows, macOS, Linux) and the Android APK (Android 15+) from the
    [latest release](https://github.com/TIANLI0/SwitchTether/releases/latest).
-2. **On the computer:** Settings → **Remote (phone)** → turn it on → **Show QR code**.
+2. **On the computer:** click **Remote** in the toolbar (on by default) → **Show QR code**.
 3. **On the phone:** **Pair a computer** → scan → check that both screens show the same 6-digit code.
 
 Done. Your sessions appear on the phone; tap one to follow it, or start a new one.
@@ -130,7 +131,8 @@ Done. Your sessions appear on the phone; tap one to follow it, or start a new on
 
 No. You keep starting them exactly as before. SwitchTether reads their session files and starts
 *additional* sessions through their official interfaces. The only thing that touches your agent
-setup is the opt-in takeover, and only while you have it switched on.
+setup is the takeover, and only while it is switched on (on by default; turn it off in
+Settings → Remote and it stays off).
 </details>
 
 <details>

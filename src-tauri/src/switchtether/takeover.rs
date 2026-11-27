@@ -1,6 +1,8 @@
-//! Opt-in takeover hooks ("接管"): the only place where SwitchTether changes
-//! anything outside its own data directory, and only when the user turns a
-//! hook on in Settings → Remote. Each hook:
+//! Takeover hooks ("接管"): the only place where SwitchTether changes anything
+//! outside its own data directory. They are turned on once by default at first
+//! run ([`apply_first_run_defaults`], guarded by a marker so it never runs again)
+//! and are then under the user's control in Settings → Remote: a switch the user
+//! turns off stays off. Each hook:
 //! - points the user's program at `switchtether-shim` (a pass-through wrapper
 //!   when SwitchTether is not running),
 //! - backs up what it changes into `~/.switchtether/backups/`,
@@ -714,7 +716,12 @@ pub fn status() -> Value {
     })
 }
 
+/// Serialises changes to the hooks (the first-run defaults run in the background
+/// while the user may already be flipping switches).
+static SET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn set(hook: &str, enabled: bool) -> Result<Value, String> {
+    let _guard = SET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut st = load_state();
     let res = match hook {
         "vscode" => vscode_set(enabled, &mut st),
@@ -729,9 +736,145 @@ pub fn set(hook: &str, enabled: bool) -> Result<Value, String> {
     Ok(json!({ "report": report, "status": status() }))
 }
 
+// ------------------------------------------------------ first-run defaults
+
+/// Written once when the first-run defaults have been applied; while it exists
+/// they never run again, so a switch the user turns off stays off.
+fn defaults_marker() -> PathBuf {
+    home().join("remote").join("takeover-defaults.json")
+}
+
+/// Hooks the first-run default turns on, from [`status`]: only targets that are
+/// present and not already configured by the user (a foreign wrapper or
+/// `CODEX_CLI_PATH` value is left alone) and not already on.
+fn default_hooks(status: &Value) -> Vec<&'static str> {
+    let mut hooks = Vec::new();
+    if status["shimAvailable"] != true {
+        return hooks;
+    }
+    let vscode = &status["vscode"];
+    let free_editor = vscode["editors"].as_array().is_some_and(|eds| {
+        eds.iter()
+            .any(|e| e["enabled"] != true && e["foreignWrapper"].is_null())
+    });
+    if vscode["available"] == true && free_editor {
+        hooks.push("vscode");
+    }
+    let codex = &status["codexDesktop"];
+    if codex["available"] == true && codex["enabled"] != true && codex["foreignValue"].is_null() {
+        hooks.push("codex_desktop");
+    }
+    let cli = &status["cli"];
+    if cli["available"] == true && cli["enabled"] != true {
+        hooks.push("cli");
+    }
+    let dsh = &status["dsh"];
+    if dsh["available"] == true && dsh["profileReady"] == true && dsh["enabled"] != true {
+        hooks.push("dsh");
+    }
+    hooks
+}
+
+/// One-time default: turn the takeover hooks on through the same code paths as
+/// the switches (backups first, values the user set are never replaced). Runs
+/// once per install, for new and existing installs alike, unless the user has
+/// already used the switches (`takeover.json` exists: their choice is kept).
+/// Unavailable or foreign targets are skipped. Never runs under the test home
+/// override, whose editor settings and user environment would be the real ones.
+pub fn apply_first_run_defaults() {
+    if std::env::var_os("CC_SWITCH_TEST_HOME").is_some_and(|v| !v.is_empty()) {
+        log::info!("[switchtether] takeover defaults skipped under CC_SWITCH_TEST_HOME");
+        return;
+    }
+    let marker = defaults_marker();
+    if marker.exists() {
+        return;
+    }
+    let st = status();
+    if st["shimAvailable"] != true {
+        // Broken install (or a development build without the shim): try again next launch.
+        log::warn!("[switchtether] takeover defaults postponed: switchtether-shim not bundled");
+        return;
+    }
+    let user_chose = state_file().exists();
+    let write_marker = |results: Value| -> Result<(), String> {
+        if let Some(d) = marker.parent() {
+            std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+        }
+        let body = json!({
+            "appliedAt": chrono::Utc::now().to_rfc3339(),
+            "keptUserChoice": user_chose,
+            "results": results,
+        });
+        std::fs::write(&marker, serde_json::to_vec_pretty(&body).unwrap())
+            .map_err(|e| e.to_string())
+    };
+    // The marker goes first: whatever happens below, this never runs twice.
+    if let Err(e) = write_marker(Value::Null) {
+        log::warn!("[switchtether] takeover defaults not applied (marker: {e})");
+        return;
+    }
+    if user_chose {
+        log::info!("[switchtether] takeover defaults: keeping the user's existing switches");
+        return;
+    }
+    let mut results = serde_json::Map::new();
+    for hook in default_hooks(&st) {
+        let r = match set(hook, true) {
+            Ok(v) => json!({ "result": "enabled", "report": v["report"] }),
+            Err(e) => json!({ "result": "skipped", "error": e }),
+        };
+        log::info!("[switchtether] takeover default {hook}: {r}");
+        results.insert(hook.into(), r);
+    }
+    let _ = write_marker(Value::Object(results));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_run_defaults_skip_missing_foreign_and_enabled_targets() {
+        let none =
+            json!({ "shimAvailable": false, "cli": { "available": true, "enabled": false } });
+        assert!(
+            default_hooks(&none).is_empty(),
+            "no shim: nothing is turned on"
+        );
+
+        let st = json!({
+            "shimAvailable": true,
+            "vscode": { "available": true, "enabled": false, "editors": [
+                { "editor": "Code", "enabled": false, "foreignWrapper": "/usr/bin/mine" },
+            ]},
+            "codexDesktop": { "available": true, "enabled": false, "foreignValue": "C:/x/codex.exe" },
+            "dsh": { "available": true, "profileReady": false, "enabled": false },
+            "cli": { "available": true, "enabled": false },
+        });
+        assert_eq!(default_hooks(&st), vec!["cli"]);
+
+        let st = json!({
+            "shimAvailable": true,
+            "vscode": { "available": true, "enabled": false, "editors": [
+                { "editor": "Code", "enabled": false, "foreignWrapper": "/usr/bin/mine" },
+                { "editor": "Cursor", "enabled": false, "foreignWrapper": null },
+            ]},
+            "codexDesktop": { "available": true, "enabled": false, "foreignValue": null },
+            "dsh": { "available": true, "profileReady": true, "enabled": true },
+            "cli": { "available": true, "enabled": true },
+        });
+        assert_eq!(default_hooks(&st), vec!["vscode", "codex_desktop"]);
+
+        let st = json!({
+            "shimAvailable": true,
+            "vscode": { "available": false, "enabled": false, "editors": [] },
+            "codexDesktop": { "available": false, "enabled": false, "foreignValue": null },
+            "dsh": { "available": false, "profileReady": false, "enabled": false },
+            "cli": { "available": true, "enabled": false },
+        });
+        assert_eq!(default_hooks(&st), vec!["cli"]);
+    }
 
     #[test]
     fn dsh_manifest_equivalence_ignores_only_empty_dependency_objects() {

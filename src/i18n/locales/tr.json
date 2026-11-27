@@ -5628,7 +5628,7 @@
     "cancel": "İptal",
     "takeover": {
       "title": "Kendi başlattığım oturumları devral",
-      "help": "İsteğe bağlı. VS Code, Codex Desktop veya bir terminalde başlattığın Claude Code / Codex oturumlarını telefondan kontrol etmeni sağlar: SwitchTether'in küçük bir aktarım sarmalayıcısı programın ile ajan arasına girer. SwitchTether çalışmıyorsa sarmalayıcı her şeyi olduğu gibi aktarır. Her anahtar değiştirdiği şeyi ~/.switchtether/backups içine yedekler ve kapatıldığında yalnızca o değişikliği geri alır.",
+      "help": "Varsayılan olarak açık: ilk çalıştırmada, programın kurulu olduğu ve kendi değerini ayarlamadığın yerlerde bir kez açılır; kapattığın anahtar kapalı kalır. VS Code, Codex Desktop veya bir terminalde başlattığın Claude Code / Codex oturumlarını telefondan kontrol etmeni sağlar: SwitchTether'in küçük bir aktarım sarmalayıcısı programın ile ajan arasına girer. SwitchTether çalışmıyorsa sarmalayıcı her şeyi olduğu gibi aktarır. Her anahtar değiştirdiği şeyi ~/.switchtether/backups içine yedekler ve kapatıldığında yalnızca o değişikliği geri alır.",
       "noShim": "Bu kurulumda devralma sarmalayıcısı eksik; bu anahtarları kullanmak için SwitchTether'i yeniden kur.",
       "skipped": "{{editors}} atlandı: orada zaten bir işlem sarmalayıcısı ayarlı ve SwitchTether onu değiştirmez.",
       "disabledToast": "Devralma kapatıldı. Etkinleşmesi için programı yeniden başlat.",

@@ -5628,7 +5628,7 @@
     "cancel": "Abbrechen",
     "takeover": {
       "title": "Selbst gestartete Sitzungen übernehmen",
-      "help": "Optional. Damit kann das Handy Claude-Code-/Codex-Sitzungen steuern, die du in VS Code, Codex Desktop oder einem Terminal startest: Ein kleiner Durchleitungs-Wrapper von SwitchTether sitzt zwischen deinem Programm und dem Agenten. Läuft SwitchTether nicht, leitet der Wrapper alles unverändert durch. Jeder Schalter sichert, was er ändert (in ~/.switchtether/backups), und beim Ausschalten wird genau diese Änderung entfernt.",
+      "help": "Standardmäßig an: beim ersten Start einmal eingeschaltet, wo das Programm installiert ist und du keinen eigenen Wert gesetzt hast; ein Schalter, den du ausschaltest, bleibt aus. Damit kann das Handy Claude-Code-/Codex-Sitzungen steuern, die du in VS Code, Codex Desktop oder einem Terminal startest: Ein kleiner Durchleitungs-Wrapper von SwitchTether sitzt zwischen deinem Programm und dem Agenten. Läuft SwitchTether nicht, leitet der Wrapper alles unverändert durch. Jeder Schalter sichert, was er ändert (in ~/.switchtether/backups), und beim Ausschalten wird genau diese Änderung entfernt.",
       "noShim": "Der Übernahme-Wrapper fehlt in dieser Installation; installiere SwitchTether neu, um diese Schalter zu nutzen.",
       "skipped": "{{editors}} übersprungen: Dort ist bereits ein Prozess-Wrapper eingerichtet, den SwitchTether nicht ersetzt.",
       "disabledToast": "Übernahme ausgeschaltet. Starte das Programm neu, damit es wirkt.",

@@ -268,7 +268,7 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   never resumed implicitly (observe-only; `continueSession` explains the explicit way).
 - `POST /v1/sessions/{id}/options` `{commandId, model?, effort?, permissionMode?}` (feature `session_options`, fixture
   `session_options.json`) — changes model, effort and / or permission mode of a **running** session the phone controls
-  (started by SwitchTether, or attached through an opt-in takeover hook: VS Code panel, Codex Desktop); absent =
+  (started by SwitchTether, or attached through a takeover hook: VS Code panel, Codex Desktop); absent =
   unchanged, `""` or `"default"` = the agent's default. Claude Code: `set_model`, `apply_flag_settings {effortLevel}` and
   `set_permission_mode` control requests (as the Agent SDK and the VS Code extension; in an attached panel they go through
   switchtether-shim, and changes made in the IDE are followed); Codex: sent with the next `turn/start` (`model`, `effort`,
@@ -572,7 +572,7 @@ Session-level `capabilities` override the agent defaults (e.g. a managed session
 | `title` | The task title: Codex's thread name (including initial resume metadata and subsequent renames), else its indexed title / first prompt. Claude Code's `/rename` title (`custom-title`), else its generated `ai-title`, else the first prompt; `null` when none exists yet. Never the project name and never the registry slug in `~/.claude/sessions/<pid>.json`. Records written by sub-agents are ignored. Sub-agent work is nested under its tool call and is not a session |
 | `project` | Folder of `cwd`; an agent worktree (`<project>/.claude/worktrees/<name>`) maps to its containing project |
 | `origin` | `cli`, `vscode`, `desktop_app`, `managed` (started by SwitchTether), `unknown` |
-| `managed` | `true` only for sessions SwitchTether started. A session of the user's own process that SwitchTether is attached to through an opt-in takeover hook has its real origin, `managed: false` and `control: "full"` |
+| `managed` | `true` only for sessions SwitchTether started. A session of the user's own process that SwitchTether is attached to through a takeover hook has its real origin, `managed: false` and `control: "full"` |
 | `effort` | optional; effort / reasoning level chosen for a session SwitchTether runs (`low` … `max`), absent when the agent's default applies |
 | `terminalId` | optional; set for sessions running in the user's terminal window (`st-claude` / `st-codex`). The id of an **external** terminal (`/v1/terminals`, `external: true`) mirroring that window; prompts are answered there |
 | `liveness` | `live` (process running), `ended`, `unknown` |
@@ -615,7 +615,7 @@ this change used `managed:<random>` ids that disappeared with the process.
     and audited like `interrupt`; any other session → `422 capability_unavailable` (sessions started elsewhere are
     observe-only).
   - **Claude Code session tools** (the IDE extension's session features, for a Claude Code process SwitchTether started
-    or one attached through the opt-in takeover hook — sent through switchtether-shim like messages and approvals; the
+    or one attached through the takeover hook — sent through switchtether-shim like messages and approvals; the
     session detail then has `claudeTools: true` and `permissionMode`; Stop in the Agent map likewise): `POST /v1/sessions/{id}/claude/{action}`
     with the action's parameters and an optional `commandId` (idempotent, audited as `session.claude.<action>`). Each is
     one whitelisted control request; replies are reduced to these fields, texts redacted, MCP configuration never sent:
@@ -664,7 +664,7 @@ this change used `managed:<random>` ids that disappeared with the process.
   - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
     when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`, Codex thread settings);
     the detail then has `resumable: true` and `nextStart {model, effort, permissionMode}`, and `changeModel` is `PARTIAL`.
-    This includes a session attached through the opt-in hook whose window was closed (VS Code panel, Codex Desktop): the
+    This includes a session attached through the takeover hook whose window was closed (VS Code panel, Codex Desktop): the
     next message resumes the conversation in a process SwitchTether starts, **under the same session id** (the
     `attached:` key is taken over), so the page the phone has open keeps following it. A session running in a window
     SwitchTether does not control stays observe-only (`capability_unavailable`).

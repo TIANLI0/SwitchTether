@@ -54,8 +54,9 @@
 
 **🚀 在手机上新建和操作会话**
 - 在任意项目文件夹新建会话；发文字和图片、中断，切换模型、思考强度和权限模式，使用斜杠命令。
-- **可选接管**你自己打开的窗口：VS Code 的 Claude 面板、Codex Desktop、用 `st-claude` /
-  `st-codex` 启动的终端会话，以及 `dsh web`。默认关闭，开启前先备份，关闭时原样移除。
+- **接管**你自己打开的窗口：VS Code 的 Claude 面板、Codex Desktop、用 `st-claude` /
+  `st-codex` 启动的终端会话，以及 `dsh web`。首次运行时默认开启一次（先备份，不替换你自己设置的值）；
+  关掉的开关会一直保持关闭，关闭时原样移除。
 - **DeepSeek Harness 网页版**：在手机上全屏打开 DSH 自己的网页界面，走同一条连接。
 
 **🔐 隐私优先**
@@ -90,11 +91,11 @@ flowchart LR
 
 | Agent | 查看（历史 + 实时） | 控制你自己启动的会话 | 从手机新建会话 |
 |---|:---:|---|---|
-| Claude Code CLI | ✅ | 可选开启：`st-claude`（终端镜像） | ✅ 已验证 |
-| Claude Code VS Code 扩展 | ✅ | 可选开启：VS Code 接管 | ✅ 已验证 |
-| Codex CLI | ✅ | 可选开启：`st-codex` | ✅ 已实测 |
-| Codex Desktop | ✅ | 可选开启：Codex Desktop 接管 | ✅ 已实测 |
-| DeepSeek Harness | ✅ | 可选开启：`dsh web` 插件 · 手机上用 DSH 网页版 | ⚠️ ACP，部分验证 |
+| Claude Code CLI | ✅ | 接管：`st-claude`（终端镜像） | ✅ 已验证 |
+| Claude Code VS Code 扩展 | ✅ | 接管：VS Code | ✅ 已验证 |
+| Codex CLI | ✅ | 接管：`st-codex` | ✅ 已实测 |
+| Codex Desktop | ✅ | 接管：Codex Desktop | ✅ 已实测 |
+| DeepSeek Harness | ✅ | 接管：`dsh web` 插件 · 手机上用 DSH 网页版 | ⚠️ ACP，部分验证 |
 
 不开启接管时，你自己启动的会话只读——这些 Agent 没有提供让其他程序控制运行中会话的受支持接口。
 上表每一项都有证据，见 [AGENT_COMPATIBILITY](docs/AGENT_COMPATIBILITY.md)。
@@ -103,7 +104,7 @@ flowchart LR
 
 1. **安装**：从[最新版本](https://github.com/TIANLI0/SwitchTether/releases/latest)下载桌面端
    （Windows、macOS、Linux）和 Android APK（Android 15 及以上）。
-2. **电脑端**：设置 → **远程（手机）** → 开启 → **显示二维码**。
+2. **电脑端**：点工具栏上的 **远程**（默认已开启）→ **显示二维码**。
 3. **手机端**：**配对电脑** → 扫码 → 确认两边显示的 6 位验证码一致。
 
 完成。你的会话会出现在手机上，点开就能跟进，也可以直接新建一个。
@@ -121,7 +122,7 @@ flowchart LR
 <summary><b>会改变我运行 Claude Code 或 Codex 的方式吗？</b></summary>
 
 不会。你照常启动它们。SwitchTether 读取它们的会话文件，并通过官方接口启动*额外*的会话。唯一会
-碰到你 Agent 配置的是可选接管，而且只在你开启期间生效。
+碰到你 Agent 配置的是接管，而且只在它开启期间生效（默认开启；在设置 → 远程里关掉后保持关闭）。
 </details>
 
 <details>
