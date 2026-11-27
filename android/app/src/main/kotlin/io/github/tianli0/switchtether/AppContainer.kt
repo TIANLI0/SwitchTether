@@ -127,11 +127,75 @@ class AppContainer(private val context: Context) {
     @Volatile var pairedServerIdCache: String? = null
         private set
 
+    /**
+     * Large transfers (attachment uploads, uploads into a folder, downloads) as Android 14+ user-initiated
+     * data transfer jobs with a progress notification (docs/ANDROID_UI.md §36).
+     */
+    val transferJobs = io.github.tianli0.switchtether.transfer.JobTransferEnvelope(context) { isForeground }
+    val transfers = io.github.tianli0.switchtether.transfer.TransferManager(
+        io.github.tianli0.switchtether.transfer.FileTransferJournal(java.io.File(context.filesDir, "transfers/journal.json")),
+        transferJobs,
+    )
+    /** Read synchronously before any transfer can start, so the journal of a dead process is never overwritten. */
+    private val transferRecovery = transfers.recover()
+
+    /** Why earlier app processes ended (About → 诊断记录, docs/ANDROID_UI.md §37). */
+    val diagnostics = io.github.tianli0.switchtether.diag.ExitDiagnostics(context)
+
     /** Preview cache + explicit downloads of remote files (docs/ANDROID_UI.md "Downloads vs cache"). */
-    val fileStore = io.github.tianli0.switchtether.files.FileStore(context, serverId = { pairedServerIdCache }, api = { connection.apiOrNull() })
+    val fileStore = io.github.tianli0.switchtether.files.FileStore(context, serverId = { pairedServerIdCache }, api = { connection.apiOrNull() }, transfers = transfers)
 
     init {
         appScope.launch { pairingStore.desktop.collect { pairedServerIdCache = it?.serverId } }
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { diagnostics.refresh() }
+        appScope.launch {
+            kotlinx.coroutines.flow.combine(connection.state, transfers.active) { s, t -> (s is io.github.tianli0.switchtether.connection.ConnectionState.Online) to t.size }
+                .distinctUntilChanged()
+                .collect { publishProcessState() }
+        }
+        cleanUpInterruptedTransfers()
+    }
+
+    /** Hands the system a summary of this process (foreground, monitor service, connected, transfers) for its exit record. */
+    private fun publishProcessState() {
+        diagnostics.setSummary(
+            io.github.tianli0.switchtether.diag.ProcessSummary(
+                foreground = isForeground,
+                monitor = serviceRunning,
+                online = connection.state.value is io.github.tianli0.switchtether.connection.ConnectionState.Online,
+                transfers = transfers.active.value.size,
+            ),
+        )
+    }
+
+    /**
+     * Transfers the previous process was running when it ended: reported once, never resumed (so
+     * nothing is sent twice). A pending download entry is removed at once; an unfinished upload or
+     * attachment on the computer is discarded at the next connection (the computer would drop it after
+     * 6 h anyway).
+     */
+    private fun cleanUpInterruptedTransfers() {
+        val r = transferRecovery
+        io.github.tianli0.switchtether.transfer.JobTransferEnvelope.postInterrupted(context, r.interrupted)
+        if (r.cleanup.isEmpty()) return
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val remote = r.cleanup.filter { it.ref?.attachmentId != null || it.ref?.uploadId != null }
+            for (e in r.cleanup) {
+                e.ref?.pendingUri?.let { u -> runCatching { context.contentResolver.delete(android.net.Uri.parse(u), null, null) } }
+                if (e !in remote) transfers.cleanedUp(e.id)
+            }
+            if (remote.isEmpty()) return@launch
+            connection.state.first { it is io.github.tianli0.switchtether.connection.ConnectionState.Online }
+            val api = connection.apiOrNull() ?: return@launch
+            for (e in remote) {
+                val ref = e.ref ?: continue
+                runCatching {
+                    if (ref.attachmentId != null && ref.sessionId != null) api.cancelAttachment(ref.sessionId, ref.attachmentId)
+                    else if (ref.uploadId != null) api.cancelUpload(ref.uploadId)
+                }
+                transfers.cleanedUp(e.id)
+            }
+        }
     }
 
     /** Pinned tasks → Android 16 Live Updates (ColorOS 16 Fluid Cloud / 流体云). */
@@ -225,6 +289,7 @@ class AppContainer(private val context: Context) {
 
     fun onForeground() {
         isForeground = true
+        publishProcessState()
         backgroundStop?.cancel()
         backgroundStop = null
         network.start()
@@ -240,6 +305,7 @@ class AppContainer(private val context: Context) {
 
     fun onBackground() {
         isForeground = false
+        publishProcessState()
         // With the monitor service running the connection stays up; otherwise nothing runs in
         // background — after a short grace, so a quick look at another app (copying a code, a
         // glance at a message) does not cost a full reconnect, which via the relay takes seconds.
@@ -287,6 +353,7 @@ class AppContainer(private val context: Context) {
 
     fun onServiceKeepAlive() {
         serviceRunning = true
+        publishProcessState()
         network.start()
         connection.start()
         keepAlive.start()
@@ -300,6 +367,7 @@ class AppContainer(private val context: Context) {
 
     fun onServiceStopped() {
         serviceRunning = false
+        publishProcessState()
         keepAlive.stop()
         if (!isForeground) {
             network.stop()

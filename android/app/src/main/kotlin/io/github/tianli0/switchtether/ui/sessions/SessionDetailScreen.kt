@@ -156,7 +156,7 @@ fun SessionDetailScreen(
     onOpenRoute: (io.github.tianli0.switchtether.ui.nav.Route) -> Unit = {},
 ) {
     val container = appContainer()
-    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }) }
+    val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }, transfers = it.transfers) }
     val state by vm.state.collectAsStateWithLifecycle()
     // "Share to SwitchTether": a share sent to this session fills the input box (never sends).
     io.github.tianli0.switchtether.share.ShareIntoComposer(sessionId, vm, state)

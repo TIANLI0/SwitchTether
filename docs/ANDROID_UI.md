@@ -1923,3 +1923,94 @@ content-receiver listener, the highlight, the toasts).
 **Not verified on a device.** No hardware keyboard, drag and drop, keyboard GIF commit or clipboard
 image paste was tried on a phone, tablet or emulator; only unit tests (incl. Robolectric Compose key
 injection into the composer) and the build ran.
+
+## 36. Large transfers as user-initiated data transfer jobs (2026-11-27)
+
+Code: `transfer/TransferModel.kt` (pure state machine, `TransferTest`), `transfer/TransferManager.kt`
+(bookkeeping, journal, cancel), `transfer/TransferJobs.kt` (`JobTransferEnvelope`, `TransferJobService`,
+`TransferActionReceiver`), hooks in `SessionDetailViewModel.addAttachment`, `FilesViewModel.upload` and
+`FileStore.download`.
+
+**What runs as a job.** Every transfer that moves a whole file: attachment uploads (composer, share,
+drops; ≤ 1 GiB, 4 MiB chunks), uploads into a folder (Files page) and explicit downloads into
+`Downloads/SwitchTether` (Files page, viewer, lightbox — all through `FileStore.download`). Preview
+copies into the cache are not (they are for looking at a file now, in the app).
+
+**How.** The bytes still move exactly as before, in the caller's coroutine: same chunking, same offsets,
+same streaming from the `content:` URI or into the MediaStore entry (never a whole file in memory), the
+same idempotent `commandId`s for `fs/upload`. `TransferManager.run` wraps that work: it records the
+transfer, and `JobTransferEnvelope.begin` schedules a JobScheduler job with `setUserInitiated(true)`
+(`RUN_USER_INITIATED_JOBS`, network constraint `ANY`, estimated up/down bytes, job namespace
+`transfers` so ids never clash with WorkManager's). While that job runs the system treats the app as doing
+user-requested work: the transfer keeps its network and CPU in the background. `onStartJob` calls
+`setNotification` at once (channel "文件传输", low importance, grouped): "正在上传 report.pdf",
+"12 MB / 40 MB", a progress bar and **取消**; progress updates are throttled to one per second and only
+when the percentage changes, and `updateTransferredNetworkBytes` is reported. The job ends with the
+transfer (`jobFinished(…, false)`, the notification is removed with it); if the app is in the
+background then, a short result notification says it finished, failed or was stopped.
+WorkManager 2.12 has no user-initiated work (only expedited work, limited to minutes), so JobScheduler is
+used directly. minSdk is 35, so every device has the API; when `schedule` is refused (the app was not
+visible, or the permission is missing) the transfer runs as before, in the app, without a notification.
+
+**Cancel.** 取消 on the notification → `TransferManager.cancel` → the caller's coroutine is cancelled,
+and its existing cancel path runs: an attachment's chip is removed and its partial upload discarded
+(`DELETE …/attachments/{id}`), a folder upload sends `DELETE /v1/fs/upload/{id}` and its card shows
+"已取消", a download deletes its pending MediaStore entry. If the system stops the job (Task Manager's
+stop, quota, network constraint lost), `onStopJob` does the same and the transfer is reported as
+stopped by the system. A stopped job is never rescheduled.
+
+**Process death.** While a transfer runs, `filesDir/transfers/journal.json` holds its id, kind, file
+name, size, start time and the ids needed to clean it up (session + attachment id, upload id, or the
+pending download's `content:` URI) — written on start, when an id is learned, and on end; never progress
+or content. At the next start (`AppContainer` reads it synchronously before anything can start a new
+transfer) every entry still running is **interrupted**: one notification "传输已中断 — 应用退出时 … 仍在
+传输。没有重新发送；如仍需要，请重新添加文件。", a pending download entry is deleted at once, an
+unfinished upload / attachment is discarded on the computer at the next connection (the computer drops
+unfinished attachments after 6 h anyway). Nothing is resumed and nothing is sent twice; a job the system
+re-delivers to the new process ends immediately.
+
+**State machine** (`reduce`): QUEUED → RUNNING (progress, never backwards, clamped to the total) →
+SUCCEEDED | FAILED | CANCELLED | STOPPED_BY_SYSTEM | INTERRUPTED; terminal phases absorb every later
+event.
+
+**Tests.** `TransferTest` (progress monotonic / clamped, terminal phases absorb, ref merge,
+interrupted-on-restart, throttle, journal while running and empty after, failure thrown or signalled,
+notification cancel cancels the caller's job and nothing more is sent, system stop vs user cancel,
+no job → still runs, process death reported once / never resumed / leftovers kept until cleaned,
+file journal round trip and garbage), `ViewModelTest.anAttachmentCancelledFromItsTransferNotificationStopsAndIsDiscarded`.
+
+**Not verified on a device.** No job was scheduled on a phone or emulator: the system notification,
+Cancel, Task Manager's stop, background survival on ColorOS and the process-death path are
+unexercised; only unit tests and the build ran.
+
+## 37. Diagnostics: why the app process ended (2026-11-27)
+
+Code: `diag/ExitRecords.kt` (pure mapping, bounds, redaction, report; `ExitRecordsTest`),
+`diag/ExitDiagnostics.kt`, `ui/settings/DiagnosticsScreen.kt`; About → **诊断记录**.
+
+To see how ColorOS ends background delivery: at every start the app reads
+`ActivityManager.getHistoricalProcessExitReasons` (API 30+, guarded although minSdk is 35) and merges the
+records into `filesDir/diagnostics/exits.json`: the newest 50, one per (pid, time). Each record has the
+reason (name and number), status (signal name for `SIGNALED`), importance, PSS / RSS, timestamp and the
+system's description (redacted: URLs, e-mail addresses, file paths except `/system` `/apex` `/data/app`,
+IP addresses, long tokens and long quoted strings are masked; ≤ 300 characters).
+
+**Was the monitor service running?** The app hands the system a ≤ 128-byte process state summary with
+`setProcessStateSummary` whenever it changes — `st1;fg=…;mon=…;on=…;tx=…` (foreground, `MonitorService`
+running, connected, transfers running) — and the system returns it with that process's exit record, so
+"后台连接：运行中 / 未运行" is exact. Without a summary (an older process) a `FOREGROUND_SERVICE`
+importance is read as "running (importance)"; otherwise "unknown".
+
+**Traces.** For an ANR only the main thread's block is kept: thread header, `|` state lines, `at` /
+`native:` frames and lock lines, each redacted; any other line is withheld and counted; ≤ 8 KB. The
+trace's full size is stored. A native crash's tombstone is only counted (size), never read. Java crashes
+have no trace.
+
+**Page.** An explanation, **导出并分享** (writes `cache/diagnostics/switchtether-diagnostics.txt` with
+the app version, device, Android version, ROM build and every record, shared through the existing
+FileProvider, new `<cache-path name="diagnostics">`), **清除记录**, then one card per record: a
+plain-language reason, time · reason name · status, process state, background connection, memory,
+transfers running, description, trace size.
+
+**Not verified on a device.** No real exit record was read: the ColorOS kill reasons, the summary round
+trip through the system and the share sheet are unexercised; only unit tests and the build ran.

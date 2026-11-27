@@ -98,7 +98,7 @@ private fun terminalViewModel(): TerminalViewModel =
 internal fun filesViewModel(): FilesViewModel {
     val context = LocalContext.current
     return containerViewModel { c ->
-        FilesViewModel(c.connection, c.stepUpGate, { context.applicationContext.contentResolver }, c.fileStore) {
+        FilesViewModel(c.connection, c.stepUpGate, { context.applicationContext.contentResolver }, c.fileStore, c.transfers) {
             c.sessions.list(SessionQuery()).items.firstOrNull { it.isLive && it.cwd != null }?.cwd
         }
     }

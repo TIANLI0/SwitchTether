@@ -166,7 +166,11 @@ class FakeSessionRepository : SessionRepository {
         return io.github.tianli0.switchtether.remote.protocol.AttachmentView(aid, name, size, 0, false, mediaType.orEmpty())
     }
 
+    /** When set, every attachment chunk waits for it (a slow upload that can be cancelled midway). */
+    var chunkGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
     override suspend fun uploadAttachmentChunk(id: String, attachmentId: String, offset: Long, bytes: ByteArray): io.github.tianli0.switchtether.remote.protocol.AttachmentView {
+        chunkGate?.await()
         val have = uploads.getValue(attachmentId)
         check(offset == have.size.toLong()) { "offset" }
         val now = have + bytes

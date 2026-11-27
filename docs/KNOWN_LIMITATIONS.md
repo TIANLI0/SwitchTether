@@ -71,10 +71,17 @@ TODO list. Each item says what the user experiences.
     Conversation notifications follow the same delivery. An inline reply starts the connection
     for up to 9 s and is sent once; a send the computer wants step-up for is not sent (the
     notification asks to open the app). Not yet verified on a device.
+    About → 诊断记录 keeps the last 50 reasons the app process ended (and whether the connection
+    service ran) to study vendor kills; it observes, it does not prevent them.
 10f. Session content search reads the last 64 MiB of each transcript within 3 s, newest sessions
     first; on very large histories older sessions may be reported as not searched (`partial`).
     It searches message text only, not tool output, and sessions of other CC Switch providers
     (history only) are not searched.
+10g. Large uploads and downloads run as Android 14+ user-initiated data transfer jobs, but a
+    transfer cut by the app process ending (killed, crashed, updated) is not resumed: it is reported
+    once and has to be started again; the partial upload is discarded on the computer at the next
+    connection. A transfer started while the app was not visible (rare) runs without the job and its
+    notification. Not yet verified on a device.
 
 ## Port forwarding
 

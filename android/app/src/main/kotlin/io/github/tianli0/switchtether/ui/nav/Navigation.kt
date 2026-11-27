@@ -42,6 +42,8 @@ sealed interface Route {
     data object NotificationPrefs : Route
     data object Licenses : Route
     data object About : Route
+    /** About → 诊断记录: process-exit records (docs/ANDROID_UI.md §37). */
+    data object Diagnostics : Route
     data object DesktopInfo : Route
 }
 
