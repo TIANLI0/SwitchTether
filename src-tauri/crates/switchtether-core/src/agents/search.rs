@@ -150,6 +150,29 @@ pub(crate) fn search_lines(
     (hit.count > 0).then_some(hit)
 }
 
+/// Search a plain transcript as CC Switch's session parser returns it (`[{role, content}]`,
+/// oldest first): user and assistant messages only, like [`search_lines`].
+pub(crate) fn search_messages(messages: &Value, folded: &str) -> Option<FileHit> {
+    let mut hit = FileHit::default();
+    for m in messages.as_array().map(Vec::as_slice).unwrap_or_default() {
+        if !matches!(
+            m.get("role").and_then(Value::as_str),
+            Some("user" | "assistant")
+        ) {
+            continue;
+        }
+        let Some(text) = m.get("content").and_then(Value::as_str) else {
+            continue;
+        };
+        let found = find_all(text, folded);
+        if let Some(&(s, e)) = found.first() {
+            hit.count = (hit.count + found.len()).min(MAX_COUNT);
+            hit.snippet = snippet(text, s, e);
+        }
+    }
+    (hit.count > 0).then_some(hit)
+}
+
 /// Lines of a transcript file (`.jsonl`, or DeepSeek Harness `.jsonl.zstd` frames), at most
 /// [`MAX_FILE_BYTES`] from its end.
 pub fn file_lines(path: &Path) -> std::io::Result<Box<dyn Iterator<Item = String>>> {
@@ -302,6 +325,20 @@ mod tests {
             serde_json::to_value(r).unwrap(),
             fixture("session_search.json")["results"][0]
         );
+    }
+
+    #[test]
+    fn plain_transcripts_are_searched_by_user_and_assistant_text() {
+        let msgs = serde_json::json!([
+            {"role": "user", "content": "Deploy the Widget"},
+            {"role": "tool", "content": "widget log"},
+            {"role": "assistant", "content": "The widget is deployed"},
+        ]);
+        let hit = search_messages(&msgs, &fold("WIDGET")).unwrap();
+        assert_eq!(hit.count, 2);
+        assert!(hit.snippet.contains("deployed"), "newest message wins");
+        assert_eq!(search_messages(&msgs, &fold("log")), None);
+        assert_eq!(search_messages(&serde_json::Value::Null, "x"), None);
     }
 
     #[test]

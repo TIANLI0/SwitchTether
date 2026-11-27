@@ -112,6 +112,13 @@ pub trait CcSwitchBackend: Send + Sync + 'static {
     async fn session_index(&self) -> BackendResult<Vec<IndexedSession>>;
     /// Plain role/text transcript for agents without a rich adapter.
     async fn session_messages(&self, provider_id: &str, source_path: &str) -> BackendResult<Value>;
+
+    /// Model list of an agent the desktop knows how to ask but this crate does not launch
+    /// (e.g. Antigravity `agy models`): `[{ id, displayName }]`, or null when unknown. Read
+    /// only; nothing is sent to a model and no configuration is written.
+    async fn agent_models(&self, _agent: &str) -> BackendResult<Value> {
+        Ok(Value::Null)
+    }
 }
 
 /// Backend used in tests and when CC Switch is not initialised.

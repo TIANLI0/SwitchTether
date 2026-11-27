@@ -541,6 +541,7 @@ impl AgentHub {
             { "agent": "codex", "origin": "desktop_app", "capabilities": observed_caps("codex"), "notes": "Without the opt-in hook: observation of rollouts only." },
             { "agent": "codex", "origin": "desktop_app", "takeover": "CODEX_CLI_PATH", "capabilities": attached(false), "notes": "With the opt-in CODEX_CLI_PATH hook: every thread loaded in Codex Desktop can be messaged, approved and interrupted from the phone." },
             { "agent": "dsh", "origin": "cli", "capabilities": observed_caps("dsh"), "notes": "DeepSeek Harness session logs ($DSH_HOME/sessions, zstd frames) tailed read-only; a log written in the last two minutes counts as live. Sub-agents are their own sessions (parentSession)." },
+            { "agent": "agy", "origin": "cli", "capabilities": history_caps("agy"), "notes": "Google Antigravity (agy CLI / IDE) conversations from CC Switch's session index, read with its parser (JSONL transcripts and trajectory databases): history and content search only, no live view and no control." },
             { "agent": "dsh", "origin": "managed", "capabilities": managed_caps(), "notes": "New or resumed sessions on SwitchTether's own `dsh --profile acp` process (ACP v1 over stdio): prompt, cancel and permission requests; the timeline is read from the persisted session log." },
         ])
     }
@@ -905,6 +906,11 @@ impl AgentHub {
             }
         }
         all.sort_by_key(|s| std::cmp::Reverse(s.last_active_at_ms.unwrap_or(0)));
+        // Antigravity keeps conversations in JSONL transcripts and trajectory databases; only
+        // CC Switch's own parser reads both, so those are searched through the backend below.
+        let (via_backend, all): (Vec<SessionSummary>, Vec<SessionSummary>) = all
+            .into_iter()
+            .partition(|s| s.agent == "agy" && s.source_path.is_some());
         let mut seen = std::collections::HashSet::new();
         let targets: Vec<(SessionSummary, PathBuf)> = all
             .into_iter()
@@ -929,8 +935,10 @@ impl AgentHub {
             })
             .collect();
         let limit = limit.clamp(1, 50);
-        tokio::task::spawn_blocking(move || {
-            let deadline = Instant::now() + budget;
+        let deadline = Instant::now() + budget;
+        let folded_files = folded.clone();
+        let (mut out, mut partial) = tokio::task::spawn_blocking(move || {
+            let folded = folded_files;
             let mut out = Vec::new();
             let mut partial = false;
             for (s, path) in targets {
@@ -967,7 +975,49 @@ impl AgentHub {
             (out, partial)
         })
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+        for s in via_backend {
+            // Newest first: once the page is full, an older session cannot make it in.
+            let oldest = out.iter().map(|r| r.time_ms.unwrap_or(0)).min();
+            if out.len() >= limit && s.last_active_at_ms.unwrap_or(0) <= oldest.unwrap_or(0) {
+                break;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                partial = true;
+                break;
+            }
+            let Some(src) = s.source_path.as_deref() else {
+                continue;
+            };
+            let messages = match tokio::time::timeout(
+                left,
+                self.backend.session_messages(&s.agent, src),
+            )
+            .await
+            {
+                Ok(Ok(v)) => v,
+                Ok(Err(_)) => continue,
+                Err(_) => {
+                    partial = true;
+                    break;
+                }
+            };
+            if let Some(h) = search::search_messages(&messages, &folded) {
+                out.push(search::SearchResult {
+                    session_id: s.id,
+                    agent: s.agent,
+                    title: s.title,
+                    cwd: s.cwd,
+                    time_ms: s.last_active_at_ms,
+                    snippet: h.snippet,
+                    match_count: h.count,
+                });
+            }
+        }
+        out.sort_by_key(|r| std::cmp::Reverse(r.time_ms.unwrap_or(0)));
+        out.truncate(limit);
+        (out, partial)
     }
 
     /// Fallback for Claude sessions that are not (yet) in CC Switch's index:
@@ -2521,6 +2571,13 @@ impl AgentHub {
                 Some(b) => model_probe::codex_models(b).await,
                 None => None,
             },
+            // Agents this crate does not launch: the desktop asks them (e.g. `agy models`).
+            "agy" => self
+                .backend
+                .agent_models(agent)
+                .await
+                .ok()
+                .filter(|v| !model_list(v).is_empty()),
             _ => None,
         };
         let mut lists = self.model_lists.lock();
@@ -2984,6 +3041,13 @@ impl AgentHub {
     }
 }
 
+/// Capabilities of a history-only agent's (not live) session, as `capabilities_for` reports it.
+fn history_caps(agent: &str) -> Capabilities {
+    let mut c = observed_caps(agent);
+    c.live_events = None;
+    c
+}
+
 fn observed_caps(agent: &str) -> Capabilities {
     let known = agent == "claude_code" || agent == "codex";
     let dsh = agent == "dsh";
@@ -3000,6 +3064,7 @@ fn observed_caps(agent: &str) -> Capabilities {
             "claude_code" => "The original Claude Code process (CLI / VS Code) cannot be controlled from another program. Use \"Continue on phone\": the same conversation continues in a SwitchTether process (only while the original is idle; the original window will not show the new turns).".into(),
             "codex" => "The original Codex process (CLI / Desktop) cannot be controlled from another program. Use \"Continue on phone\": the thread continues on SwitchTether's own app-server, which Codex allows only when the thread is not open elsewhere.".into(),
             "dsh" => "A DeepSeek Harness window (web / desktop / terminal) cannot be controlled from another program without the opt-in plugin. Use \"Continue on phone\": the session is resumed on SwitchTether's own `dsh --profile acp` process once it is no longer active elsewhere.".into(),
+            "agy" => "History only: Antigravity conversations are read through CC Switch's session parser. SwitchTether cannot start, continue or control Antigravity sessions.".into(),
             _ => "History only.".into(),
         }),
     }
@@ -4733,5 +4798,155 @@ mod tests {
         assert!(lg.iter().all(|e| e.session_id == "codex:th-1"));
         assert_eq!(public_id("claude_code", "x"), "claude:x");
         assert_eq!(public_id("codex", "th"), "codex:th");
+    }
+
+    /// Antigravity sessions only exist in CC Switch's index; the backend reads them.
+    struct AgyBackend;
+
+    type R = crate::backend::BackendResult<Value>;
+    type Q = crate::backend::UsageQuery;
+
+    #[async_trait::async_trait]
+    impl CcSwitchBackend for AgyBackend {
+        async fn app_types(&self) -> R {
+            Ok(json!(["agy"]))
+        }
+        async fn providers(&self, a: &str) -> R {
+            UnavailableBackend.providers(a).await
+        }
+        async fn switch_provider(&self, a: &str, i: &str) -> R {
+            UnavailableBackend.switch_provider(a, i).await
+        }
+        async fn test_provider(&self, a: &str, i: &str) -> R {
+            UnavailableBackend.test_provider(a, i).await
+        }
+        async fn set_provider_credential(&self, a: &str, i: &str, f: &str, v: &str) -> R {
+            UnavailableBackend.set_provider_credential(a, i, f, v).await
+        }
+        async fn usage_summary(&self, q: Q) -> R {
+            UnavailableBackend.usage_summary(q).await
+        }
+        async fn usage_trends(&self, q: Q) -> R {
+            UnavailableBackend.usage_trends(q).await
+        }
+        async fn usage_models(&self, q: Q) -> R {
+            UnavailableBackend.usage_models(q).await
+        }
+        async fn usage_providers(&self, q: Q) -> R {
+            UnavailableBackend.usage_providers(q).await
+        }
+        async fn usage_log(&self, id: &str) -> R {
+            UnavailableBackend.usage_log(id).await
+        }
+        async fn usage_first_date(&self, q: Q) -> R {
+            UnavailableBackend.usage_first_date(q).await
+        }
+        async fn usage_last_sync(&self) -> R {
+            UnavailableBackend.usage_last_sync().await
+        }
+        async fn usage_logs(&self, q: Q, s: Option<u16>, p: u32, ps: u32) -> R {
+            UnavailableBackend.usage_logs(q, s, p, ps).await
+        }
+        async fn quota(&self, t: &str) -> R {
+            UnavailableBackend.quota(t).await
+        }
+        async fn mcp_servers(&self) -> R {
+            UnavailableBackend.mcp_servers().await
+        }
+        async fn mcp_toggle(&self, i: &str, a: &str, e: bool) -> R {
+            UnavailableBackend.mcp_toggle(i, a, e).await
+        }
+        async fn skills(&self) -> R {
+            UnavailableBackend.skills().await
+        }
+        async fn skill_toggle(&self, i: &str, a: &str, e: bool) -> R {
+            UnavailableBackend.skill_toggle(i, a, e).await
+        }
+        async fn prompts(&self, a: &str) -> R {
+            UnavailableBackend.prompts(a).await
+        }
+        async fn prompt_enable(&self, a: &str, i: &str) -> R {
+            UnavailableBackend.prompt_enable(a, i).await
+        }
+        async fn settings(&self) -> R {
+            UnavailableBackend.settings().await
+        }
+        async fn proxy_status(&self) -> R {
+            UnavailableBackend.proxy_status().await
+        }
+        async fn health(&self) -> R {
+            UnavailableBackend.health().await
+        }
+        async fn session_index(&self) -> crate::backend::BackendResult<Vec<IndexedSession>> {
+            let s = |id: &str, at: i64| IndexedSession {
+                provider_id: "agy".into(),
+                session_id: id.into(),
+                title: Some(format!("Conversation {id}")),
+                summary: None,
+                project_dir: Some("/w".into()),
+                created_at_ms: Some(at),
+                last_active_at_ms: Some(at),
+                source_path: Some(format!("/agy/{id}.jsonl")),
+                resume_command: None,
+            };
+            Ok(vec![s("a1", 1_000), s("a2", 2_000)])
+        }
+        async fn session_messages(&self, p: &str, src: &str) -> R {
+            assert_eq!(p, "agy");
+            Ok(match src {
+                "/agy/a1.jsonl" => json!([
+                    {"role": "user", "content": "Plan the Orbit release"},
+                    {"role": "tool", "content": "orbit in tool output only"},
+                    {"role": "assistant", "content": "Orbit is ready"},
+                ]),
+                _ => json!([{"role": "user", "content": "something else"}]),
+            })
+        }
+        async fn agent_models(&self, agent: &str) -> R {
+            Ok(match agent {
+                "agy" => json!([{"id": "Gemini 3.5 Pro", "displayName": "Gemini 3.5 Pro"}]),
+                _ => Value::Null,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn agy_history_is_searchable_and_honestly_read_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(64),
+            Arc::new(AgyBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        let (hits, partial) = hub
+            .search("orbit", Some("agy"), 20, Duration::from_secs(3))
+            .await;
+        assert!(!partial);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].session_id, "agy:a1");
+        assert_eq!(hits[0].agent, "agy");
+        // Tool output is not searched: one user and one assistant match.
+        assert_eq!(hits[0].match_count, 2);
+        assert!(hits[0].snippet.contains("Orbit is ready"));
+
+        let s = hub.summary("agy:a1").await.unwrap();
+        let caps = hub.capabilities_for(&s);
+        assert_eq!(caps.read_history, Some(CapStatus::Partial));
+        assert_eq!(caps.send_message, Some(CapStatus::Blocked));
+        assert_eq!(caps.continue_session, None);
+        let matrix = hub.capability_matrix();
+        let agy = matrix
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["agent"] == "agy")
+            .unwrap();
+        assert_eq!(agy["capabilities"], json!(caps));
+
+        let m = hub.model_options("agy", None).await;
+        assert_eq!(m["source"], "agent");
+        assert_eq!(m["models"][0]["id"], "Gemini 3.5 Pro");
+        assert_eq!(m["efforts"], json!([]));
+        assert_eq!(m["permissionModes"], json!([]));
     }
 }
