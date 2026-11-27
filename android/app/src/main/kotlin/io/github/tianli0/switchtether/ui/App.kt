@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.ui
 
 import io.github.tianli0.switchtether.ui.icons.AppIcons
+import androidx.activity.compose.LocalActivity
 
 import io.github.tianli0.switchtether.ui.nav.AppNavHost
 import io.github.tianli0.switchtether.ui.nav.TabCrossfade
@@ -170,18 +171,30 @@ fun MainShell() {
             nav.push(Route.SessionDetail(it, null))
         }
     }
-    // Android 13+: ask for notification permission once the user reached the main UI.
+    // Ask once after pairing. Users can enable notifications later from Settings.
     val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
     val ctx = LocalContext.current
+    val activity = LocalActivity.current
     androidx.compose.runtime.LaunchedEffect(Unit) {
         // Pairing saves the computer a moment before it hands over the 6-digit code to compare, so
         // the main shell is composed for a frame in between: without this pause the system prompt
         // opened over the code. If the code step takes over, this shell leaves and the wait is
         // cancelled; the prompt then comes once the user has compared the codes.
         kotlinx.coroutines.delay(800)
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val permission = android.Manifest.permission.POST_NOTIFICATIONS
+            val hint = "notification_permission_asked"
+            val hints = container.hintPrefs
+            if (!hints.getBoolean(hint, false) &&
+                androidx.core.content.ContextCompat.checkSelfPermission(ctx, permission) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                hints.edit().putBoolean(hint, true).apply()
+                // Respect a denial made before the app started recording the prompt.
+                if (activity?.shouldShowRequestPermissionRationale(permission) != true) {
+                    notifLauncher.launch(permission)
+                }
+            }
+        }
     }
     val tabs = rememberTabTransition(nav)
     BoxWithConstraints(Modifier.fillMaxSize()) {

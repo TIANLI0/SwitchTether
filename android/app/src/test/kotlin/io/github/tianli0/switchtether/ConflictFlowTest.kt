@@ -83,6 +83,76 @@ class ConflictFlowTest {
     private fun body(): String = server.takeRequest(5, TimeUnit.SECONDS)!!.body!!.utf8()
 
     @Test
+    fun leavingSearchPreventsLateResultsFromReplacingTheDirectory() {
+        server.enqueue(json(200, """{"path":"D:\\p","entries":[]}"""))
+        vm.browse("D:\\p")
+        await { vm.state.value.listing is Loadable.Ready }
+        server.takeRequest(5, TimeUnit.SECONDS)!!
+
+        server.enqueue(
+            MockResponse.Builder()
+                .setHeader("Content-Type", "application/json")
+                .body("""{"results":[]}""")
+                .bodyDelay(400, TimeUnit.MILLISECONDS)
+                .build(),
+        )
+        vm.setQuery("old")
+        vm.search()
+        assertEquals("old", server.takeRequest(5, TimeUnit.SECONDS)!!.url.queryParameter("q"))
+        vm.clearSearch()
+        await { vm.state.value.results == null && vm.state.value.query.isEmpty() }
+
+        server.enqueue(json(200, """{"path":"D:\\p","entries":[]}"""))
+        vm.refreshListing()
+        await { !vm.state.value.refreshing }
+        Thread.sleep(450)
+        assertNull(vm.state.value.results)
+        assertEquals("D:\\p", vm.currentDir())
+    }
+
+    @Test
+    fun navigatingDuringRefreshKeepsTheNewDirectory() {
+        server.enqueue(json(200, """{"path":"D:\\p","entries":[]}"""))
+        vm.browse("D:\\p")
+        await { vm.currentDir() == "D:\\p" }
+        server.takeRequest(5, TimeUnit.SECONDS)!!
+
+        server.enqueue(
+            MockResponse.Builder()
+                .setHeader("Content-Type", "application/json")
+                .body("""{"path":"D:\\p","entries":[]}""")
+                .bodyDelay(400, TimeUnit.MILLISECONDS)
+                .build(),
+        )
+        vm.refreshListing()
+        assertEquals("D:\\p", server.takeRequest(5, TimeUnit.SECONDS)!!.url.queryParameter("path"))
+
+        server.enqueue(json(200, """{"path":"D:\\p\\next","entries":[]}"""))
+        vm.browse("D:\\p\\next")
+        await { vm.currentDir() == "D:\\p\\next" }
+        Thread.sleep(450)
+        assertEquals("D:\\p\\next", vm.currentDir())
+        assertEquals(false, vm.state.value.refreshing)
+    }
+
+    @Test
+    fun editingTheFilterReturnsToTheCurrentFolderImmediately() {
+        server.enqueue(json(200, """{"path":"D:\\p","entries":[]}"""))
+        vm.browse("D:\\p")
+        await { vm.state.value.listing is Loadable.Ready }
+        server.enqueue(json(200, """{"results":[]}"""))
+        vm.setQuery("old")
+        vm.search()
+        await { vm.state.value.results is Loadable.Ready }
+
+        vm.setQuery("new")
+
+        assertEquals("new", vm.state.value.query)
+        assertNull(vm.state.value.results)
+        assertEquals("D:\\p", vm.currentDir())
+    }
+
+    @Test
     fun creatingBeforeAnyDirectoryIsLoadedReportsAMessageAndSendsNothing() {
         vm.mkdir("x")
         assertNotNull(vm.state.value.message)

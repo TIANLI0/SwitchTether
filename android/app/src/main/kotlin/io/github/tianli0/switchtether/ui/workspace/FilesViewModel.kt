@@ -199,20 +199,26 @@ class FilesViewModel(
     }
 
     private var browseJob: Job? = null
+    private var refreshJob: Job? = null
+    private var searchJob: Job? = null
 
     fun browse(path: String) {
         val api = api() ?: return
         // Opening a folder always shows that folder: drop a file / viewer left open from before. The quick filter
         // belongs to the folder it was typed in. The old list stays visible until the new one arrives (no flash).
         browseJob?.cancel()
+        refreshJob?.cancel()
+        searchJob?.cancel()
         _state.update {
             it.copy(
                 listing = if (it.listing is Loadable.Ready) it.listing else Loadable.Loading,
-                navigatingTo = path, query = "", results = null, file = null, viewer = null, editing = false, conflict = null, confirmDiscard = false,
+                navigatingTo = path, refreshing = false, query = "", results = null, file = null, viewer = null,
+                editing = false, conflict = null, confirmDiscard = false,
             )
         }
         browseJob = viewModelScope.launch {
             val r = loadable { api.fsList(path, _state.value.showHidden) }
+            ensureActive()
             _state.update { it.copy(listing = r, navigatingTo = null) }
         }
     }
@@ -230,19 +236,27 @@ class FilesViewModel(
 
     fun currentDir(): String? = (_state.value.listing as? Loadable.Ready)?.value?.path
 
-    fun setQuery(q: String) = _state.update { it.copy(query = q) }
+    fun setQuery(q: String) {
+        if (q == _state.value.query) return
+        searchJob?.cancel()
+        _state.update { it.copy(query = q, results = null) }
+    }
 
     /** Leaves search: the folder list comes back. */
-    fun clearSearch() = _state.update { it.copy(query = "", results = null) }
+    fun clearSearch() {
+        searchJob?.cancel()
+        _state.update { it.copy(query = "", results = null) }
+    }
 
     /** Reloads the current folder in place (pull-to-refresh). */
     fun refreshListing() {
         val api = api() ?: return
         val path = currentDir() ?: return loadRoots()
-        if (_state.value.refreshing) return
+        if (_state.value.refreshing || _state.value.navigatingTo != null) return
         _state.update { it.copy(refreshing = true) }
-        viewModelScope.launch {
+        refreshJob = viewModelScope.launch {
             val r = loadable { api.fsList(path, _state.value.showHidden) }
+            ensureActive()
             _state.update { it.copy(listing = r, refreshing = false) }
         }
     }
@@ -272,15 +286,19 @@ class FilesViewModel(
 
     fun search() {
         val api = api() ?: return
+        if (_state.value.navigatingTo != null) return
         val root = currentDir() ?: return
-        val q = _state.value.query.trim()
+        val snapshot = _state.value
+        val q = snapshot.query.trim()
+        searchJob?.cancel()
         if (q.isEmpty()) {
             _state.update { it.copy(results = null) }
             return
         }
         _state.update { it.copy(results = Loadable.Loading) }
-        viewModelScope.launch {
-            val r = loadable { SearchHit.parseList(api.fsSearch(root, q, _state.value.searchContent).obj()) }
+        searchJob = viewModelScope.launch {
+            val r = loadable { SearchHit.parseList(api.fsSearch(root, q, snapshot.searchContent).obj()) }
+            ensureActive()
             _state.update { it.copy(results = r) }
         }
     }
