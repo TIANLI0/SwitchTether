@@ -158,6 +158,8 @@ class TransferManager(
         return true
     }
 
+    // Throwable on purpose: any failure is recorded on the transfer, then rethrown unchanged.
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun <T> run(kind: TransferKind, label: String, total: Long?, block: suspend (TransferTicket) -> T): T {
         val job = currentCoroutineContext()[Job]
         val id = newId()

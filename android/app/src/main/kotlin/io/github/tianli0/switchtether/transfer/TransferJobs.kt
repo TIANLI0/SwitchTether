@@ -40,6 +40,9 @@ class JobTransferEnvelope(
 ) : TransferEnvelope {
     private val scheduler: JobScheduler? by lazy {
         runCatching { context.getSystemService(JobScheduler::class.java)?.forNamespace(NAMESPACE) }.getOrNull()
+            // A new process never continues a transfer: jobs left from the last one go, so the ids
+            // counted from 1 again below cannot meet one of them.
+            ?.also { js -> runCatching { js.cancelAll() } }
     }
     private val seq = AtomicInteger(0)
     private val jobIds = ConcurrentHashMap<String, Int>()
@@ -188,12 +191,22 @@ class JobTransferEnvelope(
                 .setAutoCancel(true)
                 .setContentIntent(PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
                 .build()
-            runCatching { NotificationManagerCompat.from(context).notify(id, n) }
+            // Notification permission can be refused or revoked: then there is simply no notification.
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                runCatching { NotificationManagerCompat.from(context).notify(id, n) }
+            }
         }
     }
 }
 
-/** The user-initiated data transfer job of one transfer (see [JobTransferEnvelope]). */
+/**
+ * The user-initiated data transfer job of one transfer (see [JobTransferEnvelope]). Its jobs live in
+ * their own JobScheduler namespace ([JobTransferEnvelope.NAMESPACE]), so their ids never meet
+ * WorkManager's (ReconnectWorker), which schedules in the default namespace.
+ */
+@android.annotation.SuppressLint("SpecifyJobSchedulerIdRange")
 class TransferJobService : JobService() {
     private val container get() = (application as SwitchTetherApp).container
 

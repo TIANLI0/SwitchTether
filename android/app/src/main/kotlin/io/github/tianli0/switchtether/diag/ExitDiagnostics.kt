@@ -36,12 +36,10 @@ class ExitDiagnostics(private val context: Context) {
     /** Merges the system's exit records into the local log. Runs on IO. */
     suspend fun refresh() = withContext(Dispatchers.IO) {
         val stored = load()
-        val incoming = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            runCatching { am?.getHistoricalProcessExitReasons(context.packageName, 0, MAX_EXIT_RECORDS).orEmpty() }
-                .getOrDefault(emptyList())
-                .filter { it.processName == context.packageName || it.processName.isNullOrEmpty() }
-                .map { mapExit(raw(it)) }
-        } else emptyList()
+        val incoming = runCatching { am?.getHistoricalProcessExitReasons(context.packageName, 0, MAX_EXIT_RECORDS).orEmpty() }
+            .getOrDefault(emptyList())
+            .filter { it.processName == context.packageName || it.processName.isNullOrEmpty() }
+            .map { mapExit(raw(it)) }
         val merged = mergeExits(stored, incoming)
         if (merged != stored) save(merged)
         _records.value = merged
@@ -51,7 +49,7 @@ class ExitDiagnostics(private val context: Context) {
     fun setSummary(summary: ProcessSummary) {
         if (summary == lastSummary) return
         lastSummary = summary
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) runCatching { am?.setProcessStateSummary(summary.encode()) }
+        runCatching { am?.setProcessStateSummary(summary.encode()) }
     }
 
     suspend fun clear() = withContext(Dispatchers.IO) {
@@ -90,7 +88,6 @@ class ExitDiagnostics(private val context: Context) {
         }
     }
 
-    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private fun raw(info: ApplicationExitInfo): RawExit {
         var size: Long? = null
         var text: String? = null
