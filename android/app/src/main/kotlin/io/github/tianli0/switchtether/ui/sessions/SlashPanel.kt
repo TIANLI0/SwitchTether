@@ -150,7 +150,7 @@ private fun SlashRow(entry: SlashEntry, shape: Shape, onPick: (SlashEntry) -> Un
 /** "/help": every command this session offers, in a half-screen panel; a row does what the "/" panel does. */
 @Composable
 fun SlashHelpSheet(show: Boolean, commands: List<SlashEntry>, onPick: (SlashEntry) -> Unit, onDismiss: () -> Unit) {
-    PanelSheet(show = show, title = stringResource(R.string.slash_help_title), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.slash_help_title), onDismissRequest = onDismiss, imePadding = false) {
         // The list itself is what "/help" shows: it is not a row of its own list.
         val rows = commands.filter { slashActionFor(it) != SlashAction.HELP }
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp).testTag("slash-help")) {

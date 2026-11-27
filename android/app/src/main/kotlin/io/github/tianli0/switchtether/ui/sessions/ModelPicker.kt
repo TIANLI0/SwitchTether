@@ -278,7 +278,7 @@ fun ModelEffortSheet(
     optionsFailed: Boolean = false,
     onRetryOptions: (() -> Unit)? = null,
 ) {
-    PanelSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss, imePadding = false) {
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             if (modelNote != null) {
                 Text(modelNote, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp))

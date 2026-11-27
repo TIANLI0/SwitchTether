@@ -9,7 +9,6 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -18,7 +17,6 @@ import com.adamglin.phosphoricons.regular.Article
 import com.adamglin.phosphoricons.regular.Code
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import io.github.suqi8.coui.kmp.basic.Chip
 import io.github.tianli0.coui17.patterns.FormDialog
 import io.github.tianli0.coui17.patterns.MenuEntry
 import io.github.tianli0.coui17.patterns.GlassMenu
@@ -43,6 +41,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -76,6 +75,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
@@ -89,6 +90,7 @@ import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.ListPopupColumn
 import io.github.suqi8.coui.kmp.basic.LocalSearchBarKeyboardType
 import io.github.suqi8.coui.kmp.basic.SearchBar
+import io.github.suqi8.coui.kmp.basic.SearchBarActionButton
 import io.github.suqi8.coui.kmp.basic.SearchBarDefaults
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
@@ -130,34 +132,36 @@ private fun FilesSortEntry(sort: SortOrder, onSort: (SortKey) -> Unit) {
     )
     val direction = if (sort.descending) " ↓" else " ↑"
     val activeLabel = keys.first { it.first == sort.key }.second
-    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterEnd) {
-        Box {
-            Row(
-                modifier = Modifier
-                    .heightIn(min = 36.dp)
-                    .clip(SquircleShape(8.dp))
-                    .clickable(role = Role.Button, onClick = { open = true })
-                    .padding(horizontal = 12.dp)
-                    .testTag("files-sort"),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.files_sort_current, activeLabel + direction),
-                    style = COUITheme.textStyles.body2,
-                    color = COUITheme.colorScheme.onSurface,
-                )
-                ExpandArrow(expanded = open, modifier = Modifier.size(16.dp))
-            }
-            GlassMenu(
-                show = open,
-                entries = keys.map { (key, label) ->
-                    val active = key == sort.key
-                    MenuEntry(if (active) label + direction else label, selected = active) { onSort(key) }
-                },
-                onDismiss = { open = false },
+    Box {
+        Row(
+            modifier = Modifier
+                .widthIn(max = 140.dp)
+                .heightIn(min = 36.dp)
+                .clip(SquircleShape(8.dp))
+                .clickable(role = Role.Button, onClick = { open = true })
+                .padding(horizontal = 12.dp)
+                .testTag("files-sort"),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.files_sort_current, activeLabel + direction),
+                style = COUITheme.textStyles.body2,
+                color = COUITheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f, fill = false),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            ExpandArrow(expanded = open, modifier = Modifier.size(16.dp))
         }
+        GlassMenu(
+            show = open,
+            entries = keys.map { (key, label) ->
+                val active = key == sort.key
+                MenuEntry(if (active) label + direction else label, selected = active) { onSort(key) }
+            },
+            onDismiss = { open = false },
+        )
     }
 }
 
@@ -240,8 +244,8 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
  * type over "共 N 项", and three round keys: new, search, ⋮), a plain-text breadcrumb "全部文件 › … ›
  * current" with the current folder in the accent colour, and flat rows on the page — a large folder or
  * file-type icon, the name, "size | date", a chevron for folders — with dividers that start at the
- * text. Long-press a row for its actions. The sort selector sits below the path bar. The search
- * toolbar replaces the folder header and keeps its filter in a separate row.
+ * text. Long-press a row for its actions. The path row includes the sort selector, and the search
+ * toolbar replaces the folder header.
  *
  * [onBack] leaves the Files page; back first closes search, then goes up a folder,
  * then shows "全部文件" (the computer's shared roots), and only then leaves.
@@ -286,39 +290,48 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     val allLabel = stringResource(R.string.files_all)
     Column(Modifier.fillMaxSize().then(back)) {
         if (searching && !showRoots) {
-            // Matches the file manager's search toolbar with a separate filter row.
-            CompositionLocalProvider(LocalSearchBarKeyboardType provides KeyboardType.Ascii) {
-                SearchBar(
-                    query = state.query,
-                    onQueryChange = vm::setQuery,
-                    onSearch = { vm.search() },
-                    expanded = true,
-                    onExpandedChange = { if (it) searchExpanded = true else closeSearch() },
-                    label = stringResource(R.string.files_filter_hint),
-                    cancelText = stringResource(R.string.action_cancel),
-                    onCancel = closeSearch,
-                    insideMargin = DpSize(16.dp, 6.dp),
-                    clearContentDescription = stringResource(R.string.files_filter_clear),
-                    leadingIcon = {
-                        Icon(
-                            imageVector = COUIIcons.Basic.Search,
-                            contentDescription = null,
-                            tint = SearchBarDefaults.searchBarColors().iconColor,
-                            modifier = Modifier.padding(
-                                start = SearchBarDefaults.LeadingIconStartPadding,
-                                end = SearchBarDefaults.LeadingIconEndPadding,
-                            ),
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).testTag("files-filter"),
-                )
-            }
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp)) {
-                Chip(
-                    label = stringResource(R.string.files_search_content),
-                    selected = state.searchContent,
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CompositionLocalProvider(LocalSearchBarKeyboardType provides KeyboardType.Ascii) {
+                    SearchBar(
+                        query = state.query,
+                        onQueryChange = vm::setQuery,
+                        onSearch = { vm.search() },
+                        expanded = true,
+                        onExpandedChange = { if (it) searchExpanded = true else closeSearch() },
+                        label = stringResource(R.string.files_filter_hint),
+                        cancelText = stringResource(R.string.action_cancel),
+                        onCancel = closeSearch,
+                        insideMargin = DpSize(0.dp, 6.dp),
+                        clearContentDescription = stringResource(R.string.files_filter_clear),
+                        leadingIcon = {
+                            Icon(
+                                imageVector = COUIIcons.Basic.Search,
+                                contentDescription = null,
+                                tint = SearchBarDefaults.searchBarColors().iconColor,
+                                modifier = Modifier.padding(
+                                    start = SearchBarDefaults.LeadingIconStartPadding,
+                                    end = SearchBarDefaults.LeadingIconEndPadding,
+                                ),
+                            )
+                        },
+                        modifier = Modifier.weight(1f).testTag("files-filter"),
+                    )
+                }
+                SearchBarActionButton(
                     onClick = { vm.setSearchContent(!state.searchContent) },
-                )
+                    modifier = Modifier.size(40.dp).semantics { selected = state.searchContent },
+                ) {
+                    Icon(
+                        PhosphorIcons.Regular.Article,
+                        contentDescription = stringResource(R.string.files_search_content),
+                        tint = if (state.searchContent) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         } else {
             // Header: back, folder name over "共 N 项", then + / search / ⋮.
@@ -398,45 +411,47 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
             val crumbScroll = androidx.compose.foundation.rememberScrollState()
             LaunchedEffect(crumbs) { crumbScroll.scrollTo(crumbScroll.maxValue) }
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(crumbScroll)
-                    .padding(start = PageDefaults.TextGutter, end = PageDefaults.TextGutter, top = 6.dp, bottom = 6.dp)
-                    .testTag("files-path"),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val items = listOf(Crumb(allLabel, "")) + crumbs
-                items.forEachIndexed { i, c ->
-                    val last = i == items.lastIndex
-                    if (i > 0) {
-                        Icon(
-                            AppIcons.ChevronRight, contentDescription = null,
-                            tint = COUITheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(horizontal = 4.dp).size(14.dp),
+                Row(
+                    Modifier.weight(1f).horizontalScroll(crumbScroll).padding(vertical = 6.dp).testTag("files-path"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val items = listOf(Crumb(allLabel, "")) + crumbs
+                    items.forEachIndexed { i, c ->
+                        val last = i == items.lastIndex
+                        if (i > 0) {
+                            Icon(
+                                AppIcons.ChevronRight, contentDescription = null,
+                                tint = COUITheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(horizontal = 4.dp).size(14.dp),
+                            )
+                        }
+                        Text(
+                            c.label,
+                            style = COUITheme.textStyles.body2,
+                            color = if (last) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .clip(SquircleShape(6.dp))
+                                .then(
+                                    if (last) Modifier else Modifier.clickable {
+                                        if (i == 0) {
+                                            showRoots = true
+                                        } else {
+                                            showRoots = false
+                                            vm.browse(c.path)
+                                        }
+                                    },
+                                )
+                                .padding(horizontal = 2.dp, vertical = 4.dp),
                         )
                     }
-                    Text(
-                        c.label,
-                        style = COUITheme.textStyles.body2,
-                        color = if (last) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        modifier = Modifier
-                            .clip(SquircleShape(6.dp))
-                            .then(
-                                if (last) Modifier else Modifier.clickable {
-                                    if (i == 0) {
-                                        showRoots = true
-                                    } else {
-                                        showRoots = false
-                                        vm.browse(c.path)
-                                    }
-                                },
-                            )
-                            .padding(horizontal = 2.dp, vertical = 4.dp),
-                    )
                 }
+                if (!showRoots && listing != null) FilesSortEntry(sort = state.sort, onSort = vm::sortBy)
             }
-        }
-        if (!searching && !showRoots && listing != null) {
-            FilesSortEntry(sort = state.sort, onSort = vm::sortBy)
         }
         NoticeVisibility(state.navigatingTo != null && listing != null) {
             LinearProgressIndicator(progress = null, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
@@ -562,7 +577,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     }
     actionsFor?.let { e ->
         val copied = stringResource(R.string.files_copied)
-        PanelSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }) {
+        PanelSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }, imePadding = false) {
             val opts = buildList {
                 if (!e.isDir && !state.transferRunning) add(stringResource(R.string.files_download) to { actionsFor = null; vm.download(e) })
                 add(stringResource(R.string.files_copy_path) to {
@@ -585,8 +600,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                     )
                 }
             }
-            // The last card ended on the gesture handle.
-            Spacer(Modifier.navigationBarsPadding().height(16.dp))
+            Spacer(Modifier.height(16.dp))
         }
     }
     nameDialog?.let { kind ->

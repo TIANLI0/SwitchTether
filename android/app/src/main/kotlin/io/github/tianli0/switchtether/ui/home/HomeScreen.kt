@@ -233,6 +233,7 @@ private fun SessionGroup(
                 compact = true,
                 pinned = s.id in pins,
                 onLongClick = { menuFor = s },
+                holdDown = menuFor?.id == s.id,
                 bottom = running?.let { a -> { ActivityLines(a) { onOpen(Route.SubagentTree(s.id, s.agent)) } } },
                 // Older desktops send no `activeTasks`: what Home's Agent map poll saw running.
                 activeFallback = activity[s.id]?.let { a -> a.agents.size + a.tasks.size },

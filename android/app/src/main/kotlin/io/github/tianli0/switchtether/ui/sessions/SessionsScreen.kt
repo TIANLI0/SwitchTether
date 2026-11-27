@@ -256,7 +256,7 @@ fun SessionsContent(
                                                 onClick = { expanded = if (open) expanded - g.primary.id else expanded + g.primary.id },
                                             )
                                         } else {
-                                            SessionRow(s, onClick = { onOpen(Route.SessionDetail(s.id, s.title)) }, position = pos, pinned = s.id in pins, onLongClick = { menuFor = s })
+                                            SessionRow(s, onClick = { onOpen(Route.SessionDetail(s.id, s.title)) }, position = pos, pinned = s.id in pins, onLongClick = { menuFor = s }, holdDown = menuFor?.id == s.id)
                                         }
                                     }
                                 }

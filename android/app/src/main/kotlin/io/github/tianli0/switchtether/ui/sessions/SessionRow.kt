@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.Column
@@ -47,6 +46,7 @@ fun SessionRow(
     compact: Boolean = false,
     pinned: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    holdDown: Boolean = false,
     /** Lines under the row inside the same card slot (Home: what runs inside the session). */
     bottom: (@Composable () -> Unit)? = null,
     /** Sub-agents / background tasks the phone saw running itself, for desktops without `activeTasks`. */
@@ -69,7 +69,7 @@ fun SessionRow(
     }
     BasicComponent(
         // Long-press rows get their press highlight clipped to the row's rounded card edges (never a square mask).
-        modifier = if (onLongClick != null) marked.clip(groupRowShape(position)).combinedClickable(onClick = onClick, onLongClick = onLongClick) else marked,
+        modifier = if (onLongClick != null) marked.clip(groupRowShape(position)) else marked,
         // Two lines at most, whatever the font size (coui17 patch 0009); the subtitle stays one.
         title = title,
         titleMaxLines = 2,
@@ -112,7 +112,9 @@ fun SessionRow(
         insideMargin = if (compact) androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp) else io.github.suqi8.coui.kmp.basic.BasicComponentDefaults.InsideMargin,
         cardListPosition = position,
         bottomAction = bottom,
-        onClick = if (onLongClick != null) null else onClick,
+        holdDownState = holdDown,
+        onClick = onClick,
+        onLongClick = onLongClick,
     )
 }
 
@@ -143,11 +145,13 @@ fun statusLabel(status: String): String = when (status) {
 @Composable
 fun PinMenu(session: SessionSummary?, pinned: Boolean, touch: io.github.suqi8.coui.kmp.basic.PreciseClickState, onDismiss: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val shownSession = io.github.tianli0.switchtether.ui.common.rememberLast(session)
+    val shownPinned = io.github.tianli0.switchtether.ui.common.rememberLast(pinned.takeIf { session != null }) == true
     io.github.tianli0.coui17.patterns.GlassMenu(
         show = session != null,
         entries = listOf(
-            io.github.tianli0.coui17.patterns.MenuEntry(stringResource(if (pinned) R.string.pin_remove else R.string.pin_add)) {
-                session?.let { io.github.tianli0.switchtether.ui.common.togglePin(context, it) }
+            io.github.tianli0.coui17.patterns.MenuEntry(stringResource(if (shownPinned) R.string.pin_remove else R.string.pin_add)) {
+                shownSession?.let { io.github.tianli0.switchtether.ui.common.togglePin(context, it) }
             },
         ),
         onDismiss = onDismiss,

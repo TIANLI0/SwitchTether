@@ -576,7 +576,7 @@ fun PermissionModeSheet(
     modes: List<PermissionModeOption> = emptyList(),
     agent: String? = null,
 ) {
-    PanelSheet(show = show, title = stringResource(R.string.tools_permission), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.tools_permission), onDismissRequest = onDismiss, imePadding = false) {
         // Up to six modes with two-line descriptions: scrolls in landscape or with large text.
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             PermissionModeOptions(current, pending, enabled, onSelect, modes, agent)

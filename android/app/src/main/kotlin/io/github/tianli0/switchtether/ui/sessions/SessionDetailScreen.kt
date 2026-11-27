@@ -69,6 +69,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -277,6 +279,12 @@ fun SessionDetailScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
     ) { addPicked(it) }
     var showAttach by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val dismissIme = {
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+    }
     var showModels by rememberSaveable { mutableStateOf(false) }
     val switchLabel = stringResource(R.string.model_switch_label)
     // The desktop's capability decides (sessions taken over from VS Code / Codex Desktop can change it too).
@@ -346,12 +354,19 @@ fun SessionDetailScreen(
         when (vm.pickSlashCommand(entry)) {
             SlashAction.SEND, SlashAction.INSERT -> Unit
             SlashAction.OPEN_MODEL -> {
+                dismissIme()
                 if (modelChangeable) vm.loadModelOptions()
                 showModels = true
             }
-            SlashAction.OPEN_PERMISSION -> showPermission = true
+            SlashAction.OPEN_PERMISSION -> {
+                dismissIme()
+                showPermission = true
+            }
             SlashAction.RENAME -> showSlashRename = true
-            SlashAction.HELP -> showSlashHelp = true
+            SlashAction.HELP -> {
+                dismissIme()
+                showSlashHelp = true
+            }
             // Context, plan, MCP, export and the side question are sections of the session tools page.
             SlashAction.OPEN_TOOLS, SlashAction.CONTEXT, SlashAction.PLAN, SlashAction.MCP, SlashAction.EXPORT, SlashAction.SIDE_QUESTION ->
                 onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId))
@@ -430,6 +445,7 @@ fun SessionDetailScreen(
         onEditOutgoing = vm::editOutgoing,
         onInterrupt = { confirmInterrupt = true },
         onModelClick = {
+            dismissIme()
             if (modelChangeable) vm.loadModelOptions()
             showModels = true
         },
@@ -444,7 +460,10 @@ fun SessionDetailScreen(
         onOpenSubagentTree = { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SubagentTree(sessionId, agent)) },
         pinned = pinned,
         onTogglePin = { state.detail.valueOrNull?.summary?.let { s -> io.github.tianli0.switchtether.ui.common.togglePin(context, s) } },
-        onPickImage = { showAttach = true },
+        onPickImage = {
+            dismissIme()
+            showAttach = true
+        },
         onRemoveImage = vm::removeImage,
         onRemoveAttachment = vm::removeAttachment,
         onWithdrawOutgoing = vm::withdrawOutgoing,
@@ -464,7 +483,10 @@ fun SessionDetailScreen(
                 onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.GitReview(cwd, files))
             }
         },
-        onPermissionClick = { showPermission = true },
+        onPermissionClick = {
+            dismissIme()
+            showPermission = true
+        },
         onSlashCommand = onSlashCommand,
         onOpenProjectUsage = { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.ProjectUsage(it)) },
         // Also here, not only on the Claude Code tools page: a Codex session SwitchTether started
@@ -1357,7 +1379,7 @@ private fun ComposerNote(text: String, color: Color) {
 /** Photos or any file: both go to the computer and reach the agent as file paths. */
 @Composable
 private fun AttachSheet(show: Boolean, onImages: () -> Unit, onFiles: () -> Unit, onDismiss: () -> Unit) {
-    PanelSheet(show = show, title = stringResource(R.string.composer_attach), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.composer_attach), onDismissRequest = onDismiss, imePadding = false) {
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             GroupCard {
                 BasicComponent(
@@ -1513,7 +1535,7 @@ private fun pickedFileInfo(context: android.content.Context, uri: android.net.Ur
 /** Bottom sheet with everything about the session that does not fit the chip row. */
 @Composable
 private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: String?, onDismiss: () -> Unit, onEndSession: (() -> Unit)? = null, activeFallback: Int? = null) {
-    PanelSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss, imePadding = false) {
         val d = detail ?: return@PanelSheet
         val s = d.summary
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
@@ -1604,7 +1626,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
 /** Confirm sheet for "continue on phone" (fork into a managed session with the same context). */
 @Composable
 private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boolean, canFork: Boolean, enabled: Boolean, busy: Boolean, onConfirm: (fork: Boolean) -> Unit, onDismiss: () -> Unit) {
-    PanelSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss) {
+    PanelSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss, imePadding = false) {
         // Scrolls so the continue / fork buttons stay reachable in landscape or with large text.
         Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

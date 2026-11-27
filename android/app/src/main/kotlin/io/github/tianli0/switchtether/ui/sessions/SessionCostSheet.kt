@@ -96,7 +96,7 @@ fun SessionCostSheet(
     onOpenProjectUsage: ((String) -> Unit)?,
     onDismiss: () -> Unit,
 ) {
-    PanelSheet(show = show, title = stringResource(R.string.cost_sheet_title), onDismissRequest = onDismiss, modifier = Modifier.testTag("cost-sheet")) {
+    PanelSheet(show = show, title = stringResource(R.string.cost_sheet_title), onDismissRequest = onDismiss, modifier = Modifier.testTag("cost-sheet"), imePadding = false) {
         val b = breakdown ?: return@PanelSheet
         Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             SessionCostBody(b, partial, project, onOpenProjectUsage)
