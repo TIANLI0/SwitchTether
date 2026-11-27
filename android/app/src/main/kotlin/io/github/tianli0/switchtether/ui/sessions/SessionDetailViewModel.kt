@@ -372,13 +372,13 @@ class SessionDetailViewModel(
                     // computer is offered from a snapshot (send, approve, interrupt, tools).
                     n = n.copy(
                         detail = Loadable.Ready(SessionDetail(cachedSummary, io.github.tianli0.switchtether.remote.protocol.SessionCapabilities(readHistory = "VERIFIED"), emptyList())),
-                        snapshotAtMs = n.snapshotAtMs ?: cachedList.savedAtMs,
+                        snapshotAtMs = n.snapshotAtMs ?: io.github.tianli0.switchtether.ui.common.snapshotLabelFor(n.connection, cachedList.savedAtMs),
                     )
                 }
                 if (n.events !is Loadable.Ready && cached != null && cached.events.isNotEmpty()) {
                     // Live events that arrived before the cache was read stay.
                     n = n.derive(log = AgentEventLog.of(cached.events).upsert(n.log.events))
-                        .copy(events = Loadable.Ready(Unit), hasMoreBefore = cached.hasMoreBefore, snapshotAtMs = cached.savedAtMs)
+                        .copy(events = Loadable.Ready(Unit), hasMoreBefore = cached.hasMoreBefore, snapshotAtMs = io.github.tianli0.switchtether.ui.common.snapshotLabelFor(n.connection, cached.savedAtMs))
                 }
                 if (n.events !is Loadable.Ready && io.github.tianli0.switchtether.ui.common.isAway(n.connection)) n = n.copy(notInSnapshot = true)
                 n
@@ -405,7 +405,7 @@ class SessionDetailViewModel(
         }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
-                _state.update { it.copy(connection = s).markedOffline() }
+                _state.update { it.copy(connection = s).let { st -> if (s is ConnectionState.Online) st.copy(snapshotAtMs = null, notInSnapshot = false) else st.markedOffline() } }
                 if (io.github.tianli0.switchtether.ui.common.isAway(s)) rememberSnapshot()
                 if (s is ConnectionState.Online) load()
             }

@@ -80,12 +80,12 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
         viewModelScope.launch {
             val cached = runCatching { repo.cachedList() }.getOrNull()
             if (cached != null && cached.items.isNotEmpty()) {
-                _state.update { if (it.items is Loadable.Ready) it else it.copy(items = Loadable.Ready(cached.items), snapshotAtMs = cached.savedAtMs).withKnown() }
+                _state.update { if (it.items is Loadable.Ready) it else it.copy(items = Loadable.Ready(cached.items), snapshotAtMs = io.github.tianli0.switchtether.ui.common.snapshotLabelFor(it.connection, cached.savedAtMs)).withKnown() }
             }
         }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
-                _state.update { it.copy(connection = s).markedOffline() }
+                _state.update { it.copy(connection = s).let { st -> if (s is ConnectionState.Online) st.copy(snapshotAtMs = null) else st.markedOffline() } }
                 if (s is ConnectionState.Online) reload()
             }
         }

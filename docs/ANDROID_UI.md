@@ -1778,8 +1778,16 @@ same commandId on reconnect). New session: the launcher already says it needs th
 Workspace: "新建终端" is disabled with "需要连接电脑，当前未连接"; file and terminal pages report
 "not connected" (local file copies still open offline, §29).
 
-**Back online.** Nothing new: `ConnectionState.Online` triggers the normal `reload()` / `load()`,
-and the stream's resync triggers `catchUp()`; each success clears the label.
+**Back online.** `ConnectionState.Online` clears the label at once (Home, Sessions, conversation)
+and triggers the normal `reload()` / `load()` (the stream's resync triggers `catchUp()`). If that
+reload fails the page keeps the last data seen, unlabelled, as before the snapshot existed.
+
+**Never labelled while connected** (fix 2026-11-27, 0.1.28 before release: the label stuck while
+online). Cache read while online only paints the screen early and gets no label
+(`snapshotLabelFor`); the label is cleared on Online rather than by a successful reload; and
+`OfflineSnapshotNotice` appears only after the label has lasted 1.5 s, so a reconnect when the app
+returns to the foreground does not flash it. Tests: `theCacheIsNotASnapshotWhileOnline`,
+`backOnlineClearsTheLabelEvenWhenTheReloadFails`.
 
 **Tests.** `OfflineSnapshotTest` (cipher round trip, tamper / wrong-context / destroyed key; list
 sealed on disk and readable after a restart; conversations never on disk; no cipher → nothing

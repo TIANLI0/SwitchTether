@@ -10,6 +10,7 @@ import io.github.tianli0.switchtether.security.BlobCipher
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.isAway
 import io.github.tianli0.switchtether.ui.common.snapshotTimeLabel
+import io.github.tianli0.switchtether.ui.common.snapshotLabelFor
 import io.github.tianli0.switchtether.ui.home.HomeViewModel
 import io.github.tianli0.switchtether.ui.sessions.SessionDetailViewModel
 import io.github.tianli0.switchtether.ui.sessions.SessionsViewModel
@@ -268,6 +269,40 @@ class OfflineSnapshotTest {
         val at = vm.state.value.snapshotAtMs
         assertNotNull("the list stays, labelled as a snapshot", at)
         assertTrue(at!! >= before)
+        assertEquals(listOf("claude:new"), vm.state.value.visible.map { it.id })
+    }
+
+    @Test
+    fun theCacheIsNotASnapshotWhileOnline() = runTest(dispatcher) {
+        assertNull(snapshotLabelFor(ONLINE, 5_000L))
+        assertEquals(5_000L, snapshotLabelFor(offline, 5_000L))
+        val repo = FakeSessionRepository().apply {
+            cached = listOf(summary("claude:old", live = false))
+            cachedAtMs = 7_000L
+            listHandler = { _, _ -> kotlinx.coroutines.awaitCancellation() } // the live load is still on its way
+        }
+        val vm = SessionsViewModel(FakeConnection(ONLINE), repo)
+        advanceUntilIdle()
+        assertEquals("the cache paints the screen early", listOf("claude:old"), vm.state.value.visible.map { it.id })
+        assertNull("but connected is never labelled offline", vm.state.value.snapshotAtMs)
+    }
+
+    @Test
+    fun backOnlineClearsTheLabelEvenWhenTheReloadFails() = runTest(dispatcher) {
+        val repo = FakeSessionRepository().apply { sessions = listOf(summary("claude:new")) }
+        val conn = FakeConnection(ONLINE)
+        val vm = SessionsViewModel(conn, repo)
+        val home = HomeViewModel(conn, repo, noManagement)
+        advanceUntilIdle()
+        // A short reconnect (app back in the foreground) whose reload then fails.
+        conn.state.value = ConnectionState.Connecting(TEST_DESKTOP, 1, null)
+        advanceUntilIdle()
+        assertNotNull(vm.state.value.snapshotAtMs)
+        repo.listHandler = { _, _ -> throw java.io.IOException("timeout") }
+        conn.state.value = ONLINE
+        advanceUntilIdle()
+        assertNull(vm.state.value.snapshotAtMs)
+        assertNull(home.state.value.snapshotAtMs)
         assertEquals(listOf("claude:new"), vm.state.value.visible.map { it.id })
     }
 

@@ -117,12 +117,14 @@ class HomeViewModel(
         viewModelScope.launch {
             val cached = runCatching { sessions.cachedList() }.getOrNull()
             if (cached != null && cached.items.isNotEmpty()) {
-                _state.update { if (it.sessions is Loadable.Ready) it else it.copy(sessions = Loadable.Ready(cached.items), snapshotAtMs = cached.savedAtMs) }
+                _state.update { if (it.sessions is Loadable.Ready) it else it.copy(sessions = Loadable.Ready(cached.items), snapshotAtMs = io.github.tianli0.switchtether.ui.common.snapshotLabelFor(it.connection, cached.savedAtMs)) }
             }
         }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
-                _state.update { it.copy(connection = s).markedOffline() }
+                // Online again: the label goes at once (the refresh below replaces the data; if it
+                // fails, the list is the last one seen online, not an offline snapshot).
+                _state.update { it.copy(connection = s).let { st -> if (s is ConnectionState.Online) st.copy(snapshotAtMs = null) else st.markedOffline() } }
                 if (s is ConnectionState.Online) refresh()
             }
         }
