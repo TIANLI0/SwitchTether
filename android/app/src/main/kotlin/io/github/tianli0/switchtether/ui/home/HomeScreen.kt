@@ -106,6 +106,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
         LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
             // Only problems are shown (connecting / offline / revoked / incompatible), as a thin strip.
             item(key = "connection") { io.github.tianli0.switchtether.ui.common.ConnectionBanner(state.connection, onRetry) }
+            item(key = "offline-snapshot") { io.github.tianli0.switchtether.ui.common.OfflineSnapshotNotice(state.snapshotAtMs) }
             when (val s = state.sessions) {
                 Loadable.Loading -> item(key = "loading") { CompactNote(stringResource(R.string.state_loading)) }
                 is Loadable.Failed -> item(key = "error") {

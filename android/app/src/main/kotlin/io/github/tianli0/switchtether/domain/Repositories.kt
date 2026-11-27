@@ -54,11 +54,14 @@ interface SessionRepository {
 
     suspend fun list(query: SessionQuery, cursor: String? = null, limit: Int = 50): SessionPage
 
-    /** Last session list seen from this desktop (shown while connecting), null if none. */
-    suspend fun cachedList(): List<SessionSummary>? = null
+    /** Offline snapshot: last session list seen from this desktop, null if none (see SessionCache). */
+    suspend fun cachedList(): io.github.tianli0.switchtether.data.ListSnapshot? = null
 
-    /** Last newest-events page of a conversation (shown while connecting), null if none. */
-    suspend fun cachedEvents(id: String): EventPage? = null
+    /** Offline snapshot: newest events of a conversation as last seen in this process, null if none. */
+    suspend fun cachedEvents(id: String): io.github.tianli0.switchtether.data.EventsSnapshot? = null
+
+    /** Keeps what a conversation screen shows as its offline snapshot (memory only). */
+    fun rememberEvents(id: String, events: List<AgentEvent>, hasMoreBefore: Boolean) = Unit
 
     /** Change model and / or effort of a running session (`""` = the agent's default, null = unchanged). */
     suspend fun setOptions(id: String, model: String?, effort: String?, commandId: String = newCommandId()): CommandOutcome =
@@ -230,22 +233,33 @@ class RemoteSessionRepository(
     override suspend fun list(query: SessionQuery, cursor: String?, limit: Int): SessionPage {
         val page = conn.withApi { it.sessions(query.agent, query.project, query.text, cursor, limit) }
         if (cache != null && cursor == null && query == SessionQuery()) {
-            serverId()?.let { sid -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.saveList(sid, page.items) } }
+            serverId()?.let { sid ->
+                lastServerId = sid
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.saveList(sid, page.items) }
+            }
         }
         return page
     }
 
-    override suspend fun cachedList(): List<SessionSummary>? {
+    override suspend fun cachedList(): io.github.tianli0.switchtether.data.ListSnapshot? {
         val c = cache ?: return null
         val sid = serverId() ?: return null
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { c.loadList(sid) }
     }
 
-    override suspend fun cachedEvents(id: String): EventPage? {
+    override suspend fun cachedEvents(id: String): io.github.tianli0.switchtether.data.EventsSnapshot? {
         val c = cache ?: return null
         val sid = serverId() ?: return null
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { c.loadEvents(sid, id) }
-            ?.let { (events, more) -> EventPage(events, more) }
+        return c.loadEvents(sid, id)
+    }
+
+    /** Server id of the last [list] / [events] answer: [rememberEvents] is not suspending. */
+    @Volatile private var lastServerId: String? = null
+
+    override fun rememberEvents(id: String, events: List<AgentEvent>, hasMoreBefore: Boolean) {
+        val c = cache ?: return
+        val sid = lastServerId ?: return
+        c.saveEvents(sid, id, events, hasMoreBefore)
     }
 
     override suspend fun detail(id: String) = conn.withApi { it.session(id) }
@@ -253,7 +267,10 @@ class RemoteSessionRepository(
     override suspend fun events(id: String, before: Long?, after: Long?, limit: Int): EventPage {
         val page = conn.withApi { it.sessionEvents(id, before, after, limit) }
         if (cache != null && before == null && after == null) {
-            serverId()?.let { sid -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.saveEvents(sid, id, page.events, page.hasMoreBefore) } }
+            serverId()?.let { sid ->
+                lastServerId = sid
+                cache.saveEvents(sid, id, page.events, page.hasMoreBefore) // memory only
+            }
         }
         return page
     }

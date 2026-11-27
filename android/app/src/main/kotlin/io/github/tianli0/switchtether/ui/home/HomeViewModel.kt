@@ -32,6 +32,8 @@ data class HomeState(
     val refreshing: Boolean = false,
     /** What runs inside each live session (sub-agents, background tasks), by session id. */
     val activity: Map<String, SessionActivity> = emptyMap(),
+    /** Set while [sessions] is an offline snapshot (see SessionsState.snapshotAtMs). */
+    val snapshotAtMs: Long? = null,
 ) {
     val live: List<SessionSummary> get() = sessions.valueOrNull.orEmpty().filter { it.isLive }.sortedWith(RECENT_FIRST)
     /** Live sessions that wait for the user (approval / question / input): shown first on Home. */
@@ -113,12 +115,14 @@ class HomeViewModel(
     init {
         // Last list seen from this desktop, at once (replaced by the first successful load).
         viewModelScope.launch {
-            val cached = runCatching { sessions.cachedList() }.getOrNull().orEmpty()
-            if (cached.isNotEmpty()) _state.update { if (it.sessions is Loadable.Ready) it else it.copy(sessions = Loadable.Ready(cached)) }
+            val cached = runCatching { sessions.cachedList() }.getOrNull()
+            if (cached != null && cached.items.isNotEmpty()) {
+                _state.update { if (it.sessions is Loadable.Ready) it else it.copy(sessions = Loadable.Ready(cached.items), snapshotAtMs = cached.savedAtMs) }
+            }
         }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
-                _state.update { it.copy(connection = s) }
+                _state.update { it.copy(connection = s).markedOffline() }
                 if (s is ConnectionState.Online) refresh()
             }
         }
@@ -197,6 +201,14 @@ class HomeViewModel(
         }
     }
 
+    /** The connection dropped: the list stays, labelled as a snapshot of this moment. */
+    private fun HomeState.markedOffline(): HomeState =
+        if (io.github.tianli0.switchtether.ui.common.isAway(connection) && sessions is Loadable.Ready && snapshotAtMs == null) {
+            copy(snapshotAtMs = System.currentTimeMillis())
+        } else {
+            this
+        }
+
     fun refresh() {
         refreshSessions()
         refreshUsage()
@@ -217,7 +229,13 @@ class HomeViewModel(
             fetched
         }
         // A failed refresh keeps the list that is already shown.
-        _state.update { if (r is Loadable.Failed && it.sessions is Loadable.Ready) it else it.copy(sessions = r) }
+        _state.update {
+            when {
+                r is Loadable.Failed && it.sessions is Loadable.Ready -> it
+                r is Loadable.Ready -> it.copy(sessions = r, snapshotAtMs = null).markedOffline()
+                else -> it.copy(sessions = r)
+            }
+        }
         if (r is Loadable.Ready) refreshActivity()
     }
 

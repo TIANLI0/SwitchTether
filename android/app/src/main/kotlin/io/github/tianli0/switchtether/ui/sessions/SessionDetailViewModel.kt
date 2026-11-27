@@ -119,6 +119,13 @@ data class SessionDetailState(
     val notice: ToolNotice? = null,
     /** Slash commands the running agent reported ("Slash commands" block of the view model; rules in SlashCommands.kt). */
     val desktopSlashCommands: List<io.github.tianli0.switchtether.remote.session.SlashCommand> = emptyList(),
+    /**
+     * Set while the conversation shown is an offline snapshot ("离线快照 · 10:42"): from the phone's
+     * memory, or kept from the moment the connection dropped. Null once a live load replaced it.
+     */
+    val snapshotAtMs: Long? = null,
+    /** Offline and nothing of this conversation is on the phone: shown instead of a spinner. */
+    val notInSnapshot: Boolean = false,
 ) {
     val online: Boolean get() = connection is ConnectionState.Online
     fun cap(c: Capability): CapStatus = detail.valueOrNull?.capabilities?.status(c) ?: CapStatus.UNKNOWN
@@ -355,17 +362,25 @@ class SessionDetailViewModel(
     init {
         // Where the conversation stood last time, at once (replaced by the first successful load).
         viewModelScope.launch {
-            val cachedSummary = runCatching { repo.cachedList() }.getOrNull()?.firstOrNull { it.id == sessionId }
+            val cachedList = runCatching { repo.cachedList() }.getOrNull()
+            val cachedSummary = cachedList?.items?.firstOrNull { it.id == sessionId }
             val cached = runCatching { repo.cachedEvents(sessionId) }.getOrNull()
             _state.update { st ->
                 var n = st
                 if (n.detail !is Loadable.Ready && cachedSummary != null) {
-                    n = n.copy(detail = Loadable.Ready(SessionDetail(cachedSummary, io.github.tianli0.switchtether.remote.protocol.SessionCapabilities(readHistory = "VERIFIED"), emptyList())))
+                    // Only the summary is known: no capability is assumed, so nothing that needs the
+                    // computer is offered from a snapshot (send, approve, interrupt, tools).
+                    n = n.copy(
+                        detail = Loadable.Ready(SessionDetail(cachedSummary, io.github.tianli0.switchtether.remote.protocol.SessionCapabilities(readHistory = "VERIFIED"), emptyList())),
+                        snapshotAtMs = n.snapshotAtMs ?: cachedList.savedAtMs,
+                    )
                 }
                 if (n.events !is Loadable.Ready && cached != null && cached.events.isNotEmpty()) {
                     // Live events that arrived before the cache was read stay.
-                    n = n.derive(log = AgentEventLog.of(cached.events).upsert(n.log.events)).copy(events = Loadable.Ready(Unit), hasMoreBefore = cached.hasMoreBefore)
+                    n = n.derive(log = AgentEventLog.of(cached.events).upsert(n.log.events))
+                        .copy(events = Loadable.Ready(Unit), hasMoreBefore = cached.hasMoreBefore, snapshotAtMs = cached.savedAtMs)
                 }
+                if (n.events !is Loadable.Ready && io.github.tianli0.switchtether.ui.common.isAway(n.connection)) n = n.copy(notInSnapshot = true)
                 n
             }
         }
@@ -390,7 +405,8 @@ class SessionDetailViewModel(
         }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
-                _state.update { it.copy(connection = s) }
+                _state.update { it.copy(connection = s).markedOffline() }
+                if (io.github.tianli0.switchtether.ui.common.isAway(s)) rememberSnapshot()
                 if (s is ConnectionState.Online) load()
             }
         }
@@ -466,10 +482,10 @@ class SessionDetailViewModel(
                 // Folding a 300-event page is real work: off the main thread when the app gave us a pool.
                 if (liveDispatcher != null) {
                     kotlinx.coroutines.withContext(liveDispatcher) {
-                        _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
+                        _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)).liveAgain() }
                     }
                 } else {
-                    _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)) }
+                    _state.update { it.derive(log = log).copy(hasMoreBefore = page.hasMoreBefore, events = Loadable.Ready(Unit)).liveAgain() }
                 }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
                 endStaleWait(d)
@@ -482,6 +498,29 @@ class SessionDetailViewModel(
                 if (liveDuringLoad === live) liveDuringLoad = null
             }
         }
+    }
+
+    /** The connection dropped: the conversation stays, labelled as a snapshot of this moment. */
+    private fun SessionDetailState.markedOffline(): SessionDetailState = when {
+        !io.github.tianli0.switchtether.ui.common.isAway(connection) -> this
+        events is Loadable.Ready && snapshotAtMs == null -> copy(snapshotAtMs = System.currentTimeMillis())
+        else -> this
+    }
+
+    /** A live answer replaced the snapshot (only while online: a reply that raced a drop keeps the label). */
+    private fun SessionDetailState.liveAgain(): SessionDetailState =
+        if (connection is ConnectionState.Online) copy(snapshotAtMs = null, notInSnapshot = false) else copy(notInSnapshot = false)
+
+    /** Keeps what this screen shows as the conversation's offline snapshot (memory only, see SessionCache). */
+    private fun rememberSnapshot() {
+        val st = _state.value
+        if (st.events !is Loadable.Ready || st.log.size == 0) return
+        runCatching { repo.rememberEvents(sessionId, st.log.events, st.hasMoreBefore) }
+    }
+
+    override fun onCleared() {
+        rememberSnapshot()
+        super.onCleared()
     }
 
     /**
@@ -521,6 +560,7 @@ class SessionDetailViewModel(
                 }
                 d.valueOrNull?.pendingRequests?.let { applyEvents(it) }
                 endStaleWait(d)
+                _state.update { it.liveAgain() }
                 // This catch-up usually cancelled the load() of the same reconnect: queued messages go out here.
                 if (pages >= CATCH_UP_MAX_PAGES) load() else flushWaiting() // too far behind: start from the newest page
             } catch (e: CancellationException) {

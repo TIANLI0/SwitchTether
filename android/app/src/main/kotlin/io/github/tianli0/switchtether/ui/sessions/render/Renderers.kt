@@ -1,5 +1,7 @@
 package io.github.tianli0.switchtether.ui.sessions.render
 
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import io.github.tianli0.coui17.patterns.ExpandBody
 import androidx.compose.foundation.layout.offset
 import io.github.tianli0.coui17.patterns.ActionTone
@@ -854,8 +856,20 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
             val approvePlan = ctx.onApprovePlan?.takeIf { isPlanExitApproval(d.str("toolName"), options.mapNotNull { it.str("id") }) }
             // Compact, end-aligned actions (a card's buttons, not a page's): they wrap onto the next
             // line when the desktop's labels are long.
+            val optionIds = options.mapNotNull { it.str("id") }
+            val optionLabels = options.associate { (it.str("id") ?: "") to decisionOptionLabel(it.str("id") ?: "", it.str("label")) }
             androidx.compose.foundation.layout.FlowRow(
-                Modifier.fillMaxWidth().padding(top = 12.dp),
+                Modifier.fillMaxWidth().padding(top = 12.dp)
+                    // Hardware keyboard, only while a button of this card has focus: Y / Ctrl+Enter
+                    // allow, N denies; the same call as a tap (step-up and confirmation unchanged).
+                    .onPreviewKeyEvent { ev ->
+                        if (ev.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        val id = io.github.tianli0.switchtether.ui.keys.KeyShortcuts.approval(
+                            io.github.tianli0.switchtether.ui.keys.KeyChord.of(ev.nativeKeyEvent), optionIds, enabled, planCard = approvePlan != null,
+                        ) ?: return@onPreviewKeyEvent false
+                        ctx.onApprove(d.str("requestId").orEmpty(), id, optionLabels[id] ?: id)
+                        true
+                    },
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {

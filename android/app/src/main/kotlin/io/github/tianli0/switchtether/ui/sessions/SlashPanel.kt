@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -44,9 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.BasicComponent
@@ -213,6 +213,7 @@ fun SlashRenameDialog(show: Boolean, current: String, onRename: (String, (String
  * panel, a failed message put back for editing) leaves the caret at its end. `InputPill` takes a
  * plain string, so its caret would stay where it was, in the middle of the inserted "/name ".
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun DraftInputPill(
     value: String,
@@ -226,16 +227,32 @@ fun DraftInputPill(
     fieldModifier: Modifier = Modifier,
     sendModifier: Modifier = Modifier,
     maxLines: Int = 5,
+    /** Rich content (keyboard images / GIFs, pasted pictures, drops onto the field); null = text only. */
+    receiveContent: androidx.compose.foundation.content.ReceiveContentListener? = null,
 ) {
     val scheme = COUITheme.colorScheme
-    var fieldState by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    // A state-based field: only it supports `Modifier.contentReceiver` (keyboard commits, paste).
+    val fieldState = androidx.compose.foundation.text.input.rememberTextFieldState(value)
+    val echo = remember { DraftEcho() }
     // The draft was replaced from outside when it changed and is not what was just typed here.
     // (A draft that merely has not caught up with the keyboard yet is left alone.)
     val seen = remember { arrayOf(value) }
-    val replaced = value != seen[0] && value != fieldState.text
-    seen[0] = value
-    val field = if (replaced) TextFieldValue(value, TextRange(value.length)) else fieldState
-    SideEffect { if (field !== fieldState) fieldState = field }
+    if (value != seen[0]) {
+        seen[0] = value
+        if (echo.isOutside(value, fieldState.text.toString())) {
+            SideEffect { if (fieldState.text.toString() != value) fieldState.setTextAndPlaceCursorAtEnd(value) }
+        }
+    }
+    val currentValue by androidx.compose.runtime.rememberUpdatedState(value)
+    val emit by androidx.compose.runtime.rememberUpdatedState(onValueChange)
+    LaunchedEffect(fieldState) {
+        androidx.compose.runtime.snapshotFlow { fieldState.text.toString() }.collect { t ->
+            if (t != currentValue) {
+                echo.sent(t)
+                emit(t)
+            }
+        }
+    }
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         Box(
             Modifier
@@ -245,19 +262,18 @@ fun DraftInputPill(
                 .padding(horizontal = 16.dp, vertical = 9.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
-            if (value.isEmpty()) {
+            if (fieldState.text.isEmpty()) {
                 Text(placeholder, style = COUITheme.textStyles.body1, color = scheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             BasicTextField(
-                value = field,
-                onValueChange = {
-                    fieldState = it
-                    if (it.text != value) onValueChange(it.text)
-                },
+                state = fieldState,
                 textStyle = COUITheme.textStyles.body1.copy(color = scheme.onSurface),
                 cursorBrush = SolidColor(scheme.primary),
-                maxLines = maxLines,
-                modifier = fieldModifier.fillMaxWidth().semantics { contentDescription = placeholder },
+                lineLimits = androidx.compose.foundation.text.input.TextFieldLineLimits.MultiLine(1, maxLines),
+                modifier = fieldModifier
+                    .then(if (receiveContent != null) Modifier.contentReceiver(receiveContent) else Modifier)
+                    .fillMaxWidth()
+                    .semantics { contentDescription = placeholder },
             )
         }
         Spacer(Modifier.size(ComposerKeyGap))
@@ -271,5 +287,31 @@ fun DraftInputPill(
                 Icon(sendIcon, contentDescription = null, tint = lerp(scheme.onSurfaceVariantSummary, scheme.onPrimary, ready), modifier = Modifier.size(20.dp))
             }
         }
+    }
+}
+
+/**
+ * Tells a draft replaced from outside (a picked slash command, a message put back for editing, the
+ * draft cleared by send) from one that only has not caught up with what the field reported yet:
+ * the view model's drafts arrive in the order the field sent them, possibly skipping some.
+ */
+class DraftEcho {
+    private val pending = ArrayDeque<String>()
+
+    /** The field reported [text] to the view model. */
+    fun sent(text: String) {
+        pending.addLast(text)
+        while (pending.size > 64) pending.removeFirst()
+    }
+
+    /** The view model's draft became [value]: true when it is not an echo of the field (replace the field's text). */
+    fun isOutside(value: String, fieldText: String): Boolean {
+        val i = pending.indexOf(value)
+        if (i >= 0) {
+            repeat(i + 1) { pending.removeFirst() }
+            return false
+        }
+        pending.clear()
+        return value != fieldText
     }
 }

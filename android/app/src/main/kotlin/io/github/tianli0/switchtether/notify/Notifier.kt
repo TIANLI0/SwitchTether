@@ -27,6 +27,9 @@ import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.str
 import io.github.tianli0.switchtether.remote.protocol.bool
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
+import io.github.tianli0.switchtether.remote.protocol.CapStatus
+import io.github.tianli0.switchtether.remote.protocol.Capability
+import io.github.tianli0.switchtether.remote.protocol.ControlLevel
 import io.github.tianli0.switchtether.remote.protocol.EventKinds
 import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
 import io.github.tianli0.switchtether.remote.protocol.SessionSummary
@@ -51,13 +54,38 @@ class Notifier(
     private val conn: ConnectionController,
     private val prefs: StateFlow<NotifyPrefs>,
     private val isForeground: () -> Boolean,
-    /** A Live Update card shows this session; its waits and outcomes are not notified twice. */
+    /** Conversation style and session shortcuts (null: plain notifications, e.g. in tests). */
+    private val conversations: ConversationNotifier? = null,
+    /** A Live Update card shows this session; its waits and outcomes are not notified twice (see [ConversationPolicy.liveDecision]). */
     private val coveredByLiveUpdate: (String) -> Boolean = { false },
 ) {
     /** Not thread-safe: every use holds the Notifier's monitor (events, buttons, timers run on different threads). */
     private val engine = NotificationEngine({ prefs.value }, { LocalTime.now().let { it.hour * 60 + it.minute } }, t = ResourceNotifyText(context))
     private val sessions = ConcurrentHashMap<String, SessionSummary>()
     private val nm = NotificationManagerCompat.from(context)
+
+    /**
+     * The desktop's `sendMessage` capability per session (what enables the in-app composer), with
+     * the liveness / control it was read for: read again once either changes.
+     */
+    private val sendCaps = ConcurrentHashMap<String, Pair<String, CapStatus>>()
+
+    private fun capKey(s: SessionSummary) = "${s.liveness}|${s.control}"
+
+    private fun sendCapability(s: SessionSummary?): CapStatus? =
+        s?.let { sendCaps[it.id]?.takeIf { (k, _) -> k == capKey(s) }?.second }
+
+    /**
+     * Reads the session detail once per liveness / control when the phone could reply to it, so the
+     * reply button follows the same capability as the composer. Bounded (3 s); unknown = no button.
+     */
+    private suspend fun ensureSendCapability(s: SessionSummary?) {
+        if (s == null || !s.isLive || s.controlLevel != ControlLevel.FULL) return
+        if (sendCapability(s) != null) return
+        runCatching { kotlinx.coroutines.withTimeoutOrNull(3_000) { conn.apiOrNull()?.session(s.id) } }.getOrNull()?.let { d ->
+            sendCaps[s.id] = capKey(d.summary) to d.capabilities.status(Capability.SEND_MESSAGE)
+        }
+    }
 
     /**
      * Approvals / questions still unanswered, per session, in the order they opened (request id → the
@@ -100,6 +128,8 @@ class Notifier(
                     "session.upserted" -> runCatching { ProtocolJson.decodeFromJsonElement(SessionSummary.serializer(), (data["session"] as? JsonObject) ?: data) }.getOrNull()?.let {
                         sessions[it.id] = it
                         refreshActive()
+                        if (!it.isLive) conversations?.onSessionEnded(it.id, it.lastActiveAtMs ?: System.currentTimeMillis())
+                        ensureSendCapability(it)
                         // Nobody is waiting any more: drop the "needs you" notification of that session.
                         synchronized(this@Notifier) {
                             if (it.waitingFor == null && it.status != "waiting") {
@@ -112,6 +142,7 @@ class Notifier(
                     "session.event" -> {
                         runCatching { ProtocolJson.decodeFromJsonElement(AgentEvent.serializer(), (data["event"] as? JsonObject) ?: data) }.getOrNull()?.let { e ->
                             val summary = sessions[e.sessionId] ?: lookup(e.sessionId)
+                            ensureSendCapability(summary)
                             // One at a time with the notification buttons (requestAnswered): both
                             // decide which request the "needs you" notification shows.
                             synchronized(this@Notifier) {
@@ -130,7 +161,9 @@ class Notifier(
                         // lock follows this count) and nobody can answer its request any more.
                         (data.str("sessionId") ?: data.str("id"))?.let {
                             sessions.remove(it)
+                            sendCaps.remove(it)
                             refreshActive()
+                            conversations?.onSessionEnded(it)
                             synchronized(this@Notifier) {
                                 forgetRequests(it)
                                 cancel(it, NotifySlot.ATTENTION)
@@ -174,6 +207,7 @@ class Notifier(
                     // Another computer: the previous one's sessions are not its (the active count keeps the CPU awake).
                     if (serverId != null && serverId != desktop.serverId) {
                         sessions.clear()
+                        sendCaps.clear()
                         synchronized(this@Notifier) {
                             openRequests.clear()
                             attentionShown.clear()
@@ -181,6 +215,7 @@ class Notifier(
                         refreshActive()
                     }
                     serverId = desktop.serverId
+                    conversations?.onServer(desktop.serverId)
                 }
                 when (s) {
                     is ConnectionState.Online -> {
@@ -220,8 +255,11 @@ class Notifier(
 
     /** Summary of a session not seen in `session.upserted` yet (title/project for the notification text). */
     private suspend fun lookup(sessionId: String): SessionSummary? = runCatching {
-        kotlinx.coroutines.withTimeoutOrNull(3_000) { conn.apiOrNull()?.session(sessionId)?.summary }
-    }.getOrNull()?.also { sessions[it.id] = it }
+        kotlinx.coroutines.withTimeoutOrNull(3_000) { conn.apiOrNull()?.session(sessionId) }
+    }.getOrNull()?.let { d ->
+        sendCaps[d.summary.id] = capKey(d.summary) to d.capabilities.status(Capability.SEND_MESSAGE)
+        d.summary.also { sessions[it.id] = it }
+    }
 
     /** The phone itself interrupted/stopped a session or killed a terminal: don't notify the echo. */
     fun noteLocalAction(target: String, action: LocalAction) = synchronized(this) { engine.noteLocalAction(target, action) }
@@ -309,7 +347,7 @@ class Notifier(
     private fun cancel(sessionId: String, slot: NotifySlot) {
         val id = "$sessionId:$slot".hashCode()
         postedWhen.remove(id)
-        runCatching { nm.cancel(id) }
+        if (conversations != null) conversations.cancel(id) else runCatching { nm.cancel(id) }
     }
 
     private fun createChannels() {
@@ -337,7 +375,19 @@ class Notifier(
     private fun post(n: NotifyIntent, timeoutMs: Long?): Boolean {
         if (isForeground()) return false
         val sid = n.sessionId
-        if (sid != null && coveredByLiveUpdate(sid) && n.type in COVERED_BY_LIVE_UPDATE) return false
+        // Pinned task: the Live Update card owns the session's state; see ConversationPolicy.liveDecision.
+        val live = if (sid != null) ConversationPolicy.liveDecision(n.type, coveredByLiveUpdate(sid)) else ConversationPolicy.LiveDecision.POST
+        if (live == ConversationPolicy.LiveDecision.SKIP) return false
+        val summary = sid?.let { sessions[it] }
+        val content = ConversationPolicy.content(
+            n.type, sid, n.title, n.body,
+            agentLabel = io.github.tianli0.switchtether.ui.common.Formatters.agentLabel(summary?.agent ?: "unknown"),
+            sessionName = summary?.let { io.github.tianli0.switchtether.domain.SessionNaming.title(it) ?: io.github.tianli0.switchtether.domain.SessionNaming.projectName(it) },
+            // Same gating as the composer: controllable live session and a usable sendMessage capability.
+            replyAllowed = ConversationPolicy.replyAllowed(n.replyable, n.type, summary, sendCapability(summary)),
+            silent = n.silent,
+            live = live,
+        )
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return false
@@ -370,14 +420,15 @@ class Notifier(
             .setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(public)
-            .setSilent(n.silent)
+            .setSilent(content.silent)
             // The same wait announced again with more detail: update in place, no second sound.
-            .setOnlyAlertOnce(n.alertOnce)
+            .setOnlyAlertOnce(n.alertOnce || live == ConversationPolicy.LiveDecision.POST_SILENTLY)
             .setCategory(if (n.type == NotifyType.WAITING_APPROVAL || n.type == NotifyType.WAITING_INPUT) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
             // One "needs you" and one "status" notification per session, grouped by session.
             .setGroup(n.sessionId ?: "switchtether")
-        // Long questions / commands are readable when expanded.
-        if (n.body.length > 40) b.setStyle(NotificationCompat.BigTextStyle().bigText(n.body))
+        val conversation = conversations != null && sid != null && content.conversation
+        // Long questions / commands are readable when expanded (a conversation shows the whole message).
+        if (!conversation && n.body.length > 40) b.setStyle(NotificationCompat.BigTextStyle().bigText(n.body))
         timeoutMs?.let(b::setTimeoutAfter)
         // Act without opening the app (each button needs the phone unlocked).
         if (sid != null) {
@@ -389,8 +440,11 @@ class Notifier(
                     b.addAction(NotifyActionReceiver.decisionAction(context, allow = false, sid, requestId, id))
                 }
                 prompt != null -> b.addAction(NotifyActionReceiver.answerAction(context, sid, prompt, id))
-                n.replyable && n.type != NotifyType.WAITING_APPROVAL -> b.addAction(NotifyActionReceiver.replyAction(context, sid, id))
+                content.offerReply -> b.addAction(NotifyActionReceiver.replyAction(context, sid, id))
             }
+        }
+        if (conversation) {
+            conversations!!.decorate(b, id, sid!!, summary, content, whenMs, replaceLast = n.alertOnce)
         }
         return runCatching { nm.notify(id, b.build()) }.isSuccess
     }
@@ -414,11 +468,6 @@ class Notifier(
         private const val CONNECTION_NOTIFICATION_ID = 0x5357_0C0A
         private const val CONNECTION_LOST_GRACE_MS = 30_000L
         private const val RECONNECTED_VISIBLE_MS = 8_000L
-
-        private val COVERED_BY_LIVE_UPDATE = setOf(
-            NotifyType.WAITING_APPROVAL, NotifyType.WAITING_INPUT, NotifyType.TASK_STARTED, NotifyType.TASK_COMPLETED,
-            NotifyType.TASK_FAILED, NotifyType.SESSION_INTERRUPTED, NotifyType.SESSION_EXITED, NotifyType.LONG_RUNNING, NotifyType.TOOL_CALL,
-        )
 
         fun channelId(t: NotifyType) = "evt_" + t.name.lowercase()
 

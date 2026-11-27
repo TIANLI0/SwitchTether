@@ -140,4 +140,11 @@
     <string name="ntf_open_to_check">请打开 SwitchTether 查看。</string>
     <string name="notif_quiet_switch">按时段静默</string>
     <string name="notif_quiet_off">已关闭：通知照常提醒</string>
+    <!-- 对话通知、内联回复与气泡（docs/ANDROID_UI.md §34）。 -->
+    <string name="conv_you">你</string>
+    <string name="conv_reply_step_up">需要在 SwitchTether 中确认。点按打开会话。</string>
+    <string name="conv_reply_failed">没有发送：“%1$s”。%2$s</string>
+    <string name="conv_settings_title">对话</string>
+    <string name="conv_conversation_settings">对话设置</string>
+    <string name="conv_conversation_settings_summary">在通知栏的“对话”中把会话设为优先</string>
 </resources>

@@ -995,9 +995,9 @@ Rejected: sora-editor (LGPL-2.1, View-based, large with TextMate grammars), WebV
   custom model field and the models used before) and, for a running session, a "模型 · 强度" chip above the
   composer that opens a sheet (`POST /v1/sessions/{id}/options`; applies from the next reply, like `/model`, `/effort`).
 - Last known state: the unfiltered session list and the newest 300 events of the last 40 opened conversations are
-  cached per desktop in app-private storage (`filesDir/session-cache`, `SessionCache`) and shown at once on a fresh
-  start while connecting; the first successful load replaces them, a failed refresh keeps them. Cleared with
-  "clear caches" and on unpair. The sessions page now opens on "全部" (running sessions first).
+  kept per desktop (`SessionCache`) and shown at once on a fresh start while connecting; the first successful load
+  replaces them, a failed refresh keeps them. Cleared with "clear caches" and on unpair. Since §33 only the list is
+  on disk (sealed); conversations are memory-only. The sessions page now opens on "全部" (running sessions first).
 
 
 ## 20. Claude Code session tools (2026-11-21)
@@ -1688,3 +1688,230 @@ of re-implementing it natively.
 contrast), `DshWebModelsTest` (fixtures). Not seen on a device: the WebView, the full-screen colours,
 the file picker, the keyboard insets, dsh web's own UI on a phone screen.
 
+## 32. Share to SwitchTether (2026-11-27)
+
+Other apps (gallery, browser, chat apps, file managers) can share text, links, images and files to
+SwitchTether: `ACTION_SEND` / `ACTION_SEND_MULTIPLE` with `text/*`, `image/*`, `*/*`, filtered on
+`MainActivity` next to the MAIN and `switchtether://pair` filters. Nothing is ever sent
+automatically: the share only fills a composer, the user reviews it and presses send.
+
+**Flow** (`share/ShareModel.kt` pure logic, `share/ShareAndroid.kt` intent / URI / cache,
+`share/ShareUi.kt` UI).
+1. `MainActivity` reads the intent (`EXTRA_TEXT`, `EXTRA_SUBJECT`, `EXTRA_STREAM`, ClipData) into a
+   `SharedContent` and puts it in `AppContainer.shareInbox` (one pending share; a newer one replaces
+   it; a recreated activity does not take the same intent twice). Browser shares keep
+   "title + URL". Only `content:` URIs of other apps are taken; `file:` URIs and URIs of this app's
+   own providers are counted as "could not be read" and the picker says so.
+2. Routing (`shareRoute`): not paired / code not confirmed → a dialog "请先与电脑配对" over
+   onboarding (去配对 keeps the share for after pairing; 取消分享 drops it). Paired but offline → the
+   picker says the computer is offline, offers retry, and keeps the share until it is back or the
+   user cancels. Online → the picker.
+3. Picker ("分享到 SwitchTether", a `PanelSheet`): a preview of the text and the file count, a
+   warning when more than 10 files came ("the first 10 are attached, the other N are not"), then
+   **新建会话** and **可以接收消息的会话** — sessions with `control == full` (managed or taken over),
+   live ones first, working before idle, then newest; terminal-attached sessions are left out when
+   files were shared (they take text only). Closing the panel cancels the share.
+4. An existing session: the page opens; once the desktop confirms the session takes messages
+   (`send_message` usable) the text is appended to the input box (what was typed stays) and the
+   files go through the normal attachment pipeline (`addAttachment`: uploaded at once, streamed in
+   4 MiB chunks, 1 GiB each, chips with progress). If the message already holds attachments and the
+   rest does not fit in 10, a toast says how many were not attached. A session that turns out not to
+   take messages says so and the picker comes back.
+5. New session: the text becomes the launcher's first message (`NewSessionSheet`); the user starts
+   the session. The files are attached in the created session's input box. Closing the sheet
+   returns to the picker.
+
+**Direct Share.** Each session's long-lived conversation shortcut (`notify/Conversations.kt`,
+id `session:<id>`) also carries the category `io.github.tianli0.switchtether.category.SESSION_SHARE`,
+declared as a `<share-target>` in `res/xml/shortcuts.xml` (meta-data `android.app.shortcuts` on
+`MainActivity`), so the system share sheet offers recent sessions directly. A share with
+`EXTRA_SHORTCUT_ID = session:<id>` skips the picker: once online, the session list is read and,
+if that session is still listed and can take the share (`directShareTarget`, same rule as the
+picker), its page opens prefilled. Gone, not controllable, or terminal-attached with files → the
+picker. Offline, the panel shows the offline notice until the computer is back.
+
+**URI grants.** The share's read grant belongs to the activity; while it lives, uploads stream
+from the sender's URI (never loaded into memory). When the share has to wait (pairing, offline)
+the grant could end first: it is made persistable if the sender allows it, otherwise the file is
+copied (streamed) into `cache/shared/` — not over 1 GiB, and only with 256 MiB to spare on the
+volume. Persisted grants are released and cache copies older than a day removed when the next share
+arrives; a cancelled share's copies are removed at once.
+
+**Tests.** `ShareModelTest` (intent parsing incl. subject/URL, wildcard types, ClipData duplicates,
+own-provider and `file:` rejection; the 10-file split; routing; staging decision; target order;
+draft merge; inbox stages incl. the new-session sheet order; Direct Share shortcut-id routing). Device / emulator evidence: see
+DEVELOPMENT_STATUS.md (2026-11-27).
+
+## 33. Offline snapshot (2026-11-27)
+
+When the computer sleeps or the network drops (or before the first connection of a fresh start),
+Home, Sessions and recently opened conversations keep rendering from a local snapshot instead of an
+empty "offline" page.
+
+**What is kept, where** (`data/SessionCache.kt`). SECURITY.md §5 promises that the phone stores no
+transcripts persistently, so:
+
+| | Where | Bounds | Lifetime |
+|---|---|---|---|
+| Session list metadata (id, agent, title, folder, project, branch, model, state, times) | `filesDir/session-cache/<server>/sessions.bin`, AES-256-GCM sealed with a non-exportable AndroidKeyStore key (`switchtether_session_snapshot`, `core/security` `KeystoreBlobCipher`); the computer's server id is the AAD | 200 rows, 512 KB JSON | until replaced by the next live list, "clear caches", unpair, revoke, or pairing another computer |
+| Conversation events (transcript, tool output as the desktop sent it, already redacted there) | process memory only | 40 conversations, 300 events each, 8 MB JSON in total; least recently used evicted first, an oversize conversation keeps its newest events | the app process |
+
+Everything is keyed by the paired computer's server id; pairing another computer forgets the
+previous one's snapshot (`forget`). `clear()` deletes the files and destroys the key (crypto-erase
+even if a delete failed). Plain-text `sessions.json` / `events/` files written by earlier versions are
+deleted on first use. A conversation screen hands its current log to the memory snapshot when the
+connection drops and when it closes, so reopening it offline shows what was last seen.
+
+**What the user sees.** Under the connection banner: "离线快照 · 10:42" (time only for today, short
+date and time otherwise) and "只读，电脑恢复连接后自动更新" (`OfflineSnapshotNotice`). The label
+appears when a page shows snapshot data (a fresh start) or when the connection drops while a page
+is open (time = the moment it dropped) and folds away when a live load / catch-up replaces the
+data. A conversation that is not in memory (opened before an app restart) shows "这个对话不在离线
+快照中" with retry instead of a spinner.
+
+**Gating.** Snapshot data never offers what needs the computer: a conversation restored from the
+snapshot has only the list summary and no capabilities, so send, queue-for-later, approvals and
+questions, interrupt, stop, model / permission switches, fork / continue and session tools are all
+off; the composer says "离线快照：发送、审批和会话工具都需要连接电脑。草稿保存在本机。". A
+conversation that was live in this screen keeps the existing offline queue (§13.9 "等待连接",
+same commandId on reconnect). New session: the launcher already says it needs the connection.
+Workspace: "新建终端" is disabled with "需要连接电脑，当前未连接"; file and terminal pages report
+"not connected" (local file copies still open offline, §29).
+
+**Back online.** Nothing new: `ConnectionState.Online` triggers the normal `reload()` / `load()`,
+and the stream's resync triggers `catchUp()`; each success clears the label.
+
+**Tests.** `OfflineSnapshotTest` (cipher round trip, tamper / wrong-context / destroyed key; list
+sealed on disk and readable after a restart; conversations never on disk; no cipher → nothing
+written; legacy files removed; per-computer keys incl. a file moved to another computer; clear;
+list row bound; LRU eviction; event and byte bounds; time label; Sessions / Home / conversation
+snapshot → live → offline transitions incl. resync; snapshot gating; conversation not on the
+phone), `SessionCacheTest` (round trip, existing VM cases).
+
+## 34. Conversation notifications, inline reply (2026-11-27)
+
+Code: `notify/ConversationPolicy.kt` (pure rules, `ConversationPolicyTest`), `notify/Conversations.kt`
+(`ConversationNotifier`: shortcuts, MessagingStyle threads), hooks in
+`Notifier.post` / `Notifier.cancel` and `NotifyActionReceiver.reply`.
+
+**Conversations.** Every notification about a session (waits, approvals, questions, outcomes, replies,
+tool steps, long-running) is a `MessagingStyle` conversation. The sender is the agent with the session
+name ("Claude Code · fix login"; the name is `SessionNaming.title`, else the project, cut at 40
+characters) with the agent's mark as avatar; the user is "你". The message is the notification's text
+(an agent reply is just the reply text). The last 5 lines of each notification are kept in memory only.
+Each session has one long-lived dynamic shortcut (`session:<sessionId>`, `setLongLived`, person, icon,
+locus id, category `android.shortcut.conversation`, pushed with `ShortcutManagerCompat.pushDynamicShortcut`;
+it opens the session in the app), so sessions show under the shade's "Conversations" and can be made
+priority. Connection and terminal notifications stay plain. The lock-screen public version is unchanged
+(never message text).
+
+**Shortcut policy.** At most `min(6, system limit − 1)` session shortcuts; posting for a session
+refreshes it and the least recently posted one is evicted first; the session being posted is never
+evicted. A session that ended (`session.upserted` not live, or `session.removed`) keeps its shortcut
+3 days; a shortcut nothing was posted for in 14 days goes too. Pruned at app start; all removed on
+unpair and when the phone is paired with another computer. (Share-sheet direct-share targets are not
+declared here; the share entry point (§32) would add a `share-target` category if wanted.)
+
+**Inline reply.** 回复 is offered on a session notification when the engine says the phone controls the
+live session (live, control `full`, not an approval) **and** the desktop's `sendMessage` capability is
+usable — the same capability that enables the composer (read once per liveness / control from
+`GET /v1/sessions/{id}`, ≤ 3 s; unknown = no button). The reply uses the composer's send path:
+`sendMessage` with a fresh commandId, sent once; `409 in progress` / unknown outcomes are settled by the
+command record (`GET /v1/commands/{id}`), never by sending again. Step-up is never performed from a
+notification: `step_up_required` (or `no_step_up_key`) puts "需要在 SwitchTether 中确认。点按打开会话。"
+into the conversation and the tap opens the session. Afterwards the conversation shows the sent message
+as "你" or "没有发送：“…”。<reason>" (quietly, the reply action stays). If the app process was restarted
+in between, the previous plain outcome notification is used.
+
+**Live Update de-dup rule.** While a pinned task's Live Update card really shows the session
+(`LiveUpdates.covers`: pinned, Live Updates on, card not swiped away): everything the card shows —
+state, approvals, questions, outcomes, tool steps, long-running — is **not** posted to the
+conversation (the card has its own allow / deny); the agent's reply text, which the card cannot show,
+**is** posted to the conversation but silently (`ConversationPolicy.liveDecision`: SKIP / POST_SILENTLY /
+POST). Not covered: everything posts as before. Allow / deny on conversation notifications is unchanged
+(`NotifyActionReceiver.decisionAction`).
+
+**No bubbles.** Bubbles were built and then removed at the user's request (2026-11-27): no
+`BubbleMetadata`, no bubble activity, no setting.
+
+**Not verified on a device.** Conversation placement, priority and inline reply were not tried on a phone or emulator; only unit tests and the build
+ran.
+
+## 35. Hardware keyboard shortcuts; drag and drop and rich content into the composer (2026-11-27)
+
+For tablets, DeX / desktop windowing, split screen and Bluetooth keyboards.
+
+### 35.1 Keyboard shortcuts
+
+Code: `ui/keys/KeyShortcuts.kt` (pure tables and gating, `KeyShortcutsTest`), `ui/keys/ShortcutHost.kt`
+(`ShortcutRegistry`, `ShortcutHandler`, the Meta+/ helper groups, `ShortcutRegistryTest`), hooks in
+`MainActivity.dispatchKeyEvent` / `onProvideKeyboardShortcuts`, `MainShell` (App.kt), `SessionDetailScreen`,
+the composer field, the approval card (`Renderers.kt`) and the terminal input (`TerminalPane.kt`).
+
+| Keys | Where | Action |
+|---|---|---|
+| Ctrl+Enter (Meta+Enter) | composer field | send, when the send key is enabled; nothing otherwise |
+| Enter, Shift+Enter | composer field | new line (unchanged; the composer is multi-line and has no "Enter sends" mode, and a Chinese IME needs Enter) |
+| Esc | session page | interrupt the running turn: opens the existing "中断" confirmation; only when the stop capsule is shown (`interrupt` usable, live, not idle). Otherwise Esc stays unhandled and Android turns it into Back, as before |
+| Ctrl+K, Ctrl+F | anywhere but the terminal | session search (the bar's search key: Sessions list with the search field open) |
+| Ctrl+N | anywhere but the terminal | new-session launcher |
+| Ctrl+1 / 2 / 3 | anywhere but the terminal | Home / Sessions / Workspace (like tapping the tab: the current tab returns to its root). Ctrl+4…9 are not bound |
+| Ctrl+/ | session page | the slash command list ("/help" sheet), when the composer takes input and the session offers commands |
+| Alt+↑ / Alt+↓ | list beside the conversation (two panes, Sessions tab) | previous / next session row in the list's on-screen order (`sessionRowOrder`); nothing at either end or in one-pane layouts |
+| Y / N, Ctrl+Enter | an approval card whose button has keyboard focus | allow / deny / allow. Plain allow / deny cards only (not the plan card's three answers), only offered options, only while the card's buttons are enabled; the same `onApprove` call as a tap, so step-up and the command tracker are unchanged |
+
+**Routing.** `MainActivity.dispatchKeyEvent` hands every key to `ShortcutRegistry.onKeyEvent`: the
+global chords (Ctrl+K/F/N/1-3//, Alt+↑/↓; none of them edits text) are offered to the registered
+handlers before the view hierarchy; everything else goes to the focused view first, and only a plain
+Esc nobody took is offered afterwards. Key repeats never fire an action; a taken key's key-up is
+swallowed. Handlers register while their page is resumed (`LifecycleResumeEffect`), newest first, so
+the session page on top answers Esc / Ctrl+/ before the shell. The composer's Ctrl+Enter and the
+approval card's keys are `onPreviewKeyEvent` on the field / card, so they act only with focus there.
+
+**The terminal keeps its keys.** While the terminal's hidden input has focus it sets
+`ShortcutRegistry.focus = TERMINAL`: no global chord and no Esc is taken. Hardware Ctrl+letter
+(without Shift) is now sent to the shell as its control character (`KeyEncoder.ctrlChar`: Ctrl+C →
+0x03, Ctrl+[ → ESC …); Esc, arrows, Tab and Enter were already forwarded; Ctrl+Shift+V still pastes.
+
+**Helper.** `onProvideKeyboardShortcuts` adds two groups ("SwitchTether", "会话") with every entry of
+`KeyShortcuts.help`, labels from `strings.xml` (`kbd_*`, en + zh-CN), so Meta+/ lists them in the
+app's language.
+
+### 35.2 Drag and drop, keyboard images, pasted pictures
+
+Code: `ui/sessions/ComposerIntake.kt` (pure: `DropPayload`, `composerGate`, `planIntake`, `DraftEcho`;
+`ComposerIntakeTest`), `ui/sessions/ComposerIntakeUi.kt` (clip reading, the drop target, the
+content-receiver listener, the highlight, the toasts).
+
+- **Drop targets.** The whole conversation area of a session page (`Modifier.dragAndDropTarget`) and
+  the new-session sheet. Any drag that carries a MIME type is offered; while it hovers a highlight
+  says what a drop would do ("松开以添加到消息", or the reason it would be refused, in the warning
+  colour). On drop the activity requests the clip's read grant (`requestDragAndDropPermissions`, held
+  until the activity ends so an upload can stream the file), then the clip is classified.
+- **Rich content.** The composer field is now a state-based `BasicTextField(TextFieldState)` with
+  `Modifier.contentReceiver`: images / GIFs / stickers the keyboard commits, pictures pasted from the
+  clipboard and drops onto the field itself. Items with a file URI become attachments; text and links
+  are left to the field, which inserts them at the caret. (Only the state-based field supports
+  `contentReceiver`; `DraftInputPill` keeps its "caret after a draft set from outside" rule through
+  `DraftEcho`, which tells an outside change from an echo that has not caught up.)
+- **Classification** (`planIntake`) reuses the share intake (`ShareIntake.parse`, §32): text
+  de-duplicated, dragged web links are text, only `content:` URIs of other apps are files (`file:` and
+  this app's own providers are counted as "could not be read" and reported), at most 10 files per
+  message counting those already attached (`planAttachments`; the rest are reported), 1 GiB per file
+  (the attachment pipeline marks larger ones "too large"). Files are read with `ShareFiles.info/open`
+  and go through `addAttachment` exactly like picked files (uploaded at once, streamed, chips with
+  progress). Nothing is ever sent by itself.
+- **Gating** (`composerGate`, the composer's own rules): a composer that takes no input refuses
+  everything with the reason — offline snapshot ("离线快照：连接电脑后才能添加内容。"), offline,
+  read-only / no control, still loading. A live conversation whose connection dropped (messages queue)
+  takes text but not files (they upload at once and need the computer). A terminal-attached session
+  takes text only.
+- **New session.** Dropped text joins the first message; dropped files wait in the share inbox's
+  "new session" stage and are attached in the created session's input box (the §32 path); the sheet
+  says how many will be attached. If the sheet is closed instead, the share picker offers them to
+  another session or to cancel. Offline, the launcher refuses drops (starting needs the connection).
+- **Not done.** Dragging an image out of the lightbox to other apps.
+
+**Not verified on a device.** No hardware keyboard, drag and drop, keyboard GIF commit or clipboard
+image paste was tried on a phone, tablet or emulator; only unit tests (incl. Robolectric Compose key
+injection into the composer) and the build ran.

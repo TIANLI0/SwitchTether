@@ -138,6 +138,7 @@ fun SessionsContent(
     ) { inner ->
         Column(Modifier.fillMaxSize().padding(top = inner.calculateTopPadding())) {
             ConnectionBanner(state.connection, onRetryConnection)
+            io.github.tianli0.switchtether.ui.common.OfflineSnapshotNotice(state.snapshotAtMs)
             TabRowWithContour(
                 tabs = listOf(stringResource(R.string.sessions_tab_live), stringResource(R.string.sessions_history), stringResource(R.string.sessions_all)),
                 selectedTabIndex = state.scope.ordinal,
@@ -157,6 +158,15 @@ fun SessionsContent(
             }
             // While searching: titles (the list below) or what was said in the sessions (§28.2).
             val searching = searchExpanded || state.query.isNotEmpty()
+            // Alt+↑ / Alt+↓ beside the conversation follow the rows as shown here (§35).
+            val shortcuts = io.github.tianli0.switchtether.ui.keys.LocalShortcuts.current
+            val keyOrder = androidx.compose.runtime.remember(state.visible, expanded, state.scope, searching && contentSearch.enabled) {
+                if (searching && contentSearch.enabled) emptyList() else sessionRowOrder(state.visible, state.scope, expanded)
+            }
+            androidx.compose.runtime.DisposableEffect(shortcuts, keyOrder) {
+                shortcuts?.sessionOrder = keyOrder
+                onDispose { if (shortcuts?.sessionOrder === keyOrder) shortcuts.sessionOrder = emptyList() }
+            }
             io.github.tianli0.switchtether.ui.common.NoticeVisibility(searching) {
                 io.github.suqi8.coui.kmp.basic.ChipTabGroup(
                     tabs = listOf(ChipTabData(stringResource(R.string.tab_sessions)), ChipTabData(stringResource(R.string.search_content_mode))),
@@ -266,4 +276,28 @@ fun SessionsContent(
             }
         }
     }
+}
+
+/**
+ * The session rows in the order the list shows them (running, idle, then history for the scope;
+ * one row per conversation, with the folded ones of an [expanded] conversation under it), as
+ * (id, title) for the keyboard's previous / next session.
+ */
+fun sessionRowOrder(
+    visible: List<io.github.tianli0.switchtether.remote.protocol.SessionSummary>,
+    scope: SessionScope,
+    expanded: Set<String>,
+): List<Pair<String, String?>> {
+    val (live, past) = visible.partition { it.isLive }
+    val (idle, working) = live.partition { it.status == "idle" || it.status == "completed" }
+    val groups = when (scope) {
+        SessionScope.HISTORY -> listOf(past)
+        SessionScope.LIVE -> listOf(working, idle)
+        SessionScope.ALL -> listOf(working, idle, past)
+    }
+    return groups.flatMap { list ->
+        io.github.tianli0.switchtether.domain.SessionGrouping.group(list).flatMap { g ->
+            listOf(g.primary) + if (g.primary.id in expanded) g.others else emptyList()
+        }
+    }.map { it.id to it.title }
 }

@@ -7,6 +7,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import io.github.tianli0.switchtether.share.ShareFiles
+import io.github.tianli0.switchtether.share.ShareIntake
+import io.github.tianli0.switchtether.share.ShareIntents
 import io.github.tianli0.switchtether.ui.SwitchTetherRoot
 
 /**
@@ -29,11 +32,25 @@ class MainActivity : FragmentActivity() {
         const val HANDOFF_SERVER = "handoff_server_id"
     }
 
+    /** Hardware keyboard shortcuts of this window (docs/ANDROID_UI.md §35). */
+    private val shortcuts = io.github.tianli0.switchtether.ui.keys.ShortcutRegistry()
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+        shortcuts.onKeyEvent(event) { super.dispatchKeyEvent(it) }
+
+    /** Lists the shortcuts in the system's keyboard shortcuts helper (Meta+/), in the app's language. */
+    override fun onProvideKeyboardShortcuts(data: MutableList<android.view.KeyboardShortcutGroup>, menu: android.view.Menu?, deviceId: Int) {
+        super.onProvideKeyboardShortcuts(data, menu, deviceId)
+        data.addAll(io.github.tianli0.switchtether.ui.keys.keyboardShortcutGroups(this))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        handle(intent)
-        setContent { SwitchTetherRoot() }
+        handle(intent, fresh = savedInstanceState == null)
+        setContent {
+            androidx.compose.runtime.CompositionLocalProvider(io.github.tianli0.switchtether.ui.keys.LocalShortcuts provides shortcuts) { SwitchTetherRoot() }
+        }
         if (android.os.Build.VERSION.SDK_INT >= 37) {
             // Offer the open session detail to the user's other device (tablet ↔ phone).
             lifecycleScope.launch {
@@ -63,8 +80,16 @@ class MainActivity : FragmentActivity() {
         handle(intent)
     }
 
-    /** `switchtether://pair?...` VIEW intents prefill the pairing confirm screen (never auto-pair). */
-    private fun handle(intent: Intent?) {
+    /**
+     * `switchtether://pair?...` VIEW intents prefill the pairing confirm screen (never auto-pair).
+     * SEND / SEND_MULTIPLE from other apps become the pending share (never sent automatically);
+     * a recreated activity ([fresh] false) does not take the same share twice.
+     */
+    private fun handle(intent: Intent?, fresh: Boolean = true) {
+        if (intent != null && fresh && ShareIntake.isShare(intent.action)) {
+            receiveShare(intent)
+            return
+        }
         intent?.getStringExtra(EXTRA_SESSION_ID)?.let { (application as SwitchTetherApp).container.openSessionRequest.value = it }
         intent?.getStringExtra(EXTRA_TERMINAL_ID)?.let { (application as SwitchTetherApp).container.openTerminalRequest.value = it }
         if (intent?.getBooleanExtra(EXTRA_SHOW_UPDATE, false) == true) (application as SwitchTetherApp).container.showUpdateRequest.value = true
@@ -78,6 +103,20 @@ class MainActivity : FragmentActivity() {
         val data = intent?.data ?: return
         if (intent.action == Intent.ACTION_VIEW && data.scheme == "switchtether") {
             (application as SwitchTetherApp).container.incomingPairingLink.value = data.toString()
+        }
+    }
+
+    private fun receiveShare(intent: Intent) {
+        val raw = runCatching { ShareIntents.read(intent) }.getOrNull() ?: return
+        val content = ShareIntake.parse(raw, ShareIntents.ownAuthority(this)) ?: return
+        val container = (application as SwitchTetherApp).container
+        // A newer share replaces one still waiting (its cache copies go with it).
+        val replaced = container.shareInbox.state.value?.content
+        container.shareInbox.receive(content)
+        val app = applicationContext
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            replaced?.items?.forEach { it.cachedPath?.let { p -> java.io.File(p).parentFile?.deleteRecursively() } }
+            ShareFiles.cleanup(app, keep = content.items)
         }
     }
 }

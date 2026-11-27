@@ -78,8 +78,11 @@ class AppContainer(private val context: Context) {
         relaySecrets = io.github.tianli0.switchtether.connection.KeystoreRelaySecrets,
     )
 
-    /** Last session list / conversation pages, shown at once on a fresh start (see SessionCache). */
-    val sessionCache = io.github.tianli0.switchtether.data.SessionCache(java.io.File(context.filesDir, "session-cache"))
+    /** Offline snapshot: sealed session list on disk, conversations in memory only (see SessionCache). */
+    val sessionCache = io.github.tianli0.switchtether.data.SessionCache(
+        java.io.File(context.filesDir, "session-cache"),
+        io.github.tianli0.switchtether.security.KeystoreBlobCipher("switchtether_session_snapshot"),
+    )
 
     val sessions: SessionRepository = RemoteSessionRepository(connection, sessionCache) { pairingStore.current()?.serverId }
     val management: ManagementRepository = RemoteManagementRepository(connection)
@@ -94,6 +97,8 @@ class AppContainer(private val context: Context) {
             // Best effort: the old desktop keeps a record until revoked there; wipe our keys for it.
             keys.delete(previous.identityAlias)
             keys.delete(previous.stepUpAlias)
+            // Its offline snapshot never shows under the new computer.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { sessionCache.forget(previous.serverId) }
         },
     )
 
@@ -104,7 +109,9 @@ class AppContainer(private val context: Context) {
     @Volatile private var serviceRunning = false
 
     val notifyPrefsState = settingsStore.notifyPrefs.stateIn(appScope, SharingStarted.Eagerly, io.github.tianli0.switchtether.remote.notify.NotifyPrefs())
-    private val notifier = io.github.tianli0.switchtether.notify.Notifier(context, appScope, connection, notifyPrefsState, { isForeground }) { id -> liveUpdates.covers(id) }
+    /** Conversation notifications: session shortcuts, inline-reply threads (docs/ANDROID_UI.md §34). */
+    val conversations = io.github.tianli0.switchtether.notify.ConversationNotifier(context)
+    private val notifier = io.github.tianli0.switchtether.notify.Notifier(context, appScope, connection, notifyPrefsState, { isForeground }, conversations) { id -> liveUpdates.covers(id) }
 
     /** Working/waiting live sessions (keeps the monitor service's CPU wake lock). */
     val activeSessions get() = notifier.activeSessions
@@ -347,6 +354,9 @@ class AppContainer(private val context: Context) {
     /** A pairing link delivered by a VIEW intent; consumed by the onboarding screen. */
     val incomingPairingLink = MutableStateFlow<String?>(null)
 
+    /** "Share to SwitchTether": the pending share until the user picks where it goes (docs/ANDROID_UI.md §32). */
+    val shareInbox = io.github.tianli0.switchtether.share.ShareInbox()
+
     /** After the user confirmed the verification code: connect to the new desktop. */
     fun onPaired() {
         pendingVerification.value = null
@@ -381,6 +391,7 @@ class AppContainer(private val context: Context) {
         fileStore.onServerForgotten() // temporary copies of that computer's files; user downloads stay
         clearCaches()
         stepUpGate.clear()
+        conversations.forgetAll() // session shortcuts / conversations of that computer
     }
 
     fun clearCaches() {
@@ -438,6 +449,7 @@ class AppContainer(private val context: Context) {
     init {
         appScope.launch { pairingStore.desktop.collect { stepUpEnabledCache = it?.stepUpEnabled == true } }
         notifier.start()
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { conversations.prune() }
         liveUpdates.start()
         widget.start()
         money.start()

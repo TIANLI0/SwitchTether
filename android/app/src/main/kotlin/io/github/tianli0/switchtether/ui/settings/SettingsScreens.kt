@@ -442,6 +442,27 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
                     }
                 }
             }
+            // Conversation notifications (§34): priority and per-conversation options live in the
+            // system's own settings.
+            item { SectionHeader(stringResource(R.string.conv_settings_title)) }
+            item {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                GroupCard {
+                    ArrowPreference(
+                        title = stringResource(R.string.conv_conversation_settings),
+                        summary = stringResource(R.string.conv_conversation_settings_summary),
+                        onClick = {
+                            runCatching {
+                                ctx.startActivity(
+                                    android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName),
+                                )
+                            }
+                        },
+                        cardListPosition = CardListPosition.Full,
+                    )
+                }
+            }
             item { SectionHeader(stringResource(R.string.notif_quiet)) }
             item {
                 GroupCard {

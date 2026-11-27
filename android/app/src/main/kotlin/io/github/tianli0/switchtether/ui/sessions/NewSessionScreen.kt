@@ -810,8 +810,40 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
                 override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity, available: androidx.compose.ui.unit.Velocity) = available
             }
         }
-        Box(Modifier.fillMaxWidth().heightIn(max = 620.dp).nestedScroll(keepFlingInside)) {
+        // Drops from other apps (§35): text joins the first message; files wait for the session and
+        // are attached in its input box once it has started (the share inbox's "new session" path).
+        val container = io.github.tianli0.switchtether.ui.appContainer()
+        val inbox = container.shareInbox
+        val pendingShare by inbox.state.collectAsStateWithLifecycle()
+        val heldFiles = pendingShare?.takeIf { it.toNewSession }?.content?.items?.size ?: 0
+        val dropContext = androidx.compose.ui.platform.LocalContext.current
+        var dropHover by remember { mutableStateOf(false) }
+        val gate = newSessionGate(state.connection is ConnectionState.Online)
+        val onDrop: (DropPayload) -> Unit = { payload ->
+            val plan = planIntake(payload, gate, heldFiles, io.github.tianli0.switchtether.share.ShareIntents.ownAuthority(dropContext.applicationContext))
+            if (!plan.text.isNullOrBlank()) vm.setPrompt(dropIntoDraft(vm.state.value.prompt, plan.text))
+            if (plan.accepted.isNotEmpty()) {
+                val p = inbox.state.value
+                if (p != null && p.toNewSession) {
+                    inbox.updateContent { it.copy(items = it.items + plan.accepted) }
+                } else {
+                    // The newest content wins, as with a newer share (§32); the replaced one's cache copies go.
+                    p?.content?.items?.forEach { it.cachedPath?.let { path -> java.io.File(path).parentFile?.deleteRecursively() } }
+                    inbox.receive(io.github.tianli0.switchtether.share.SharedContent(text = null, items = plan.accepted))
+                    inbox.pickNewSession()
+                }
+            }
+            intakeReport(dropContext, plan)?.let { android.widget.Toast.makeText(dropContext, it, android.widget.Toast.LENGTH_LONG).show() }
+        }
+        Box(Modifier.fillMaxWidth().heightIn(max = 620.dp).nestedScroll(keepFlingInside).contentDropTarget(onHover = { dropHover = it }, onDrop = onDrop)) {
             Column(Modifier.pageScroll().verticalScroll(rememberPageScrollState())) {
+                if (heldFiles > 0) {
+                    io.github.tianli0.coui17.patterns.NoticeBanner(
+                        text = androidx.compose.ui.res.pluralStringResource(R.plurals.new_session_drop_files, heldFiles, heldFiles),
+                        color = COUITheme.colorScheme.primary,
+                        modifier = Modifier.testTag("new-session-files"),
+                    )
+                }
                 NewSessionContent(
                     state = state,
                     busy = busy != null,
@@ -827,6 +859,11 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
                     onRetryModels = vm::loadModelOptions,
                 )
             }
+            DropHighlight(
+                visible = dropHover,
+                label = intakeBlockText(gate.block) ?: stringResource(R.string.drop_here_new_session),
+                blocked = gate.block != IntakeBlock.NONE,
+            )
         }
     }
     CommandPromptDialog(prompt, vm.commands::checkStatus, vm.commands::retry, vm.commands::dismiss)

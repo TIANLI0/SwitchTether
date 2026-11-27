@@ -128,6 +128,8 @@ fun SwitchTetherRoot() {
                 desktop == null || pending != null -> OnboardingScreen(revokedReason = (conn as? ConnectionState.Revoked)?.let { it.reason to it.desktopName })
                 else -> MainShell()
             }
+            // "Share to SwitchTether": the pair-first explanation and keeping a waiting share readable.
+            if (desktop !== LOADING_SENTINEL) io.github.tianli0.switchtether.share.ShareRootEffects(paired = desktop != null, verificationPending = pending != null)
         }
       }
     }
@@ -186,7 +188,10 @@ fun MainShell() {
         var showNewSession by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
         io.github.tianli0.switchtether.ui.sessions.NewSessionSheet(
             show = showNewSession,
-            onDismiss = { showNewSession = false },
+            onDismiss = {
+                showNewSession = false
+                container.shareInbox.newSessionClosed()
+            },
             onPickFolder = {
                 showNewSession = false
                 nav.push(Route.PickFolder)
@@ -200,9 +205,34 @@ fun MainShell() {
                 if (container.liveUpdates.autoPinPhoneSessions) {
                     container.liveUpdates.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true), manual = false)
                 }
+                // A share that chose "new session" brings its files into this session's input box.
+                container.shareInbox.sessionCreated(id)
                 nav.push(Route.SessionDetail(id, title))
             },
         )
+        io.github.tianli0.switchtether.share.ShareHost(nav)
+        // Hardware keyboard (§35): search, new session, tabs, and the neighbouring session while the
+        // list stands beside the conversation. The session page on top answers its own keys first.
+        val shortcuts = io.github.tianli0.switchtether.ui.keys.LocalShortcuts.current
+        io.github.tianli0.switchtether.ui.keys.ShortcutHandler { action ->
+            val order = shortcuts?.sessionOrder.orEmpty()
+            val selected = nav.stack.firstNotNullOfOrNull { (it as? Route.SessionDetail)?.sessionId }
+            val shell = io.github.tianli0.switchtether.ui.keys.ShellKeyState(twoPanes, order.map { it.first }, selected)
+            if (!shell.allows(action)) return@ShortcutHandler false
+            when (action) {
+                io.github.tianli0.switchtether.ui.keys.ShortcutAction.SEARCH -> nav.openSessionsSearch()
+                io.github.tianli0.switchtether.ui.keys.ShortcutAction.NEW_SESSION -> showNewSession = true
+                io.github.tianli0.switchtether.ui.keys.ShortcutAction.TAB_HOME -> nav.select(Tab.HOME)
+                io.github.tianli0.switchtether.ui.keys.ShortcutAction.TAB_SESSIONS -> nav.select(Tab.SESSIONS)
+                io.github.tianli0.switchtether.ui.keys.ShortcutAction.TAB_WORKSPACE -> nav.select(Tab.WORKSPACE)
+                io.github.tianli0.switchtether.ui.keys.ShortcutAction.PREVIOUS_SESSION, io.github.tianli0.switchtether.ui.keys.ShortcutAction.NEXT_SESSION -> {
+                    val id = shell.neighbour(if (action == io.github.tianli0.switchtether.ui.keys.ShortcutAction.NEXT_SESSION) 1 else -1) ?: return@ShortcutHandler false
+                    nav.openFromList(Route.SessionDetail(id, order.firstOrNull { it.first == id }?.second))
+                }
+                else -> return@ShortcutHandler false
+            }
+            true
+        }
         val reopen by container.newSessionReopen.collectAsState()
         androidx.compose.runtime.LaunchedEffect(reopen) {
             if (reopen) {

@@ -11,6 +11,7 @@ import io.github.tianli0.switchtether.MainActivity
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.SwitchTetherApp
 import io.github.tianli0.switchtether.remote.command.CommandOutcome
+import io.github.tianli0.switchtether.remote.command.CommandStatus
 import io.github.tianli0.switchtether.remote.notify.QuestionPrompt
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -37,6 +38,10 @@ class NotifyActionReceiver : BroadcastReceiver() {
         val pending = goAsync()
         container.appScope.launch {
             try {
+                if (action == ACTION_REPLY) {
+                    reply(context, container, session, notificationId, typed)
+                    return@launch
+                }
                 val outcome = withTimeoutOrNull(BUDGET_MS) {
                     if (!container.awaitOnline(CONNECT_MS)) return@withTimeoutOrNull null
                     val request = intent.getStringExtra(EXTRA_REQUEST)
@@ -48,7 +53,6 @@ class NotifyActionReceiver : BroadcastReceiver() {
                             val answers = buildJsonObject { put(prompt.key, prompt.valueFor(typed)) }
                             container.sessions.answer(session, prompt.requestId, answers, action = "submit")
                         }
-                        ACTION_REPLY -> container.sessions.sendMessage(session, typed)
                         else -> null
                     }
                 }
@@ -65,6 +69,43 @@ class NotifyActionReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }
+    }
+
+    /**
+     * Inline reply: the composer's send path (`sendMessage` with a fresh commandId, sent once).
+     * A `409 in progress` / unknown outcome is settled by the desktop's command record, never by
+     * sending again. Step-up is never performed here: if the desktop asks for it, the conversation
+     * says so and tapping it opens the session in the app. The conversation then shows the sent
+     * message or why it was not sent.
+     */
+    private suspend fun reply(context: Context, container: io.github.tianli0.switchtether.AppContainer, session: String, notificationId: Int, typed: String) {
+        val commandId = io.github.tianli0.switchtether.remote.command.newCommandId()
+        val outcome = withTimeoutOrNull(BUDGET_MS) {
+            if (!container.awaitOnline(CONNECT_MS)) null else container.sessions.sendMessage(session, typed, commandId)
+        }
+        val record = if (outcome is CommandOutcome.InProgress || outcome is CommandOutcome.Unknown) {
+            withTimeoutOrNull(STATUS_MS) {
+                when (runCatching { container.sessions.commandStatus(commandId) }.getOrNull()) {
+                    is CommandStatus.Succeeded, is CommandStatus.Pending -> true
+                    is CommandStatus.Failed, is CommandStatus.Interrupted -> false
+                    else -> null
+                }
+            }
+        } else {
+            null
+        }
+        val result = ConversationPolicy.replyResult(outcome, record)
+        if (container.conversations.replyResult(notificationId, typed, result)) return
+        // Not a conversation this process posted (restarted meanwhile): the plain outcome notification.
+        fun s(id: Int): String = context.getString(id)
+        val (title, text) = when (result) {
+            ConversationPolicy.ReplyResult.Sent -> s(R.string.ntf_sent) to typed
+            ConversationPolicy.ReplyResult.NeedsStepUp -> s(R.string.ntf_not_sent) to s(R.string.conv_reply_step_up)
+            is ConversationPolicy.ReplyResult.Refused -> s(R.string.ntf_not_sent) to result.reason.ifBlank { s(R.string.ntf_open_to_check) }
+            ConversationPolicy.ReplyResult.Unsure -> s(R.string.ntf_not_sure) to s(R.string.ntf_open_to_check)
+            ConversationPolicy.ReplyResult.Offline -> s(R.string.ntf_not_sent) to s(R.string.ntf_offline_open)
+        }
+        reportText(context, notificationId, session, ACTION_REPLY, title, text, ok = result == ConversationPolicy.ReplyResult.Sent)
     }
 
     /** Replaces the notification with the outcome (this also ends the inline-reply spinner). */
@@ -84,6 +125,12 @@ class NotifyActionReceiver : BroadcastReceiver() {
             null -> context.getString(R.string.ntf_not_sent) to context.getString(R.string.ntf_offline_open)
             else -> context.getString(R.string.ntf_not_sent) to context.getString(R.string.ntf_open_to_check)
         }
+        val ok = outcome is CommandOutcome.Succeeded || (outcome is CommandOutcome.Rejected && outcome.error.httpStatus == 409)
+        reportText(context, id, session, action, title, text, ok)
+    }
+
+    private fun reportText(context: Context, id: Int, session: String, action: String, title: String, text: String, ok: Boolean) {
+        val nm = NotificationManagerCompat.from(context)
         val tap = PendingIntent.getActivity(
             context, ("open:$session").hashCode(),
             Intent(context, MainActivity::class.java)
@@ -91,7 +138,6 @@ class NotifyActionReceiver : BroadcastReceiver() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val ok = outcome is CommandOutcome.Succeeded || (outcome is CommandOutcome.Rejected && outcome.error.httpStatus == 409)
         val channel = Notifier.channelId(
             if (action == ACTION_APPROVE || action == ACTION_DENY) io.github.tianli0.switchtether.remote.notify.NotifyType.WAITING_APPROVAL
             else io.github.tianli0.switchtether.remote.notify.NotifyType.WAITING_INPUT,
@@ -125,6 +171,7 @@ class NotifyActionReceiver : BroadcastReceiver() {
         private const val BUDGET_MS = 9_000L
         private const val CONNECT_MS = 6_000L
         private const val SENT_VISIBLE_MS = 4_000L
+        private const val STATUS_MS = 4_000L
 
         private fun promptFrom(i: Intent): QuestionPrompt? {
             val request = i.getStringExtra(EXTRA_REQUEST) ?: return null

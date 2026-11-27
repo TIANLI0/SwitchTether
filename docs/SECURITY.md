@@ -87,9 +87,12 @@ Revoking a device (desktop UI, or the phone unpairing itself):
 4. deletes its step-up key, grants and pending command records, kills terminals it opened;
 5. writes an audit record. The deny-list survives restarts (`e2e: server_restart_keeps_devices`).
 
-Data already stored on a lost phone cannot be wiped remotely. The app stores no transcripts,
-file contents or credentials persistently (see docs/ANDROID_UI.md), and keys are hardware-
-bound, so a revoked phone holds nothing that grants further access.
+Data already stored on a lost phone cannot be wiped remotely. The app stores no transcripts or
+credentials persistently: the offline snapshot keeps conversations in memory only and persists
+just the session list metadata (titles, folders, state), sealed with a non-exportable Keystore key
+that is destroyed on unpair / revoke (docs/ANDROID_UI.md §33). Previewed and downloaded files are
+the exception the user chose (ANDROID_UI.md §13.13). Keys are hardware-bound, so a revoked phone
+holds nothing that grants further access.
 
 ## 6. Secrets never leave the desktop
 

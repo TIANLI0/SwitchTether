@@ -820,3 +820,63 @@ on this machine, the phone UI on a device.
   highlighting, Markdown bullet alignment (renderer), per-hunk staging, stash drop, resolving merge
   conflicts on the phone; titles / bottom-bar labels keep ColorOS's fixed size at large font scales
   (native behaviour). Not verified on the user's phone.
+
+## Android offline snapshot (2026-11-27, uncommitted)
+
+- 2026-11-27: offline snapshot (ANDROID_UI.md §33). Session list metadata persisted per computer,
+  AES-256-GCM sealed with a Keystore key (`KeystoreBlobCipher`, server id as AAD, key destroyed on
+  clear / unpair / revoke); conversations memory-only (40 conversations, 300 events each, 8 MB,
+  LRU); old plain-text `session-cache` files deleted on first use; "离线快照 · HH:mm" on Home,
+  Sessions and the conversation; snapshot conversations offer no send / queue / approvals / tools;
+  new-terminal row says why it is off. Verified: `./gradlew testDebugUnitTest :app:assembleDebug`
+  green (390 unit tests, 0 failures, incl. 17 new in `OfflineSnapshotTest`) in a clean worktree of
+  HEAD plus these changes only (the shared tree had other in-progress work that did not compile).
+  Not verified: on a device or emulator (no UI run at all), the AndroidKeyStore path itself (tests
+  use the same AES-GCM code with a software key), a real sleeping computer.
+
+## Android conversation notifications, inline reply (2026-11-27, uncommitted)
+
+- 2026-11-27: session notifications are `MessagingStyle` conversations from the agent ("Claude Code ·
+  <session>") with one long-lived dynamic shortcut per session (≤ min(6, system limit − 1), least
+  recently posted evicted, ended sessions dropped after 3 days, unused after 14, all on unpair /
+  another computer); 回复 only for live `full`-control sessions whose `sendMessage` capability is
+  usable (the composer's gate), sent once through `sendMessage` with a fresh commandId, unknown / 409
+  outcomes settled by the command record, `step_up_required` never prompted from the notification
+  (it asks to open the app); the conversation then shows the sent message or the reason. Bubbles were
+  implemented and then removed at the user's request (no `BubbleMetadata`, activity or setting). Live Update rule: a covered
+  (pinned, shown) session's state / waits / outcomes are not posted to the conversation, agent
+  replies are posted silently (ANDROID_UI.md §34). Verified: `./gradlew testDebugUnitTest
+  :app:assembleDebug` green in the shared tree (app 409 unit tests, 0 failures, incl. 14 new in
+  `ConversationPolicyTest`: shortcut ids / limit / eviction, content decisions, reply gating and
+  outcome mapping, Live Update de-dup). Not verified: anything on a device or emulator — the
+  conversation section and priority, shortcut avatars and inline reply end to end were never run.
+
+## Android: share to SwitchTether + Direct Share (2026-11-27, uncommitted)
+
+- Other apps can share text, links, images and files (SEND / SEND_MULTIPLE, `text/*`, `image/*`,
+  `*/*`) to SwitchTether; the user picks a session or a new session and the composer is prefilled
+  (nothing sent automatically). Session conversation shortcuts are Direct Share targets
+  (`res/xml/shortcuts.xml`). Details: ANDROID_UI.md §32.
+- Verified: unit tests only — `ShareModelTest` (22 tests: intent parsing, 10-file limit, routing,
+  staging decision, target order, inbox stages, Direct Share shortcut-id routing) and the full
+  `./gradlew testDebugUnitTest :app:assembleDebug :core:remote:test` green in an isolated copy of the
+  working tree (`--no-build-cache`; the shared build directory was being rebuilt by other sessions).
+- Not verified: no emulator run and not on a device — the share sheet entry, the picker, the
+  pair-first dialog, the offline wait, URI grants / cache copies from real sender apps, and Direct
+  Share targets in the system sheet are all unexercised.
+
+## Android: hardware keyboard shortcuts, drag and drop, rich content (2026-11-27, uncommitted)
+
+- 2026-11-27: keyboard shortcuts (Ctrl+Enter send, Esc interrupt via the existing confirmation,
+  Ctrl+K/F search, Ctrl+N new session, Ctrl+1/2/3 tabs, Ctrl+/ slash commands, Alt+↑/↓ neighbouring
+  session beside the list, Y/N/Ctrl+Enter on a focused approval card; never while the terminal has
+  focus, which now also receives hardware Ctrl+letter) and the Meta+/ helper groups; drops from other
+  apps onto the session page and the new-session sheet, keyboard image / GIF commits and pasted
+  pictures through `contentReceiver` on a now state-based composer field; share rules reused (10 files,
+  1 GiB, `file:` / own-provider URIs refused and reported), refused with the reason when the composer
+  takes no input (ANDROID_UI.md §35). Verified: `./gradlew testDebugUnitTest :app:assembleDebug` green
+  in the shared working tree (normal build cache; app 443 unit tests, 0 failures, incl. 31 new in
+  `KeyShortcutsTest`, `ShortcutRegistryTest`, `ComposerIntakeTest`, `ComposerKeysTest` with
+  Robolectric key injection; `SlashPanelTest` still green on the new field). Not verified: nothing was
+  run on a device, tablet, DeX or emulator — real hardware keyboards, the Meta+/ helper, drag and drop
+  between apps and its permission grant, keyboard GIF commit and clipboard image paste are unexercised.

@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -454,6 +455,11 @@ internal fun imeEdit(old: String, new: String): ImeEdit {
 @Composable
 private fun HiddenInput(focus: FocusRequester, onText: (String) -> Unit, onKey: (TermKey) -> Unit) {
     var value by remember { mutableStateOf(TextFieldValue(SENTINEL, TextRange(SENTINEL.length))) }
+    // While this input has focus the app's keyboard shortcuts stand back: Ctrl and Esc belong to the shell (§35).
+    val shortcuts = io.github.tianli0.switchtether.ui.keys.LocalShortcuts.current
+    androidx.compose.runtime.DisposableEffect(shortcuts) {
+        onDispose { shortcuts?.focus = io.github.tianli0.switchtether.ui.keys.KeyFocus.ELSEWHERE }
+    }
     BasicTextField(
         value = value,
         onValueChange = { nv ->
@@ -465,8 +471,21 @@ private fun HiddenInput(focus: FocusRequester, onText: (String) -> Unit, onKey: 
         },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Send, autoCorrectEnabled = false),
         keyboardActions = KeyboardActions(onSend = { onKey(TermKey.ENTER) }),
-        modifier = Modifier.size(1.dp).alpha(0f).focusRequester(focus).onPreviewKeyEvent { ev ->
+        modifier = Modifier.size(1.dp).alpha(0f).focusRequester(focus).onFocusChanged {
+            shortcuts?.focus = if (it.isFocused) io.github.tianli0.switchtether.ui.keys.KeyFocus.TERMINAL else io.github.tianli0.switchtether.ui.keys.KeyFocus.ELSEWHERE
+        }.onPreviewKeyEvent { ev ->
             if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            // A hardware Ctrl+letter (Ctrl+C, Ctrl+D, Ctrl+[ …) goes to the shell as its control character
+            // (Ctrl+Shift+… is left to the field: Ctrl+Shift+V pastes).
+            val native = ev.nativeKeyEvent
+            if (native.isCtrlPressed && !native.isAltPressed && !native.isMetaPressed && !native.isShiftPressed) {
+                val base = native.getUnicodeChar(0)
+                val ctrl = if (base > 0) io.github.tianli0.switchtether.remote.terminal.KeyEncoder.ctrlChar(base.toChar()) else null
+                if (ctrl != null) {
+                    onText(ctrl.toString())
+                    return@onPreviewKeyEvent true
+                }
+            }
             val k = when (ev.key) {
                 Key.Enter, Key.NumPadEnter -> TermKey.ENTER
                 Key.DirectionUp -> TermKey.UP

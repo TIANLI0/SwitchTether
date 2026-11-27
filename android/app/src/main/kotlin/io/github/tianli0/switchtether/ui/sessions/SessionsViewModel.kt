@@ -38,6 +38,11 @@ data class SessionsState(
     /** Agents/projects seen so far (filter options). */
     val knownAgents: List<String> = emptyList(),
     val knownProjects: List<String> = emptyList(),
+    /**
+     * Set while the list is an offline snapshot ("离线快照 · 10:42"): read from the phone on a fresh
+     * start, or kept from the moment the connection dropped. Null once a live load replaced it.
+     */
+    val snapshotAtMs: Long? = null,
 ) {
     val visible: List<SessionSummary>
         get() = items.valueOrNull.orEmpty()
@@ -73,12 +78,14 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     init {
         // Last list seen from this desktop, at once (replaced by the first successful load).
         viewModelScope.launch {
-            val cached = runCatching { repo.cachedList() }.getOrNull().orEmpty()
-            if (cached.isNotEmpty()) _state.update { if (it.items is Loadable.Ready) it else it.copy(items = Loadable.Ready(cached)).withKnown() }
+            val cached = runCatching { repo.cachedList() }.getOrNull()
+            if (cached != null && cached.items.isNotEmpty()) {
+                _state.update { if (it.items is Loadable.Ready) it else it.copy(items = Loadable.Ready(cached.items), snapshotAtMs = cached.savedAtMs).withKnown() }
+            }
         }
         viewModelScope.launch {
             conn.state.distinctUntilChangedBy { it::class }.collect { s ->
-                _state.update { it.copy(connection = s) }
+                _state.update { it.copy(connection = s).markedOffline() }
                 if (s is ConnectionState.Online) reload()
             }
         }
@@ -150,7 +157,7 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
                 // The answer was read before these live changes: they stay on top of it.
                 var items = page.items.filter { it.id !in changed || changed[it.id] != null }
                 changed.values.filterNotNull().forEach { items = upserted(items, it, s.query) }
-                _state.update { it.copy(items = Loadable.Ready(items), nextCursor = page.nextCursor).withKnown() }
+                _state.update { it.copy(items = Loadable.Ready(items), nextCursor = page.nextCursor, snapshotAtMs = null).withKnown().markedOffline() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -182,6 +189,10 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
             }
         }
     }
+
+    /** The connection dropped: what is shown stays, labelled as a snapshot of this moment. */
+    private fun SessionsState.markedOffline(): SessionsState =
+        if (io.github.tianli0.switchtether.ui.common.isAway(connection) && items is Loadable.Ready && snapshotAtMs == null) copy(snapshotAtMs = System.currentTimeMillis()) else this
 
     private fun SessionsState.withKnown(): SessionsState {
         val list = items.valueOrNull.orEmpty()

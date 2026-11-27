@@ -41,28 +41,28 @@ class SessionCacheTest {
     @Test
     fun cacheRoundTripsListsAndConversationsPerDesktop() {
         val dir = Files.createTempDirectory("st-cache").toFile()
-        val cache = SessionCache(dir, maxConversations = 2)
+        val cache = SessionCache(dir, testCipher(), maxConversations = 2)
         assertNull(cache.loadList("srv"))
         cache.saveList("srv", listOf(summary("claude:a"), summary("codex:b", live = false)))
-        assertEquals(listOf("claude:a", "codex:b"), cache.loadList("srv")!!.map { it.id })
+        assertEquals(listOf("claude:a", "codex:b"), cache.loadList("srv")!!.items.map { it.id })
         assertNull(cache.loadList("other-desktop"))
 
         val events = (1L..(SessionCache.MAX_EVENTS + 20)).map { event("e$it", it, "assistant_message", """{"text":"t$it"}""", session = "claude:a") }
         cache.saveEvents("srv", "claude:a", events, hasMoreBefore = false)
-        val (back, more) = cache.loadEvents("srv", "claude:a")!!
-        assertEquals(SessionCache.MAX_EVENTS, back.size)
-        assertEquals(events.last().id, back.last().id)
-        assertTrue("older events were dropped, so older ones exist", more)
+        val back = cache.loadEvents("srv", "claude:a")!!
+        assertEquals(SessionCache.MAX_EVENTS, back.events.size)
+        assertEquals(events.last().id, back.events.last().id)
+        assertTrue("older events were dropped, so older ones exist", back.hasMoreBefore)
 
-        // Only the most recent conversations are kept.
+        // Only the most recently used conversations are kept.
         cache.saveEvents("srv", "claude:b", events.take(3), false)
-        Thread.sleep(20)
         cache.saveEvents("srv", "claude:c", events.take(3), false)
-        val kept = listOf("claude:a", "claude:b", "claude:c").count { cache.loadEvents("srv", it) != null }
-        assertEquals(2, kept)
+        val kept = listOf("claude:a", "claude:b", "claude:c").filter { cache.loadEvents("srv", it) != null }
+        assertEquals(listOf("claude:b", "claude:c"), kept)
 
         cache.clear()
         assertNull(cache.loadList("srv"))
+        assertNull(cache.loadEvents("srv", "claude:b"))
         assertFalse(dir.exists())
     }
 

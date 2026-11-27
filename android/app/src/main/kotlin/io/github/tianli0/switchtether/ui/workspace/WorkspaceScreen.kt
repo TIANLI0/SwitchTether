@@ -156,7 +156,12 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                     Box {
                         BasicComponent(
                             title = stringResource(R.string.term_new),
-                            summary = if (term.terminals.isEmpty()) stringResource(R.string.workspace_security) else null,
+                            summary = when {
+                                // Disabled offline: say why instead of a dead row.
+                                !term.online && conn !is io.github.tianli0.switchtether.connection.ConnectionState.Unpaired -> stringResource(R.string.offline_needs_computer)
+                                term.terminals.isEmpty() -> stringResource(R.string.workspace_security)
+                                else -> null
+                            },
                             startAction = { RowIcon(AppIcons.Add) },
                             enabled = term.online && !term.busy,
                             onClick = { showShells = true },

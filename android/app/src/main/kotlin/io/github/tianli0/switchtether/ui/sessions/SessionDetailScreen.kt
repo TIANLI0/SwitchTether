@@ -78,6 +78,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import io.github.tianli0.switchtether.ui.keys.chord
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -155,6 +158,8 @@ fun SessionDetailScreen(
     val container = appContainer()
     val vm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }) }
     val state by vm.state.collectAsStateWithLifecycle()
+    // "Share to SwitchTether": a share sent to this session fills the input box (never sends).
+    io.github.tianli0.switchtether.share.ShareIntoComposer(sessionId, vm, state)
     val pins by container.liveUpdates.pins.collectAsStateWithLifecycle()
     val pinned = sessionId in pins
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -391,6 +396,24 @@ fun SessionDetailScreen(
     }
 
     val turnEdited = remember(state.log) { io.github.tianli0.switchtether.remote.session.TurnFiles.latestTurn(state.log.events).isNotEmpty() }
+    // Hardware keyboard (§35): Esc interrupts the running turn (asking first, like the stop
+    // capsule), Ctrl+/ lists the slash commands. Only what the page offers right now.
+    val keyState = io.github.tianli0.switchtether.ui.keys.SessionKeyState(
+        canInterrupt = state.canInterrupt,
+        turnRunning = summary != null && summary.isLive && summary.status != "idle",
+        composerEnabled = state.canSend || state.canQueue,
+        hasSlashCommands = state.slashCommands.isNotEmpty(),
+    )
+    io.github.tianli0.switchtether.ui.keys.ShortcutHandler { action ->
+        if (!keyState.allows(action)) return@ShortcutHandler false
+        when (action) {
+            io.github.tianli0.switchtether.ui.keys.ShortcutAction.INTERRUPT -> confirmInterrupt = true
+            io.github.tianli0.switchtether.ui.keys.ShortcutAction.SLASH_PANEL -> showSlashHelp = true
+            else -> return@ShortcutHandler false
+        }
+        true
+    }
+    val intake = rememberComposerIntake(vm)
     SessionDetailContent(
         state = state,
         initialTitle = initialTitle,
@@ -449,6 +472,7 @@ fun SessionDetailScreen(
         onEndSession = if (state.canStop) {
             { confirmStop = true }
         } else null,
+        onIntake = intake,
     )
     val endLabel = stringResource(R.string.session_end)
     ConfirmDialog(
@@ -574,9 +598,17 @@ fun SessionDetailContent(
     onEndSession: (() -> Unit)? = null,
     /** "Usage of project …" in the cost sheet (null = not offered). */
     onOpenProjectUsage: ((String) -> Unit)? = null,
+    /**
+     * Content from other apps (drag and drop, keyboard images, pasted pictures, §35): the payload and
+     * whether the text field already inserted its text. Null = the page takes no drops.
+     */
+    onIntake: ((DropPayload, Boolean) -> Unit)? = null,
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
+    // A drag from another app over the conversation (page) or over the input field.
+    var pageDropHover by remember { mutableStateOf(false) }
+    var fieldDropHover by remember { mutableStateOf(false) }
     // Cost and tokens of the loaded turns (§26); the capsule only shows when a turn reported usage.
     var showCost by rememberSaveable { mutableStateOf(false) }
     val usageBreakdown = remember(state.log, summary?.agent) { sessionUsageBreakdown(state.log.events, summary?.agent) }
@@ -637,6 +669,7 @@ fun SessionDetailContent(
         // Notices that used to take rows above the list now float over its top, under the title bar.
         val topNotices: @Composable () -> Unit = {
         ConnectionBanner(state.connection, onRetryConnection)
+        io.github.tianli0.switchtether.ui.common.OfflineSnapshotNotice(state.snapshotAtMs)
         val d = state.detail.valueOrNull
         if (d != null && state.online && !state.canSend) {
             val readOnly = !d.summary.managed && d.summary.origin != "managed" && d.summary.controlLevel != io.github.tianli0.switchtether.remote.protocol.ControlLevel.FULL
@@ -696,10 +729,26 @@ fun SessionDetailContent(
         val composerHeight = with(density) { (composerHeightPx - slashPanelPx).coerceAtLeast(0).toDp() }
         // Title bar + notices + capsules: where the first message starts at rest.
         val topOverlay = with(density) { topOverlayPx.toDp() }.coerceAtLeast(topInset)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        val dropModifier = if (onIntake != null) {
+            Modifier.contentDropTarget(onHover = { pageDropHover = it }, onDrop = { onIntake(it, false) })
+        } else {
+            Modifier
+        }
+        Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier)) {
             Box(Modifier.fillMaxSize().then(if (chatBackdrop != null) Modifier.layerBackdrop(chatBackdrop) else Modifier)) {
                 when (val ev = state.events) {
-                    Loadable.Loading -> LoadingState(stringResource(R.string.state_loading), Modifier.padding(top = topOverlay))
+                    // Offline and this conversation is not on the phone: say so instead of spinning.
+                    Loadable.Loading -> if (state.notInSnapshot && !state.online) {
+                        ErrorState(
+                            stringResource(R.string.session_not_in_snapshot),
+                            Modifier.padding(top = topOverlay).testTag("not-in-snapshot"),
+                            stringResource(R.string.session_not_in_snapshot_detail),
+                            stringResource(R.string.action_retry),
+                            onRetryConnection,
+                        )
+                    } else {
+                        LoadingState(stringResource(R.string.state_loading), Modifier.padding(top = topOverlay))
+                    }
                     is Loadable.Failed -> ErrorState(ev.error.title(), Modifier.padding(top = topOverlay), ev.error.detail, stringResource(R.string.action_retry), onReload)
                     is Loadable.Ready -> EventList(state, ctx, listState, follow, onLoadOlder, onToggleSteps, onRetryOutgoing, onDeleteOutgoing, onEditOutgoing, onWithdrawOutgoing, bottomInset = composerHeight, topInset = topOverlay)
                 }
@@ -756,10 +805,21 @@ fun SessionDetailContent(
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { composerHeightPx = it.height }) {
                     // One blur for the whole composer (field, keys, capsules, notes) instead of one per control.
                     io.github.tianli0.coui17.patterns.GlassGroup(Modifier.fillMaxWidth()) {
-                        Composer(state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick, onViewImage = { ctx.onViewImage?.invoke(it) }, onSlashCommand = onSlashCommand, onSlashPanelHeight = { slashPanelPx = it })
+                        Composer(
+                            state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick,
+                            onViewImage = { ctx.onViewImage?.invoke(it) }, onSlashCommand = onSlashCommand, onSlashPanelHeight = { slashPanelPx = it },
+                            onIntake = onIntake, onDropHover = { fieldDropHover = it },
+                        )
                     }
                 }
             }
+            // While something from another app is dragged over the page: what a drop would do here.
+            val gate = composerGate(state)
+            DropHighlight(
+                visible = onIntake != null && (pageDropHover || fieldDropHover),
+                label = intakeBlockText(gate.block) ?: stringResource(R.string.drop_here),
+                blocked = gate.block != IntakeBlock.NONE,
+            )
         }
     }
     SessionInfoSheet(
@@ -1049,6 +1109,7 @@ private fun StepsHeader(row: TimelineRow.Steps, onToggle: (String) -> Unit) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun Composer(
     state: SessionDetailState,
@@ -1065,6 +1126,8 @@ private fun Composer(
     onViewImage: (io.github.tianli0.switchtether.ui.sessions.render.ImagePreview) -> Unit = {},
     onSlashCommand: ((SlashEntry) -> Unit)? = null,
     onSlashPanelHeight: (Int) -> Unit = {},
+    onIntake: ((DropPayload, Boolean) -> Unit)? = null,
+    onDropHover: (Boolean) -> Unit = {},
 ) {
     val s = state.detail.valueOrNull?.summary
     Column(
@@ -1104,7 +1167,16 @@ private fun Composer(
             return@Column
         }
         if (!state.online) {
-            ComposerNote(stringResource(if (state.canQueue) R.string.composer_queue_hint else R.string.composer_offline), LocalDevColors.current.warn)
+            ComposerNote(
+                stringResource(
+                    when {
+                        state.canQueue -> R.string.composer_queue_hint
+                        state.snapshotAtMs != null -> R.string.composer_offline_snapshot
+                        else -> R.string.composer_offline
+                    },
+                ),
+                LocalDevColors.current.warn,
+            )
         }
         if (state.attachedImages.isNotEmpty()) {
             Row(
@@ -1231,6 +1303,12 @@ private fun Composer(
                 }
                 Spacer(Modifier.size(io.github.tianli0.coui17.patterns.ComposerKeyGap))
             }
+            val sendEnabled = (state.canSend || state.canQueue) &&
+                (state.draft.isNotBlank() || state.attachedImages.isNotEmpty() || state.draftAttachments.isNotEmpty()) &&
+                state.draftAttachments.all { it.ready }
+            val receiver = remember(onIntake) {
+                onIntake?.let { intake -> composerContentListener(onHover = onDropHover, onFiles = { intake(it, true) }) }
+            }
             // InputPill with a caret that follows a draft set from outside (a picked slash command).
             DraftInputPill(
                 value = state.draft,
@@ -1246,14 +1324,19 @@ private fun Composer(
                 // Sending never blocks the field: the bubble shows the message's own progress.
                 state = InputPillState(
                     enabled = state.canSend || state.canQueue,
-                    sendEnabled = (state.canSend || state.canQueue) &&
-                        (state.draft.isNotBlank() || state.attachedImages.isNotEmpty() || state.draftAttachments.isNotEmpty()) &&
-                        state.draftAttachments.all { it.ready },
+                    sendEnabled = sendEnabled,
                     busy = false,
                 ),
                 modifier = Modifier.weight(1f),
-                fieldModifier = Modifier.testTag("composer"),
+                // Hardware keyboard: Ctrl+Enter sends; Enter and Shift+Enter stay a new line (§35).
+                fieldModifier = Modifier.testTag("composer").onPreviewKeyEvent { ev ->
+                    if (ev.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    if (io.github.tianli0.switchtether.ui.keys.KeyShortcuts.composer(ev.chord()) != io.github.tianli0.switchtether.ui.keys.ShortcutAction.SEND) return@onPreviewKeyEvent false
+                    if (sendEnabled) onSend()
+                    true
+                },
                 sendModifier = Modifier.testTag("send"),
+                receiveContent = receiver,
             )
         }
     }

@@ -140,4 +140,11 @@
     <string name="ntf_open_to_check">Open SwitchTether to check.</string>
     <string name="notif_quiet_switch">Silence by time of day</string>
     <string name="notif_quiet_off">Off: notifications alert as usual</string>
+    <!-- Conversation notifications and inline reply (docs/ANDROID_UI.md §34). -->
+    <string name="conv_you">You</string>
+    <string name="conv_reply_step_up">Needs confirmation in SwitchTether. Tap to open the session.</string>
+    <string name="conv_reply_failed">Not sent: “%1$s”. %2$s</string>
+    <string name="conv_settings_title">Conversations</string>
+    <string name="conv_conversation_settings">Conversation settings</string>
+    <string name="conv_conversation_settings_summary">Mark a session as priority under “Conversations” in the notification shade</string>
 </resources>

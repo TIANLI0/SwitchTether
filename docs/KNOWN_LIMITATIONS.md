@@ -59,12 +59,18 @@ TODO list. Each item says what the user experiences.
    settings. "唤醒并重试" sends a Wake-on-LAN magic packet, which only helps while the phone is
    on the computer's LAN and the computer's adapter / firmware already allow Wake-on-LAN
    (SwitchTether never changes those). A sleeping computer cannot be woken from outside its
-   LAN (Tailscale, relay). Not yet verified against a real sleeping computer.
+   LAN (Tailscale, relay). Not yet verified against a real sleeping computer. While offline the
+   phone shows an offline snapshot ("离线快照 · 10:42", ANDROID_UI.md §33): the session list
+   survives an app restart, conversation contents only while the app process lives (opened since
+   the last start, in memory); everything that needs the computer is disabled.
 10. Android background delivery is best effort: there is no push channel (FCM or UnifiedPush
     would need a third-party app or a hosted backend, which the phone app does not use).
     Notifications depend on the optional foreground connection service and vendor battery
     policies; Doze can delay them. Missed events are fetched after reconnecting (event replay) or
     by refreshing (resync).
+    Conversation notifications follow the same delivery. An inline reply starts the connection
+    for up to 9 s and is sent once; a send the computer wants step-up for is not sent (the
+    notification asks to open the app). Not yet verified on a device.
 10f. Session content search reads the last 64 MiB of each transcript within 3 s, newest sessions
     first; on very large histories older sessions may be reported as not searched (`partial`).
     It searches message text only, not tool output, and sessions of other CC Switch providers
@@ -102,7 +108,8 @@ TODO list. Each item says what the user experiences.
 17. A remote shell has the full privileges of the desktop user; SwitchTether cannot make a shell
     "safe" and does not filter commands.
 18. Revocation cannot erase data on a phone that is offline or lost; the app avoids persisting
-    sensitive content and keys are hardware-bound.
+    sensitive content (no transcripts on disk; the offline session list is Keystore-sealed and
+    crypto-erased on unpair / revoke) and keys are hardware-bound.
 19. The file browser deny-list reduces accidental exposure but is not a sandbox (the shell can
     read anything the user can).
 20. On Linux without a Secret Service and on headless systems the desktop key falls back to an

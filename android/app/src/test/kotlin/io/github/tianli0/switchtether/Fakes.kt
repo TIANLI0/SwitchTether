@@ -75,8 +75,16 @@ class FakeSessionRepository : SessionRepository {
     var cached: List<SessionSummary>? = null
     var cachedPage: EventPage? = null
     val optionCalls = mutableListOf<Pair<String?, String?>>()
-    override suspend fun cachedList() = cached
-    override suspend fun cachedEvents(id: String) = cachedPage
+    /** When the offline snapshot ([cached], [cachedPage]) was taken. */
+    var cachedAtMs = 1_000L
+    override suspend fun cachedList() = cached?.let { io.github.tianli0.switchtether.data.ListSnapshot(it, cachedAtMs) }
+    override suspend fun cachedEvents(id: String) = cachedPage?.let { io.github.tianli0.switchtether.data.EventsSnapshot(it.events, it.hasMoreBefore, cachedAtMs) }
+
+    /** What screens handed over as offline snapshots (session id → events). */
+    val remembered = mutableMapOf<String, List<AgentEvent>>()
+    override fun rememberEvents(id: String, events: List<AgentEvent>, hasMoreBefore: Boolean) {
+        remembered[id] = events
+    }
     override suspend fun setOptions(id: String, model: String?, effort: String?, commandId: String): CommandOutcome {
         optionCalls += model to effort
         return nextOutcome(commandId)

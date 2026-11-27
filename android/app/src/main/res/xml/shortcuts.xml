@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Direct Share: the long-lived per-session conversation shortcuts (notify/Conversations.kt) carry
+     this category, so the system share sheet offers sessions as targets. A share into one opens
+     that session's input box prefilled; nothing is sent automatically (docs/ANDROID_UI.md §32). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="io.github.tianli0.switchtether.MainActivity">
+        <data android:mimeType="text/*" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="*/*" />
+        <category android:name="io.github.tianli0.switchtether.category.SESSION_SHARE" />
+    </share-target>
+</shortcuts>

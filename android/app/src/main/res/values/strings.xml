@@ -144,6 +144,12 @@
     <string name="composer_hint">Message the agent</string>
     <string name="composer_draft_hint">Draft (kept on this phone, not sent)</string>
     <string name="composer_offline">Offline — drafts are kept on this phone and never sent automatically.</string>
+    <string name="composer_offline_snapshot">Offline snapshot — sending, approvals and session tools need the computer. Drafts stay on this phone.</string>
+    <string name="offline_snapshot_label">Offline snapshot · %1$s</string>
+    <string name="offline_snapshot_detail">Read-only. Updates by itself when the computer is reachable again.</string>
+    <string name="session_not_in_snapshot">This conversation is not in the offline snapshot</string>
+    <string name="session_not_in_snapshot_detail">Only conversations opened since the app started are kept (in memory, never on disk). It appears once the computer is reachable.</string>
+    <string name="offline_needs_computer">Needs the computer — not connected</string>
     <string name="composer_unavailable">Sending messages to this session is not possible (%1$s). Sessions started outside SwitchTether can only be observed.</string>
     <string name="approval_confirm_title">Answer this request?</string>
     <string name="approval_confirm_body">Send \"%1$s\" to the agent on the computer.</string>
@@ -520,4 +526,50 @@
     <string name="about_coui17_summary">The ColorOS 17 component library this app is built with</string>
     <string name="about_upstream_summary">The desktop app SwitchTether is a fork of</string>
     <string name="home_manage_summary">Providers, usage, MCP, skills, settings</string>
+    <!-- Share to SwitchTether (docs/ANDROID_UI.md §32) -->
+    <string name="share_title">Share to SwitchTether</string>
+    <string name="share_files">Files: %1$d</string>
+    <string name="share_too_many">%1$d files were shared, but one message takes at most %2$d. The first %2$d will be attached; the other %3$d will not.</string>
+    <string name="share_rejected">%1$d item(s) could not be read and are left out.</string>
+    <string name="share_offline">Your computer is offline. The share waits here until it is back; nothing is sent until you press send.</string>
+    <string name="share_new_session_hint">The text becomes the first message; you start the session yourself.</string>
+    <string name="share_new_session_files_hint">The text becomes the first message; the files are attached in the input box of the new session once it has started.</string>
+    <string name="share_sessions">Sessions that can take a message</string>
+    <string name="share_no_sessions">No session can take a message right now. Start a new one.</string>
+    <string name="share_sessions_failed">Could not load the sessions.</string>
+    <string name="share_cancel">Cancel share</string>
+    <string name="share_unpaired_title">Pair with your computer first</string>
+    <string name="share_unpaired_body">SwitchTether is not paired with a computer yet. Pair it first; what you shared waits here and you pick a session afterwards.</string>
+    <string name="share_unpaired_pair">Pair</string>
+    <string name="share_overflow_toast">%1$d shared files were not attached: a message takes at most %2$d.</string>
+    <string name="share_session_cannot_send">This session cannot take a message now. Pick another one.</string>
+    <!-- Drag and drop / rich content into a composer (ANDROID_UI.md §35) -->
+    <string name="drop_here">Drop to add to the message</string>
+    <string name="drop_here_new_session">Drop to add to the first message</string>
+    <string name="drop_blocked_snapshot">Offline snapshot: nothing can be added until your computer is connected.</string>
+    <string name="drop_blocked_offline">Your computer is not connected; nothing can be added.</string>
+    <string name="drop_blocked_no_control">This session is read-only on the phone; nothing can be added.</string>
+    <string name="drop_blocked_loading">The session is still loading; nothing can be added yet.</string>
+    <string name="drop_files_offline">Attachments need the connection to your computer: %1$d file(s) left out.</string>
+    <string name="drop_files_text_only">This session takes text only: %1$d file(s) left out.</string>
+    <string name="drop_overflow">%1$d file(s) not attached: a message takes at most %2$d.</string>
+    <plurals name="new_session_drop_files">
+        <item quantity="one">%1$d file will be attached in the new session’s input box once it has started.</item>
+        <item quantity="other">%1$d files will be attached in the new session’s input box once it has started.</item>
+    </plurals>
+    <!-- Hardware keyboard shortcuts, listed by the system helper (Meta+/) -->
+    <string name="kbd_group_general">SwitchTether</string>
+    <string name="kbd_group_session">Session</string>
+    <string name="kbd_search">Search sessions</string>
+    <string name="kbd_new_session">New session</string>
+    <string name="kbd_tab_home">Home</string>
+    <string name="kbd_tab_sessions">Sessions</string>
+    <string name="kbd_tab_workspace">Workspace</string>
+    <string name="kbd_previous_session">Previous session (list beside the conversation)</string>
+    <string name="kbd_next_session">Next session (list beside the conversation)</string>
+    <string name="kbd_send">Send message</string>
+    <string name="kbd_interrupt">Interrupt the running turn</string>
+    <string name="kbd_slash">Slash commands</string>
+    <string name="kbd_approve">Approve (approval card focused)</string>
+    <string name="kbd_deny">Deny (approval card focused)</string>
 </resources>
