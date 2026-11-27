@@ -87,10 +87,37 @@ const CODEX: &[Mode] = &[
     },
 ];
 
+/// Google Antigravity's ACP session modes (`agy acp`, `session/set_mode`); the descriptions are
+/// agy's own. Running without permission prompts (`--dangerously-skip-permissions`) is a process
+/// flag, not a mode, and is not offered.
+const AGY: &[Mode] = &[
+    Mode {
+        id: "default",
+        label: "Default",
+        description: "Asks before edits and commands, per your Antigravity permission settings.",
+    },
+    Mode {
+        id: "acceptEdits",
+        label: "Accept edits",
+        description: "Approves file edits in the workspace without asking.",
+    },
+    Mode {
+        id: "auto",
+        label: "Auto",
+        description: "Approves edits and safe commands; asks before irreversible actions.",
+    },
+    Mode {
+        id: "plan",
+        label: "Plan",
+        description: "Plans carefully before executing a task.",
+    },
+];
+
 fn table(agent: &str) -> &'static [Mode] {
     match agent {
         "claude_code" => CLAUDE,
         "codex" => CODEX,
+        "agy" => AGY,
         _ => &[],
     }
 }
@@ -122,6 +149,7 @@ pub fn normalize(agent: &str, mode: &str) -> Option<&'static str> {
         ("codex", "read-only") => "readOnly",
         ("codex", "never" | "danger-full-access") => FULL_ACCESS,
         ("claude_code", "manual") => "default",
+        ("agy", "accept-edits") => "acceptEdits",
         (_, m) => m,
     };
     table(agent).iter().find(|m| m.id == mode).map(|m| m.id)
@@ -222,6 +250,9 @@ mod tests {
         assert_eq!(normalize("claude_code", "auto"), Some("auto"));
         assert_eq!(normalize("claude_code", "manual"), Some("default"));
         assert_eq!(normalize("dsh", "default"), None);
+        assert_eq!(normalize("agy", "accept-edits"), Some("acceptEdits"));
+        assert_eq!(normalize("agy", "plan"), Some("plan"));
+        assert_eq!(normalize("agy", "bypassPermissions"), None);
         assert!(needs_step_up("bypassPermissions"));
         assert!(needs_step_up("danger-full-access"));
         assert!(!needs_step_up("auto"));
