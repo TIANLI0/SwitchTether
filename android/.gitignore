@@ -7,3 +7,5 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+# The committed Baseline Profile (the root .gitignore excludes every release/ directory).
+!app/src/release/
