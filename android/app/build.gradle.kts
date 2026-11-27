@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -105,6 +106,21 @@ kotlin {
     jvmToolchain(21)
 }
 
+// :core:remote models are immutable but built without the Compose compiler; see the file's header.
+composeCompiler {
+    stabilityConfigurationFiles.add(layout.projectDirectory.file("compose-stability.conf"))
+}
+
+// Baseline Profile (android/DEV_NOTES.md "Performance"): generated on a device by
+// `./gradlew :app:generateBaselineProfile` from :baselineprofile and committed under
+// src/release/generated/baselineProfiles/. Never generated during a normal build, so release
+// builds (CI) need no device.
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    dexLayoutOptimization = true
+}
+
 dependencies {
     implementation(libs.lottie.compose)
     implementation(project(":core:remote"))
@@ -135,6 +151,9 @@ dependencies {
     implementation(libs.markdown.renderer.code)
     implementation(libs.highlights)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    // Installs the Baseline Profile on devices without Play's cloud profiles (sideloaded APKs).
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit4)

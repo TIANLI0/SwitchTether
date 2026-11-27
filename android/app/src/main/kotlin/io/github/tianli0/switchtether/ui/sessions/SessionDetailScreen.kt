@@ -789,7 +789,7 @@ fun SessionDetailContent(
                 // glass has the conversation to blur (inside the list it could only paint a flat fill).
                 if (state.events is Loadable.Ready) {
                     Box(Modifier.fillMaxSize()) {
-                        NewMessagesPill(listState, follow, chatRows(state), composerHeight)
+                        NewMessagesPill(listState, follow, remember(state.timeline, state.outgoing, state.typing) { chatRows(state) }, composerHeight)
                     }
                 }
                 // Under the gesture handle the conversation fades into the page: text scrolling past
@@ -1008,7 +1008,9 @@ private fun EventList(
     /** Height of the title bar, notices and capsules floating over the list's top. */
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
-    val rows = chatRows(state)
+    // Remembered: the state also changes on every keystroke in the composer (draft), and the rows only
+    // depend on these three fields; rebuilding them copied the whole timeline each time.
+    val rows = remember(state.timeline, state.outgoing, state.typing) { chatRows(state) }
     // Opening a session lands at the bottom; only then may scrolling to the top load older pages.
     // Saveable: coming back from a sub-agent page keeps the reading position instead of jumping down.
     var initialScrollDone by androidx.compose.runtime.saveable.rememberSaveable(state.sessionId) { mutableStateOf(false) }
