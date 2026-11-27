@@ -53,7 +53,7 @@ fun QuotaGlance(quotas: List<QuotaView>, onOpen: () -> Unit) {
 
 @Composable
 private fun QuotaGlanceBlock(q: QuotaView, position: CardListPosition, onOpen: () -> Unit) {
-    val tiers = q.tiers.take(4)
+    val tiers = q.tiers.filter { it.name !in HOME_HIDDEN_TIERS }.take(4)
     val tightest = tiers.filter { it.utilizationPercent != null }.maxByOrNull { it.utilizationPercent!! }
     Column(
         Modifier
@@ -117,6 +117,12 @@ private fun TierLine(t: QuotaTier) {
     }
 }
 
+/**
+ * Windows left off Home: Antigravity's Claude / GPT allowance. Its Gemini windows are what the
+ * glance is for; the Usage page still lists every window.
+ */
+internal val HOME_HIDDEN_TIERS = setOf("agy_third_party_five_hour", "agy_third_party_weekly")
+
 /** The window's name short enough for the fixed label column: "5 小时", "本周", "本周 Opus". */
 @Composable
 private fun shortTierLabel(name: String): String {
@@ -127,6 +133,10 @@ private fun shortTierLabel(name: String): String {
         model != null -> stringResource(R.string.home_tier_week) + " " + model
         name == "monthly" || name == "30_day" -> stringResource(R.string.home_tier_month)
         name == "credits" -> stringResource(R.string.quota_tier_credits)
+        // Antigravity: Home shows only its Gemini windows (the block already says Antigravity).
+        name == "agy_gemini_five_hour" -> stringResource(R.string.home_tier_5h)
+        name == "agy_gemini_weekly" -> stringResource(R.string.home_tier_week)
+        name == "agy_gemini_argon_weekly" -> stringResource(R.string.home_tier_week) + " Argon"
         else -> io.github.tianli0.switchtether.ui.manage.quotaTierLabel(name)
     }
 }
