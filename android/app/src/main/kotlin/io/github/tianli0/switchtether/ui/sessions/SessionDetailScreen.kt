@@ -1572,9 +1572,11 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
                     "claude_code" -> stringResource(R.string.cap_reason_observed_claude, stringResource(R.string.continue_action))
                     "codex" -> stringResource(R.string.cap_reason_observed_codex, stringResource(R.string.continue_action))
                     "dsh" -> stringResource(R.string.cap_reason_observed_dsh, stringResource(R.string.continue_action))
+                    "agy" -> stringResource(R.string.cap_reason_observed_agy, stringResource(R.string.continue_action))
                     else -> null
                 }
-            } else if (s.agent == "agy") {
+            } else if (s.agent == "agy" && d.capabilities.continueSession == null) {
+                // A desktop that cannot continue Antigravity conversations (before managed agy).
                 stringResource(R.string.cap_reason_history_agy)
             } else {
                 null

@@ -5,6 +5,9 @@ import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.switchtether.ui.manage.DEFAULT_APPS
 import io.github.tianli0.switchtether.ui.manage.ToggleListKind
 import io.github.tianli0.switchtether.ui.manage.appChoices
+import io.github.tianli0.switchtether.ui.sessions.fallbackEfforts
+import io.github.tianli0.switchtether.ui.sessions.launcherAgents
+import io.github.tianli0.switchtether.ui.sessions.supportsEffort
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,5 +37,14 @@ class AgyAppsTest {
     fun agyHasALabelAndAQuota() {
         assertEquals("Antigravity", Formatters.agentLabel("agy"))
         assertTrue("agy" in QUOTA_TOOLS)
+    }
+
+    @Test
+    fun launcherOffersAgyOnlyWhenTheDesktopCanStartIt() {
+        assertEquals(listOf("claude_code", "codex", "dsh"), launcherAgents(setOf("managed_sessions", "dsh_web")))
+        assertEquals(listOf("claude_code", "codex", "dsh", "agy"), launcherAgents(setOf("managed_sessions", "managed_agy")))
+        // Thinking levels before the desktop's list arrives.
+        assertEquals(listOf("low", "medium", "high", "xhigh"), fallbackEfforts("agy"))
+        assertTrue(supportsEffort("agy"))
     }
 }

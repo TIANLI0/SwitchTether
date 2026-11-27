@@ -495,7 +495,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
             // Mute by switching off, not by typing internal ids: known agents plus the projects of recent sessions.
             item { SectionHeader(stringResource(R.string.notif_muted_agents)) }
             item {
-                val agents = (listOf("claude_code", "codex", "dsh") + prefs.mutedAgents).distinct()
+                val agents = (listOf("claude_code", "codex", "dsh", "agy") + prefs.mutedAgents).distinct()
                 GroupCard {
                     agents.forEachIndexed { i, a ->
                         SwitchPreference(
