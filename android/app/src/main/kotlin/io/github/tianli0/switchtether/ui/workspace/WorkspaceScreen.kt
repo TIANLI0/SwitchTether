@@ -181,33 +181,6 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                     }
                 }
             }
-            item { SmallTitle(stringResource(R.string.ws_files)) }
-            item {
-                val roots = (files.roots as? Loadable.Ready)?.value.orEmpty()
-                GroupCard {
-                    if (roots.isEmpty()) {
-                        ArrowPreference(
-                            title = stringResource(R.string.ws_files_open),
-                            startAction = { RowIcon(AppIcons.Files) },
-                            onClick = { onOpen(Route.Files) },
-                            cardListPosition = CardListPosition.Full,
-                        )
-                    }
-                    roots.forEachIndexed { i, r ->
-                        ArrowPreference(
-                            // Folder name for a project root, the phone's words for Home / Desktop / ….
-                            title = rootLabel(r),
-                            summary = r.path,
-                            startAction = { RowIcon(AppIcons.Files) },
-                            onClick = {
-                                filesVm.browse(r.path)
-                                onOpen(Route.Files)
-                            },
-                            cardListPosition = cardListPositionOf(i, roots.size),
-                        )
-                    }
-                }
-            }
             item { SmallTitle(stringResource(R.string.forward_title)) }
             item {
                 val forwards by container.portForwards.active.collectAsStateWithLifecycle()
@@ -235,6 +208,34 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                         onClick = { onOpen(Route.Git) },
                         cardListPosition = CardListPosition.Full,
                     )
+                }
+            }
+            // The folders come last: their list grows with the projects, the rows above stay put.
+            item { SmallTitle(stringResource(R.string.ws_files)) }
+            item {
+                val roots = (files.roots as? Loadable.Ready)?.value.orEmpty()
+                GroupCard {
+                    if (roots.isEmpty()) {
+                        ArrowPreference(
+                            title = stringResource(R.string.ws_files_open),
+                            startAction = { RowIcon(AppIcons.Files) },
+                            onClick = { onOpen(Route.Files) },
+                            cardListPosition = CardListPosition.Full,
+                        )
+                    }
+                    roots.forEachIndexed { i, r ->
+                        ArrowPreference(
+                            // Folder name for a project root, the phone's words for Home / Desktop / ….
+                            title = rootLabel(r),
+                            summary = r.path,
+                            startAction = { RowIcon(AppIcons.Files) },
+                            onClick = {
+                                filesVm.browse(r.path)
+                                onOpen(Route.Files)
+                            },
+                            cardListPosition = cardListPositionOf(i, roots.size),
+                        )
+                    }
                 }
             }
         }
