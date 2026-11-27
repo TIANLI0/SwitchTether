@@ -71,6 +71,12 @@ class SessionCache(
         snap?.also { lists[serverId] = it }
     }
 
+    /**
+     * The list kept in memory for [serverId] (saved or loaded earlier in this process), without
+     * touching the disk: cheap enough for a screen's first frame on the main thread.
+     */
+    fun peekList(serverId: String): ListSnapshot? = synchronized(lock) { lists[serverId] }
+
     fun saveList(serverId: String, items: List<SessionSummary>) = synchronized(lock) {
         dropLegacy()
         var keep = items.take(maxListItems)

@@ -61,6 +61,12 @@ interface SessionRepository {
     /** Offline snapshot: last session list seen from this desktop, null if none (see SessionCache). */
     suspend fun cachedList(): io.github.tianli0.switchtether.data.ListSnapshot? = null
 
+    /**
+     * The last session list this process already holds in memory (another screen loaded or read it),
+     * without waiting: what a list screen shows in its first frame. Null when nothing is held yet.
+     */
+    fun peekList(): io.github.tianli0.switchtether.data.ListSnapshot? = null
+
     /** Offline snapshot: newest events of a conversation as last seen in this process, null if none. */
     suspend fun cachedEvents(id: String): io.github.tianli0.switchtether.data.EventsSnapshot? = null
 
@@ -257,6 +263,7 @@ class RemoteSessionRepository(
         if (cache != null && cursor == null && query == SessionQuery()) {
             serverId()?.let { sid ->
                 lastServerId = sid
+                listServerId = sid
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.saveList(sid, page.items) }
             }
         }
@@ -266,7 +273,16 @@ class RemoteSessionRepository(
     override suspend fun cachedList(): io.github.tianli0.switchtether.data.ListSnapshot? {
         val c = cache ?: return null
         val sid = serverId() ?: return null
+        listServerId = sid
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { c.loadList(sid) }
+    }
+
+    /** Server id of the last list saved or read ([peekList] is not suspending). */
+    @Volatile private var listServerId: String? = null
+
+    override fun peekList(): io.github.tianli0.switchtether.data.ListSnapshot? {
+        val sid = listServerId ?: return null
+        return cache?.peekList(sid)
     }
 
     override suspend fun cachedEvents(id: String): io.github.tianli0.switchtether.data.EventsSnapshot? {

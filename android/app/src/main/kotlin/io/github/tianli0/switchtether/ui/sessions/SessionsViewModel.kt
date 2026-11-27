@@ -61,7 +61,12 @@ data class SessionsState(
 
 @OptIn(FlowPreview::class)
 class SessionsViewModel(private val conn: ConnectionController, private val repo: SessionRepository) : ViewModel() {
-    private val _state = MutableStateFlow(SessionsState(connection = conn.state.value))
+    /**
+     * The first frame already shows the list Home loaded a moment ago (held in memory by the
+     * repository): starting from Loading put a "正在加载…" frame between Home and the list on the
+     * first switch to this tab. The disk snapshot below still fills in when nothing is held yet.
+     */
+    private val _state = MutableStateFlow(initialState(conn.state.value, repo.peekList()))
     val state: StateFlow<SessionsState> = _state.asStateFlow()
     private val queryFlow = MutableStateFlow("")
     private var loadJob: Job? = null
@@ -188,6 +193,12 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
                 _state.update { it.copy(loadingMore = false) }
             }
         }
+    }
+
+    private fun initialState(connection: ConnectionState, held: io.github.tianli0.switchtether.data.ListSnapshot?): SessionsState {
+        val st = SessionsState(connection = connection)
+        if (held == null || held.items.isEmpty()) return st
+        return st.copy(items = Loadable.Ready(held.items), snapshotAtMs = io.github.tianli0.switchtether.ui.common.snapshotLabelFor(connection, held.savedAtMs)).withKnown()
     }
 
     /** The connection dropped: what is shown stays, labelled as a snapshot of this moment. */
