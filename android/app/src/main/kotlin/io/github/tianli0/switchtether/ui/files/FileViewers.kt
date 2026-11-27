@@ -3,7 +3,6 @@ package io.github.tianli0.switchtether.ui.files
 import io.github.tianli0.coui17.patterns.LinkButton
 import io.github.tianli0.coui17.patterns.SmallButton
 import android.content.ActivityNotFoundException
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
@@ -94,6 +93,7 @@ import io.github.tianli0.switchtether.files.LocalFile
 import io.github.tianli0.switchtether.remote.api.ApiException
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.common.Formatters
+import io.github.tianli0.switchtether.ui.common.rememberPredictiveBack
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -613,11 +613,11 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
                 }
                 PageBadge(stringResource(R.string.viewer_pdf_page, listState.firstVisibleItemIndex + 1, pdf.pageCount), Modifier.align(Alignment.BottomCenter))
                 zoomedPage?.let { start ->
-                    BackHandler { zoomedPage = null }
-                    PdfZoomPager(pdf, start, (constraints.maxWidth * 2).coerceIn(800, 2400), onClose = { page ->
+                    val back = rememberPredictiveBack { zoomedPage = null }
+                    PdfZoomPager(pdf, start, (constraints.maxWidth * 2).coerceIn(800, 2400), back) { page ->
                         zoomedPage = null
                         listState.requestScrollToItem(page)
-                    })
+                    }
                 }
             }
         }
@@ -625,9 +625,9 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
 }
 
 @Composable
-private fun PdfZoomPager(pdf: PdfDoc, start: Int, renderWidthPx: Int, onClose: (Int) -> Unit) {
+private fun PdfZoomPager(pdf: PdfDoc, start: Int, renderWidthPx: Int, modifier: Modifier, onClose: (Int) -> Unit) {
     val pager = rememberPagerState(initialPage = start) { pdf.pageCount }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().then(modifier).background(Color.Black)) {
         HorizontalPager(state = pager, beyondViewportPageCount = 0, key = { it }, modifier = Modifier.fillMaxSize()) { index ->
             val page by produceState<ImageBitmap?>(null, index, renderWidthPx) {
                 value = withContext(Dispatchers.IO) { pdf.render(index, renderWidthPx)?.asImageBitmap() }

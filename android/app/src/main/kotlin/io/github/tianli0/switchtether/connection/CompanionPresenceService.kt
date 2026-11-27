@@ -17,7 +17,7 @@ import io.github.tianli0.switchtether.SwitchTetherApp
 @RequiresApi(Build.VERSION_CODES.S)
 class CompanionPresenceService : CompanionDeviceService() {
 
-    private fun container() = (application as? SwitchTetherApp)?.container
+    private fun container() = (application as? SwitchTetherApp)?.link
 
     private fun appeared(what: String) {
         Log.i(TAG, "computer nearby: $what")

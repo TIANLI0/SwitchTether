@@ -36,7 +36,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
-/** Manual dependency container (no DI framework). One per process. */
+/**
+ * Manual dependency container (no DI framework) of the UI process. The background side —
+ * notifications, Live Update cards, the widget, port forwards, the monitor service — lives in the
+ * `:link` process ([io.github.tianli0.switchtether.link.LinkContainer], docs/ANDROID_UI.md §38);
+ * this process connects only while the app is in use and can be reclaimed once it is left.
+ */
 class AppContainer(private val context: Context) {
     val appScope = CoroutineScope(SupervisorJob())
     val keys = KeystoreKeys(context)
@@ -106,18 +111,19 @@ class AppContainer(private val context: Context) {
 
     @Volatile var isForeground: Boolean = false
         private set
-    @Volatile private var serviceRunning = false
 
+    /** Notification settings (the `:link` process posts the notifications and reads the same store). */
     val notifyPrefsState = settingsStore.notifyPrefs.stateIn(appScope, SharingStarted.Eagerly, io.github.tianli0.switchtether.remote.notify.NotifyPrefs())
-    /** Conversation notifications: session shortcuts, inline-reply threads (docs/ANDROID_UI.md §34). */
-    val conversations = io.github.tianli0.switchtether.notify.ConversationNotifier(context)
-    private val notifier = io.github.tianli0.switchtether.notify.Notifier(context, appScope, connection, notifyPrefsState, { isForeground }, conversations) { id -> liveUpdates.covers(id) }
 
-    /** Working/waiting live sessions (keeps the monitor service's CPU wake lock). */
-    val activeSessions get() = notifier.activeSessions
+    /** Shared with the `:link` process (companion, auto-pin, pending wipe). */
+    val linkPrefs: io.github.tianli0.switchtether.data.LinkPrefs = stores
 
-    /** Home-screen widget data (memory only). */
-    val widget = io.github.tianli0.switchtether.widget.StatusWidgetUpdater(context, appScope, connection, sessions)
+    /** Messages to / from the `:link` process. */
+    val link = io.github.tianli0.switchtether.link.LinkClient(context)
+
+    /** Pinned tasks; the cards are posted by the `:link` process. */
+    val livePins = io.github.tianli0.switchtether.link.LivePins(context, appScope, link, linkPrefs)
+
     val money = io.github.tianli0.switchtether.domain.MoneySettings(context, appScope, connection)
 
     /** Session detail currently on screen (Android 17 Handoff offers it to the user's other device). */
@@ -156,12 +162,13 @@ class AppContainer(private val context: Context) {
         cleanUpInterruptedTransfers()
     }
 
-    /** Hands the system a summary of this process (foreground, monitor service, connected, transfers) for its exit record. */
+    /** Hands the system a summary of this process (foreground, connected, transfers) for its exit record. */
     private fun publishProcessState() {
         diagnostics.setSummary(
             io.github.tianli0.switchtether.diag.ProcessSummary(
                 foreground = isForeground,
-                monitor = serviceRunning,
+                // The monitor service runs in the `:link` process, which records its own state.
+                monitor = false,
                 online = connection.state.value is io.github.tianli0.switchtether.connection.ConnectionState.Online,
                 transfers = transfers.active.value.size,
             ),
@@ -198,33 +205,6 @@ class AppContainer(private val context: Context) {
         }
     }
 
-    /** Pinned tasks → Android 16 Live Updates (ColorOS 16 Fluid Cloud / 流体云). */
-    val liveUpdates: io.github.tianli0.switchtether.notify.LiveUpdates by lazy {
-        io.github.tianli0.switchtether.notify.LiveUpdates(
-            context = context,
-            scope = appScope,
-            conn = connection,
-            pairingStore = pairingStore,
-            channel = io.github.tianli0.switchtether.notify.AndroidLiveUpdateChannel(context),
-            resolveApproval = { s, r, d, c -> sessions.resolveApproval(s, r, d, c) },
-            enabled = { io.github.tianli0.switchtether.remote.notify.NotifyType.LIVE_UPDATE in notifyPrefsState.value.enabled },
-            // The card replaces the ordinary "finished / failed / stopped" notification, so it sounds
-            // exactly when that one would have (type on, agent / project not muted, not quiet hours,
-            // app not in front).
-            alertOnFinish = { s ->
-                val prefs = notifyPrefsState.value
-                val type = when (s.phase) {
-                    io.github.tianli0.switchtether.remote.live.LivePhase.FAILED -> io.github.tianli0.switchtether.remote.notify.NotifyType.TASK_FAILED
-                    io.github.tianli0.switchtether.remote.live.LivePhase.INTERRUPTED -> io.github.tianli0.switchtether.remote.notify.NotifyType.SESSION_INTERRUPTED
-                    else -> io.github.tianli0.switchtether.remote.notify.NotifyType.TASK_COMPLETED
-                }
-                val minute = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
-                !isForeground && type in prefs.enabled && s.agent !in prefs.mutedAgents &&
-                    (s.project == null || s.project !in prefs.mutedProjects) && !prefs.inQuietHours(minute)
-            },
-        )
-    }
-
     /** Self-update (GitHub releases; checksum + signing-certificate verified). */
     val updates = io.github.tianli0.switchtether.update.UpdateManager(context)
 
@@ -232,10 +212,14 @@ class AppContainer(private val context: Context) {
     val showUpdateRequest = MutableStateFlow(false)
 
     /** The phone itself interrupted/stopped a session or killed a terminal (suppresses the echo notification). */
-    fun noteLocalAction(target: String, action: io.github.tianli0.switchtether.remote.notify.LocalAction) = notifier.noteLocalAction(target, action)
-
-    /** An approval was answered from its notification: withdraw it, or show the session's next open request. */
-    fun requestAnswered(sessionId: String, requestId: String) = notifier.requestAnswered(sessionId, requestId)
+    fun noteLocalAction(target: String, action: io.github.tianli0.switchtether.remote.notify.LocalAction) {
+        link.send(
+            io.github.tianli0.switchtether.link.LinkProtocol.message(io.github.tianli0.switchtether.link.LinkProtocol.LOCAL_ACTION) {
+                putString(io.github.tianli0.switchtether.link.LinkProtocol.K_TARGET, target)
+                putString(io.github.tianli0.switchtether.link.LinkProtocol.K_ACTION, action.name)
+            },
+        )
+    }
 
     /** The new-session sheet was left for the folder picker page; reopen it when the picker closes. */
     val newSessionReopen = MutableStateFlow(false)
@@ -253,38 +237,14 @@ class AppContainer(private val context: Context) {
     val openTerminalRequest = MutableStateFlow<String?>(null)
 
     /** Optional Bluetooth association with the computer (battery exemption, presence wake-ups). */
-    val companion = io.github.tianli0.switchtether.connection.CompanionLink(context)
+    val companion = io.github.tianli0.switchtether.connection.CompanionLink(context, linkPrefs, appScope)
 
-    /** Pinned tasks and port forwards need the connection wherever the computer is. */
-    private fun hasHardKeepAlive(): Boolean =
-        liveUpdates.pins.value.isNotEmpty() || portForwards.active.value.isNotEmpty()
-
-    /**
-     * Whether the monitor service should run in the background right now: a pinned task or port
-     * forward, or the "Stay connected in background" setting — the latter only while the bound
-     * computer is nearby when the user chose "nearby only" (see [CompanionLink]).
-     */
-    suspend fun wantsMonitor(): Boolean {
-        if (pairingStore.current() == null) return false
-        if (hasHardKeepAlive()) return true
-        return settingsStore.backgroundConnection.first() && companion.allowsBackgroundKeepAlive()
+    /** "Nearby only" changed or an association was added / removed: the `:link` process decides again. */
+    fun onCompanionChanged() {
+        link.send(io.github.tianli0.switchtether.link.LinkProtocol.message(io.github.tianli0.switchtether.link.LinkProtocol.COMPANION, -1))
     }
 
-    /** From [io.github.tianli0.switchtether.connection.CompanionPresenceService]. */
-    fun onCompanionPresence(present: Boolean) {
-        companion.setPresent(present)
-        appScope.launch {
-            if (wantsMonitor()) {
-                io.github.tianli0.switchtether.connection.ReconnectWorker.schedulePeriodic(context)
-                io.github.tianli0.switchtether.notify.MonitorService.start(context)
-            } else if (!isForeground && serviceRunning) {
-                // The computer left: let the process go instead of holding a connection nobody nearby needs.
-                io.github.tianli0.switchtether.notify.MonitorService.stop(context)
-            }
-        }
-    }
-
-    /** Pending "stop the connection" after leaving the app without the monitor service. */
+    /** Pending "stop the connection" after leaving the app. */
     private var backgroundStop: kotlinx.coroutines.Job? = null
 
     fun onForeground() {
@@ -294,51 +254,28 @@ class AppContainer(private val context: Context) {
         backgroundStop = null
         network.start()
         connection.start()
-        appScope.launch {
-            // A pinned task keeps the connection alive (its Live Update must follow the session).
-            if (wantsMonitor()) {
-                io.github.tianli0.switchtether.connection.ReconnectWorker.schedulePeriodic(context)
-                io.github.tianli0.switchtether.notify.MonitorService.start(context)
-            }
-        }
+        // Binds the `:link` process: it connects too, and may start the monitor service now that
+        // the app is in front (pinned tasks, port forwards, "Stay connected in background").
+        link.setForeground(true)
     }
 
     fun onBackground() {
         isForeground = false
         publishProcessState()
-        // With the monitor service running the connection stays up; otherwise nothing runs in
-        // background — after a short grace, so a quick look at another app (copying a code, a
-        // glance at a message) does not cost a full reconnect, which via the relay takes seconds.
-        if (!serviceRunning) {
-            backgroundStop?.cancel()
-            backgroundStop = appScope.launch {
-                kotlinx.coroutines.delay(BACKGROUND_GRACE_MS)
-                if (!isForeground && !serviceRunning) {
-                    network.stop()
-                    connection.stop()
-                }
-            }
-        } else {
-            appScope.launch {
-                if (!isForeground && !wantsMonitor()) io.github.tianli0.switchtether.notify.MonitorService.stop(context)
+        link.setForeground(false)
+        // After a short grace, so a quick look at another app (copying a code, a glance at a
+        // message) does not cost a full reconnect, which via the relay takes seconds. Then this
+        // process holds nothing: the `:link` process keeps the background connection if wanted.
+        backgroundStop?.cancel()
+        backgroundStop = appScope.launch {
+            kotlinx.coroutines.delay(BACKGROUND_GRACE_MS)
+            if (!isForeground) {
+                network.stop()
+                connection.stop()
+                onTrimMemory()
             }
         }
-        trimAfterBackground()
-    }
-
-    private var trimJob: kotlinx.coroutines.Job? = null
-
-    /**
-     * After a while in the background, drops what only the UI needed: idle HTTP connections
-     * (their sockets and TLS buffers) are reopened on demand. The events WebSocket is not idle
-     * and stays up.
-     */
-    private fun trimAfterBackground() {
-        trimJob?.cancel()
-        trimJob = appScope.launch {
-            kotlinx.coroutines.delay(60_000)
-            if (!isForeground) onTrimMemory()
-        }
+        link.unbindAfter(BACKGROUND_GRACE_MS)
     }
 
     /** Releases re-creatable memory (called from Application.onTrimMemory and after backgrounding). */
@@ -348,69 +285,9 @@ class AppContainer(private val context: Context) {
         runCatching { baseClient.connectionPool.evictAll() }
     }
 
-    /** Wake locks while reconnecting and a periodic liveness alarm, while the monitor service runs. */
-    private val keepAlive by lazy { io.github.tianli0.switchtether.connection.KeepAlive(context, appScope, connection.state) }
-
-    fun onServiceKeepAlive() {
-        serviceRunning = true
-        publishProcessState()
-        network.start()
-        connection.start()
-        keepAlive.start()
-    }
-
-    /** The keep-alive alarm fired (see [io.github.tianli0.switchtether.connection.KeepAlive]). */
-    fun keepAliveTick() {
-        if (serviceRunning) keepAlive.tick(connection)
-        else io.github.tianli0.switchtether.connection.KeepAlive.cancel(context)
-    }
-
-    fun onServiceStopped() {
-        serviceRunning = false
-        publishProcessState()
-        keepAlive.stop()
-        if (!isForeground) {
-            network.stop()
-            connection.stop()
-        }
-    }
-
-    /**
-     * For a notification button (approve, answer, reply) pressed while the app is in the background:
-     * makes sure the desktop connection is up, starting it briefly when nothing keeps it alive.
-     */
-    suspend fun awaitOnline(timeoutMs: Long): Boolean {
-        if (connection.apiOrNull() != null) return true
-        connection.start()
-        return kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
-            connection.state.first { it is io.github.tianli0.switchtether.connection.ConnectionState.Online }
-        } != null
-    }
-
-    /** After [awaitOnline]: nothing runs in the background unless the app or the monitor service needs it. */
-    fun releaseBackgroundConnection() {
-        if (!isForeground && !serviceRunning) {
-            network.stop()
-            connection.stop()
-        }
-    }
-
-    /** Settings toggle "Stay connected in background". */
+    /** Settings toggle "Stay connected in background" (the `:link` process follows the stored value). */
     fun setBackgroundConnection(enabled: Boolean) {
-        appScope.launch {
-            settingsStore.setBackgroundConnection(enabled)
-            if (enabled && pairingStore.current() != null) {
-                io.github.tianli0.switchtether.connection.ReconnectWorker.schedulePeriodic(context)
-                if (wantsMonitor()) io.github.tianli0.switchtether.notify.MonitorService.start(context)
-            }
-            if (!enabled) {
-                if (liveUpdates.pins.value.isEmpty()) {
-                    io.github.tianli0.switchtether.connection.ReconnectWorker.cancel(context)
-                }
-                // Running port forwards keep the connection (a browser on the phone depends on it).
-                if (portForwards.active.value.isEmpty()) io.github.tianli0.switchtether.notify.MonitorService.stop(context)
-            }
-        }
+        appScope.launch { settingsStore.setBackgroundConnection(enabled) }
     }
 
     /**
@@ -430,6 +307,7 @@ class AppContainer(private val context: Context) {
         pendingVerification.value = null
         connection.reset()
         connection.start()
+        link.send(io.github.tianli0.switchtether.link.LinkProtocol.message(io.github.tianli0.switchtether.link.LinkProtocol.RESET))
     }
 
     /**
@@ -449,17 +327,24 @@ class AppContainer(private val context: Context) {
 
     private suspend fun wipeLocal(desktop: PairedDesktop) {
         io.github.tianli0.switchtether.connection.ReconnectWorker.cancel(context)
-        io.github.tianli0.switchtether.notify.MonitorService.stop(context)
         pairingStore.clear()
         keys.delete(desktop.identityAlias)
         keys.delete(desktop.stepUpAlias)
         keys.deleteAllExcept(emptySet())
+        // The `:link` process stops the monitor service, its forwards and the conversations
+        // (session shortcuts) of that computer.
+        link.send(io.github.tianli0.switchtether.link.LinkProtocol.message(io.github.tianli0.switchtether.link.LinkProtocol.RESET))
+        wipeUiData()
+    }
+
+    /** What this process keeps for a computer that is gone (also after the `:link` process saw the revocation). */
+    private suspend fun wipeUiData() {
         draftStore.clearAll()
         money.clear()
         fileStore.onServerForgotten() // temporary copies of that computer's files; user downloads stay
         clearCaches()
         stepUpGate.clear()
-        conversations.forgetAll() // session shortcuts / conversations of that computer
+        linkPrefs.setPendingWipe(null)
     }
 
     fun clearCaches() {
@@ -494,47 +379,22 @@ class AppContainer(private val context: Context) {
 
     @Volatile private var stepUpEnabledCache = true
 
-    /** Port forwards to the computer's loopback (docs/PROTOCOL.md §7.11); memory only. */
-    val portForwards: io.github.tianli0.switchtether.forward.PortForwards by lazy {
-        io.github.tianli0.switchtether.forward.PortForwards(appScope, connection, stepUpGate, { stepUpEnabledCache }, ::forwardErrorPage)
-    }
-
-    /** Page a browser on the phone gets when the forwarded port cannot be reached; reloads itself every 3 s. */
-    private fun forwardErrorPage(kind: io.github.tianli0.switchtether.remote.forward.LocalForwarder.ErrorKind, port: Int): String {
-        val refused = kind == io.github.tianli0.switchtether.remote.forward.LocalForwarder.ErrorKind.REFUSED
-        val title = if (refused) context.getString(R.string.forward_page_refused_title, port) else context.getString(R.string.forward_page_unreachable_title)
-        val body = context.getString(if (refused) R.string.forward_page_refused_body else R.string.forward_page_unreachable_body)
-        val footer = context.getString(R.string.forward_page_footer, port)
-        fun esc(t: String) = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-            "<meta http-equiv=\"refresh\" content=\"3\"><title>SwitchTether</title><style>" +
-            "body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f4f5f7;color:#1f2328}" +
-            "@media(prefers-color-scheme:dark){body{background:#121417;color:#e6e8eb}}main{max-width:28rem;padding:2rem}" +
-            "h1{font-size:1.2rem;margin:0 0 .75rem}p{margin:.3rem 0;line-height:1.55;opacity:.8}small{opacity:.55}" +
-            "</style></head><body><main><h1>${esc(title)}</h1><p>${esc(body)}</p><p><small>${esc(footer)}</small></p></main></body></html>"
+    /** Port forwards to the computer's loopback (docs/PROTOCOL.md §7.11); the listeners run in the `:link` process. */
+    val portForwards: io.github.tianli0.switchtether.forward.Forwards by lazy {
+        io.github.tianli0.switchtether.link.LinkedForwards(appScope, link, connection, stepUpGate) { stepUpEnabledCache }
     }
 
     init {
         appScope.launch { pairingStore.desktop.collect { stepUpEnabledCache = it?.stepUpEnabled == true } }
-        notifier.start()
-        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { conversations.prune() }
-        liveUpdates.start()
-        widget.start()
-        money.start()
-        // Pinning a task while the app is open must keep the connection once the app goes to the
-        // background (foreground services may only be started from the foreground).
-        appScope.launch {
-            // Running port forwards likewise: the phone's browser keeps using them in the background.
-            kotlinx.coroutines.flow.combine(liveUpdates.pins, portForwards.active) { pins, forwards -> pins.isNotEmpty() || forwards.isNotEmpty() }
-                .distinctUntilChanged()
-                .collect { keep ->
-                    if (keep && isForeground && pairingStore.current() != null) {
-                        io.github.tianli0.switchtether.notify.MonitorService.start(context)
-                    } else if (!keep && serviceRunning && !settingsStore.backgroundConnection.first()) {
-                        io.github.tianli0.switchtether.notify.MonitorService.stop(context)
-                    }
-                }
-        }
+        appScope.launch { runCatching { stores.migrateLegacy(context) } }
+        // The `:link` process saw the desktop revoke this phone (now, or while this process was gone).
+        appScope.launch { link.revoked.collect { if (linkPrefs.pendingWipe.first() != null) wipeAfterRevocation() } }
+        appScope.launch { if (linkPrefs.pendingWipe.first() != null) wipeAfterRevocation() }
+    }
+
+    private suspend fun wipeAfterRevocation() {
+        connection.reset()
+        wipeUiData()
     }
 
     /** Whether the current pairing has a step-up key (terminal/file writes possible at all). */

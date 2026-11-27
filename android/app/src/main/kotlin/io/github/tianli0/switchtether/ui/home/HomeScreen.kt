@@ -219,7 +219,7 @@ private fun SessionGroup(
     onOpen: (Route) -> Unit,
     activity: Map<String, SessionActivity> = emptyMap(),
 ) {
-    val pins by io.github.tianli0.switchtether.ui.appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
+    val pins by io.github.tianli0.switchtether.ui.appContainer().livePins.pins.collectAsStateWithLifecycle()
     var menuFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.remote.protocol.SessionSummary?>(null) }
     val touch = io.github.suqi8.coui.kmp.basic.rememberPreciseClickState()
     io.github.tianli0.switchtether.ui.sessions.PinMenu(menuFor, menuFor?.id in pins, touch) { menuFor = null }

@@ -160,7 +160,7 @@ fun SessionDetailScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     // "Share to SwitchTether": a share sent to this session fills the input box (never sends).
     io.github.tianli0.switchtether.share.ShareIntoComposer(sessionId, vm, state)
-    val pins by container.liveUpdates.pins.collectAsStateWithLifecycle()
+    val pins by container.livePins.pins.collectAsStateWithLifecycle()
     val pinned = sessionId in pins
     val context = androidx.compose.ui.platform.LocalContext.current
     val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
@@ -1189,13 +1189,11 @@ private fun Composer(
                     val bytes = remember(img.dataBase64) {
                         runCatching { android.util.Base64.decode(img.dataBase64, android.util.Base64.DEFAULT) }.getOrNull()
                     }
-                    val bmp = remember(bytes) {
-                        bytes?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
-                    }
+                    val thumb = io.github.tianli0.switchtether.ui.common.rememberThumbnail(bytes, 56.dp).value
                     Box(Modifier.size(56.dp)) {
-                        if (bmp != null) {
+                        if (thumb is io.github.tianli0.switchtether.ui.common.Thumb.Ready) {
                             androidx.compose.foundation.Image(
-                                bitmap = bmp,
+                                bitmap = thumb.bitmap,
                                 contentDescription = img.name ?: stringResource(R.string.render_image_preview),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize().clip(SquircleShape(8.dp)),
@@ -1449,8 +1447,7 @@ private fun decodeThumbnail(context: android.content.Context, uri: android.net.U
     val r = context.contentResolver
     val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
     r.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
-    var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
+    val sample = io.github.tianli0.switchtether.ui.common.Thumbnails.sampleSize(bounds.outWidth, bounds.outHeight, maxPx)
     val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
     r.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }?.asImageBitmap()
 }.getOrNull()

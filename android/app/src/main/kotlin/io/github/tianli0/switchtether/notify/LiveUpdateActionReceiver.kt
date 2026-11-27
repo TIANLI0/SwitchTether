@@ -9,7 +9,7 @@ import io.github.tianli0.switchtether.SwitchTetherApp
 class LiveUpdateActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as? SwitchTetherApp ?: return
-        val live = app.container.liveUpdates
+        val live = app.link?.liveUpdates ?: return
         val session = intent.getStringExtra(EXTRA_SESSION) ?: return
         val request = intent.getStringExtra(EXTRA_REQUEST)
         when (intent.action) {

@@ -130,9 +130,8 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
                     SwitchPreference(
                         checked = nearbyOnly,
                         onCheckedChange = { v ->
-                            link.setNearbyOnly(v)
-                            // Re-evaluates the monitor at once: starts it when allowed again.
-                            container.onCompanionPresence(link.present.value)
+                            // Then the `:link` process decides again: starts the monitor when allowed again.
+                            link.setNearbyOnly(v) { container.onCompanionChanged() }
                         },
                         title = stringResource(R.string.companion_nearby_only),
                         summary = stringResource(

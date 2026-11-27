@@ -47,7 +47,6 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.ConnectionController
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.forward.ActiveForward
-import io.github.tianli0.switchtether.forward.PortForwards
 import io.github.tianli0.switchtether.forward.StartResult
 import io.github.tianli0.switchtether.remote.forward.TunnelStatus
 import io.github.tianli0.switchtether.remote.protocol.ForwardView
@@ -102,7 +101,7 @@ sealed interface ForwardMessage {
     data class Ended(val remotePort: Int) : ForwardMessage
 }
 
-class PortForwardViewModel(private val conn: ConnectionController, private val forwards: PortForwards) : ViewModel() {
+class PortForwardViewModel(private val conn: ConnectionController, private val forwards: io.github.tianli0.switchtether.forward.Forwards) : ViewModel() {
     private val _state = MutableStateFlow(PortForwardUiState())
     val state: StateFlow<PortForwardUiState> = _state.asStateFlow()
     private val _messages = MutableSharedFlow<ForwardMessage>(extraBufferCapacity = 4)

@@ -3,7 +3,10 @@ package io.github.tianli0.switchtether.ui
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.nav.AppNavHost
+import io.github.tianli0.switchtether.ui.nav.TabCrossfade
+import io.github.tianli0.switchtether.ui.nav.rememberTabTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Transition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -180,7 +183,7 @@ fun MainShell() {
             androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
     }
-    // Back (incl. the predictive gesture) is handled by AppNavHost.
+    val tabs = rememberTabTransition(nav)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val twoPanes = io.github.tianli0.switchtether.ui.nav.usesTwoPanes(maxWidth)
@@ -204,8 +207,8 @@ fun MainShell() {
             },
             onCreated = { id, title ->
                 // "从手机发起的任务自动钉住": the phone started it, so following it is user-initiated.
-                if (container.liveUpdates.autoPinPhoneSessions) {
-                    container.liveUpdates.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true), manual = false)
+                if (container.livePins.autoPinPhoneSessions) {
+                    container.livePins.pin(io.github.tianli0.switchtether.remote.protocol.SessionSummary(id = id, title = title, liveness = "live", status = "busy", managed = true), manual = false)
                 }
                 // A share that chose "new session" brings its files into this session's input box.
                 container.shareInbox.sessionCreated(id)
@@ -262,8 +265,8 @@ fun MainShell() {
                 }
                 Box(Modifier.weight(1f).fillMaxSize()) {
                     // Tablets / unfolded foldables: the tab's list stays beside what it opened (§27).
-                    if (twoPanes) TwoPaneHost(nav)
-                    else AppNavHost(nav, root = { Destination(nav, it, null) }, page = { t, r -> Destination(nav, t, r) })
+                    if (twoPanes) TwoPaneHost(nav, tabs)
+                    else AppNavHost(nav, tabs, root = { Destination(nav, it, null) }, page = { t, r -> Destination(nav, t, r) })
                 }
             }
         } else {
@@ -288,7 +291,7 @@ fun MainShell() {
                         LocalBlurEnabled provides true,
                         LocalBottomBarSpace provides if (showBar) 96.dp else 0.dp,
                     ) {
-                        AppNavHost(nav, root = { Destination(nav, it, null) }, page = { t, r -> Destination(nav, t, r) })
+                        AppNavHost(nav, tabs, root = { Destination(nav, it, null) }, page = { t, r -> Destination(nav, t, r) })
                     }
                 }
                 // ColorOS shows and hides the bar in place: scale, alpha and (with system blur on) a
@@ -347,20 +350,20 @@ fun MainShell() {
  * nothing open the right pane shows a hint. Rows opened from the list replace the detail.
  */
 @Composable
-private fun TwoPaneHost(nav: NavViewModel) {
+private fun TwoPaneHost(nav: NavViewModel, tabs: Transition<Tab>) {
     val listStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val selected = nav.stack.firstNotNullOfOrNull { (it as? Route.SessionDetail)?.sessionId }
     CompositionLocalProvider(io.github.tianli0.switchtether.ui.nav.LocalSelectedSessionId provides selected) {
         io.github.tianli0.switchtether.ui.nav.ListDetailPanes(
             list = {
-                androidx.compose.animation.Crossfade(nav.tab, animationSpec = androidx.compose.animation.core.tween(150), label = "pane-list") { t ->
+                TabCrossfade(tabs, nav.tab) { t ->
                     listStates.SaveableStateProvider("list/${t.name}") {
                         Destination(nav, t, null, onOpenRoot = nav::openFromList)
                     }
                 }
             },
             detail = {
-                AppNavHost(nav, root = { io.github.tianli0.switchtether.ui.nav.PaneEmptyState(it) }, page = { t, r -> Destination(nav, t, r) })
+                AppNavHost(nav, tabs, root = { io.github.tianli0.switchtether.ui.nav.PaneEmptyState(it) }, page = { t, r -> Destination(nav, t, r) })
             },
         )
     }
@@ -395,7 +398,7 @@ private fun Destination(nav: NavViewModel, tab: Tab, route: Route?, onOpenRoot: 
             val container = appContainer()
             androidx.compose.runtime.LaunchedEffect(top.sessionId) {
                 // Seen: its "已完成" result notification has done its job.
-                container.liveUpdates.onSessionOpened(top.sessionId)
+                container.livePins.onSessionOpened(top.sessionId)
             }
             // Handed off only while this page is the one on top (the page under a pushed page
             // stays composed, paused).

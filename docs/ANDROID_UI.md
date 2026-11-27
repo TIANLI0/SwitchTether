@@ -673,16 +673,23 @@ Updates only (no OPPO SDK).
 - `AppNavHost` (`ui/nav/AppNavHost.kt`): one coui-nav `NavDisplay` per tab (COUI17 `coui-nav`,
   from upstream coui17), cross-faded between tabs; each page's UI state is saved while it is in the
   stack, also while another tab shows. Push, pop, the system predictive back gesture and an in-page
-  swipe to the right all drive one position, so the ColorOS slide (§30) follows the finger 1:1:
+  swipe in the reading direction all drive one position. The ColorOS slide (§30) follows the actual
+  edge of the system gesture, revealing the previous page on that side:
   release finishes the pop from there, cancel slides back, a programmatic push / pop runs 280ms.
-  The in-page swipe is the fallback for systems that do not hand the app the gesture's progress;
-  it starts anywhere on the page but only on drags nothing in the page claims first (horizontal
-  code / chip scrollers, selection keep theirs; COUI17 patch 0011). Settings → Appearance →
+  The in-page swipe is the fallback for systems that do not hand the app the gesture's progress.
+  A swipe in the reading direction can start anywhere. The opposite swipe starts just inside its
+  screen edge. Both yield to horizontal code / chip scrollers and text selection. Settings → Appearance →
   predictive back off: no swipe, back is a plain pop once committed. Pages keep the activity's
   ViewModels; the page under the top one stays composed (lifecycle STARTED) and is the one revealed
-  by the gesture. Back at a tab root returns to Home; at Home with nothing to pop no handler is
-  enabled, so the system "back to home" animation runs.
+  by the gesture. Back at a tab root previews Home with a crossfade driven by the gesture. Only
+  the selected tab handles back while the preview is visible. Home with an empty stack leaves
+  back to the system for its launcher animation.
+  In-page back actions such as leaving a folder, closing a file, leaving a Git diff or navigating
+  WebView history animate the current content during the drag and run the existing action on commit.
   `enableOnBackInvokedCallback="true"`; edge-to-edge via `enableEdgeToEdge()`.
+  On a PKJ110 running ColorOS 17, a minimal Android `OnBackAnimationCallback` test reported
+  only zero progress during ADB edge swipes on both sides with target SDK 34 and 37. The in-page
+  right swipe was checked on the same device, including preview, cancellation, and commit.
 - Per-app language: `locales_config` (en, zh-CN) and Settings → 语言 opens the system page
   (Android 13+).
 
@@ -2014,3 +2021,67 @@ transfers running, description, trace size.
 
 **Not verified on a device.** No real exit record was read: the ColorOS kill reasons, the summary round
 trip through the system and the share sheet are unexercised; only unit tests and the build ran.
+
+## 38. Two processes: the UI and `:link` (2026-11-27)
+
+Code: `link/` (`LinkContainer`, `LinkBridge` + `LinkBridgeService` + `LinkReceiver`, `LinkClient`,
+`LinkProtocol`, `LinkedFacades`), `SwitchTetherApp` (one container per process), `AndroidManifest.xml`
+(`android:process=":link"`). Tests: `LinkBridgeIpcTest` (a real `Messenger` binding in Robolectric),
+`LinkProtocolTest`, `ExitRecordsTest`.
+
+**Why.** Exit records from a ColorOS phone showed the single process at ~200 MB RSS while only the
+background connection was needed, and 350–450 MB peaks: the whole UI (Compose, view models, decoded
+images, the offline snapshot) stayed resident behind the monitor service. Now the background work
+runs in a small process of its own and the UI process holds nothing once the app is left, so the
+system can reclaim it (and does first: it is a cached process, the `:link` one is a foreground
+service).
+
+**Who owns what.**
+
+| `:link` process | UI process (main) |
+|---|---|
+| `MonitorService`, `KeepAlive` alarm, `CompanionPresenceService` | activities, screens, view models |
+| its own `ConnectionManager` (the background connection) | its own `ConnectionManager`, while the app is in use + 45 s |
+| `Notifier`, `ConversationNotifier`, `NotifyActionReceiver` | offline snapshot (`SessionCache`), drafts, step-up (biometric) |
+| `LiveUpdates` (cards, `LiveUpdateActionReceiver`) | `LivePins` (mirror + commands) |
+| `PortForwards` (the local listeners) | `LinkedForwards` (asks for the lease with step-up, hands it over) |
+| `StatusWidgetProvider` + updater | transfers (`TransferJobService`), self-update, WorkManager jobs |
+| `BootReceiver`, `LinkReceiver` (recovery) | `ReconnectWorker` → broadcast to `LinkReceiver` |
+
+**Lifecycle.** `ProcessLifecycleOwner` start → the UI connects and binds `LinkBridgeService`
+(`BIND_AUTO_CREATE`), sending `FOREGROUND 1`; the `:link` process connects while bound and starts the
+monitor service if wanted (pins, forwards, "Stay connected in background" + companion presence) — it
+may, the app being in front. Stop → `FOREGROUND 0` (notifications speak again), and 45 s later the UI
+stops its connection, trims its HTTP pool and unbinds. Unbound and without the monitor service, the
+`:link` process stops its connection too and is just a cached process. So while the app is open there
+are two event streams to the desktop (it counts live sockets per device, `push::connected`), never
+one per screen; in the background there is one, in the `:link` process.
+
+**Messages** (`LinkProtocol`, Bundles with JSON strings, both ends this app, not exported):
+UI → link `REGISTER`, `FOREGROUND`, `PIN` (→ `RESULT ok`), `UNPIN`, `SESSION_OPENED`, `LOCAL_ACTION`,
+`FORWARD_ATTACH` (→ `RESULT` with the `StartResult`), `FORWARD_LEASE` (extended), `FORWARD_STOP`,
+`RESET` (pairing replaced / removed), `COMPANION`; link → UI `STATE` (pins + active forwards, on
+every change and on `REGISTER`), `FORWARD_ENDED`, `REVOKED`. Messages sent before the binding is
+connected wait in order; requests time out after 10 s. If the `:link` process dies the mirror drops
+its forwards (their listeners died with it) and the system binds again.
+
+**Shared settings.** The preferences file is now a multi-process DataStore (`MultiProcessDataStoreFactory`
++ `PreferencesFileSerializer`, same file and format — nothing migrates). Values both processes use
+moved into it from per-process SharedPreferences (copied once by `migrateLegacy`): companion "nearby
+only" and presence, "auto-pin tasks started from the phone", and `pending_wipe_server`.
+
+**Revocation.** Whichever process's connection sees it wipes what it owns. The `:link` process removes
+the pairing and keys, its forwards and conversations, stops the monitor and records
+`pending_wipe_server`; the UI process clears drafts, money display, temporary files, caches and
+step-up grants at once (`REVOKED`) or at its next start. Unpair in the UI sends `RESET`.
+
+**WorkManager** is initialised on demand (`SwitchTetherApp` is its `Configuration.Provider`, default
+process = the UI process; the startup initializer is removed in the manifest), so the `:link` process
+may enqueue work while jobs run only in the UI process.
+
+**Diagnostics.** Exit records of both processes are kept, labelled `process ui` / `process link`;
+a UI-process record never counts as "monitor running".
+
+**Thumbnails.** In the same change, images in conversations and the composer strip are decoded at their
+slot size (`ui/common/Thumbnails.kt`, power-of-two sample, off the main thread) instead of at full
+size — a 4000×3000 photo was a 48 MB bitmap for a 120 dp square.

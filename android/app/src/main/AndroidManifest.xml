@@ -109,14 +109,31 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+        <!--
+          The `:link` process (docs/ANDROID_UI.md §38): background connection, notifications, Live
+          Updates, widget, port forwards. Everything below with android:process=":link" runs there;
+          the UI process can be reclaimed once the app is left.
+        -->
         <!-- Keeps the events WebSocket to the paired computer alive in the background (user toggle). -->
         <service
             android:name=".notify.MonitorService"
+            android:process=":link"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+        <!-- Bound by the UI process while the app is in use (messages UI ↔ link). -->
+        <service
+            android:name=".link.LinkBridgeService"
+            android:process=":link"
+            android:exported="false" />
+        <!-- Periodic recovery handed over by ReconnectWorker (WorkManager runs in the UI process). -->
+        <receiver
+            android:name=".link.LinkReceiver"
+            android:process=":link"
+            android:exported="false" />
         <!-- Bound by the system when the associated computer connects / disconnects over Bluetooth. -->
         <service
             android:name=".connection.CompanionPresenceService"
+            android:process=":link"
             android:exported="true"
             android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
             <intent-filter>
@@ -130,6 +147,7 @@
         <!-- Home-screen widget "待处理 / 运行中" (opens sessions only; never approves). -->
         <receiver
             android:name=".widget.StatusWidgetProvider"
+            android:process=":link"
             android:exported="false"
             android:label="@string/widget_label">
             <intent-filter>
@@ -142,18 +160,22 @@
         <!-- Allow / deny / answer / reply buttons of ordinary notifications (PendingIntents only). -->
         <receiver
             android:name=".notify.NotifyActionReceiver"
+            android:process=":link"
             android:exported="false" />
         <!-- Keep-alive alarm of the monitor service (checks / restores the connection while asleep). -->
         <receiver
             android:name=".connection.KeepAlive$Receiver"
+            android:process=":link"
             android:exported="false" />
         <!-- Buttons / swipe-away of pinned tasks' Live Updates (PendingIntents only). -->
         <receiver
             android:name=".notify.LiveUpdateActionReceiver"
+            android:process=":link"
             android:exported="false" />
         <!-- Boot / app-update recovery: schedules WorkManager check (never bypasses FGS rules). -->
         <receiver
             android:name=".connection.BootReceiver"
+            android:process=":link"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -169,6 +191,18 @@
         <receiver
             android:name=".transfer.TransferActionReceiver"
             android:exported="false" />
+        <!-- WorkManager is initialised on demand (SwitchTetherApp is its Configuration.Provider), so the
+             `:link` process can enqueue work while jobs run in the UI process only. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
         <!-- Hands cached / downloaded remote files to viewers and other apps (read grant only; never a file:// URI). -->
         <provider
             android:name="androidx.core.content.FileProvider"

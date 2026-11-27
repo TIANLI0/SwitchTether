@@ -280,7 +280,7 @@
     <string name="settings_background">Stay connected in background</string>
     <string name="settings_background_summary">Stays connected to the computer while in the background so approvals and task changes are notified (ongoing notification).</string>
     <string name="settings_predictive_back">Predictive back gesture</string>
-    <string name="settings_predictive_back_summary">While you swipe back, the page shrinks and shows the one underneath.</string>
+    <string name="settings_predictive_back_summary">The page responds as you swipe back from the edge of the screen.</string>
     <string name="companion_title">Bind computer (Bluetooth)</string>
     <string name="companion_summary_none">Lets Android keep SwitchTether running in the background and wake it when the computer is nearby.</string>
     <string name="companion_summary_bound">Bound: %1$s</string>

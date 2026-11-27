@@ -18,7 +18,11 @@ import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * Optional CompanionDeviceManager association with the user's computer over Bluetooth.
@@ -34,7 +38,12 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * Nothing here touches the computer or any agent: it is a phone-side system association only.
  */
-class CompanionLink(private val context: Context) {
+class CompanionLink(
+    private val context: Context,
+    /** Shared with the other process (the UI sets "nearby only", the `:link` process records presence). */
+    private val prefs: io.github.tianli0.switchtether.data.LinkPrefs,
+    private val scope: kotlinx.coroutines.CoroutineScope,
+) {
 
     data class Association(val id: Int?, val name: String, val address: String?)
 
@@ -45,8 +54,6 @@ class CompanionLink(private val context: Context) {
         fun onChooser(sender: IntentSender)
         fun onFailure(error: String?)
     }
-
-    private val prefs = context.getSharedPreferences("companion", Context.MODE_PRIVATE)
 
     private val cdm: CompanionDeviceManager? =
         if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)) {
@@ -63,33 +70,34 @@ class CompanionLink(private val context: Context) {
     private val _associations = MutableStateFlow(load())
     val associations: StateFlow<List<Association>> = _associations.asStateFlow()
 
-    private val _present = MutableStateFlow(prefs.getBoolean(KEY_PRESENT, true))
-
     /** Last presence reported by the system (true until the first "disappeared" event). */
-    val present: StateFlow<Boolean> = _present.asStateFlow()
-
-    private val _nearbyOnly = MutableStateFlow(prefs.getBoolean(KEY_NEARBY_ONLY, false))
+    val present: StateFlow<Boolean> = prefs.companionPresent.stateIn(scope, SharingStarted.Eagerly, true)
 
     /** "Only stay connected while the computer is nearby" (meaningful only with an association). */
-    val nearbyOnly: StateFlow<Boolean> = _nearbyOnly.asStateFlow()
+    val nearbyOnly: StateFlow<Boolean> = prefs.companionNearbyOnly.stateIn(scope, SharingStarted.Eagerly, false)
 
-    fun setNearbyOnly(value: Boolean) {
-        prefs.edit().putBoolean(KEY_NEARBY_ONLY, value).apply()
-        _nearbyOnly.value = value
+    /** Stores the choice, then runs [then] (on the main thread). */
+    fun setNearbyOnly(value: Boolean, then: () -> Unit = {}) {
+        scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            prefs.setCompanionNearbyOnly(value)
+            then()
+        }
     }
 
-    fun setPresent(value: Boolean) {
-        prefs.edit().putBoolean(KEY_PRESENT, value).apply()
-        _present.value = value
+    suspend fun setPresent(value: Boolean) {
+        prefs.setCompanionPresent(value)
     }
 
     /**
      * Whether a *background-only* connection (the "Stay connected in background" setting, without
      * pinned tasks or port forwards) should be kept right now. False only when the user bound a
-     * computer, chose "nearby only" and the system reported the computer gone.
+     * computer, chose "nearby only" and the system reported the computer gone. Reads the stored
+     * values (the other process may have just changed them).
      */
-    fun allowsBackgroundKeepAlive(): Boolean =
-        _associations.value.isEmpty() || !canObservePresence || !_nearbyOnly.value || _present.value
+    suspend fun allowsBackgroundKeepAlive(): Boolean {
+        refresh()
+        return _associations.value.isEmpty() || !canObservePresence || !prefs.companionNearbyOnly.first() || prefs.companionPresent.first()
+    }
 
     fun refresh() {
         _associations.value = load()
@@ -199,12 +207,10 @@ class CompanionLink(private val context: Context) {
             Log.w(TAG, "disassociate failed: ${e.message}")
         }
         refresh()
-        if (_associations.value.isEmpty()) setPresent(true)
+        if (_associations.value.isEmpty()) scope.launch { setPresent(true) }
     }
 
     private companion object {
         const val TAG = "ST/Companion"
-        const val KEY_NEARBY_ONLY = "nearby_only"
-        const val KEY_PRESENT = "present"
     }
 }

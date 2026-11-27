@@ -87,7 +87,7 @@ fun SessionsContent(
     onSearchHandled: () -> Unit = {},
 ) {
     val refreshing = state.items is Loadable.Ready && state.items.refreshing
-    val pins by appContainer().liveUpdates.pins.collectAsStateWithLifecycle()
+    val pins by appContainer().livePins.pins.collectAsStateWithLifecycle()
     var menuFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.tianli0.switchtether.remote.protocol.SessionSummary?>(null) }
     var expanded by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var searchExpanded by rememberSaveable { mutableStateOf(state.query.isNotEmpty()) }

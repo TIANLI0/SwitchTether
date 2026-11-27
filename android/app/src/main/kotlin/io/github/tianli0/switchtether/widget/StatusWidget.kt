@@ -33,7 +33,7 @@ import kotlinx.serialization.json.JsonObject
 class StatusWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         val app = context.applicationContext as? SwitchTetherApp
-        val snapshot = app?.container?.widget?.snapshot
+        val snapshot = app?.link?.widget?.snapshot
         ids.forEach { manager.updateAppWidget(it, StatusWidgetRenderer.render(context, snapshot)) }
     }
 }

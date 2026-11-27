@@ -22,7 +22,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -53,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import io.github.tianli0.switchtether.ui.common.rememberPredictiveBack
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -220,14 +220,14 @@ private fun DshWebBrowser(ready: DshWebUi.Ready, onBack: () -> Unit, onStop: () 
         webView.loadUrl(ready.startUrl)
     }
     // Back: out of full screen first (full screen has no toolbar), then the page's own history, then leave.
-    BackHandler(enabled = page.canGoBack || fullScreen) {
+    val back = rememberPredictiveBack(enabled = page.canGoBack || fullScreen) {
         if (fullScreen) fullScreen = false else webView.goBack()
     }
     if (fullScreen) PageColoredSystemBars(page.pageColor)
 
     val pageColor = pageContainerColor()
     val chromeColor = if (fullScreen) page.pageColor?.let { Color(it) } ?: pageColor else pageColor
-    Column(Modifier.fillMaxSize().background(chromeColor)) {
+    Column(Modifier.fillMaxSize().then(back).background(chromeColor)) {
         if (!fullScreen) {
             SmallTopAppBar(
                 title = stringResource(R.string.dsh_web_title),

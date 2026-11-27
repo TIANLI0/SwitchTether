@@ -7,7 +7,9 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.core.MultiProcessDataStoreFactory
+import androidx.datastore.preferences.core.PreferencesFileSerializer
+import androidx.datastore.preferences.preferencesDataStoreFile
 import io.github.tianli0.switchtether.remote.notify.NotifyPrefs
 import io.github.tianli0.switchtether.remote.notify.NotifyType
 import io.github.tianli0.switchtether.remote.protocol.ProtocolJson
@@ -49,7 +51,26 @@ data class PairedDesktop(
 }
 
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "switchtether")
+/**
+ * The app's one preferences file, shared by the UI process and the `:link` process (docs/ANDROID_UI.md
+ * §38): a multi-process DataStore, so a write in one process (pairing, a setting, the relay refresh)
+ * reaches the other's flows. Same file and format as the single-process `preferencesDataStore`
+ * it replaces, so nothing is migrated. One instance per process.
+ */
+internal object SharedPreferencesStore {
+    @Volatile private var instance: DataStore<Preferences>? = null
+
+    fun get(context: Context): DataStore<Preferences> = instance ?: synchronized(this) {
+        instance ?: MultiProcessDataStoreFactory.create(
+            serializer = PreferencesFileSerializer,
+            produceFile = { context.applicationContext.preferencesDataStoreFile(FILE_NAME) },
+        ).also { instance = it }
+    }
+
+    const val FILE_NAME = "switchtether"
+}
+
+private val Context.dataStore: DataStore<Preferences> get() = SharedPreferencesStore.get(this)
 
 interface PairingStore {
     val desktop: Flow<PairedDesktop?>
@@ -78,7 +99,35 @@ interface DraftStore {
     suspend fun clearAll()
 }
 
-class DataStoreStores(private val context: Context) : PairingStore, SettingsStore, DraftStore {
+/**
+ * Small settings the UI process and the `:link` process both use. They lived in per-process
+ * SharedPreferences, whose in-memory copy never sees the other process's writes.
+ */
+interface LinkPrefs {
+    /** Companion: keep the background connection only while the bound computer is nearby. */
+    val companionNearbyOnly: Flow<Boolean>
+    suspend fun setCompanionNearbyOnly(value: Boolean)
+
+    /** Companion: last presence the system reported (true until the first "gone"). */
+    val companionPresent: Flow<Boolean>
+    suspend fun setCompanionPresent(value: Boolean)
+
+    /** Live Updates: tasks started from the phone are pinned automatically. */
+    val autoPinPhoneSessions: Flow<Boolean>
+    suspend fun setAutoPinPhoneSessions(value: Boolean)
+
+    /**
+     * Server id whose pairing the `:link` process ended (the desktop revoked this phone) while
+     * the UI process may not have been running: the UI clears what it keeps for it at next start.
+     */
+    val pendingWipe: Flow<String?>
+    suspend fun setPendingWipe(serverId: String?)
+
+    /** Copies the values the SharedPreferences of older builds kept (idempotent; only missing keys). */
+    suspend fun migrateLegacy(context: Context)
+}
+
+class DataStoreStores(private val context: Context) : PairingStore, SettingsStore, DraftStore, LinkPrefs {
     private val store get() = context.dataStore
 
     private val keyDesktop = stringPreferencesKey("paired_desktop_v1")
@@ -153,6 +202,32 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
             p[keyMutedAgents] = n.mutedAgents
             p[keyMutedProjects] = n.mutedProjects
             p[keyQuiet] = "${if (n.quietHoursEnabled) 1 else 0}|${n.quietStartMin}|${n.quietEndMin}"
+        }
+    }
+
+    private val keyNearbyOnly = booleanPreferencesKey("companion_nearby_only")
+    private val keyPresent = booleanPreferencesKey("companion_present")
+    private val keyAutoPin = booleanPreferencesKey("live_auto_pin_new")
+    private val keyPendingWipe = stringPreferencesKey("pending_wipe_server")
+
+    override val companionNearbyOnly: Flow<Boolean> = store.data.map { it[keyNearbyOnly] ?: false }
+    override suspend fun setCompanionNearbyOnly(value: Boolean) { store.edit { it[keyNearbyOnly] = value } }
+    override val companionPresent: Flow<Boolean> = store.data.map { it[keyPresent] ?: true }
+    override suspend fun setCompanionPresent(value: Boolean) { store.edit { it[keyPresent] = value } }
+    override val autoPinPhoneSessions: Flow<Boolean> = store.data.map { it[keyAutoPin] ?: true }
+    override suspend fun setAutoPinPhoneSessions(value: Boolean) { store.edit { it[keyAutoPin] = value } }
+    override val pendingWipe: Flow<String?> = store.data.map { it[keyPendingWipe] }
+    override suspend fun setPendingWipe(serverId: String?) {
+        store.edit { if (serverId == null) it.remove(keyPendingWipe) else it[keyPendingWipe] = serverId }
+    }
+
+    override suspend fun migrateLegacy(context: Context) {
+        val companion = context.getSharedPreferences("companion", Context.MODE_PRIVATE)
+        val live = context.getSharedPreferences("live_pins", Context.MODE_PRIVATE)
+        store.edit { p ->
+            if (p[keyNearbyOnly] == null && companion.contains("nearby_only")) p[keyNearbyOnly] = companion.getBoolean("nearby_only", false)
+            if (p[keyPresent] == null && companion.contains("present")) p[keyPresent] = companion.getBoolean("present", true)
+            if (p[keyAutoPin] == null && live.contains("auto_pin_new")) p[keyAutoPin] = live.getBoolean("auto_pin_new", true)
         }
     }
 

@@ -36,7 +36,7 @@
     <ID>TooGenericExceptionCaught:PairingRepository.kt$DefaultPairingRepository$e: Throwable</ID>
     <ID>TooGenericExceptionCaught:PairingViewModel.kt$PairingViewModel$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PortForward.kt$LocalForwarder$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:PortForwards.kt$PortForwards$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PortForwards.kt$e: Exception</ID>
     <ID>TooGenericExceptionCaught:Repositories.kt$RemoteSessionRepository$e: Exception</ID>
     <ID>TooGenericExceptionCaught:Repositories.kt$SessionRepository$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SessionDetailViewModel.kt$SessionDetailViewModel$e: Exception</ID>

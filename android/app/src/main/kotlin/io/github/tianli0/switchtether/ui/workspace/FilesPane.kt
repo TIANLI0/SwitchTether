@@ -30,7 +30,6 @@ import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.common.resolve
 
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -102,6 +101,7 @@ import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
 import io.github.tianli0.switchtether.ui.common.NoticeVisibility
 import io.github.tianli0.switchtether.ui.common.rememberLast
+import io.github.tianli0.switchtether.ui.common.rememberPredictiveBack
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
@@ -119,8 +119,8 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
     val opened: (@Composable () -> Unit)? = when {
         viewer != null -> {
             {
-                androidx.activity.compose.BackHandler(onBack = vm::closeViewer)
-                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                val back = rememberPredictiveBack(onBack = vm::closeViewer)
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().then(back)) {
                     RemoteFileViewer(
                         ref = RemoteFileRef(viewer.path, viewer.name, viewer.kind, viewer.size, viewer.modifiedMs),
                         onBack = vm::closeViewer,
@@ -228,12 +228,12 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
             else -> onBack?.invoke()
         }
     }
-    androidx.activity.compose.BackHandler(
+    val back = rememberPredictiveBack(
         enabled = state.results != null || state.query.isNotEmpty() || searchExpanded || (!showRoots && (listing?.parent != null || roots.isNotEmpty())),
         onBack = goBack,
     )
     val allLabel = stringResource(R.string.files_all)
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().then(back)) {
         // Header: back, folder name over "共 N 项", then + / search / ⋮.
         val title = if (showRoots || listing == null) allLabel else FileTypes.fileName(listing.path).ifBlank { listing.path }
         val count = if (showRoots) roots.size else listing?.entries?.size
@@ -737,8 +737,8 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
 
 @Composable
 private fun FileScreen(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
-    androidx.activity.compose.BackHandler(onBack = vm::requestCloseFile)
-    Column(Modifier.fillMaxSize()) {
+    val back = rememberPredictiveBack(onBack = vm::requestCloseFile)
+    Column(Modifier.fillMaxSize().then(back)) {
         val f = (state.file as? Loadable.Ready)?.value
         val name = f?.path?.let(FileTypes::fileName).orEmpty()
         val controls = io.github.tianli0.switchtether.ui.files.rememberCodeViewerState(f?.path.orEmpty())
@@ -873,8 +873,8 @@ private fun Modifier.topEdgeFade(height: androidx.compose.ui.unit.Dp): Modifier 
 private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
     val c = state.conflict ?: return
     var confirmOverwrite by remember { mutableStateOf(false) }
-    BackHandler { vm.dismissConflict() }
-    LazyColumn(Modifier.fillMaxSize().testTag("conflict"), contentPadding = PaddingValues(bottom = 24.dp)) {
+    val back = rememberPredictiveBack(onBack = vm::dismissConflict)
+    LazyColumn(Modifier.fillMaxSize().then(back).testTag("conflict"), contentPadding = PaddingValues(bottom = 24.dp)) {
         item { SmallTitle(stringResource(R.string.files_conflict_title)) }
         item {
             GroupCard {

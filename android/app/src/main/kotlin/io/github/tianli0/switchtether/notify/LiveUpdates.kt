@@ -70,6 +70,8 @@ class LiveUpdates(
     /** Whether a finished turn (DONE / FAILED / INTERRUPTED) should sound, per the user's notification settings. */
     private val alertOnFinish: (PinnedSessionState) -> Boolean = { false },
     private val timing: Timing = Timing(),
+    /** "Tasks started from the phone are pinned" (shared setting, see [io.github.tianli0.switchtether.data.LinkPrefs]). */
+    private val autoPin: () -> Boolean = { true },
 ) {
     data class Timing(
         val headlineMs: Long = 3_000L,
@@ -144,9 +146,7 @@ class LiveUpdates(
         "$sessionId|${(e.data["requestId"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: e.id}"
 
     /** Auto-pin newly started live tasks to the phone (respects manual unpin and ignores history). */
-    var autoPinPhoneSessions: Boolean
-        get() = prefs.getBoolean("auto_pin_new", true)
-        set(v) = prefs.edit().putBoolean("auto_pin_new", v).apply()
+    val autoPinPhoneSessions: Boolean get() = autoPin()
 
     fun canPromote(): Boolean = channel.canPromote()
 
