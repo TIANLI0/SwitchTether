@@ -42,11 +42,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -70,6 +72,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -143,7 +146,9 @@ import io.github.tianli0.switchtether.ui.sessions.render.AgentEventRegistry
 import io.github.tianli0.switchtether.ui.sessions.render.RenderContext
 import io.github.tianli0.switchtether.ui.sessions.render.statusStateLabel
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 
 /** "Rewind files" is built but switched off for now (desktop refuses it too). */
@@ -279,11 +284,22 @@ fun SessionDetailScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
     ) { addPicked(it) }
     var showAttach by remember { mutableStateOf(false) }
+    var attachRequested by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val imeInsets = WindowInsets.ime
+    val density = LocalDensity.current
     val dismissIme = {
         focusManager.clearFocus(force = true)
         keyboard?.hide()
+    }
+    LaunchedEffect(attachRequested) {
+        if (attachRequested) {
+            // Let the composer finish moving with the IME before the dialog takes window focus.
+            withTimeoutOrNull(550L) { snapshotFlow { imeInsets.getBottom(density) }.first { it == 0 } }
+            showAttach = true
+            attachRequested = false
+        }
     }
     var showModels by rememberSaveable { mutableStateOf(false) }
     val switchLabel = stringResource(R.string.model_switch_label)
@@ -462,7 +478,7 @@ fun SessionDetailScreen(
         onTogglePin = { state.detail.valueOrNull?.summary?.let { s -> io.github.tianli0.switchtether.ui.common.togglePin(context, s) } },
         onPickImage = {
             dismissIme()
-            showAttach = true
+            attachRequested = true
         },
         onRemoveImage = vm::removeImage,
         onRemoveAttachment = vm::removeAttachment,
