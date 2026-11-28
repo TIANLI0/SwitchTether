@@ -46,7 +46,7 @@ in docs/research), **UNTESTED**, **TODO**.
 | Quit confirmation / exit cleanup | PARTIAL | implemented; not exercised manually |
 | Windows installers (NSIS + MSI, unsigned) | DONE — `pnpm tauri build --bundles nsis,msi` on Windows 11 (built from `1bb7f502`) |
 
-## Android (`android/`)
+## Android (now [SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android))
 
 | Item | Status | Evidence |
 |---|---|---|
@@ -1023,3 +1023,15 @@ on this machine, the phone UI on a device.
   the bucket in a floating COUI-style bubble (`ui/chart/ChartTooltip.kt`), dismissed on release.
 - Checked: unit tests (core cache, phone freshness rule, axis and labels), Robolectric screenshots of
   the four ranges. Not checked against a real provider quota on a device.
+
+## Repository split (2026-11-29)
+
+The Android app and the relay moved to their own repositories with their history
+(git filter-repo): [SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) (`android/` plus a copy of `protocol/fixtures`
+and `docs/ANDROID_UI.md`) and [SwitchTether-Relay](https://github.com/TIANLI0/SwitchTether-Relay) (`relay/`, Go module renamed to
+`github.com/TIANLI0/SwitchTether-Relay`). Paths like `android/...` and `relay/...` in the entries
+above refer to the tree before the split. This repository keeps the wire protocol
+(`docs/PROTOCOL.md`, `docs/RELAY.md`, `protocol/fixtures/`, now with the relay MAC/AUTH vectors in
+`protocol/fixtures/relay/`) and remains the release hub: `release.yml` builds and signs the APK
+from SwitchTether-Android at the release tag and attaches it here, so the in-app updater keeps
+reading this repository's releases.

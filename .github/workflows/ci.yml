@@ -32,8 +32,6 @@ jobs:
       # 定时 / 手动运行不过滤（过滤步骤被跳过、输出为空），一律当作两边都有改动
       frontend: ${{ steps.filter.outputs.frontend || 'true' }}
       backend: ${{ steps.filter.outputs.backend || 'true' }}
-      android: ${{ steps.filter.outputs.android || 'true' }}
-      relay: ${{ steps.filter.outputs.relay || 'true' }}
     steps:
       # On pull_request the filter reads changed files via the API (no checkout);
       # on push it needs a local git history to diff against.
@@ -67,13 +65,6 @@ jobs:
               - "src-tauri/**"
               - "rust-toolchain.toml"
               - "protocol/**"
-              - ".github/workflows/ci.yml"
-            android:
-              - "android/**"
-              - "protocol/**"
-              - ".github/workflows/ci.yml"
-            relay:
-              - "relay/**"
               - ".github/workflows/ci.yml"
 
   frontend:
@@ -352,124 +343,5 @@ jobs:
           & $env:CC_SWITCH_TEST_EXE $testName --ignored --exact --nocapture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  android:
-    name: Android
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.android == 'true'
-    timeout-minutes: 60
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          # android/third_party/coui17 is the COUI17 library (TIANLI0/COUI17) as a submodule.
-          submodules: true
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-37.2 build-tools;37.0.0 platform-tools"
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Unit tests
-        working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest
-
-      - name: Build debug APK
-        working-directory: android
-        run: ./gradlew --no-daemon :app:assembleDebug
-
-      # Android Lint and detekt over SwitchTether's own modules (third_party/ is not analysed).
-      # Existing findings are in the committed baselines; only new ones fail.
-      - name: Android Lint
-        working-directory: android
-        run: ./gradlew --no-daemon :app:lintDebug :core:ui:lintDebug :core:security:lintDebug
-
-      - name: detekt
-        working-directory: android
-        run: ./gradlew --no-daemon detekt
-
-      - name: Upload lint and detekt reports
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: switchtether-android-static-analysis
-          path: |
-            android/app/build/reports/lint-results-debug.*
-            android/core/*/build/reports/lint-results-debug.*
-            android/build/reports/detekt/
-          if-no-files-found: ignore
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: switchtether-android-debug
-          path: android/app/build/outputs/apk/debug/*.apk
-
-  # Relay server (Go, relay/): vet, race tests, then build the Docker image and smoke-test it.
-  relay:
-    name: Relay
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.relay == 'true'
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: relay
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.27.x"
-          cache-dependency-path: relay/go.sum
-
-      - name: Check formatting
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
-
-      - name: go vet
-        run: go vet ./...
-
-      - name: go test
-        run: go test -race -count=1 ./...
-
-      - name: Build Docker image
-        run: docker build -t switchtether-relay:ci .
-
-      - name: Smoke-test the image
-        run: |
-          # Without a relay key the relay must refuse to start (exit code 2).
-          set +e; timeout 20 docker run --rm switchtether-relay:ci; code=$?; set -e
-          echo "exit code without a key: $code"
-          test "$code" = 2
-          key=$(docker run --rm switchtether-relay:ci genkey)
-          docker run -d --name relay-smoke -e SWITCHTETHER_RELAY_KEYS="$key" \
-            -p 127.0.0.1:47700:47700 -p 127.0.0.1:8080:8080 switchtether-relay:ci
-          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 0.5; done
-          curl -fsS http://127.0.0.1:8080/healthz
-          # Raw TCP transport: CONNECT gets a CHALLENGE; a wrong relay-key MAC is refused.
-          exec 3<>/dev/tcp/127.0.0.1/47700
-          printf 'ST-RELAY/1 CONNECT %064d\n' 0 >&3
-          read -r -t 5 challenge <&3 || true
-          echo "CONNECT answered: $challenge"
-          case "$challenge" in "CHALLENGE "*) ;; *) exit 1 ;; esac
-          printf 'KEY not-the-right-mac\n' >&3
-          read -r -t 5 answer <&3 || true
-          exec 3<&-
-          echo "KEY answered: $answer"
-          test "$answer" = "ERR auth_failed"
-          docker exec relay-smoke /switchtether-relay -healthcheck
-          docker stop relay-smoke
-          docker logs relay-smoke
+  # The Android app and the relay live in TIANLI0/SwitchTether-Android and
+  # TIANLI0/SwitchTether-Relay, each with its own CI.

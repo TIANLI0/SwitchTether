@@ -441,11 +441,12 @@ mod tests {
         assert_ne!(a, key_mac(&raw, "connect", "other", "ab"));
     }
 
-    /// Same MACs as the Go relay (relay/internal/relay/testdata/relay_key_vector.json).
+    /// Same MACs as the Go relay (protocol/fixtures/relay/relay_key_vector.json, mirrored in the
+    /// SwitchTether-Relay repository under internal/relay/testdata).
     #[test]
     fn relay_key_mac_matches_the_go_relay_vector() {
         let v: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../relay/internal/relay/testdata/relay_key_vector.json"
+            "../../../../protocol/fixtures/relay/relay_key_vector.json"
         ))
         .unwrap();
         let key = decode_key(v["key"].as_str().unwrap()).unwrap();

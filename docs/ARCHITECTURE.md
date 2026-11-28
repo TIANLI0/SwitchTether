@@ -28,8 +28,9 @@ are enough; there is no public server, broker, database server or message queue.
 | `src-tauri/src/switchtether/` | All fork-specific desktop glue |
 | `src-tauri/crates/switchtether-core/` | Remote Core library (tests, examples `dev_server`, `dev_client`, `managed_smoke`) |
 | `src/components/settings/sections/RemoteSection.tsx`, `src/lib/api/remote.ts` | Desktop "Remote" settings page |
-| `android/` | Native Android app (`:app`, `:core:remote`, `:core:security`, `:core:ui`, the COUI17 submodule `third_party/coui17`) |
-| `protocol/fixtures/` | JSON fixtures parsed by Rust and Kotlin tests |
+| [SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) (own repository) | Native Android app (`:app`, `:core:remote`, `:core:security`, `:core:ui`, the COUI17 submodule `third_party/coui17`); APK released from this repository |
+| [SwitchTether-Relay](https://github.com/TIANLI0/SwitchTether-Relay) (own repository) | Optional relay server (Go), spec in `docs/RELAY.md` |
+| `protocol/fixtures/` | JSON fixtures parsed by Rust and Kotlin tests (source of truth; the Android repository keeps a synced copy), relay test vectors in `relay/` |
 | `docs/` | Protocol, security, compatibility, research evidence |
 
 Upstream hook points (kept minimal for merge-ability): `lib.rs` (module, setup calls, quit
@@ -88,7 +89,7 @@ VERIFIED/PARTIAL/BLOCKED/UNTESTED statuses.
 
 ## 4. Android
 
-See [ANDROID_UI.md](ANDROID_UI.md). Layers: Compose UI → ViewModels → repositories →
+See [ANDROID_UI.md](https://github.com/TIANLI0/SwitchTether-Android/blob/main/docs/ANDROID_UI.md) in the Android repository. Layers: Compose UI → ViewModels → repositories →
 `RemoteApi` (OkHttp, TLS 1.3, Keystore client key, pinned server) + `EventStream` + 
 `ConnectionManager`; `core:security` holds Keystore identity/step-up keys and BiometricPrompt.
 The agent timeline is rendered by a registry keyed by `AgentEvent.kind` with a generic

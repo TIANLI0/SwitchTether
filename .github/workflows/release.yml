@@ -1,7 +1,7 @@
 name: Release
 
-# Builds SwitchTether desktop bundles (Windows, macOS, Linux) and the Android APK for
-# a version tag, then creates a DRAFT GitHub release. Nothing is published
+# Builds SwitchTether desktop bundles (Windows, macOS, Linux) and the Android APK (from
+# TIANLI0/SwitchTether-Android) for a version tag, then creates a DRAFT GitHub release. Nothing is published
 # automatically. Signing is optional and only used when the corresponding
 # secrets exist; unsigned artifacts are labelled as such.
 #
@@ -17,6 +17,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Release tag (e.g. v1.2.0). Empty: build only, from main and android_ref."
+        type: string
+        default: ""
       dry_run:
         description: "Build only, do not create a release"
         type: boolean
@@ -26,18 +30,34 @@ on:
         type: choice
         options: [all, android, desktop]
         default: all
+      android_ref:
+        description: "SwitchTether-Android ref to build when no release tag is given"
+        type: string
+        default: main
 
-# A tag builds the platforms whose own version equals the tag's (see the plan job): a release
-# that only changes the Android app bumps android/app/build.gradle.kts alone, and v<that version>
-# then builds and publishes the APK only. The desktop is built when package.json carries the
-# tag's version. The updaters cope with a release that lacks their asset (they skip it).
+# The Android app lives in TIANLI0/SwitchTether-Android, but its APK is published here, next to
+# the desktop bundles: users and the in-app updater read this repository's releases, and the
+# release signing key is a secret of this repository only. The android job checks out
+# SwitchTether-Android at the release tag.
+#
+# A release tag builds the platforms whose own version equals the tag's (see the plan job):
+#   desktop  package.json carries the tag's version
+#   android  TIANLI0/SwitchTether-Android has the same tag (its release.yml checks that the tag
+#            equals versionName, then dispatches this workflow with release_tag)
+# So an Android-only release is a tag in SwitchTether-Android alone; without the dispatch token
+# start it by hand: gh workflow run release.yml -f release_tag=vX.Y.Z -f dry_run=false.
+# A second run for the same tag adds its assets to the existing draft and merges SHA256SUMS.txt.
+# The updaters cope with a release that lacks their asset (they skip it).
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag || github.run_id }}
   cancel-in-progress: false
+
+env:
+  ANDROID_REPO: TIANLI0/SwitchTether-Android
 
 jobs:
   plan:
@@ -45,8 +65,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      tag: ${{ steps.plan.outputs.tag }}
       desktop: ${{ steps.plan.outputs.desktop }}
       android: ${{ steps.plan.outputs.android }}
+      android_ref: ${{ steps.plan.outputs.android_ref }}
     steps:
       - uses: actions/checkout@v6
       - name: Decide what this release builds
@@ -54,18 +76,31 @@ jobs:
         shell: bash
         env:
           TARGETS: ${{ inputs.targets }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+          INPUT_ANDROID_REF: ${{ inputs.android_ref }}
         run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; else tag="$INPUT_TAG"; fi
           desktop=true
           android=true
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            ver="${GITHUB_REF_NAME#v}"
+          android_ref="${INPUT_ANDROID_REF:-main}"
+          if [ -n "$tag" ]; then
+            case "$tag" in
+              v[0-9]*) ;;
+              *) echo "::error::Release tag must look like v1.2.3, got '$tag'."; exit 1 ;;
+            esac
+            ver="${tag#v}"
             desktop_ver="$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' package.json | head -n 1)"
-            android_ver="$(sed -nE 's/^ *versionName = "([^"]+)".*/\1/p' android/app/build.gradle.kts)"
-            echo "tag $ver, desktop $desktop_ver, android $android_ver"
+            echo "tag $tag, desktop $desktop_ver"
             [ "$desktop_ver" = "$ver" ] || desktop=false
-            [ "$android_ver" = "$ver" ] || android=false
+            if git ls-remote --exit-code --tags "https://github.com/$ANDROID_REPO.git" "refs/tags/$tag" >/dev/null; then
+              echo "$ANDROID_REPO has $tag"
+              android_ref="$tag"
+            else
+              echo "$ANDROID_REPO has no tag $tag"
+              android=false
+            fi
             if [ "$desktop" = false ] && [ "$android" = false ]; then
-              echo "::error::Tag $GITHUB_REF_NAME matches neither the desktop version ($desktop_ver) nor the Android version ($android_ver)."
+              echo "::error::Tag $tag matches neither the desktop version ($desktop_ver) nor a tag of $ANDROID_REPO."
               exit 1
             fi
           fi
@@ -73,9 +108,13 @@ jobs:
             android) desktop=false ;;
             desktop) android=false ;;
           esac
-          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
-          echo "android=$android" >> "$GITHUB_OUTPUT"
-          echo "Building: desktop=$desktop android=$android" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "tag=$tag"
+            echo "desktop=$desktop"
+            echo "android=$android"
+            echo "android_ref=$android_ref"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release ${tag:-(none)}: desktop=$desktop android=$android ($ANDROID_REPO@$android_ref)" >> "$GITHUB_STEP_SUMMARY"
 
   desktop:
     name: Desktop (${{ matrix.name }})
@@ -197,7 +236,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # android/third_party/coui17 is the COUI17 library (TIANLI0/COUI17) as a submodule.
+          repository: ${{ env.ANDROID_REPO }}
+          ref: ${{ needs.plan.outputs.android_ref }}
+          path: android
+          # third_party/coui17 is the COUI17 library (TIANLI0/COUI17) as a submodule.
           submodules: true
       - uses: actions/setup-java@v4
         with:
@@ -225,9 +267,14 @@ jobs:
 
       - name: Name and verify release APK
         shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           ver="$(sed -nE 's/^ *versionName = "([^"]+)".*/\1/p' android/app/build.gradle.kts)"
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then ver="${GITHUB_REF_NAME#v}"; fi
+          if [ -n "$TAG" ] && [ "v$ver" != "$TAG" ]; then
+            echo "::error::$ANDROID_REPO@$TAG has versionName $ver."
+            exit 1
+          fi
           mkdir -p dist-android
           signed=android/app/build/outputs/apk/release/app-release.apk
           if [ -f "$signed" ]; then
@@ -254,6 +301,7 @@ jobs:
     # nothing failed or was cancelled and at least one platform was built.
     if: >-
       always()
+      && needs.plan.outputs.tag != ''
       && (github.event_name == 'push' || inputs.dry_run == false)
       && !contains(needs.*.result, 'failure')
       && !contains(needs.*.result, 'cancelled')
@@ -263,15 +311,32 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Create draft release
+      - name: Create or update the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          find artifacts -type f | sort
+          mkdir -p upload old
+          find artifacts -type f -exec cp {} upload/ \;
+          ls -la upload
           # Checksums for the in-app updaters (Android and FluentSetup verify against this file).
-          (cd artifacts && find . -type f ! -name SHA256SUMS.txt -exec sha256sum {} + \
-            | sed -E 's#  \./[^/]+/#  #' > SHA256SUMS.txt)
-          cat artifacts/SHA256SUMS.txt
-          notes="SwitchTether $TAG (draft). Check signing status before publishing: unsigned artifacts are produced when signing secrets are absent."
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "SwitchTether $TAG" --notes "$notes" $(find artifacts -type f)
+          (cd upload && sha256sum -- * > ../new-sums.txt)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # This tag already has a release (e.g. the desktop was built by an earlier run): add
+            # these assets and keep the other entries of its SHA256SUMS.txt.
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS.txt -D old || true
+            touch old/SHA256SUMS.txt
+            awk 'NR == FNR { new[$2] = 1; next } !($2 in new)' new-sums.txt old/SHA256SUMS.txt > upload/SHA256SUMS.txt
+            cat new-sums.txt >> upload/SHA256SUMS.txt
+            cat upload/SHA256SUMS.txt
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber upload/*
+          else
+            cp new-sums.txt upload/SHA256SUMS.txt
+            cat upload/SHA256SUMS.txt
+            notes="SwitchTether $TAG (draft). Check signing status before publishing: unsigned artifacts are produced when signing secrets are absent."
+            target=()
+            # A dispatched run has no tag here yet; publishing creates it at this commit.
+            if [ "$GITHUB_REF_TYPE" != "tag" ]; then target=(--target "$GITHUB_SHA"); fi
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft "${target[@]}" \
+              --title "SwitchTether $TAG" --notes "$notes" upload/*
+          fi

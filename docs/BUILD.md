@@ -37,26 +37,25 @@ cargo run -p switchtether-core --example dev_client -- pair '<switchtether://pai
 cargo run -p switchtether-core --example dev_client -- get /v1/sessions
 ```
 
-## Android
+## Android and relay
 
-```bash
-cd android
-./gradlew :app:assembleDebug          # app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest           # JVM + Robolectric tests
-./gradlew :app:assembleRelease        # requires signing config, see below
-```
+The Android app and the relay have their own repositories (build instructions in their READMEs):
 
-The UI library is the [COUI17](https://github.com/TIANLI0/COUI17) repository as a git submodule at
-`android/third_party/coui17`, built from source at the pinned commit; no GitHub token or SNAPSHOT
-repository is needed. After cloning run `git submodule update --init` (or clone with
-`--recurse-submodules`). To take a newer version: `git -C android/third_party/coui17 pull origin main`,
-rebuild, run the tests and commit the submodule pointer.
+| Repository | Contents | Published as |
+|---|---|---|
+| [SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) | native app (COUI17 as a submodule) | `SwitchTether-<version>-android.apk` on **this** repository's releases |
+| [SwitchTether-Relay](https://github.com/TIANLI0/SwitchTether-Relay) | optional self-hosted relay (Go) | `ghcr.io/tianli0/switchtether-relay`, binaries on its own releases |
+
+This repository stays the owner of the wire format (`docs/PROTOCOL.md`, `docs/RELAY.md`,
+`protocol/fixtures/`) and the release hub.
 
 ### Release signing (Android)
 
-Release builds read signing data from environment variables or `android/keystore.properties`
-(git-ignored): `ST_KEYSTORE_FILE`, `ST_KEYSTORE_PASSWORD`, `ST_KEY_ALIAS`, `ST_KEY_PASSWORD`.
-Without them `assembleRelease` produces an unsigned APK. No signing material is committed.
+The release key is a secret of this repository (`ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`); `release.yml` checks out
+SwitchTether-Android at the release tag, builds `assembleRelease` with them and verifies the
+certificate digest. Locally the app reads `ST_KEYSTORE_FILE`, `ST_KEYSTORE_PASSWORD`, `ST_KEY_ALIAS`,
+`ST_KEY_PASSWORD` or `keystore.properties` (git-ignored). No signing material is committed.
 
 ## Desktop updater signing
 
@@ -78,6 +77,6 @@ such in the release notes.
 
 | Workflow | Purpose |
 |---|---|
-| `ci.yml` | Rust fmt/clippy/tests (workspace, 3 OSes), frontend typecheck + unit tests + build, Android unit tests + debug APK |
-| `release.yml` | tag `v*` → draft GitHub release with the platforms whose own version equals the tag's: desktop bundles (Windows/macOS/Linux) when `package.json` carries it, the Android APK when `android/app/build.gradle.kts` does. A release that bumps only the Android version builds only the APK. |
+| `ci.yml` | Rust fmt/clippy/tests (workspace, 3 OSes), frontend typecheck + unit tests + build (Android and relay CI run in their repositories) |
+| `release.yml` | tag `v*` (or `workflow_dispatch` with `release_tag`, which SwitchTether-Android's tag workflow sends) → draft GitHub release with the platforms whose own version equals the tag's: desktop bundles (Windows/macOS/Linux) when `package.json` carries it, the Android APK when SwitchTether-Android has the same tag (built from that tag, versionName checked). An Android-only release is a tag in SwitchTether-Android alone. A second run for the same tag adds to the draft and merges `SHA256SUMS.txt`. |
 | `upstream-sync.yml` | daily check of new CC Switch releases → sync branch + PR |

@@ -85,7 +85,8 @@ R: OK                                     # or: ERR <code> <text>
 
 `nonce` in the signed message is the base64url **text** exactly as received in `CHALLENGE`
 (not the decoded bytes), and `fp` is the lowercase hex fingerprint; the message has no
-trailing newline. A public test vector is in `relay/internal/relay/testdata/auth_vector.json`.
+trailing newline. A public test vector is in `protocol/fixtures/relay/auth_vector.json` (mirrored in the relay
+repository's `internal/relay/testdata/`).
 
 The relay checks `sha256(cert) == fp`, that the certificate key is ECDSA P-256 and the
 signature (only the SubjectPublicKeyInfo is used; validity dates and extensions are ignored).
@@ -153,7 +154,9 @@ The relay checks the MAC before it announces the phone to the desktop, then wait
 
 A tunnel counts against the limit until both of its directions have ended. The handshake time
 covers the lines up to `OK`; a phone's wait for `ACCEPT` is the separate 10 s of §2.3.
-The relay implementation is in `relay/` (Go; Docker and Cloudflare deployment).
+The relay implementation is [SwitchTether-Relay](https://github.com/TIANLI0/SwitchTether-Relay) (Go; Docker image
+`ghcr.io/tianli0/switchtether-relay`, Cloudflare deployment). This document is its specification:
+a change lands here first, then in the relay and in `switchtether-core/src/relay.rs` together.
 
 ## 5. Desktop and phone configuration
 

@@ -167,9 +167,17 @@ paired phone can be revoked from the desktop at once. See [SECURITY](docs/SECURI
 
 [Architecture](docs/ARCHITECTURE.md) · [Protocol](docs/PROTOCOL.md) ·
 [Agent compatibility](docs/AGENT_COMPATIBILITY.md) · [Relay](docs/RELAY.md) ·
-[Security](docs/SECURITY.md) · [Android UI](docs/ANDROID_UI.md) · [Build](docs/BUILD.md) ·
+[Security](docs/SECURITY.md) · [Android app](https://github.com/TIANLI0/SwitchTether-Android) · [Build](docs/BUILD.md) ·
 [Testing](docs/TESTING.md) · [Upstream sync](docs/UPSTREAM_SYNC.md) ·
 [Known limitations](docs/KNOWN_LIMITATIONS.md) · [Development status](docs/DEVELOPMENT_STATUS.md)
+
+## Repositories
+
+| Repository | Contents |
+|---|---|
+| **TIANLI0/SwitchTether** (this one) | Desktop app, Remote Core, wire protocol; releases for desktop **and** Android |
+| [TIANLI0/SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) | Android app source |
+| [TIANLI0/SwitchTether-Relay](https://github.com/TIANLI0/SwitchTether-Relay) | Optional self-hosted relay (`ghcr.io/tianli0/switchtether-relay`) |
 
 ## Contributing
 

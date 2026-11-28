@@ -31,14 +31,8 @@ CODEBUDDY.md
 mainWindow.js
 
 # SwitchTether
-android/.gradle/
-android/**/build/
-android/local.properties
-android/.idea/
-android/.kotlin/
 *.jks
 *.keystore
-!android/**/debug.keystore.README
 
 !AGENTS.md
 

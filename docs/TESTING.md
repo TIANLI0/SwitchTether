@@ -14,7 +14,7 @@ marked otherwise. CI runs the same suites on Ubuntu, macOS and Windows.
 | Clippy | `cargo clippy -p switchtether-core --all-targets -- -D warnings`; `cargo clippy -- -D warnings` | clean (lib/bin). Two pre-existing upstream warnings appear only with `--tests` on Windows (`workbuddy_account/tests.rs`, `agy_account/keychain.rs`). |
 | Frontend typecheck | `pnpm typecheck` | pass |
 | Frontend unit tests | `pnpm test:unit` | 3972+ pass; 2 locale-sensitive `UsageTrendChart` tests fail on Node 24/ICU here and on the pristine upstream baseline |
-| Android unit + Robolectric tests | `cd android && ./gradlew testDebugUnitTest` | see docs/ANDROID_UI.md |
+| Android unit + Robolectric tests | `./gradlew testDebugUnitTest` in [SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) | its CI |
 
 ## End-to-end scenarios
 

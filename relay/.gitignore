@@ -1,4 +1,0 @@
-# Relay keys must never be committed.
-.env
-relay-keys.txt
-*.keys

@@ -1,6 +1,8 @@
 # Working on SwitchTether (humans and coding agents)
 
 SwitchTether is a long-lived fork of CC Switch plus a Remote Core and a native Android app.
+Three repositories: this one (desktop, Remote Core, wire protocol, releases),
+[SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) (the app) and [SwitchTether-Relay](https://github.com/TIANLI0/SwitchTether-Relay) (optional relay).
 Read `docs/ARCHITECTURE.md`, `docs/PROTOCOL.md` and `docs/DEVELOPMENT_STATUS.md` first.
 
 ## Hard rules
@@ -28,8 +30,9 @@ Read `docs/ARCHITECTURE.md`, `docs/PROTOCOL.md` and `docs/DEVELOPMENT_STATUS.md`
 | Desktop glue (bridge to CC Switch services, lifecycle, Tauri commands) | `src-tauri/src/switchtether/` |
 | Upstream CC Switch code | change only at documented hook points (docs/UPSTREAM_SYNC.md) |
 | Desktop Remote settings UI | `src/components/settings/sections/RemoteSection.tsx`, `src/lib/api/remote.ts` |
-| Android | `android/` (see docs/ANDROID_UI.md) |
-| Wire format changes | update `docs/PROTOCOL.md`, `protocol/fixtures/`, Rust and Kotlin models together |
+| Android | TIANLI0/SwitchTether-Android (its APK is still released here by `release.yml`) |
+| Relay server | TIANLI0/SwitchTether-Relay (spec: `docs/RELAY.md` here) |
+| Wire format changes | update `docs/PROTOCOL.md`, `protocol/fixtures/` and Rust here first, then sync the fixtures and Kotlin models in SwitchTether-Android (`scripts/sync-protocol-fixtures.sh`); relay protocol changes go through `docs/RELAY.md`, `protocol/fixtures/relay/` and SwitchTether-Relay |
 
 ## Checks before committing
 
@@ -41,9 +44,9 @@ cargo clippy -- -D warnings
 cargo test -p switchtether-core
 cargo test --lib switchtether
 cd .. && pnpm typecheck && pnpm vitest run tests/config
-cd android && ./gradlew testDebugUnitTest :app:assembleDebug
-./gradlew :app:lintDebug :core:ui:lintDebug :core:security:lintDebug detekt
 ```
+
+Android and relay checks are listed in the AGENTS.md of their repositories.
 
 New UI strings must be added to all eight desktop locales (`tests/config/localeParity.test.ts`).
 Product name in upstream strings is rebranded at runtime by the i18n post-processor in

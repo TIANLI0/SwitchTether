@@ -157,9 +157,17 @@ flowchart LR
 
 [架构](docs/ARCHITECTURE.md) · [协议](docs/PROTOCOL.md) ·
 [Agent 兼容性](docs/AGENT_COMPATIBILITY.md) · [中转](docs/RELAY.md) ·
-[安全](docs/SECURITY.md) · [Android 界面](docs/ANDROID_UI.md) · [构建](docs/BUILD.md) ·
+[安全](docs/SECURITY.md) · [Android 应用](https://github.com/TIANLI0/SwitchTether-Android) · [构建](docs/BUILD.md) ·
 [测试](docs/TESTING.md) · [上游同步](docs/UPSTREAM_SYNC.md) ·
 [已知限制](docs/KNOWN_LIMITATIONS.md) · [开发状态](docs/DEVELOPMENT_STATUS.md)
+
+## 仓库
+
+| 仓库 | 内容 |
+|---|---|
+| **TIANLI0/SwitchTether**（本仓库） | 电脑端、Remote Core、通信协议；电脑端**和**安卓的发布都在这里 |
+| [TIANLI0/SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) | 安卓应用源码 |
+| [TIANLI0/SwitchTether-Relay](https://github.com/TIANLI0/SwitchTether-Relay) | 可选的自托管中继（`ghcr.io/tianli0/switchtether-relay`） |
 
 ## 参与贡献
 

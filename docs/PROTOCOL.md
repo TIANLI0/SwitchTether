@@ -2,7 +2,9 @@
 
 Status: **implemented** (desktop `switchtether-core`, Android `:core:remote`).
 Wire types live in `src-tauri/crates/switchtether-core/src/protocol/` (Rust, source of
-truth) and `android/core/remote/src/main/kotlin/.../protocol/` (Kotlin mirror).
+truth) and `core/remote/src/main/kotlin/.../protocol/` of [SwitchTether-Android](https://github.com/TIANLI0/SwitchTether-Android) (Kotlin mirror).
+This repository owns the wire format; the Android repository keeps a copy of `protocol/fixtures`
+(`scripts/sync-protocol-fixtures.sh` there).
 Shared JSON fixtures in `protocol/fixtures/` are parsed by tests on both sides.
 
 ## 1. Transport
