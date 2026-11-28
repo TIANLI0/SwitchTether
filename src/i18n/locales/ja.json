@@ -5658,9 +5658,9 @@
         "enabledToast": "オンにしました。Codex Desktop を終了して再起動してください。"
       },
       "cli": {
-        "label": "ターミナル · st-claude / st-codex",
-        "description": "st-claude と st-codex コマンドを追加します（{{dir}}）。スマートフォンから操作したいセッションは claude / codex の代わりにこれらで起動します。claude と codex 自体は変わりません。",
-        "enabledToast": "オンにしました。新しいターミナルで st-claude または st-codex を実行してください。"
+        "label": "ターミナル · st-claude / st-codex / st-agy",
+        "description": "st-claude、st-codex、st-agy コマンドを追加します（{{dir}}）。スマートフォンから操作したいセッションは claude / codex / agy の代わりにこれらで起動します。claude、codex、agy 自体は変わりません。",
+        "enabledToast": "オンにしました。新しいターミナルで st-claude、st-codex、または st-agy を実行してください。"
       },
       "dsh": {
         "label": "DeepSeek Harness · Web",

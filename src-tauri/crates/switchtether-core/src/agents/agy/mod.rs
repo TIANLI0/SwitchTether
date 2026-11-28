@@ -7,7 +7,9 @@
 //! not need a process: the mapping of ACP `session/update` notifications onto SwitchTether's
 //! event kinds ([`AcpMapper`]), locating the binary, and the model catalog.
 
+pub mod live;
 pub mod managed;
+pub mod transcript;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -237,7 +239,22 @@ fn clip(text: &str, max: usize) -> (String, bool) {
 /// Tool category of an ACP tool call (`kind`, with agy's tool name as a hint).
 fn category(kind: Option<&str>, name: Option<&str>) -> &'static str {
     match (kind, name) {
-        (_, Some("write_file" | "create_file")) => "write",
+        (_, Some("write_file" | "write_to_file" | "create_file")) => "write",
+        (_, Some("update_steps" | "task_boundary")) => "plan",
+        (_, Some("ask_question")) => "question",
+        (
+            _,
+            Some(
+                "invoke_subagent" | "manage_task" | "manage_subagents" | "send_message"
+                | "schedule" | "run_workflow",
+            ),
+        ) => "task",
+        (_, Some(n))
+            if n.starts_with("mcp_")
+                || matches!(n, "call_mcp_tool" | "list_resources" | "read_resource") =>
+        {
+            "mcp"
+        }
         (Some("execute"), _) => "shell",
         (Some("edit" | "delete" | "move"), _) => "edit",
         (Some("read"), _) => "read",
@@ -482,14 +499,27 @@ impl AcpMapper {
             "input": input,
             "status": status,
         });
-        if kind == Some("execute") {
+        let mut input = input;
+        crate::redact::redact_json(&mut input);
+        if kind == Some("execute") || matches!(name, Some("run_command" | "run_shell_command")) {
             if let Some(cmd) = input
                 .get("CommandLine")
                 .or_else(|| input.get("command"))
                 .and_then(Value::as_str)
+                .map(str::to_string)
             {
+                data["input"] = input.clone();
                 data["input"]["command"] = json!(cmd);
+            } else {
+                data["input"] = input.clone();
             }
+        } else if name == Some("invoke_subagent") {
+            if let Some(p) = input.get("Prompt").cloned() {
+                input["prompt"] = p;
+            }
+            data["input"] = input.clone();
+        } else {
+            data["input"] = input.clone();
         }
         if !files.is_empty() {
             data["files"] = json!(files);
@@ -500,17 +530,46 @@ impl AcpMapper {
         {
             data["exitCode"] = json!(code);
         }
+
+        let out_text = tool_output(&merged);
+        if let Some(raw_out) = &out_text {
+            if let Some((_, short_id)) = transcript::parse_background_task_id(raw_out) {
+                data["background"] = json!(true);
+                data["taskId"] = json!(short_id);
+                data["status"] = json!("running");
+                if let Some(o) = self.tools.get_mut(&call_id).and_then(Value::as_object_mut) {
+                    o.insert("background".into(), json!(true));
+                }
+            }
+            if let Some(out_file) = transcript::parse_step_output_file(raw_out) {
+                data["outputFile"] = json!(out_file);
+            }
+        }
+
+        let tc_event_id = format!("tc:{call_id}");
         let mut d = EventDraft::new(
-            format!("tc:{call_id}"),
+            tc_event_id.clone(),
             "tool_call",
             crate::util::now_rfc3339(),
             data,
         );
         d.turn_id = Some(self.turn_id());
         log.upsert(d, publish);
+
+        if matches!(name, Some("update_steps" | "task_boundary")) {
+            if let Some(mut plan) =
+                transcript::plan_draft_from_steps(&input, &crate::util::now_rfc3339())
+            {
+                plan.id = format!("agy-{}-plan{}", self.run, self.turn);
+                plan.turn_id = Some(self.turn_id());
+                log.upsert(plan, publish);
+            }
+        }
+
         if !matches!(status, "completed" | "failed") {
             return;
         }
+        let mut emitted_diff = false;
         for (i, diff) in merged
             .get("content")
             .and_then(Value::as_array)
@@ -519,6 +578,7 @@ impl AcpMapper {
             .filter(|c| c.get("type").and_then(Value::as_str) == Some("diff"))
             .enumerate()
         {
+            emitted_diff = true;
             let new = diff.get("newText").and_then(Value::as_str).unwrap_or("");
             let old = diff.get("oldText").and_then(Value::as_str);
             let mut text = String::new();
@@ -528,7 +588,7 @@ impl AcpMapper {
             for l in new.lines() {
                 text.push_str(&format!("+{l}\n"));
             }
-            let (p, truncated) = clip(&text, 16 * 1024);
+            let (p, truncated) = clip(&crate::redact::redact_text(&text), 16 * 1024);
             let mut f = EventDraft::new(
                 format!("fc:{call_id}:{i}"),
                 "file_change",
@@ -543,11 +603,64 @@ impl AcpMapper {
                     "truncated": truncated,
                 }),
             );
-            f.parent_id = Some(format!("tc:{call_id}"));
+            f.parent_id = Some(tc_event_id.clone());
             f.turn_id = Some(self.turn_id());
             log.upsert(f, publish);
         }
-        if let Some(out) = tool_output(&merged) {
+        if !emitted_diff && status == "completed" {
+            let path = input
+                .get("Path")
+                .or_else(|| input.get("TargetFile"))
+                .or_else(|| input.get("path"))
+                .and_then(Value::as_str);
+            if let (Some(n), Some(p)) = (name, path) {
+                let ts_now = crate::util::now_rfc3339();
+                let fallback = match n {
+                    "edit_file" | "replace_file_content" | "multi_replace_file_content" => {
+                        transcript::edit_file_change_draft(&call_id, n, p, &input, &ts_now)
+                    }
+                    "write_file" | "write_to_file" => {
+                        transcript::write_file_change_draft(&call_id, p, &input, &ts_now)
+                    }
+                    _ => None,
+                };
+                if let Some(mut fc) = fallback {
+                    fc.parent_id = Some(tc_event_id.clone());
+                    fc.turn_id = Some(self.turn_id());
+                    log.upsert(fc, publish);
+                }
+            }
+        }
+        if let Some(out) = out_text {
+            if name == Some("invoke_subagent") {
+                if let Some(agent_id) = transcript::parse_created_subagent_id(&out) {
+                    let role = input
+                        .get("Role")
+                        .or_else(|| input.get("TypeName"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("Subagent");
+                    let agent_type = input
+                        .get("TypeName")
+                        .and_then(Value::as_str)
+                        .unwrap_or("subagent");
+                    let mut sa = EventDraft::new(
+                        format!("sa:{call_id}"),
+                        "subagent",
+                        crate::util::now_rfc3339(),
+                        json!({
+                            "agentId": agent_id,
+                            "description": crate::redact::redact_text(role),
+                            "agentType": agent_type,
+                            "background": true,
+                            "status": if status == "failed" { "failed" } else { "running" },
+                            "callId": call_id,
+                        }),
+                    );
+                    sa.parent_id = Some(tc_event_id.clone());
+                    sa.turn_id = Some(self.turn_id());
+                    log.upsert(sa, publish);
+                }
+            }
             let out = crate::redact::redact_text(&out);
             let (p, truncated) = clip(&out, 8 * 1024);
             let mut data = json!({
@@ -591,10 +704,11 @@ impl AcpMapper {
             .tools
             .iter()
             .filter(|(_, t)| {
-                !matches!(
-                    t.get("status").and_then(Value::as_str),
-                    Some("completed" | "failed")
-                )
+                t.get("background").and_then(Value::as_bool) != Some(true)
+                    && !matches!(
+                        t.get("status").and_then(Value::as_str),
+                        Some("completed" | "failed")
+                    )
             })
             .map(|(k, _)| k.clone())
             .collect();
@@ -648,6 +762,141 @@ impl AcpMapper {
             publish,
         );
     }
+}
+
+/// Antigravity's built-in slash commands, served before the first prompt's
+/// `available_commands_update` arrives from `agy acp`.
+pub fn default_commands() -> Vec<Value> {
+    const BUILTINS: &[(&str, &str, &str)] = &[
+        (
+            "goal",
+            "Run until the specified goal is completely finished.",
+            "[goal]",
+        ),
+        (
+            "compact",
+            "Compact the conversation now (summarize history to free up the context window).",
+            "",
+        ),
+        (
+            "schedule",
+            "Run an instruction on a recurring schedule or as a one-time timer.",
+            "[schedule and prompt]",
+        ),
+        ("browser", "Invoke a browser agent for web tasks.", "[task]"),
+        (
+            "plan",
+            "Plan carefully before executing a task.",
+            "[instructions]",
+        ),
+        ("grill-me", "Interview me to align on a plan.", "[topic]"),
+        (
+            "teamwork",
+            "Invoke a team of agents to autonomously tackle large projects.",
+            "[project]",
+        ),
+        (
+            "learn",
+            "Reflect on recent successes or corrections to capture reusable skills or rules.",
+            "",
+        ),
+        (
+            "boost",
+            "Invoke the Boost multi-agent orchestrator for complex tasks.",
+            "[task]",
+        ),
+        (
+            "swarm",
+            "Run a swarm of agents working in parallel on one task.",
+            "[task]",
+        ),
+    ];
+    BUILTINS
+        .iter()
+        .map(|(n, d, a)| json!({ "name": n, "description": d, "argumentHint": a }))
+        .collect()
+}
+
+/// Formats the latest `plan` event (`items`) or `<brain_dir>/implementation_plan.md` artifact as
+/// a `PlanView` (`{ exists, content, path }`).
+pub fn plan_view(brain_dir: Option<&std::path::Path>, lg: &SessionLog) -> Value {
+    if let Some((md, path)) = brain_dir.and_then(live::read_brain_plan) {
+        return json!({
+            "exists": true,
+            "content": md,
+            "path": path,
+        });
+    }
+    let items = lg
+        .iter()
+        .filter(|e| e.kind == "plan")
+        .filter_map(|e| e.data.get("items").and_then(Value::as_array))
+        .last();
+    if let Some(items) = items.filter(|a| !a.is_empty()) {
+        let mut md = String::new();
+        for item in items {
+            let text = item.get("text").and_then(Value::as_str).unwrap_or("");
+            if text.is_empty() {
+                continue;
+            }
+            let marker = match item.get("status").and_then(Value::as_str) {
+                Some("completed" | "done") => "[x]",
+                Some("in_progress") => "[-]",
+                _ => "[ ]",
+            };
+            md.push_str(&format!(
+                "- {marker} {}\n",
+                crate::redact::redact_text(text)
+            ));
+        }
+        if !md.trim().is_empty() {
+            return json!({ "exists": true, "content": md.trim_end() });
+        }
+    }
+    json!({ "exists": false, "content": Value::Null })
+}
+
+/// Reads the output of a background task in an Antigravity session (`outputFile` on a whitelisted
+/// `.system_generated/steps/<N>/output.txt`, else the tool result stored in `lg`).
+pub fn task_output(lg: &SessionLog, task_id: &str) -> crate::error::ApiResult<Value> {
+    let call = lg.iter().find(|e| {
+        e.kind == "tool_call"
+            && (e.data.get("taskId").and_then(Value::as_str) == Some(task_id)
+                || e.data.get("callId").and_then(Value::as_str) == Some(task_id))
+    });
+    if let Some(path) = call
+        .and_then(|e| e.data.get("outputFile").and_then(Value::as_str))
+        .map(std::path::PathBuf::from)
+        .filter(|p| transcript::is_valid_agy_step_output_path(p) && p.is_file())
+    {
+        return super::read_task_output(&path);
+    }
+    if let Some(call) = call {
+        let cid = call
+            .data
+            .get("callId")
+            .and_then(Value::as_str)
+            .unwrap_or(&call.id);
+        let res_id = format!("res:{cid}");
+        if let Some(text) = lg.payload(&res_id).map(String::from).or_else(|| {
+            lg.get(&res_id)
+                .and_then(|r| r.data.get("text").and_then(Value::as_str).map(String::from))
+        }) {
+            let redacted = crate::redact::redact_text(&text);
+            let cut = redacted.len().saturating_sub(64 * 1024);
+            let cut = (cut..=redacted.len())
+                .find(|i| redacted.is_char_boundary(*i))
+                .unwrap_or(redacted.len());
+            return Ok(json!({
+                "output": &redacted[cut..],
+                "totalBytes": redacted.len(),
+                "truncated": cut > 0,
+            }));
+        }
+    }
+    Err(crate::error::ApiError::not_found(
+        "no output file for this task",
+    ))
 }
 
 #[cfg(test)]

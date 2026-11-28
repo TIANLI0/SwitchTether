@@ -5656,9 +5656,9 @@
         "enabledToast": "Включено. Закройте и снова запустите Codex Desktop."
       },
       "cli": {
-        "label": "Терминал · st-claude / st-codex",
-        "description": "Добавляет команды st-claude и st-codex ({{dir}}). Используйте их вместо claude / codex для сессий, к которым нужен доступ с телефона; сами claude и codex не меняются.",
-        "enabledToast": "Включено. Откройте новый терминал и запустите st-claude или st-codex."
+        "label": "Терминал · st-claude / st-codex / st-agy",
+        "description": "Добавляет команды st-claude, st-codex и st-agy ({{dir}}). Используйте их вместо claude / codex / agy для сессий, к которым нужен доступ с телефона; сами claude, codex и agy не меняются.",
+        "enabledToast": "Включено. Откройте новый терминал и запустите st-claude, st-codex или st-agy."
       },
       "dsh": {
         "label": "DeepSeek Harness · Web",

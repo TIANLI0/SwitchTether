@@ -264,8 +264,9 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   `plan` on each `turn/start`, `auto` = `approvalsReviewer: "auto_review"`, `readOnly` = read-only sandbox, `untrusted` =
   approval policy `untrusted`, `bypassPermissions` = `danger-full-access` + `never` ("full access"). Codex also accepts
   `on-request` / `acceptEdits` (= `default`), `read-only`, `never` / `danger-full-access`. Antigravity `default |
-  acceptEdits | auto | plan` (agy's ACP session modes `default`, `accept-edits`, `auto`, `plan`, `session/set_mode`; agy's
-  own spelling `accept-edits` is accepted; no full-access mode). An unknown mode is `422`.
+  acceptEdits | auto | plan | bypassPermissions` (agy's ACP session modes `default`, `accept-edits`, `auto`, `plan` via
+  `session/set_mode`, plus `--dangerously-skip-permissions` for `bypassPermissions`, seamlessly resuming the session if
+  toggled mid-session; agy's own spelling `accept-edits` is accepted). An unknown mode is `422`.
   **`bypassPermissions` (any spelling) needs the `terminal` step-up grant** (`403 step_up_required`, `details.scope:
   "terminal"`) here, in `POST …/options` and in the `permission_mode` session tool: it is as powerful as a remote
   terminal. Managed Claude Code processes start with `--allow-dangerously-skip-permissions` (not as root, which Claude
@@ -682,9 +683,9 @@ this change used `managed:<random>` ids that disappeared with the process.
     message, no conversation) and cached 30 min. Antigravity (`agy`): the signed-in CLI's own list (`agy models`, nothing
     written; a running session answers from its ACP `availableModels`), its tiered ids (`gemini-4-neon-high` "Gemini 4 Neon
     (High)") grouped into one model per base id with its thinking levels as `efforts` (fixture `model_options_agy.json`);
-    `efforts` `low|medium|high|xhigh`, `permissionModes` agy's four modes. When the desktop cannot run `agy` itself the
-    desktop's own list is served (display names as ids, no levels). A model is accepted as the grouped id (+ effort), a
-    tiered id or a display name. With an official list the built-in aliases are not added, hidden Codex
+    `efforts` `low|medium|high|xhigh`, `permissionModes` agy's five modes (`default`, `acceptEdits`, `auto`, `plan`,
+    `bypassPermissions`). When the desktop cannot run `agy` itself the desktop's own list is served (display names as ids,
+    no levels). A model is accepted as the grouped id (+ effort), a tiered id or a display name. With an official list the built-in aliases are not added, hidden Codex
     models are left out, and a model without effort levels has `efforts: []`. `source`: `agent` | `builtin`.
   - **Options of a conversation that is not running**: `POST …/options` and the `permission_mode` tool are kept and applied
     when a message resumes it (`create_managed` with `--model` / `--effort` / `--permission-mode`, Codex thread settings);
@@ -694,10 +695,16 @@ this change used `managed:<random>` ids that disappeared with the process.
     `attached:` key is taken over), so the page the phone has open keeps following it. A session running in a window
     SwitchTether does not control stays observe-only (`capability_unavailable`).
   - **Antigravity session tools** (an `agy acp` session SwitchTether runs; detail `sessionTools: ["commands",
-    "permission_mode", "context_usage"]`): `commands` lists what agy reported (`available_commands_update`: its slash
-    commands and skills; a command is sent as the text `/name args`), `permission_mode` is `session/set_mode`,
-    `context_usage` comes from the last `usage_update` (`used` of `size`, no categories). Approvals are agy's
-    `session/request_permission` (options `allow` / `deny`; first answer wins); ACP has no question request.
+    "permission_mode", "context_usage", "task_output", "plan", "mcp_status", "rename", "export"]`): `commands` lists what
+    agy reported (`available_commands_update`: its slash commands and skills, seeded with agy's built-ins before the first
+    turn; a command is sent as the text `/name args`), `permission_mode` sets `session/set_mode` or toggles
+    `--dangerously-skip-permissions` (`bypassPermissions`), `context_usage` comes from `usage_update` (or the latest turn's
+    `usage` event), `plan` reads `brain/<id>/implementation_plan.md` or the latest `plan` / `update_steps` checklist,
+    `mcp_status` reads `mcp_config.json` read-only (names, state, transport, scope; never secrets), `task_output` reads
+    whitelisted `.system_generated/steps/<N>/output.txt` or stored tool output, `rename` sets the session title, and
+    `export` formats the conversation as text. Observed/history Antigravity sessions also offer the read-only subset
+    (`task_output`, `plan`, `mcp_status`, `export`) and full sub-agent trees (`GET …/subagents`, `GET …/subagents/{agentId}/events`).
+    Approvals are agy's `session/request_permission` (options `allow` / `deny`; first answer wins); ACP has no question request.
   - **Codex session tools** (a Codex thread SwitchTether runs or one attached from Codex Desktop; detail `sessionTools:
     ["commands", "permission_mode", "context_usage", "mcp_status", "rename"]`): the same `POST …/claude/{action}` paths
     and reply shapes as Claude Code's. `commands` lists Codex's own commands (`compact`, `review`, `goal`, `plan`,

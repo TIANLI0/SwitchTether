@@ -538,3 +538,52 @@ async fn a_resumed_claude_conversation_is_keyed_by_its_own_id() {
         "listed: {ids:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn st_agy_tty_session_is_mirrored_and_controllable() {
+    use base64::Engine as _;
+    let env = setup().await;
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    let (mut shim, ack) = Shim::connect(
+        env.port,
+        json!({
+            "t": "hello",
+            "v": 1,
+            "token": env.token,
+            "kind": "tty",
+            "agent": "agy",
+            "origin": "cli",
+            "cwd": cwd,
+            "cols": 120,
+            "rows": 32,
+            "command": "agy"
+        }),
+    )
+    .await;
+    assert_eq!(ack.unwrap()["t"], "welcome");
+
+    let mut found = None;
+    for _ in 0..100 {
+        let (items, _) = env.hub.list(&SessionQuery::default()).await;
+        if let Some(s) = items.into_iter().find(|s| s.agent == "agy") {
+            found = Some(s);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let s = found.expect("st-agy session listed");
+    assert!(!s.managed);
+    assert!(s.terminal_id.is_some());
+
+    shim.send(json!({
+        "t": "pty",
+        "b64": base64::engine::general_purpose::STANDARD.encode("Antigravity ready\r\n")
+    }))
+    .await;
+    env.hub
+        .send_message(&s.id, "hello agy", None)
+        .await
+        .unwrap();
+    let frame = shim.recv().await.unwrap();
+    assert_eq!(frame["t"], "input");
+}

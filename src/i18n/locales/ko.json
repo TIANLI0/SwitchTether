@@ -5658,9 +5658,9 @@
         "enabledToast": "켰습니다. Codex Desktop을 종료한 후 다시 여세요."
       },
       "cli": {
-        "label": "터미널 · st-claude / st-codex",
-        "description": "st-claude와 st-codex 명령을 추가합니다({{dir}}). 휴대폰에서 제어할 세션은 claude / codex 대신 이 명령으로 시작하세요. claude와 codex 자체는 그대로입니다.",
-        "enabledToast": "켰습니다. 새 터미널에서 st-claude 또는 st-codex를 실행하세요."
+        "label": "터미널 · st-claude / st-codex / st-agy",
+        "description": "st-claude, st-codex, st-agy 명령을 추가합니다({{dir}}). 휴대폰에서 제어할 세션은 claude / codex / agy 대신 이 명령으로 시작하세요. claude, codex, agy 자체는 그대로입니다.",
+        "enabledToast": "켰습니다. 새 터미널에서 st-claude, st-codex 또는 st-agy를 실행하세요."
       },
       "dsh": {
         "label": "DeepSeek Harness · Web",

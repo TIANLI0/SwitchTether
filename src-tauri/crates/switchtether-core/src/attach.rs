@@ -180,6 +180,7 @@ async fn serve(
     let origin = origin_name(hello.get("origin").and_then(|o| o.as_str()));
     let agent = match hello.get("agent").and_then(|a| a.as_str()) {
         Some("codex") => "codex",
+        Some("agy") => "agy",
         _ => "claude_code",
     };
     let new_log = |id: &str| Arc::new(Mutex::new(SessionLog::new(id, Some(hub.bus()))));
@@ -271,6 +272,7 @@ async fn serve(
             let rows = hello.get("rows").and_then(|c| c.as_u64()).unwrap_or(32) as u16;
             let title = match agent {
                 "codex" => "Codex (terminal)",
+                "agy" => "Antigravity (terminal)",
                 _ => "Claude Code (terminal)",
             };
             let term = terms.create_external(

@@ -76,7 +76,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** Agents whose sub-agents can be opened (desktop `…/subagents` endpoints). */
-val SUBAGENT_AGENTS = setOf("claude_code", "codex", "dsh")
+val SUBAGENT_AGENTS = setOf("claude_code", "codex", "dsh", "agy")
 
 /** How long a sub-agent without `finished` still counts as working after its last write. */
 private const val ACTIVE_WINDOW_MS = 120_000L

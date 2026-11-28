@@ -172,9 +172,27 @@ data class SessionDetailState(
     val canPickPermission: Boolean get() = online && hasPermissionModes &&
         (detail.valueOrNull?.summary?.isLive == true || resumable)
 
-    /** One session tool is offered (Claude Code's all of them; Codex those in `sessionTools`). */
-    fun hasSessionTool(action: String): Boolean = claudeTools ||
-        detail.valueOrNull?.let { it.summary.isLive && action in it.sessionTools } == true
+    /** One session tool is offered (Claude Code's all of them; Codex / Antigravity those in `sessionTools`,
+     *  plus read-only tools on observed sessions). */
+    fun hasSessionTool(action: String): Boolean {
+        if (claudeTools) return true
+        val d = detail.valueOrNull ?: return false
+        if ((d.summary.isLive || d.claudeReadTools || d.resumable) && action in d.sessionTools) return true
+        if (claudeReadTools && action in setOf(ClaudeTools.PLAN, ClaudeTools.EXPORT, ClaudeTools.TASK_OUTPUT)) return true
+        return false
+    }
+
+    /** Whether the Session Tools page has any section to display for this session. */
+    val hasAnyToolsPage: Boolean
+        get() = claudeTools || claudeReadTools || hasPermissionModes ||
+            listOf(
+                ClaudeTools.CONTEXT_USAGE,
+                ClaudeTools.PLAN,
+                ClaudeTools.MCP_STATUS,
+                ClaudeTools.SIDE_QUESTION,
+                ClaudeTools.RENAME,
+                ClaudeTools.EXPORT,
+            ).any(::hasSessionTool)
 
     /**
      * "Continue on phone": offered only when the desktop advertises `capabilities.continueSession`
@@ -1105,9 +1123,13 @@ class SessionDetailViewModel(
         // reconnect or a resume (the condition turns false and true again).
         viewModelScope.launch {
             _state
-                .map { st -> st.online && st.hasSessionTool(ClaudeTools.COMMANDS) && st.canSend && supportsSlashCommands(st.detail.valueOrNull?.summary?.agent) }
+                .map { st ->
+                    val agent = st.detail.valueOrNull?.summary?.agent
+                    val hasCmds = st.hasSessionTool(ClaudeTools.COMMANDS) || (st.resumable && agent == "agy")
+                    Pair(st.online && hasCmds && st.canSend && supportsSlashCommands(agent), st.detail.valueOrNull?.summary?.status)
+                }
                 .distinctUntilChanged()
-                .collect { ready -> if (ready) loadSlashCommands() }
+                .collect { (ready, _) -> if (ready) loadSlashCommands() }
         }
     }
 

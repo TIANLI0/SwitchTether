@@ -167,7 +167,9 @@ class AgentMapViewModel(private val sessionId: String, private val repo: Session
     init {
         viewModelScope.launch {
             // Task output: full tools, or read-only from the output file for an observed session.
-            claudeTools.value = runCatching { repo.detail(sessionId) }.getOrNull()?.let { it.claudeTools || it.claudeReadTools } == true
+            claudeTools.value = runCatching { repo.detail(sessionId) }.getOrNull()?.let {
+                it.claudeTools || it.claudeReadTools || io.github.tianli0.switchtether.remote.session.ClaudeTools.TASK_OUTPUT in it.sessionTools
+            } == true
         }
         viewModelScope.launch {
             while (isActive) {

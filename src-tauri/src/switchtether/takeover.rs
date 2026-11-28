@@ -416,7 +416,7 @@ fn codex_set(enable: bool, st: &mut TakeoverState) -> Result<Vec<Value>, String>
 fn launcher_paths() -> Vec<(PathBuf, String)> {
     let shim = installed_shim();
     let s = shim.to_string_lossy();
-    ["claude", "codex"]
+    ["claude", "codex", "agy"]
         .iter()
         .map(|agent| {
             if cfg!(windows) {
@@ -689,6 +689,22 @@ pub fn status() -> Value {
     let codex_env = winenv::get("CODEX_CLI_PATH");
     #[cfg(not(windows))]
     let codex_env: Option<String> = None;
+    if st.cli && installed_shim().is_file() {
+        let paths = launcher_paths();
+        if paths.iter().any(|(p, _)| p.is_file()) && !paths.iter().all(|(p, _)| p.is_file()) {
+            for (p, body) in &paths {
+                if !p.is_file() {
+                    let _ = std::fs::write(p, body);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755));
+                    }
+                }
+            }
+        }
+    }
+    let cli_enabled = st.cli && launcher_paths().iter().all(|(p, _)| p.is_file());
     json!({
         "shimAvailable": bundled_shim().is_some(),
         "vscode": {
@@ -709,7 +725,7 @@ pub fn status() -> Value {
         },
         "cli": {
             "available": true,
-            "enabled": st.cli && launcher_paths().iter().all(|(p, _)| p.is_file()),
+            "enabled": cli_enabled,
             "binDir": bin_dir().to_string_lossy(),
             "pathAdded": st.cli_path_added,
         },

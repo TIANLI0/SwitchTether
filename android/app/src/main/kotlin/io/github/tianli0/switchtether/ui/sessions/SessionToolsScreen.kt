@@ -149,7 +149,11 @@ data class SessionToolsState(
     val exportError: String? = null,
 )
 
-class SessionToolsViewModel(private val sessionId: String, private val repo: SessionRepository) : ViewModel() {
+class SessionToolsViewModel(
+    private val sessionId: String,
+    private val repo: SessionRepository,
+    autoLoad: Boolean = true,
+) : ViewModel() {
     private val _state = MutableStateFlow(SessionToolsState())
     val state: StateFlow<SessionToolsState> = _state.asStateFlow()
 
@@ -158,14 +162,31 @@ class SessionToolsViewModel(private val sessionId: String, private val repo: Ses
     /** Exported conversations, handed to the share sheet once each. */
     val exports: Flow<ExportedConversation> = _exports.receiveAsFlow()
 
+    private var loadedContext = false
+    private var loadedPlan = false
+    private var loadedMcp = false
+
     init {
-        refreshAll()
+        if (autoLoad) refreshAll()
     }
 
     fun refreshAll() {
-        loadContext()
-        loadPlan()
-        loadMcp()
+        ensureLoaded(context = true, plan = true, mcp = true)
+    }
+
+    fun ensureLoaded(context: Boolean, plan: Boolean, mcp: Boolean) {
+        if (context && !loadedContext) {
+            loadedContext = true
+            loadContext()
+        }
+        if (plan && !loadedPlan) {
+            loadedPlan = true
+            loadPlan()
+        }
+        if (mcp && !loadedMcp) {
+            loadedMcp = true
+            loadMcp()
+        }
     }
 
     private suspend fun <T> load(action: String, parse: (JsonElement) -> T): Loadable<T> =
@@ -253,7 +274,7 @@ class SessionToolsViewModel(private val sessionId: String, private val repo: Ses
 @Composable
 fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
     val detailVm = containerViewModel(key = "session:$sessionId") { SessionDetailViewModel(sessionId, it.connection, it.sessions, it.draftStore, it::noteLocalAction, liveDispatcher = kotlinx.coroutines.Dispatchers.Default, stepUp = { scope -> it.stepUpGate.ensure(scope).isSuccess }, transfers = it.transfers) }
-    val vm = containerViewModel(key = "session-tools:$sessionId") { SessionToolsViewModel(sessionId, it.sessions) }
+    val vm = containerViewModel(key = "session-tools:$sessionId") { SessionToolsViewModel(sessionId, it.sessions, autoLoad = false) }
     val detail by detailVm.state.collectAsStateWithLifecycle()
     val st by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -286,6 +307,16 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
     ) {
         // A session started on the computer is observe-only: what its files hold, nothing that needs the process.
         val readOnly = detail.claudeReadTools
+        val showContext = detail.hasSessionTool(ClaudeTools.CONTEXT_USAGE)
+        val showPlan = detail.hasSessionTool(ClaudeTools.PLAN)
+        val showMcp = detail.hasSessionTool(ClaudeTools.MCP_STATUS)
+        val canReconnectMcp = detail.hasSessionTool(ClaudeTools.MCP_RECONNECT)
+        val showSideQuestion = detail.hasSessionTool(ClaudeTools.SIDE_QUESTION)
+        val showRename = detail.hasSessionTool(ClaudeTools.RENAME)
+        val showExport = detail.hasSessionTool(ClaudeTools.EXPORT)
+        LaunchedEffect(showContext, showPlan, showMcp) {
+            vm.ensureLoaded(showContext, showPlan, showMcp)
+        }
         val sessionCost = androidx.compose.runtime.remember(detail.log) { sessionCost(detail.log.events) }
         LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll().testTag("session-tools"), contentPadding = pageListPadding()) {
             if (!detail.online) {
@@ -295,7 +326,7 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
                 item { ToolsNote(stringResource(R.string.tools_read_only_note)) }
             }
             // Also for a conversation that is not running: the mode applies when a message resumes it.
-            if (!readOnly || detail.resumable) item {
+            if (detail.hasPermissionModes && (!readOnly || detail.resumable)) item {
                 SmallTitle(stringResource(R.string.tools_permission))
                 PermissionModeOptions(
                     current = detail.detail.valueOrNull?.permissionMode,
@@ -308,7 +339,7 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
                 detail.permissionError?.let { ToolsNote(stringResource(R.string.tools_permission_failed, it), LocalDevColors.current.danger) }
                 ToolsNote(stringResource(R.string.tools_permission_hint))
             }
-            if (!readOnly) item {
+            if (showContext) item {
                 SectionTitle(stringResource(R.string.tools_context), onRefresh = vm::loadContext)
                 GroupCard { ToolLoadable(st.context, vm::loadContext) { ContextUsageView(it) } }
             }
@@ -316,7 +347,7 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
             sessionCost?.let { cost ->
                 item { SessionCostCard(cost, partial = detail.hasMoreBefore) }
             }
-            item {
+            if (showPlan) item {
                 SectionTitle(stringResource(R.string.tools_plan), onRefresh = vm::loadPlan)
                 GroupCard {
                     ToolLoadable(st.plan, vm::loadPlan) { p ->
@@ -331,16 +362,13 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
                     }
                 }
             }
-            if (!readOnly) item {
+            if (showMcp) item {
                 SectionTitle(stringResource(R.string.tools_mcp), onRefresh = vm::loadMcp)
                 GroupCard {
                     ToolLoadable(st.mcp, vm::loadMcp) { servers ->
                         if (servers.isEmpty()) {
                             Text(stringResource(R.string.tools_mcp_none), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp))
                         }
-                        // Folded by default: one summary row (how many, how many connected / failing),
-                        // the servers under it. A failing server is what one comes here for, so the
-                        // summary names that first.
                         var mcpOpen by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
                         if (servers.isNotEmpty()) {
                             val dev = LocalDevColors.current
@@ -367,35 +395,34 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
                                 reconnecting = s.name in st.reconnecting,
                                 reconnected = s.name in st.reconnected,
                                 error = st.mcpErrors[s.name],
-                                enabled = detail.canUseClaudeTools,
-                                onReconnect = { vm.reconnect(s.name) },
+                                enabled = detail.online && canReconnectMcp,
+                                onReconnect = if (canReconnectMcp) ({ vm.reconnect(s.name) }) else null,
                             )
                         }
                         }
                     }
                 }
             }
-            if (!readOnly) item { SideQuestion(st, enabled = detail.canUseClaudeTools, onAsk = vm::ask) }
-            if (!readOnly) item {
+            if (showSideQuestion) item { SideQuestion(st, enabled = detail.online && showSideQuestion, onAsk = vm::ask) }
+            if (showRename) item {
                 RenameSession(
                     current = summary?.title.orEmpty(),
                     st = st,
-                    enabled = detail.canUseClaudeTools,
+                    enabled = detail.online && showRename,
                     onSave = { title ->
                         vm.setRenaming(true)
                         detailVm.renameSession(title) { err -> vm.setRenaming(false, err, done = err == null) }
                     },
                 )
             }
-            item {
+            if (showExport) item {
                 SmallTitle(stringResource(R.string.tools_export))
-                // A row of the page's card, like every other action here (not a full-width button).
                 GroupCard {
                     BasicComponent(
                         title = stringResource(R.string.tools_export_action),
                         titleColor = io.github.suqi8.coui.kmp.basic.BasicComponentDefaults.titleColor(color = COUITheme.colorScheme.primary),
                         onClick = vm::export,
-                        enabled = (detail.canUseClaudeTools || (readOnly && detail.online)) && !st.exporting,
+                        enabled = detail.online && !st.exporting,
                         endActions = {
                             if (st.exporting) RotatingProgressIndicator(color = COUITheme.colorScheme.primary, size = 18.dp, ringDiameter = 14.4.dp, strokeWidth = 2.dp)
                         },
@@ -693,7 +720,7 @@ private fun McpRow(
     reconnected: Boolean,
     error: String?,
     enabled: Boolean,
-    onReconnect: () -> Unit,
+    onReconnect: (() -> Unit)?,
 ) {
     val dev = LocalDevColors.current
     val color = when (s.status) {
@@ -715,13 +742,15 @@ private fun McpRow(
         title = s.title?.takeIf { it.isNotBlank() && it != s.name }?.let { "${s.name} · $it" } ?: s.name,
         summary = summary,
         startAction = { StatusDot(androidx.compose.animation.animateColorAsState(color, label = "mcp-dot").value, Modifier.padding(end = 12.dp)) },
-        endActions = {
-            SmallButton(
-                text = stringResource(if (reconnecting) R.string.tools_mcp_reconnecting else R.string.tools_mcp_reconnect),
-                onClick = { if (!reconnecting) onReconnect() },
-                enabled = enabled && !reconnecting,
-            )
-        },
+        endActions = if (onReconnect != null) {
+            {
+                SmallButton(
+                    text = stringResource(if (reconnecting) R.string.tools_mcp_reconnecting else R.string.tools_mcp_reconnect),
+                    onClick = { if (!reconnecting) onReconnect() },
+                    enabled = enabled && !reconnecting,
+                )
+            }
+        } else null,
         cardListPosition = position,
     )
 }

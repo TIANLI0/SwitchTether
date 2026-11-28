@@ -144,6 +144,7 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
         when (agent) {
             "claude_code", "claude" -> R.drawable.ic_tracker_claude
             "codex" -> R.drawable.ic_tracker_codex
+            "agy" -> R.drawable.ic_tracker_agy
             else -> R.drawable.ic_stat_notify
         },
     )

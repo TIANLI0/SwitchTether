@@ -5,9 +5,9 @@
 //! touched. Control goes through ACP: `session/new` / `session/resume` (continuing a conversation
 //! from agy's history), `session/prompt`, `session/cancel`, `session/request_permission`,
 //! `session/set_config_option` (model, thinking level) and `session/set_mode` (agy's permission
-//! modes). The timeline is built from the `session/update` notifications ([`super::AcpMapper`]);
-//! the conversation itself is stored by agy in its usual data directory, so it stays in agy's
-//! own history.
+//! modes, plus `--dangerously-skip-permissions` for `bypassPermissions`). The timeline is built
+//! from the `session/update` notifications ([`super::AcpMapper`]); the conversation itself is
+//! stored by agy in its usual data directory, so it stays in agy's own history.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,9 +27,11 @@ use super::AcpMapper;
 use crate::agents::dsh::managed::{approval_options, option_for};
 use crate::agents::managed::{ImageAttachment, ManagedSession};
 use crate::agents::model::{EventDraft, Liveness};
+use crate::agents::permission::FULL_ACCESS;
 use crate::agents::store::SessionLog;
 use crate::error::{ApiError, ApiResult};
 
+#[derive(Clone)]
 pub struct ManagedAgyOptions {
     pub agy_bin: PathBuf,
     pub cwd: PathBuf,
@@ -40,7 +42,8 @@ pub struct ManagedAgyOptions {
     pub model: Option<String>,
     /// Thinking level (`low`, `medium`, `high`, `xhigh`).
     pub effort: Option<String>,
-    /// SwitchTether permission mode id (`default`, `acceptEdits`, `auto`, `plan`).
+    /// SwitchTether permission mode id (`default`, `acceptEdits`, `auto`, `plan`,
+    /// `bypassPermissions`).
     pub permission_mode: Option<String>,
     /// Extra workspace directories (`--add-dir`), e.g. where phone attachments are stored.
     pub add_dirs: Vec<PathBuf>,
@@ -58,14 +61,16 @@ struct State {
     status: &'static str,
     liveness: Liveness,
     session_id: Option<String>,
-    title: Option<String>,
+    /// Explicit rename set from the phone (`rename` session tool); `None` lets `AgentHub` pick up
+    /// Antigravity's generated summary title from `conversation_summaries.db`.
+    custom_title: Option<String>,
     created_at_ms: i64,
     last_active_at_ms: i64,
     /// Latest ACP `configOptions` (model, thought_level, mode).
     config: Vec<Value>,
     /// `models.availableModels` of the session (tiered ids with display names).
     available: Vec<(String, String)>,
-    /// Current ACP mode id.
+    /// Current ACP mode id (`default`, `accept-edits`, `auto`, `plan`).
     mode: Option<String>,
     /// `available_commands_update` (slash commands and skills).
     commands: Vec<Value>,
@@ -75,12 +80,15 @@ struct State {
     images: bool,
 }
 
-pub struct ManagedAgy {
+struct Core {
     cwd: PathBuf,
+    options: ManagedAgyOptions,
     log: Arc<Mutex<SessionLog>>,
     stdin: tokio::sync::Mutex<Option<Writer>>,
     child: Mutex<Option<Child>>,
-    pid: Option<u32>,
+    pid: Mutex<Option<u32>>,
+    bypass: AtomicBool,
+    restarting: AtomicBool,
     next_id: AtomicU64,
     replies: Mutex<HashMap<u64, oneshot::Sender<Result<Value, Value>>>>,
     pending: Mutex<HashMap<String, PendingPermission>>,
@@ -91,6 +99,10 @@ pub struct ManagedAgy {
     mapper: Arc<Mutex<AcpMapper>>,
 }
 
+pub struct ManagedAgy {
+    core: Arc<Core>,
+}
+
 fn rpc_message(e: &Value) -> String {
     let msg = e
         .get("message")
@@ -99,83 +111,33 @@ fn rpc_message(e: &Value) -> String {
     crate::redact::redact_text(msg)
 }
 
-impl ManagedAgy {
-    /// Starts `agy acp` in `options.cwd` and opens (or resumes) the conversation.
-    pub async fn spawn(
-        id: String,
-        options: ManagedAgyOptions,
-        log: Arc<Mutex<SessionLog>>,
-    ) -> anyhow::Result<Arc<Self>> {
-        let mut cmd = Command::new(&options.agy_bin);
-        if let Some(path) = crate::util::child_path() {
-            cmd.env("PATH", path);
-        }
-        cmd.arg("acp");
-        for d in &options.add_dirs {
-            cmd.arg("--add-dir").arg(d);
-        }
-        cmd.current_dir(&options.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        let mut child = cmd.spawn()?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("no stdin"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
-        Self::start(id, options, log, stdout, Box::new(stdin), Some(child)).await
+fn spawn_agy_process(options: &ManagedAgyOptions, bypass: bool) -> anyhow::Result<Child> {
+    let mut cmd = Command::new(&options.agy_bin);
+    if let Some(path) = crate::util::child_path() {
+        cmd.env("PATH", path);
     }
+    cmd.arg("acp");
+    if bypass {
+        cmd.arg("--dangerously-skip-permissions");
+    }
+    for d in &options.add_dirs {
+        cmd.arg("--add-dir").arg(d);
+    }
+    cmd.current_dir(&options.cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    Ok(cmd.spawn()?)
+}
 
-    /// Runs the ACP client over any byte stream (`agy acp`'s stdio, or a test double).
-    pub async fn start(
-        id: String,
-        options: ManagedAgyOptions,
-        log: Arc<Mutex<SessionLog>>,
-        reader: impl AsyncRead + Send + Unpin + 'static,
-        writer: Writer,
-        child: Option<Child>,
-    ) -> anyhow::Result<Arc<Self>> {
-        let now = crate::util::now_ms();
-        // Event ids of this run never collide with history already in the log.
-        let run = format!("{:x}", now);
-        let _ = id;
-        let me = Arc::new(Self {
-            cwd: options.cwd.clone(),
-            pid: child.as_ref().and_then(|c| c.id()),
-            log,
-            stdin: tokio::sync::Mutex::new(Some(writer)),
-            child: Mutex::new(child),
-            next_id: AtomicU64::new(1),
-            replies: Mutex::new(HashMap::new()),
-            pending: Mutex::new(HashMap::new()),
-            resolved: Mutex::new(HashMap::new()),
-            state: Arc::new(Mutex::new(State {
-                status: "idle",
-                liveness: Liveness::Live,
-                session_id: None,
-                title: None,
-                created_at_ms: now,
-                last_active_at_ms: now,
-                config: Vec::new(),
-                available: Vec::new(),
-                mode: None,
-                commands: Vec::new(),
-                context: None,
-                images: false,
-            })),
-            prompting: Arc::new(AtomicBool::new(false)),
-            mapper: Arc::new(Mutex::new(AcpMapper::new(run))),
-        });
-        let rd = me.clone();
+impl Core {
+    fn spawn_reader(self: &Arc<Self>, reader: impl AsyncRead + Send + Unpin + 'static) {
+        let rd = self.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(reader).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -185,12 +147,6 @@ impl ManagedAgy {
             }
             rd.on_exit();
         });
-
-        if let Err(e) = me.open(&options).await {
-            me.kill();
-            return Err(e);
-        }
-        Ok(me)
     }
 
     async fn open(&self, options: &ManagedAgyOptions) -> anyhow::Result<()> {
@@ -260,9 +216,9 @@ impl ManagedAgy {
         if let Some(mode) = options
             .permission_mode
             .as_deref()
-            .filter(|m| *m != "default")
+            .filter(|m| *m != "default" && *m != FULL_ACCESS)
         {
-            self.apply_mode(mode)
+            self.apply_acp_mode(mode)
                 .await
                 .map_err(|e| anyhow::anyhow!(e.message))?;
         }
@@ -376,9 +332,7 @@ impl ManagedAgy {
         self.set_config("thought_level", effort).await
     }
 
-    async fn apply_mode(&self, mode: &str) -> ApiResult<String> {
-        let id = crate::agents::permission::normalize("agy", mode)
-            .ok_or_else(|| ApiError::validation("unknown permission mode for Antigravity"))?;
+    async fn apply_acp_mode(&self, id: &str) -> ApiResult<String> {
         let acp = super::acp_mode(id)
             .ok_or_else(|| ApiError::validation("unknown permission mode for Antigravity"))?;
         let sid = self.sid()?;
@@ -390,6 +344,90 @@ impl ManagedAgy {
         .await
         .map_err(|e| ApiError::conflict(format!("agy refused the mode: {}", rpc_message(&e))))?;
         self.state.lock().mode = Some(acp.to_string());
+        Ok(id.to_string())
+    }
+
+    /// Applies any supported permission mode, seamlessly restarting `agy acp` via `session/resume`
+    /// when toggling `bypassPermissions` (`--dangerously-skip-permissions`) mid-session.
+    async fn apply_mode(self: &Arc<Self>, mode: &str) -> ApiResult<String> {
+        let id = crate::agents::permission::normalize("agy", mode)
+            .ok_or_else(|| ApiError::validation("unknown permission mode for Antigravity"))?;
+        let want_bypass = id == FULL_ACCESS;
+        let cur_bypass = self.bypass.load(Ordering::SeqCst);
+
+        if want_bypass == cur_bypass {
+            if want_bypass {
+                return Ok(FULL_ACCESS.to_string());
+            }
+            return self.apply_acp_mode(id).await;
+        }
+
+        // Toggling `--dangerously-skip-permissions`: requires restarting `agy acp` while idle.
+        if self.prompting.load(Ordering::SeqCst) {
+            return Err(ApiError::conflict(
+                "Wait for the current turn to finish (or interrupt it) before toggling Bypass permissions.",
+            ));
+        }
+        let has_os_child = self.child.lock().is_some();
+        if !has_os_child {
+            // In-memory test pipe: flip the flag and update ACP mode when leaving bypass.
+            self.bypass.store(want_bypass, Ordering::SeqCst);
+            if !want_bypass {
+                self.apply_acp_mode(id).await?;
+            }
+            return Ok(id.to_string());
+        }
+
+        let sid = self.sid()?;
+        let (cur_model, cur_effort) = {
+            let cfg = &self.state.lock().config;
+            (
+                super::option_current(cfg, "model"),
+                super::option_current(cfg, "thought_level"),
+            )
+        };
+
+        self.restarting.store(true, Ordering::SeqCst);
+        {
+            let mut g = self.stdin.lock().await;
+            g.take();
+        }
+        if let Some(mut old) = self.child.lock().take() {
+            let _ = old.start_kill();
+        }
+
+        let mut child = match spawn_agy_process(&self.options, want_bypass) {
+            Ok(c) => c,
+            Err(e) => {
+                self.restarting.store(false, Ordering::SeqCst);
+                self.on_exit();
+                return Err(ApiError::internal("restart agy acp", e));
+            }
+        };
+        let new_pid = child.id();
+        let Some(stdin) = child.stdin.take() else {
+            self.restarting.store(false, Ordering::SeqCst);
+            return Err(ApiError::internal("restart agy acp", "no stdin"));
+        };
+        let Some(stdout) = child.stdout.take() else {
+            self.restarting.store(false, Ordering::SeqCst);
+            return Err(ApiError::internal("restart agy acp", "no stdout"));
+        };
+        *self.pid.lock() = new_pid;
+        *self.child.lock() = Some(child);
+        *self.stdin.lock().await = Some(Box::new(stdin));
+        self.bypass.store(want_bypass, Ordering::SeqCst);
+        self.spawn_reader(stdout);
+        self.restarting.store(false, Ordering::SeqCst);
+
+        let mut reopen = self.options.clone();
+        reopen.resume_session = Some(sid);
+        reopen.model = cur_model;
+        reopen.effort = cur_effort;
+        reopen.permission_mode = Some(id.to_string());
+        self.open(&reopen)
+            .await
+            .map_err(|e| ApiError::internal("reopen agy session", format!("{e:#}")))?;
         Ok(id.to_string())
     }
 
@@ -450,7 +488,9 @@ impl ManagedAgy {
                                 })
                             })
                             .collect();
-                        self.state.lock().commands = cmds;
+                        if !cmds.is_empty() {
+                            self.state.lock().commands = cmds;
+                        }
                     }
                     Some("usage_update") => {
                         let used = update.get("used").and_then(Value::as_u64);
@@ -504,6 +544,8 @@ impl ManagedAgy {
             .map(crate::redact::redact_text)
             .unwrap_or_else(|| "Permission request".into());
         let call_id = tool.get("toolCallId").and_then(Value::as_str);
+        let mut redacted_input = input.clone();
+        crate::redact::redact_json(&mut redacted_input);
         let mut d = EventDraft::new(
             &event_id,
             "approval_request",
@@ -512,7 +554,7 @@ impl ManagedAgy {
                 "requestId": rid, "kind": kind, "title": title,
                 "detail": input.get("toolSummary"),
                 "toolName": tool.get("name"), "command": command,
-                "cwd": self.cwd.to_string_lossy(), "input": input,
+                "cwd": self.cwd.to_string_lossy(), "input": redacted_input,
                 "options": approval_options(&options), "resolved": false,
                 "toolUseId": call_id,
             }),
@@ -531,6 +573,9 @@ impl ManagedAgy {
     }
 
     fn on_exit(&self) {
+        if self.restarting.load(Ordering::SeqCst) {
+            return;
+        }
         {
             let mut st = self.state.lock();
             st.liveness = Liveness::Ended;
@@ -560,18 +605,117 @@ impl ManagedAgy {
     }
 
     fn commands(&self) -> Vec<Value> {
-        self.state.lock().commands.clone()
+        let reported = self.state.lock().commands.clone();
+        if !reported.is_empty() {
+            reported
+        } else {
+            super::default_commands()
+        }
     }
 
     fn context_usage(&self) -> Value {
-        let ctx = self.state.lock().context;
+        let ctx = self.state.lock().context.or_else(|| {
+            let lg = self.log.lock();
+            let u = lg.iter().filter(|e| e.kind == "usage").last()?;
+            let n = |k: &str| u.data.get(k).and_then(Value::as_u64).unwrap_or(0);
+            let total =
+                n("inputTokens") + n("outputTokens") + n("cacheReadTokens") + n("cacheWriteTokens");
+            (total > 0).then_some((total, 1_000_000))
+        });
         let pct = ctx
             .filter(|(_, s)| *s > 0)
             .map(|(u, s)| ((u as f64) * 100.0 / (s as f64)).min(100.0));
         json!({
-            "totalTokens": ctx.map(|c| c.0), "maxTokens": ctx.map(|c| c.1),
-            "percentage": pct, "categories": [],
+            "totalTokens": ctx.map(|c| c.0),
+            "maxTokens": ctx.map(|c| c.1),
+            "percentage": pct,
+            "categories": [],
         })
+    }
+
+    fn rename(&self, title: &str) -> ApiResult<Value> {
+        if title.chars().count() > 200 {
+            return Err(ApiError::validation("title too long"));
+        }
+        let clean = crate::redact::redact_text(title.trim());
+        if clean.is_empty() {
+            return Err(ApiError::validation("'title' is required"));
+        }
+        self.state.lock().custom_title = Some(clean.clone());
+        Ok(json!({ "title": clean }))
+    }
+}
+
+impl ManagedAgy {
+    /// Starts `agy acp` in `options.cwd` and opens (or resumes) the conversation.
+    pub async fn spawn(
+        id: String,
+        options: ManagedAgyOptions,
+        log: Arc<Mutex<SessionLog>>,
+    ) -> anyhow::Result<Arc<Self>> {
+        let bypass = options.permission_mode.as_deref() == Some(FULL_ACCESS);
+        let mut child = spawn_agy_process(&options, bypass)?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
+        Self::start(id, options, log, stdout, Box::new(stdin), Some(child)).await
+    }
+
+    /// Runs the ACP client over any byte stream (`agy acp`'s stdio, or a test double).
+    pub async fn start(
+        id: String,
+        options: ManagedAgyOptions,
+        log: Arc<Mutex<SessionLog>>,
+        reader: impl AsyncRead + Send + Unpin + 'static,
+        writer: Writer,
+        child: Option<Child>,
+    ) -> anyhow::Result<Arc<Self>> {
+        let now = crate::util::now_ms();
+        let run = format!("{:x}", now);
+        let _ = id;
+        let bypass = options.permission_mode.as_deref() == Some(FULL_ACCESS);
+        let core = Arc::new(Core {
+            cwd: options.cwd.clone(),
+            pid: Mutex::new(child.as_ref().and_then(|c| c.id())),
+            options: options.clone(),
+            log,
+            stdin: tokio::sync::Mutex::new(Some(writer)),
+            child: Mutex::new(child),
+            bypass: AtomicBool::new(bypass),
+            restarting: AtomicBool::new(false),
+            next_id: AtomicU64::new(1),
+            replies: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
+            resolved: Mutex::new(HashMap::new()),
+            state: Arc::new(Mutex::new(State {
+                status: "idle",
+                liveness: Liveness::Live,
+                session_id: None,
+                custom_title: None,
+                created_at_ms: now,
+                last_active_at_ms: now,
+                config: Vec::new(),
+                available: Vec::new(),
+                mode: None,
+                commands: Vec::new(),
+                context: None,
+                images: false,
+            })),
+            prompting: Arc::new(AtomicBool::new(false)),
+            mapper: Arc::new(Mutex::new(AcpMapper::new(run))),
+        });
+        core.spawn_reader(reader);
+        let me = Arc::new(Self { core });
+        if let Err(e) = me.core.open(&options).await {
+            me.kill();
+            return Err(e);
+        }
+        Ok(me)
     }
 }
 
@@ -581,56 +725,56 @@ impl ManagedSession for ManagedAgy {
         "agy"
     }
     fn log(&self) -> Arc<Mutex<SessionLog>> {
-        self.log.clone()
+        self.core.log.clone()
     }
     fn cwd(&self) -> PathBuf {
-        self.cwd.clone()
+        self.core.cwd.clone()
     }
     fn native_session_id(&self) -> Option<String> {
-        self.state.lock().session_id.clone()
+        self.core.state.lock().session_id.clone()
     }
     fn pid(&self) -> Option<u32> {
-        self.pid
+        *self.core.pid.lock()
     }
     fn status(&self) -> &'static str {
         let (live, fallback) = {
-            let st = self.state.lock();
+            let st = self.core.state.lock();
             (st.liveness == Liveness::Live, st.status)
         };
         if !live {
             return fallback;
         }
-        if !self.pending.lock().is_empty() {
+        if !self.core.pending.lock().is_empty() {
             "waiting"
-        } else if self.prompting.load(Ordering::SeqCst) {
+        } else if self.core.prompting.load(Ordering::SeqCst) {
             "busy"
         } else {
             "idle"
         }
     }
     fn liveness(&self) -> Liveness {
-        self.state.lock().liveness
+        self.core.state.lock().liveness
     }
     fn created_at_ms(&self) -> i64 {
-        self.state.lock().created_at_ms
+        self.core.state.lock().created_at_ms
     }
     fn last_active_at_ms(&self) -> i64 {
-        self.state.lock().last_active_at_ms
+        self.core.state.lock().last_active_at_ms
     }
     fn model(&self) -> Option<String> {
-        super::option_current(&self.state.lock().config, "model")
+        super::option_current(&self.core.state.lock().config, "model")
     }
     fn effort(&self) -> Option<String> {
-        super::option_current(&self.state.lock().config, "thought_level")
+        super::option_current(&self.core.state.lock().config, "thought_level")
     }
     fn title(&self) -> Option<String> {
-        self.state.lock().title.clone()
+        self.core.state.lock().custom_title.clone()
     }
     fn has_pending_requests(&self) -> bool {
-        !self.pending.lock().is_empty()
+        !self.core.pending.lock().is_empty()
     }
     fn supports_images(&self) -> bool {
-        self.state.lock().images
+        self.core.state.lock().images
     }
 
     async fn send_message(&self, text: &str) -> ApiResult<()> {
@@ -642,7 +786,7 @@ impl ManagedSession for ManagedAgy {
         text: &str,
         images: &[ImageAttachment],
     ) -> ApiResult<()> {
-        if self.state.lock().liveness != Liveness::Live {
+        if self.core.state.lock().liveness != Liveness::Live {
             return Err(ApiError::conflict("the agy process has exited"));
         }
         if !images.is_empty() && !self.supports_images() {
@@ -652,26 +796,20 @@ impl ManagedSession for ManagedAgy {
             ));
         }
         // ACP allows one prompt per session at a time.
-        if self.prompting.swap(true, Ordering::SeqCst) {
+        if self.core.prompting.swap(true, Ordering::SeqCst) {
             return Err(ApiError::conflict(
                 "Antigravity is still working on the previous message; wait or interrupt it",
             ));
         }
-        let sid = match self.sid() {
+        let sid = match self.core.sid() {
             Ok(s) => s,
             Err(e) => {
-                self.prompting.store(false, Ordering::SeqCst);
+                self.core.prompting.store(false, Ordering::SeqCst);
                 return Err(e);
             }
         };
         {
-            let mut st = self.state.lock();
-            let own = crate::agents::attachments::split(text).map_or(text.to_string(), |(t, _)| t);
-            if st.title.is_none() && !own.trim().is_empty() {
-                st.title = Some(crate::redact::redact_text(
-                    &own.chars().take(80).collect::<String>(),
-                ));
-            }
+            let mut st = self.core.state.lock();
             st.status = "busy";
             st.last_active_at_ms = crate::util::now_ms();
         }
@@ -681,25 +819,27 @@ impl ManagedSession for ManagedAgy {
                 json!({ "type": "image", "mimeType": img.media_type, "data": img.data_base64 }),
             );
         }
-        self.mapper.lock().start_turn(&mut self.log.lock(), true);
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        self.core
+            .mapper
+            .lock()
+            .start_turn(&mut self.core.log.lock(), true);
+        let id = self.core.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
-        self.replies.lock().insert(id, tx);
-        self.write_line(&json!({
-            "jsonrpc": "2.0", "id": id, "method": "session/prompt",
-            "params": { "sessionId": sid, "prompt": prompt },
-        }))
-        .await
-        .inspect_err(|_| {
-            self.replies.lock().remove(&id);
-            self.prompting.store(false, Ordering::SeqCst);
-        })?;
-        // The prompt settles when the whole turn is done; the phone's request returns as soon as
-        // it is accepted.
-        let state = self.state.clone();
-        let prompting = self.prompting.clone();
-        let log = self.log.clone();
-        let mapper = self.mapper.clone();
+        self.core.replies.lock().insert(id, tx);
+        self.core
+            .write_line(&json!({
+                "jsonrpc": "2.0", "id": id, "method": "session/prompt",
+                "params": { "sessionId": sid, "prompt": prompt },
+            }))
+            .await
+            .inspect_err(|_| {
+                self.core.replies.lock().remove(&id);
+                self.core.prompting.store(false, Ordering::SeqCst);
+            })?;
+        let state = self.core.state.clone();
+        let prompting = self.core.prompting.clone();
+        let log = self.core.log.clone();
+        let mapper = self.core.mapper.clone();
         tokio::spawn(async move {
             let r = rx.await;
             {
@@ -739,14 +879,15 @@ impl ManagedSession for ManagedAgy {
     }
 
     async fn interrupt(&self) -> ApiResult<()> {
-        let sid = self.sid()?;
-        self.write_line(
-            &json!({ "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": sid } }),
-        )
-        .await?;
-        // ACP: permission requests still open are answered `cancelled`.
-        for rpc_id in self.cancel_pending("phone") {
+        let sid = self.core.sid()?;
+        self.core
+            .write_line(
+                &json!({ "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": sid } }),
+            )
+            .await?;
+        for rpc_id in self.core.cancel_pending("phone") {
             let _ = self
+                .core
                 .write_line(&json!({ "jsonrpc": "2.0", "id": rpc_id,
                     "result": { "outcome": { "outcome": "cancelled" } } }))
                 .await;
@@ -764,11 +905,11 @@ impl ManagedSession for ManagedAgy {
         by: &str,
     ) -> ApiResult<Value> {
         let pending = {
-            let mut p = self.pending.lock();
+            let mut p = self.core.pending.lock();
             match p.remove(request_id) {
                 Some(x) => x,
                 None => {
-                    let by = self.resolved.lock().get(request_id).cloned();
+                    let by = self.core.resolved.lock().get(request_id).cloned();
                     return Err(match by {
                         Some(b) => ApiError::conflict("this request was already answered")
                             .with_details(json!({ "resolvedBy": b })),
@@ -782,25 +923,30 @@ impl ManagedSession for ManagedAgy {
             d => match option_for(&pending.options, d) {
                 Some(option_id) => json!({ "outcome": "selected", "optionId": option_id }),
                 None => {
-                    self.pending.lock().insert(request_id.to_string(), pending);
+                    self.core
+                        .pending
+                        .lock()
+                        .insert(request_id.to_string(), pending);
                     return Err(ApiError::validation(format!("unknown decision '{d}'")));
                 }
             },
         };
-        self.write_line(
-            &json!({ "jsonrpc": "2.0", "id": pending.rpc_id, "result": { "outcome": outcome } }),
-        )
-        .await?;
-        self.resolved
+        self.core
+            .write_line(
+                &json!({ "jsonrpc": "2.0", "id": pending.rpc_id, "result": { "outcome": outcome } }),
+            )
+            .await?;
+        self.core
+            .resolved
             .lock()
             .insert(request_id.to_string(), by.to_string());
-        let ev = self.log.lock().update(&pending.event_id, true, |e| {
+        let ev = self.core.log.lock().update(&pending.event_id, true, |e| {
             e.data["resolved"] = json!(true);
             e.data["decision"] = json!(decision);
             e.data["by"] = json!(by);
         });
-        if self.pending.lock().is_empty() {
-            self.state.lock().status = "busy";
+        if self.core.pending.lock().is_empty() {
+            self.core.state.lock().status = "busy";
         }
         if decision == "abort" {
             let _ = self.interrupt().await;
@@ -809,12 +955,17 @@ impl ManagedSession for ManagedAgy {
     }
 
     fn kill(&self) {
-        // Closing stdin ends `agy acp`; the kill covers a process that does not react.
-        if let Ok(mut g) = self.stdin.try_lock() {
+        if let Ok(mut g) = self.core.stdin.try_lock() {
             g.take();
         }
-        if let Some(mut c) = self.child.lock().take() {
+        if let Some(mut c) = self.core.child.lock().take() {
             let _ = c.start_kill();
+        }
+        let mut st = self.core.state.lock();
+        if st.liveness == Liveness::Live {
+            st.liveness = Liveness::Ended;
+            st.status = "completed";
+            st.last_active_at_ms = crate::util::now_ms();
         }
     }
 
@@ -822,23 +973,26 @@ impl ManagedSession for ManagedAgy {
         true
     }
     async fn models(&self) -> Value {
-        super::group_models(&self.state.lock().available)
+        super::group_models(&self.core.state.lock().available)
     }
     async fn set_model(&self, model: Option<&str>) -> ApiResult<()> {
         match model {
-            Some(m) => self.apply_model(m, None).await,
-            // agy has no "default" value to go back to: keep the current model.
+            Some(m) => self.core.apply_model(m, None).await,
             None => Ok(()),
         }
     }
     async fn set_effort(&self, effort: Option<&str>) -> ApiResult<()> {
         match effort {
-            Some(e) => self.apply_effort(e).await,
+            Some(e) => self.core.apply_effort(e).await,
             None => Ok(()),
         }
     }
     fn permission_mode(&self) -> Option<String> {
-        self.state
+        if self.core.bypass.load(Ordering::SeqCst) {
+            return Some(FULL_ACCESS.to_string());
+        }
+        self.core
+            .state
             .lock()
             .mode
             .as_deref()
@@ -849,23 +1003,59 @@ impl ManagedSession for ManagedAgy {
         true
     }
     async fn set_permission_mode(&self, mode: &str) -> ApiResult<String> {
-        self.apply_mode(mode).await
+        self.core.apply_mode(mode).await
     }
     fn session_tools(&self) -> &'static [&'static str] {
-        &["commands", "permission_mode", "context_usage"]
+        &[
+            "commands",
+            "permission_mode",
+            "context_usage",
+            "task_output",
+            "plan",
+            "mcp_status",
+            "rename",
+            "export",
+        ]
     }
     async fn session_tool(&self, action: &str, p: &Value) -> ApiResult<Value> {
+        let arg = |k: &str| -> ApiResult<String> {
+            p.get(k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty() && v.len() <= 4000)
+                .map(String::from)
+                .ok_or_else(|| ApiError::validation(format!("'{k}' is required")))
+        };
         match action {
-            "commands" => Ok(json!(self.commands())),
+            "commands" => Ok(json!(self.core.commands())),
             "permission_mode" => {
-                let mode = p
-                    .get("mode")
-                    .and_then(Value::as_str)
-                    .filter(|m| !m.trim().is_empty())
-                    .ok_or_else(|| ApiError::validation("'mode' is required"))?;
-                Ok(json!({ "mode": self.apply_mode(mode).await? }))
+                let mode = arg("mode")?;
+                Ok(json!({ "mode": self.core.apply_mode(&mode).await? }))
             }
-            "context_usage" => Ok(self.context_usage()),
+            "context_usage" => Ok(self.core.context_usage()),
+            "task_output" => {
+                let task = arg("taskId")?;
+                if !crate::agents::valid_agent_id(&task) {
+                    return Err(ApiError::validation("invalid task id"));
+                }
+                super::task_output(&self.core.log.lock(), &task)
+            }
+            "plan" => {
+                let brain = self.native_session_id().and_then(|sid| {
+                    super::live::AgyObserver::new(super::live::AgyObserver::default_roots())
+                        .brain_dir(&sid)
+                });
+                Ok(super::plan_view(brain.as_deref(), &self.core.log.lock()))
+            }
+            "mcp_status" => Ok(super::live::read_mcp_status(Some(&self.core.cwd))),
+            "rename" => self.core.rename(&arg("title")?),
+            "export" => {
+                let sid = self.native_session_id().unwrap_or_else(|| "session".into());
+                let text =
+                    crate::redact::redact_text(&crate::agents::export_text(&self.core.log.lock()));
+                let date = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
+                Ok(json!({ "text": text, "filename": format!("{date}-{sid}.txt") }))
+            }
             _ => Err(ApiError::unavailable_capability(
                 "BLOCKED",
                 "Antigravity does not offer this session tool.",
@@ -879,8 +1069,6 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-    /// A stand-in for `agy acp` on an in-memory pipe: answers each request with the recorded
-    /// reply of the same method (agy 1.5.9) and plays the recorded notifications of a prompt.
     async fn fake_agy(
         recording: Vec<Value>,
         server: tokio::io::DuplexStream,
@@ -889,7 +1077,6 @@ mod tests {
     ) {
         let (rd, mut wr) = tokio::io::split(server);
         let mut lines = BufReader::new(rd).lines();
-        // Reply of each method in the recording, and what follows a prompt.
         let mut by_method: HashMap<String, Vec<Value>> = HashMap::new();
         let mut prompts: Vec<Vec<Value>> = Vec::new();
         let mut methods: HashMap<u64, String> = HashMap::new();
@@ -930,7 +1117,7 @@ mod tests {
             let v: Value = serde_json::from_str(&line).unwrap();
             seen.lock().push(v.clone());
             let Some(method) = v["method"].as_str() else {
-                continue; // a reply to our permission request
+                continue;
             };
             let id = v["id"].clone();
             if method == "session/cancel" {
@@ -947,7 +1134,6 @@ mod tests {
                         == Some(&json!("agent_message_chunk"));
                     if m["method"] == "session/request_permission" {
                         wr.write_all(&send(m)).await.unwrap();
-                        // Wait for the client's answer before going on.
                         loop {
                             let Ok(Some(l)) = lines.next_line().await else {
                                 return;
@@ -963,7 +1149,6 @@ mod tests {
                     wr.write_all(&send(m)).await.unwrap();
                     chunks += usize::from(is_chunk);
                     if cancel_after_chunks.is_some_and(|n| chunks == n) {
-                        // Hold the turn until the client cancels, then end it as agy does.
                         loop {
                             let Ok(Some(l)) = lines.next_line().await else {
                                 return;
@@ -1022,11 +1207,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opens_sets_model_mode_and_runs_a_turn_with_cancel() {
+    async fn opens_sets_model_mode_tools_and_runs_a_turn_with_cancel() {
         let dir = tempfile::tempdir().unwrap();
         let (client, server) = tokio::io::duplex(1 << 20);
         let seen = Arc::new(Mutex::new(Vec::new()));
-        // A new session (recorded `session/new`) whose turns are the recorded ones.
         let mut rec = recording(&["new"]);
         rec.extend(
             recording(&["turns"])
@@ -1046,31 +1230,32 @@ mod tests {
             s.native_session_id().as_deref(),
             Some("9a85a077-bd10-4bd1-9e8b-353eb66c66b6")
         );
-        let sent: Vec<Value> = seen.lock().clone();
-        let calls: Vec<(String, Value)> = sent
-            .iter()
-            .filter_map(|v| Some((v["method"].as_str()?.to_string(), v["params"].clone())))
-            .collect();
-        assert_eq!(calls[0].0, "initialize");
-        assert_eq!(calls[1].0, "session/new");
-        assert_eq!(calls[2].0, "session/set_config_option");
-        assert_eq!(calls[2].1["value"], "claude-sonnet-5-5");
-        assert_eq!(calls[3].1["configId"], "thought_level");
-        assert_eq!(calls[3].1["value"], "low");
-        assert_eq!(calls[4].0, "session/set_mode");
-        assert_eq!(calls[4].1["modeId"], "accept-edits");
-        assert_eq!(s.permission_mode().as_deref(), Some("acceptEdits"));
-        // Replies of the recording carry agy's state after those changes.
-        assert_eq!(s.model().as_deref(), Some("claude-sonnet-5-5"));
-        assert_eq!(s.effort().as_deref(), Some("low"));
-        let models = s.models().await;
-        assert!(models
+        // Builtin slash commands are served even before the first turn's update arrives.
+        let initial_cmds = s.session_tool("commands", &json!({})).await.unwrap();
+        assert!(initial_cmds
             .as_array()
             .unwrap()
             .iter()
-            .any(|m| m["id"] == "gemini-4-neon"));
+            .any(|c| c["name"] == "goal"));
 
-        // Turn 1 (a shell command), then turn 2 interrupted after a few chunks.
+        // Bypass permissions toggle + rename + export session tools.
+        assert_eq!(
+            s.set_permission_mode("bypassPermissions").await.unwrap(),
+            "bypassPermissions"
+        );
+        assert_eq!(s.permission_mode().as_deref(), Some("bypassPermissions"));
+        assert_eq!(
+            s.set_permission_mode("acceptEdits").await.unwrap(),
+            "acceptEdits"
+        );
+        assert_eq!(s.permission_mode().as_deref(), Some("acceptEdits"));
+        let renamed = s
+            .session_tool("rename", &json!({ "title": "My Agy Task" }))
+            .await
+            .unwrap();
+        assert_eq!(renamed["title"], "My Agy Task");
+        assert_eq!(s.title().as_deref(), Some("My Agy Task"));
+
         log.lock().expect_user_message(
             "Run the shell command 'echo hi' in the terminal and tell me its output in one line.",
             "cmd-1",
@@ -1085,6 +1270,13 @@ mod tests {
             "one prompt at a time"
         );
         wait_idle(&s).await;
+
+        let exported = s.session_tool("export", &json!({})).await.unwrap();
+        assert!(exported["text"]
+            .as_str()
+            .unwrap()
+            .contains("The output was `hi`."));
+
         s.send_message("Write a numbered list of 60 different fruits one per line with a short sentence about each.")
             .await
             .unwrap();

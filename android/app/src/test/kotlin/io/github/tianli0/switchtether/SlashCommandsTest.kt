@@ -62,6 +62,7 @@ class SlashCommandsTest {
         assertEquals(expected, names(builtinSlashCommands("claude")))
         builtinSlashCommands("claude_code").forEach { assertNotNull("${it.name} has a description", it.descriptionRes) }
         assertEquals(listOf("model", "permissions", "rename", "help"), names(builtinSlashCommands("codex")))
+        assertEquals(listOf("model", "permissions", "context", "mcp", "rename", "export", "help"), names(builtinSlashCommands("agy")))
         assertTrue(builtinSlashCommands("gemini").isEmpty())
         assertTrue(builtinSlashCommands(null).isEmpty())
     }

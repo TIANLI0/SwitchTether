@@ -87,9 +87,8 @@ const CODEX: &[Mode] = &[
     },
 ];
 
-/// Google Antigravity's ACP session modes (`agy acp`, `session/set_mode`); the descriptions are
-/// agy's own. Running without permission prompts (`--dangerously-skip-permissions`) is a process
-/// flag, not a mode, and is not offered.
+/// Google Antigravity's ACP session modes (`agy acp`, `session/set_mode`) plus full access
+/// (`--dangerously-skip-permissions`, gated by the terminal biometric step-up).
 const AGY: &[Mode] = &[
     Mode {
         id: "default",
@@ -110,6 +109,12 @@ const AGY: &[Mode] = &[
         id: "plan",
         label: "Plan",
         description: "Plans carefully before executing a task.",
+    },
+    Mode {
+        id: FULL_ACCESS,
+        label: "Bypass permissions",
+        description:
+            "Runs everything without asking (--dangerously-skip-permissions). Like a remote terminal.",
     },
 ];
 
@@ -150,6 +155,7 @@ pub fn normalize(agent: &str, mode: &str) -> Option<&'static str> {
         ("codex", "never" | "danger-full-access") => FULL_ACCESS,
         ("claude_code", "manual") => "default",
         ("agy", "accept-edits") => "acceptEdits",
+        ("agy", "dangerously-skip-permissions" | "yolo") => FULL_ACCESS,
         (_, m) => m,
     };
     table(agent).iter().find(|m| m.id == mode).map(|m| m.id)
@@ -158,7 +164,7 @@ pub fn normalize(agent: &str, mode: &str) -> Option<&'static str> {
 /// Whether choosing `mode` (any agent's spelling) needs the biometric step-up (see
 /// [`FULL_ACCESS`]).
 pub fn needs_step_up(mode: &str) -> bool {
-    ["claude_code", "codex"]
+    ["claude_code", "codex", "agy"]
         .iter()
         .any(|a| normalize(a, mode) == Some(FULL_ACCESS))
 }
@@ -252,9 +258,14 @@ mod tests {
         assert_eq!(normalize("dsh", "default"), None);
         assert_eq!(normalize("agy", "accept-edits"), Some("acceptEdits"));
         assert_eq!(normalize("agy", "plan"), Some("plan"));
-        assert_eq!(normalize("agy", "bypassPermissions"), None);
+        assert_eq!(normalize("agy", "bypassPermissions"), Some(FULL_ACCESS));
+        assert_eq!(
+            normalize("agy", "dangerously-skip-permissions"),
+            Some(FULL_ACCESS)
+        );
         assert!(needs_step_up("bypassPermissions"));
         assert!(needs_step_up("danger-full-access"));
+        assert!(needs_step_up("dangerously-skip-permissions"));
         assert!(!needs_step_up("auto"));
     }
 

@@ -61,30 +61,42 @@ Everything else (`agy` TUI, `--prompt-interactive`) is interactive; no PTY scrap
 ## 2. Design
 
 - `crates/switchtether-core/src/agents/agy/` (no Tauri): `managed.rs` — `ManagedAgy`, an ACP client
-  over `agy acp`'s stdio (or any byte stream, for tests) implementing `ManagedSession`; `mod.rs` —
-  `AcpMapper` (ACP updates → SwitchTether event kinds), binary lookup (`find_agy_bin`, same order as
-  the desktop's `real_agy_bin`), `agy models` reader, model grouping and resolution.
+  over `agy acp`'s stdio (or any byte stream, for tests) implementing `ManagedSession`; `transcript.rs` —
+  `AgyParser`, rich NDJSON parser for `transcript_full.jsonl` / `transcript.jsonl` (tool calls, diffs,
+  reasoning, `update_steps` plans, `ask_question`, background shell tasks, `invoke_subagent` rows, and
+  usage); `live.rs` — `AgyObserver`, read-only SQLite + OS watch over `conversation_summaries.db` for
+  live run status, generated titles and sub-agent hierarchy; `mod.rs` — `AcpMapper` (ACP updates →
+  SwitchTether event kinds), binary lookup (`find_agy_bin`), `agy models` reader, model grouping and
+  session tool helpers.
 - Events use the generic kinds, so the phone needs no new renderer: text chunks are joined into
   one streaming `assistant_message` / `reasoning` per block, the echoed prompt is the
   `user_message` (with the phone's `clientId`), tool calls are `tool_call` (`tc:<id>`, updated in
-  place, category from ACP `kind`) with a `tool_result` (`res:<id>`, output redacted and clipped),
-  diffs are `file_change`, ACP `plan` is a `plan` row, each turn ends with a `usage` row and the
-  rolling `status` row (`idle`, or `interrupted` after a cancel).
+  place, category from ACP `kind` and tool name) with a `tool_result` (`res:<id>`, output redacted and clipped),
+  diffs are `file_change`, ACP `plan` and `update_steps` are `plan` rows, `invoke_subagent` produces a
+  `subagent` row, each turn ends with a `usage` row and the rolling `status` row (`idle`, or `interrupted`
+  after a cancel).
 - Hub: `POST /v1/sessions {agent: "agy"}` (new, or `resumeFrom` an `agy:` conversation →
   `session/resume`), id `agy:<sessionId>`; history of a continued conversation is preloaded from
-  CC Switch's parser, and a `system` `continued` row says where the new turns run (an Antigravity
-  window cannot be seen from SwitchTether). A message to an agy conversation that is not running
-  resumes it (`resume_on_send`); a run that ended here passes on its model, level and mode.
+  `transcript_full.jsonl` via `AgyParser` (falling back to CC Switch's parser for legacy `.db`-only
+  trajectories), and a `system` `continued` row says where the new turns run. External `agy` sessions
+  running on the computer are discovered live (`Liveness::Live`, `Control::Observe`), tailed from
+  `transcript_full.jsonl`, and refused for `continue` while `busy`. Terminal sessions launched via
+  `st-agy` are mirrored through `switchtether-shim` PTY. A message to an agy conversation that is not
+  running resumes it (`resume_on_send`); a run that ended here passes on its model, level and mode.
 - Models: `GET /v1/agents/agy/models` groups agy's tiered list (`gemini-4-neon-high`, …) into
   models with thinking levels (`efforts`), as agy's own picker does; a running session answers
   from its `availableModels`. Any of the grouped id + effort, a tiered id or a display name is
   resolved against the session's `model` option (`gpt-oss-120b` + `medium` →
   `gpt-oss-120b-medium`). An effort the chosen model does not offer is refused (`422`), not ignored.
 - Permission modes: agy's ACP modes as SwitchTether ids — `default`, `acceptEdits`
-  (`accept-edits`), `auto`, `plan` — at start, in `POST …/options` and in the `permission_mode`
-  session tool. `--dangerously-skip-permissions` is a process flag, not a mode, and is not offered.
-- Session tools (`sessionTools`): `commands` (agy's `available_commands_update`; a command is sent as
-  `/name args` text), `permission_mode`, `context_usage` (from `usage_update`).
+  (`accept-edits`), `auto`, `plan`, plus `bypassPermissions` (`--dangerously-skip-permissions`,
+  gated by the terminal biometric step-up and seamlessly resumed via `session/resume` when toggled
+  mid-session) — at start, in `POST …/options` and in the `permission_mode` session tool.
+- Session tools (`sessionTools`): `commands` (agy's `available_commands_update`, seeded with agy's
+  built-in slash commands before the first turn), `permission_mode`, `context_usage`, `task_output`,
+  `plan` (`implementation_plan.md` or `update_steps`), `mcp_status` (`mcp_config.json`, read-only and
+  redacted), `rename`, and `export`. Observed/history sessions also expose `task_output`, `plan`,
+  `mcp_status`, `export` and full sub-agent trees (`GET …/subagents`).
 - Approvals: `session/request_permission` → `approval_request` (first answer wins, `409` with
   `resolvedBy` after); interrupt answers open requests `cancelled` as ACP requires.
 - Images: sent as ACP `image` blocks when agy advertises `promptCapabilities.image` (not verified).

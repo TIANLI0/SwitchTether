@@ -5658,9 +5658,9 @@
         "enabledToast": "Aktiviert. Beende Codex Desktop und starte es neu."
       },
       "cli": {
-        "label": "Terminal · st-claude / st-codex",
-        "description": "Fügt die Befehle st-claude und st-codex hinzu ({{dir}}). Nutze sie statt claude / codex für Sitzungen, die du vom Handy erreichen willst; claude und codex selbst bleiben unverändert.",
-        "enabledToast": "Aktiviert. Öffne ein neues Terminal und starte st-claude oder st-codex."
+        "label": "Terminal · st-claude / st-codex / st-agy",
+        "description": "Fügt die Befehle st-claude, st-codex und st-agy hinzu ({{dir}}). Nutze sie statt claude / codex / agy für Sitzungen, die du vom Handy erreichen willst; claude, codex und agy selbst bleiben unverändert.",
+        "enabledToast": "Aktiviert. Öffne ein neues Terminal und starte st-claude, st-codex oder st-agy."
       },
       "dsh": {
         "label": "DeepSeek Harness · Web",

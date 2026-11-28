@@ -101,6 +101,12 @@ impl LineParser for DshParser {
     }
 }
 
+impl LineParser for agy::transcript::AgyParser {
+    fn feed(&mut self, v: &Value) -> Vec<EventDraft> {
+        agy::transcript::AgyParser::feed(self, v)
+    }
+}
+
 /// Last turn state of a DeepSeek Harness log, read without building events.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DshTurnState {
@@ -247,6 +253,7 @@ pub struct AgentHub {
     bus: Arc<EventBus>,
     backend: Arc<dyn CcSwitchBackend>,
     pub claude: ClaudeObserver,
+    pub agy: agy::live::AgyObserver,
     managed: RwLock<HashMap<String, Arc<dyn ManagedSession>>>,
     codex_bin: Option<PathBuf>,
     dsh_bin: Option<PathBuf>,
@@ -298,19 +305,21 @@ impl AgentHub {
         backend: Arc<dyn CcSwitchBackend>,
         claude: ClaudeObserver,
     ) -> Arc<Self> {
+        let sandboxed = cfg!(test) || claude.claude_dir != claude::live::claude_dir();
         Arc::new(Self {
             bus,
             backend,
+            agy: agy::live::AgyObserver::new(if sandboxed {
+                Vec::new()
+            } else {
+                agy::live::AgyObserver::default_roots()
+            }),
             claude,
             managed: RwLock::new(HashMap::new()),
             codex_bin: codex::managed::find_codex_bin(),
             dsh_bin: dsh::managed::find_dsh_bin(),
-            // Unit tests never depend on (or start) an agy installed on the machine.
-            agy_bin: if cfg!(test) {
-                None
-            } else {
-                agy::find_agy_bin()
-            },
+            // Unit and sandboxed integration tests never depend on (or start) an agy on the machine.
+            agy_bin: if sandboxed { None } else { agy::find_agy_bin() },
             loaded: Mutex::new(HashMap::new()),
             subagent_logs: Mutex::new(HashMap::new()),
             next_start: Mutex::new(HashMap::new()),
@@ -412,12 +421,13 @@ impl AgentHub {
                     .map(PathBuf::from)
                     .filter(|p| is_rollout_file(p) && p.exists())
             }
+            "agy" => self.agy.transcript_path(native_id),
             _ => None,
         }?;
-        let parser: Box<dyn LineParser> = if agent == "codex" {
-            Box::new(CodexParser::new())
-        } else {
-            Box::new(ClaudeParser::new())
+        let parser: Box<dyn LineParser> = match agent {
+            "codex" => Box::new(CodexParser::new()),
+            "agy" => Box::new(agy::transcript::AgyParser::new()),
+            _ => Box::new(ClaudeParser::new()),
         };
         match load_file(&path, parser, log) {
             Ok(t) => Some(t),
@@ -467,6 +477,41 @@ impl AgentHub {
                     tty.set_native(l.session_id.clone(), l.name.clone(), tail);
                 }
                 tty.update_live(l.status.clone(), l.waiting_for.clone());
+            }
+        } else if tty.agent() == "agy" {
+            let claimed: Vec<String> = self
+                .managed
+                .read()
+                .iter()
+                .filter(|(k, _)| **k != tty.id)
+                .filter_map(|(_, m)| m.native_session_id())
+                .collect();
+            let rows = self.agy.rows();
+            let mine = tty
+                .native_session_id()
+                .and_then(|n| rows.get(&n).cloned())
+                .or_else(|| {
+                    if !tty.needs_native_id() {
+                        return None;
+                    }
+                    rows.values()
+                        .filter(|r| !r.is_subagent() && !claimed.contains(&r.conversation_id))
+                        .filter(|r| r.cwd.as_deref().map(norm_path) == Some(norm_path(&cwd)))
+                        .filter(|r| r.last_modified_ms.unwrap_or(0) >= tty.created_at_ms() - 10_000)
+                        .max_by_key(|r| r.last_modified_ms.unwrap_or(0))
+                        .cloned()
+                });
+            if let Some(r) = mine {
+                if tty.native_session_id().as_deref() != Some(r.conversation_id.as_str()) {
+                    let tail = self
+                        .history_tail("agy", &r.conversation_id, Some(&cwd), &tty.log())
+                        .await;
+                    tty.set_native(r.conversation_id.clone(), r.title.clone(), tail);
+                }
+                let st = r
+                    .observed_live(crate::util::now_ms())
+                    .map(|(s, _)| s.to_string());
+                tty.update_live(st, None);
             }
         } else if tty.needs_native_id() {
             *self.index_cache.lock() = None;
@@ -552,8 +597,9 @@ impl AgentHub {
             { "agent": "codex", "origin": "desktop_app", "capabilities": observed_caps("codex"), "notes": "Without the opt-in hook: observation of rollouts only." },
             { "agent": "codex", "origin": "desktop_app", "takeover": "CODEX_CLI_PATH", "capabilities": attached(false), "notes": "With the opt-in CODEX_CLI_PATH hook: every thread loaded in Codex Desktop can be messaged, approved and interrupted from the phone." },
             { "agent": "dsh", "origin": "cli", "capabilities": observed_caps("dsh"), "notes": "DeepSeek Harness session logs ($DSH_HOME/sessions, zstd frames) tailed read-only; a log written in the last two minutes counts as live. Sub-agents are their own sessions (parentSession)." },
-            { "agent": "agy", "origin": "cli", "capabilities": history_caps("agy"), "notes": "Google Antigravity (agy CLI / IDE) conversations from CC Switch's session index, read with its parser (JSONL transcripts and trajectory databases): history and content search, no live view of a window on the computer. \"Continue on phone\" resumes the conversation on SwitchTether's own `agy acp` process." },
-            { "agent": "agy", "origin": "managed", "capabilities": agy_managed_caps(), "notes": "New or resumed conversations on SwitchTether's own `agy acp` process (Agent Client Protocol v1 over stdio) with the user's normal agy login and settings: prompt, cancel, permission requests, model / thinking level (session config options) and agy's modes (default, accept edits, auto, plan). Stored by agy in its usual history." },
+            { "agent": "agy", "origin": "cli", "capabilities": observed_caps("agy"), "notes": "Google Antigravity (agy CLI / IDE) conversations discovered via conversation_summaries.db and tailed live from transcript_full.jsonl (read-only). \"Continue on phone\" resumes the conversation on SwitchTether's own `agy acp` process." },
+            { "agent": "agy", "origin": "cli", "takeover": "st-agy", "capabilities": attached(true), "notes": "Started with `st-agy` (opt-in launcher): the TUI is mirrored as a terminal; messages are typed into it; prompts are answered in the terminal view." },
+            { "agent": "agy", "origin": "managed", "capabilities": agy_managed_caps(), "notes": "New or resumed conversations on SwitchTether's own `agy acp` process (Agent Client Protocol v1 over stdio) with the user's normal agy login and settings: prompt, cancel, permission requests, model / thinking level, session tools and agy's modes (default, accept edits, auto, plan, bypass permissions)." },
             { "agent": "dsh", "origin": "managed", "capabilities": managed_caps(), "notes": "New or resumed sessions on SwitchTether's own `dsh --profile acp` process (ACP v1 over stdio): prompt, cancel and permission requests; the timeline is read from the persisted session log." },
         ])
     }
@@ -626,6 +672,13 @@ impl AgentHub {
             native_id: m.native_session_id().unwrap_or_default(),
             title: transcript_title
                 .or_else(|| m.title())
+                .or_else(|| {
+                    (m.agent() == "agy")
+                        .then(|| m.native_session_id())
+                        .flatten()
+                        .and_then(|cid| self.agy.row(&cid))
+                        .and_then(|r| r.title)
+                })
                 .or_else(|| {
                     // Codex Desktop names its threads in its session index.
                     (m.agent() == "codex")
@@ -764,6 +817,50 @@ impl AgentHub {
         })
     }
 
+    fn observed_agy_summary(&self, r: &agy::live::AgySummaryRow) -> Option<SessionSummary> {
+        let now_ms = crate::util::now_ms();
+        let (status, bg_hint) = r.observed_live(now_ms)?;
+        let transcript = r.transcript_path();
+        let id = format!("agy:{}", r.conversation_id);
+        let loaded_log = self
+            .loaded
+            .lock()
+            .get(&id)
+            .filter(|x| x.tail.is_some())
+            .map(|x| x.log.clone());
+        let from_log = loaded_log.map(|log| active_task_count(&log.lock()));
+        let active_tasks = match (from_log, bg_hint && status != "busy") {
+            (Some(n), true) => Some(n.max(1)),
+            (Some(n), false) => Some(n),
+            (None, true) => Some(1),
+            (None, false) => None,
+        };
+        let cwd = r.cwd.clone();
+        Some(SessionSummary {
+            id,
+            agent: "agy".into(),
+            origin: r.origin,
+            native_id: r.conversation_id.clone(),
+            title: r.title.clone(),
+            project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
+            cwd,
+            liveness: Liveness::Live,
+            status: status.into(),
+            waiting_for: None,
+            control: Control::Observe,
+            created_at_ms: r.last_user_input_ms,
+            last_active_at_ms: r.last_modified_ms.or(Some(now_ms)),
+            model: None,
+            effort: None,
+            git_branch: None,
+            pid: None,
+            managed: false,
+            terminal_id: None,
+            active_tasks,
+            source_path: transcript.map(|p| p.to_string_lossy().into_owned()),
+        })
+    }
+
     pub async fn list(&self, q: &SessionQuery) -> (Vec<SessionSummary>, Option<String>) {
         let indexed = self.index().await;
         let mut out: Vec<SessionSummary> = Vec::new();
@@ -792,16 +889,31 @@ impl AgentHub {
                 out.push(summary);
             }
         }
+        let agy_live = self.agy.live_sessions();
+        let mut agy_live_ids = std::collections::HashSet::new();
+        for r in &agy_live {
+            if managed_native.contains(&r.conversation_id) {
+                continue;
+            }
+            if let Some(summary) = self.observed_agy_summary(r) {
+                agy_live_ids.insert(r.conversation_id.clone());
+                out.push(summary);
+            }
+        }
         for s in indexed.iter() {
             let agent = agent_of_provider(&s.provider_id);
             if (agent == "claude_code" && live_ids.contains(&s.session_id))
+                || (agent == "agy" && agy_live_ids.contains(&s.session_id))
                 || managed_native.contains(&s.session_id)
             {
                 continue;
             }
-            // DeepSeek Harness sub-agents are sessions of their own; they are shown in their
-            // parent's branch view, never as top-level sessions.
+            // Sub-agents are sessions of their own in DeepSeek Harness and Antigravity; they are
+            // shown in their parent's branch view and Agent map, never as top-level sessions.
             if agent == "dsh" && self.dsh_is_child(s.source_path.as_deref()) {
+                continue;
+            }
+            if agent == "agy" && self.agy.is_subagent(&s.session_id) {
                 continue;
             }
             // A recently written DeepSeek Harness log belongs to a session that is open right now:
@@ -824,6 +936,8 @@ impl AgentHub {
                 s.source_path
                     .as_deref()
                     .and_then(|p| self.claude_title(Path::new(p)))
+            } else if agent == "agy" {
+                self.agy.row(&s.session_id).and_then(|r| r.title)
             } else {
                 None
             }
@@ -933,11 +1047,18 @@ impl AgentHub {
             }
         }
         all.sort_by_key(|s| std::cmp::Reverse(s.last_active_at_ms.unwrap_or(0)));
-        // Antigravity keeps conversations in JSONL transcripts and trajectory databases; only
-        // CC Switch's own parser reads both, so those are searched through the backend below.
+        // Antigravity JSONL transcripts are searched directly via `AgyParser`; legacy trajectory
+        // databases without a JSONL transcript fall back to CC Switch's parser below.
+        let agy_jsonl = |s: &SessionSummary| -> Option<PathBuf> {
+            s.source_path
+                .as_deref()
+                .map(PathBuf::from)
+                .filter(|p| p.extension().is_some_and(|e| e == "jsonl") && p.is_file())
+                .or_else(|| self.agy.transcript_path(&s.native_id))
+        };
         let (via_backend, all): (Vec<SessionSummary>, Vec<SessionSummary>) = all
             .into_iter()
-            .partition(|s| s.agent == "agy" && s.source_path.is_some());
+            .partition(|s| s.agent == "agy" && agy_jsonl(s).is_none() && s.source_path.is_some());
         let mut seen = std::collections::HashSet::new();
         let targets: Vec<(SessionSummary, PathBuf)> = all
             .into_iter()
@@ -956,6 +1077,7 @@ impl AgentHub {
                         .filter(|p| is_rollout_file(p) && p.exists())
                         .or_else(|| find_codex_rollout(&s.native_id)),
                     "dsh" => dsh_log_path(&s),
+                    "agy" => agy_jsonl(&s),
                     _ => None,
                 }?;
                 seen.insert(path.clone()).then_some((s, path))
@@ -976,6 +1098,7 @@ impl AgentHub {
                 let parser: Box<dyn LineParser> = match s.agent.as_str() {
                     "claude_code" => Box::new(ClaudeParser::new()),
                     "codex" => Box::new(CodexParser::new()),
+                    "agy" => Box::new(agy::transcript::AgyParser::new()),
                     _ => Box::new(DshParser::new()),
                 };
                 let Ok(lines) = search::file_lines(&path) else {
@@ -1104,6 +1227,88 @@ impl AgentHub {
         })
     }
 
+    fn agy_summary_from_transcript(&self, id: &str) -> Option<SessionSummary> {
+        let native = id.strip_prefix("agy:")?;
+        if !valid_agent_id(native) {
+            return None;
+        }
+        if let Some(r) = self.agy.row(native) {
+            if let Some(live) = self.observed_agy_summary(&r) {
+                return Some(live);
+            }
+            let cwd = r.cwd.clone();
+            return Some(SessionSummary {
+                id: id.to_string(),
+                agent: "agy".into(),
+                origin: r.origin,
+                native_id: native.to_string(),
+                title: r.title.clone(),
+                project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
+                cwd,
+                liveness: Liveness::Ended,
+                status: "ended".into(),
+                waiting_for: None,
+                control: Control::History,
+                created_at_ms: r.last_user_input_ms,
+                last_active_at_ms: r.last_modified_ms,
+                model: None,
+                effort: None,
+                git_branch: None,
+                pid: None,
+                managed: false,
+                terminal_id: None,
+                active_tasks: None,
+                source_path: r
+                    .transcript_path()
+                    .map(|p| p.to_string_lossy().into_owned()),
+            });
+        }
+        let path = self.agy.transcript_path(native)?;
+        let meta = std::fs::metadata(&path).ok()?;
+        let mut parser = agy::transcript::AgyParser::new();
+        if let Ok(f) = std::fs::File::open(&path) {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(f)
+                .lines()
+                .take(200)
+                .map_while(Result::ok)
+            {
+                if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                    parser.feed(&v);
+                }
+            }
+        }
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64);
+        let cwd = parser.cwd.clone();
+        Some(SessionSummary {
+            id: id.to_string(),
+            agent: "agy".into(),
+            origin: Origin::Unknown,
+            native_id: native.to_string(),
+            title: parser.title.clone(),
+            project: cwd.as_deref().and_then(SessionSummary::project_from_cwd),
+            cwd,
+            liveness: Liveness::Ended,
+            status: "ended".into(),
+            waiting_for: None,
+            control: Control::History,
+            created_at_ms: None,
+            last_active_at_ms: modified,
+            model: parser.model.clone(),
+            effort: None,
+            git_branch: None,
+            pid: None,
+            managed: false,
+            terminal_id: None,
+            active_tasks: None,
+            source_path: Some(path.to_string_lossy().into_owned()),
+        })
+    }
+
     pub async fn summary(&self, id: &str) -> Option<SessionSummary> {
         if let Some((key, m)) = self.find_managed(id) {
             return Some(self.managed_summary(&key, m.as_ref()));
@@ -1128,6 +1333,7 @@ impl AgentHub {
                 None => {
                     return self
                         .claude_summary_from_transcript(id)
+                        .or_else(|| self.agy_summary_from_transcript(id))
                         .or_else(|| dsh_summary_from_log(id))
                 }
             }
@@ -1241,6 +1447,22 @@ impl AgentHub {
                 Some(p) => Some(load_file(&p, Box::new(DshParser::new()), &log)?),
                 None => None,
             },
+            "agy" => {
+                let path = s
+                    .source_path
+                    .clone()
+                    .map(PathBuf::from)
+                    .filter(|p| p.extension().is_some_and(|e| e == "jsonl") && p.is_file())
+                    .or_else(|| self.agy.transcript_path(&s.native_id));
+                match path {
+                    Some(p) => Some(load_file(
+                        &p,
+                        Box::new(agy::transcript::AgyParser::new()),
+                        &log,
+                    )?),
+                    None => None,
+                }
+            }
             _ => None,
         };
         if tail.is_none() {
@@ -1319,9 +1541,16 @@ impl AgentHub {
                 v["permissionModes"] = permission::modes(m.agent());
             }
         }
-        if v.get("claudeTools").is_none() && s.agent == "claude_code" {
-            // Observed session: the read-only tools (task output, plan, export) only.
+        if v.get("claudeTools").is_none()
+            && v.get("sessionTools").is_none()
+            && matches!(s.agent.as_str(), "claude_code" | "agy")
+        {
+            // Observed / history session: read-only tools (task output, plan, export, plus MCP
+            // status for Antigravity) only.
             v["claudeReadTools"] = json!(true);
+            if s.agent == "agy" {
+                v["sessionTools"] = json!(["task_output", "plan", "mcp_status", "export"]);
+            }
         }
         if v.get("claudeTools").is_none() {
             // Not running anywhere: a message resumes it under SwitchTether, with the model,
@@ -1381,6 +1610,11 @@ impl AgentHub {
             .ok_or_else(|| ApiError::not_found("unknown session"))?;
         if s.agent == "dsh" {
             return self.dsh_subagent_events(&s, agent_id, before, after, limit);
+        }
+        if s.agent == "agy" {
+            return self
+                .agy_subagent_events(&s, agent_id, before, after, limit)
+                .await;
         }
         if s.agent != "claude_code" {
             return self.log_subagent_events(&s, agent_id, limit).await;
@@ -1486,13 +1720,16 @@ impl AgentHub {
     /// whitelisted control request; responses are reduced to the fields the phone shows (never
     /// MCP configuration, which can hold secrets) and texts are redacted.
     pub async fn claude_tool(&self, id: &str, action: &str, p: &Value) -> ApiResult<Value> {
-        // Codex (and any other agent with session tools of its own): same paths and replies.
-        if let Some((_, m)) = self.find_managed(id).filter(|(_, m)| {
+        // Codex / Antigravity (and any other agent with session tools of its own): same paths and replies.
+        if let Some((key, m)) = self.find_managed(id).filter(|(_, m)| {
             !m.supports_claude_tools()
                 && m.liveness() == Liveness::Live
                 && m.session_tools().contains(&action)
         }) {
             let r = m.session_tool(action, p).await?;
+            if matches!(action, "rename" | "permission_mode") {
+                self.publish_session(&key);
+            }
             return Ok(match action {
                 "commands" => command_catalog(claude::managed::normalize_commands(&r)),
                 _ => r,
@@ -1730,18 +1967,25 @@ impl AgentHub {
             .await
             .ok_or_else(|| ApiError::not_found("unknown session"))?;
         let blocked = || {
-            ApiError::unavailable_capability(
-                "BLOCKED",
-                "This Claude Code session was started on the computer and can only be watched. Turn on the takeover hook in Settings → Remote for new VS Code panels, or use \"Continue on phone\".",
-            )
+            let msg = if s.agent == "agy" {
+                "This Antigravity session was started on the computer and can only be watched. Start a terminal with `st-agy`, or use \"Continue on phone\"."
+            } else {
+                "This Claude Code session was started on the computer and can only be watched. Turn on the takeover hook in Settings → Remote for new VS Code panels, or use \"Continue on phone\"."
+            };
+            ApiError::unavailable_capability("BLOCKED", msg)
         };
         // Not running, but a message from the phone would resume it under SwitchTether: no list
-        // yet, the phone falls back to its built-in one.
+        // yet, the phone falls back to its built-in one (or Antigravity's built-ins).
         if action == "commands"
-            && matches!(s.agent.as_str(), "claude_code" | "codex")
+            && matches!(s.agent.as_str(), "claude_code" | "codex" | "agy")
             && self.resumable(id).await.is_some()
         {
-            return Ok(command_catalog(Vec::new()));
+            let cmds = if s.agent == "agy" {
+                agy::default_commands()
+            } else {
+                Vec::new()
+            };
+            return Ok(command_catalog(cmds));
         }
         // Not running: the permission mode is kept for the resume a message starts.
         if action == "permission_mode" && self.resumable(id).await.is_some() {
@@ -1756,6 +2000,34 @@ impl AgentHub {
                 .or_default()
                 .permission_mode = Some(mode.to_string()).filter(|m| m != "default");
             return Ok(json!({ "mode": mode, "pending": true }));
+        }
+        if s.agent == "agy" {
+            return match action {
+                "mcp_status" => Ok(agy::live::read_mcp_status(s.cwd.as_deref().map(Path::new))),
+                "task_output" => {
+                    let task = p
+                        .get("taskId")
+                        .and_then(Value::as_str)
+                        .filter(|t| valid_agent_id(t))
+                        .ok_or_else(|| ApiError::validation("invalid task id"))?;
+                    let log = self.ensure_loaded(&s).await?;
+                    let lg = log.lock();
+                    agy::task_output(&lg, task)
+                }
+                "plan" => {
+                    let log = self.ensure_loaded(&s).await?;
+                    let brain = self.agy.brain_dir(&s.native_id);
+                    let lg = log.lock();
+                    Ok(agy::plan_view(brain.as_deref(), &lg))
+                }
+                "export" => {
+                    let log = self.ensure_loaded(&s).await?;
+                    let text = crate::redact::redact_text(&export_text(&log.lock()));
+                    let date = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
+                    Ok(json!({ "text": text, "filename": format!("{date}-{}.txt", s.native_id) }))
+                }
+                _ => Err(blocked()),
+            };
         }
         if s.agent != "claude_code" || !matches!(action, "task_output" | "plan" | "export") {
             return Err(blocked());
@@ -1815,6 +2087,59 @@ impl AgentHub {
             .ok_or_else(|| ApiError::not_found("unknown session"))?;
         if s.agent == "dsh" {
             return Ok(json!({ "sessionId": id, "agents": dsh_subagent_nodes(&s) }));
+        }
+        if s.agent == "agy" {
+            let log = self.ensure_loaded(&s).await?;
+            let from_log = log_subagent_nodes(&log.lock());
+            let mut by_id: HashMap<String, Value> = HashMap::new();
+            for n in from_log {
+                if let Some(aid) = n.get("agentId").and_then(Value::as_str) {
+                    by_id.insert(aid.to_string(), n);
+                }
+            }
+            for c in self.agy.descendants(&s.native_id) {
+                let finished = c.killed || (!c.is_running() && !c.not_fully_idle);
+                let parent_agent = c
+                    .parent_conversation_id
+                    .as_deref()
+                    .filter(|p| !p.is_empty() && *p != s.native_id)
+                    .map(String::from);
+                match by_id
+                    .get_mut(&c.conversation_id)
+                    .and_then(Value::as_object_mut)
+                {
+                    Some(existing) => {
+                        if existing.get("parentAgentId").is_none_or(Value::is_null) {
+                            existing.insert("parentAgentId".into(), json!(parent_agent));
+                        }
+                        if existing.get("agentType").is_none_or(Value::is_null) {
+                            existing.insert("agentType".into(), json!(c.agent_name));
+                        }
+                        existing.insert("spawnDepth".into(), json!(c.nesting_depth));
+                        existing.insert("updatedAtMs".into(), json!(c.last_modified_ms));
+                        if finished {
+                            existing.insert("finished".into(), json!(true));
+                        }
+                    }
+                    None => {
+                        by_id.insert(
+                            c.conversation_id.clone(),
+                            json!({
+                                "agentId": c.conversation_id,
+                                "description": c.title.or_else(|| c.agent_name.clone()),
+                                "agentType": c.agent_name.unwrap_or_else(|| "subagent".into()),
+                                "parentAgentId": parent_agent,
+                                "spawnDepth": c.nesting_depth,
+                                "finished": finished,
+                                "updatedAtMs": c.last_modified_ms,
+                            }),
+                        );
+                    }
+                }
+            }
+            let mut agents: Vec<Value> = by_id.into_values().collect();
+            agents.sort_by_key(|a| a.get("updatedAtMs").and_then(Value::as_i64).unwrap_or(0));
+            return Ok(json!({ "sessionId": id, "agents": agents }));
         }
         if s.agent != "claude_code" {
             // Codex and other adapters: the `subagent` rows of the session's own log.
@@ -1918,6 +2243,119 @@ impl AgentHub {
             "events": events,
             "hasMore": more,
             "lastSeq": last,
+            "meta": meta,
+        }))
+    }
+
+    async fn agy_subagent_events(
+        &self,
+        s: &SessionSummary,
+        agent_id: &str,
+        before: Option<u64>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> ApiResult<Value> {
+        let log = self.ensure_loaded(s).await?;
+        let log_row = log
+            .lock()
+            .iter()
+            .find(|e| {
+                e.kind == "subagent"
+                    && e.data.get("agentId").and_then(Value::as_str) == Some(agent_id)
+            })
+            .cloned();
+        let db_row = self
+            .agy
+            .descendants(&s.native_id)
+            .into_iter()
+            .find(|c| c.conversation_id == agent_id);
+        if log_row.is_none() && db_row.is_none() {
+            return Err(ApiError::not_found("unknown sub-agent"));
+        }
+        let path = db_row
+            .as_ref()
+            .and_then(|r| r.transcript_path())
+            .or_else(|| self.agy.transcript_path(agent_id))
+            .ok_or_else(|| ApiError::not_found("no transcript for this sub-agent"))?;
+
+        let key = format!("{}|{agent_id}", s.id);
+        let child_log = {
+            let mut map = self.subagent_logs.lock();
+            map.retain(|_, l| l.last_access.elapsed() < Duration::from_secs(10 * 60));
+            match map.get_mut(&key) {
+                Some(l) => {
+                    l.last_access = Instant::now();
+                    if let Some(t) = l.tail.as_mut() {
+                        let _ = tail_file(t, &l.log, false);
+                    }
+                    l.log.clone()
+                }
+                None => {
+                    let lg = Arc::new(Mutex::new(SessionLog::new(key.clone(), None)));
+                    let tail = load_file(&path, Box::new(agy::transcript::AgyParser::new()), &lg)?;
+                    if map.len() >= 16 {
+                        if let Some(oldest) = map
+                            .iter()
+                            .min_by_key(|(_, l)| l.last_access)
+                            .map(|(k, _)| k.clone())
+                        {
+                            map.remove(&oldest);
+                        }
+                    }
+                    map.insert(
+                        key,
+                        Loaded {
+                            log: lg.clone(),
+                            tail: Some(tail),
+                            last_access: Instant::now(),
+                        },
+                    );
+                    lg
+                }
+            }
+        };
+
+        let finished = db_row
+            .as_ref()
+            .map(|c| c.killed || (!c.is_running() && !c.not_fully_idle))
+            .or_else(|| {
+                log_row.as_ref().map(|r| {
+                    matches!(
+                        r.data.get("status").and_then(Value::as_str),
+                        Some("completed" | "failed" | "interrupted")
+                    )
+                })
+            })
+            .unwrap_or(false);
+        let parent_agent = db_row
+            .as_ref()
+            .and_then(|c| c.parent_conversation_id.as_deref())
+            .filter(|p| !p.is_empty() && *p != s.native_id);
+        let meta = json!({
+            "agentType": log_row
+                .as_ref()
+                .and_then(|r| r.data.get("agentType").and_then(Value::as_str))
+                .or_else(|| db_row.as_ref().and_then(|c| c.agent_name.as_deref()))
+                .unwrap_or("subagent"),
+            "description": log_row
+                .as_ref()
+                .and_then(|r| r.data.get("description").and_then(Value::as_str))
+                .or_else(|| db_row.as_ref().and_then(|c| c.title.as_deref())),
+            "toolUseId": log_row
+                .as_ref()
+                .and_then(|r| r.data.get("callId").and_then(Value::as_str)),
+            "parentAgentId": parent_agent,
+            "spawnDepth": db_row.as_ref().map(|c| c.nesting_depth),
+            "finished": finished,
+        });
+        let lg = child_log.lock();
+        let (events, more) = lg.page(before, after, limit);
+        Ok(json!({
+            "sessionId": s.id,
+            "agentId": agent_id,
+            "events": events,
+            "hasMore": more,
+            "lastSeq": lg.last_seq(),
             "meta": meta,
         }))
     }
@@ -2203,24 +2641,41 @@ impl AgentHub {
                     .filter(|p| is_rollout_file(p) && p.exists())
                     .or_else(|| find_codex_rollout(&s.native_id))
                     .map(|p| (p, Box::new(CodexParser::new()) as Box<dyn LineParser>)),
+                "agy" => s
+                    .source_path
+                    .clone()
+                    .map(PathBuf::from)
+                    .filter(|p| p.extension().is_some_and(|e| e == "jsonl") && p.is_file())
+                    .or_else(|| self.agy.transcript_path(&s.native_id))
+                    .map(|p| {
+                        (
+                            p,
+                            Box::new(agy::transcript::AgyParser::new()) as Box<dyn LineParser>,
+                        )
+                    }),
                 _ => None,
             };
-            if let Some((path, parser)) = history {
-                if let Err(e) = load_file(&path, parser, &log) {
-                    log::warn!("[agents] could not preload history: {e}");
-                }
-            }
-            if s.agent == "agy" {
-                // Antigravity keeps conversations in transcripts and trajectory databases that
-                // only CC Switch's parser reads.
-                if let Some(src) = &s.source_path {
-                    match self.backend.session_messages("agy", src).await {
-                        Ok(v) => backend_messages_into_log(&v, &log),
-                        Err(e) => log::warn!("[agents] could not preload agy history: {e}"),
+            let loaded_rich = if let Some((path, parser)) = history {
+                match load_file(&path, parser, &log) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        log::warn!("[agents] could not preload history: {e}");
+                        false
                     }
                 }
-                // Antigravity windows on the computer cannot be seen from here: say where the new
-                // turns run whether or not one still has this conversation open.
+            } else {
+                false
+            };
+            if s.agent == "agy" {
+                if !loaded_rich {
+                    // Legacy trajectory database without a JSONL transcript: fall back to CC Switch's parser.
+                    if let Some(src) = &s.source_path {
+                        match self.backend.session_messages("agy", src).await {
+                            Ok(v) => backend_messages_into_log(&v, &log),
+                            Err(e) => log::warn!("[agents] could not preload agy history: {e}"),
+                        }
+                    }
+                }
                 log.lock().upsert(
                     EventDraft::new(
                         "continued",
@@ -2876,21 +3331,28 @@ impl AgentHub {
                 None => return,
             };
             let mut watch = claude::live::watch_registry(&claude_dir);
+            let mut agy_watch = hub.upgrade().and_then(|h| h.agy.watch());
+            let mut prev_agy: HashMap<String, ObservedState> = HashMap::new();
+            let mut missing_agy: HashMap<String, Instant> = HashMap::new();
             let mut full = tokio::time::interval(Duration::from_secs(4));
             let mut fast = tokio::time::interval(fallback_poll(watch.is_some()));
             full.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             fast.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                let (full_tick, notified) = tokio::select! {
+                let (full_tick, notified, agy_notified) = tokio::select! {
                     _ = cancel.cancelled() => break,
-                    _ = full.tick() => (true, false),
-                    _ = fast.tick() => (false, false),
-                    Some(()) = recv_change(&mut watch) => (false, true),
+                    _ = full.tick() => (true, false, false),
+                    _ = fast.tick() => (false, false, false),
+                    Some(()) = recv_change(&mut watch) => (false, true, false),
+                    Some(()) = recv_change(&mut agy_watch) => (false, false, true),
                 };
-                if notified {
+                if notified || agy_notified {
                     // One status change is several writes: settle briefly, then read once.
                     tokio::time::sleep(Duration::from_millis(80)).await;
                     if let Some((_, rx)) = watch.as_mut() {
+                        while rx.try_recv().is_ok() {}
+                    }
+                    if let Some((_, rx)) = agy_watch.as_mut() {
                         while rx.try_recv().is_ok() {}
                     }
                 }
@@ -2902,10 +3364,66 @@ impl AgentHub {
                         fast.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                     }
                 }
+                if full_tick && agy_watch.is_none() {
+                    agy_watch = hub.upgrade().and_then(|h| h.agy.watch());
+                }
                 if !active() {
                     continue;
                 }
                 let Some(hub) = hub.upgrade() else { break };
+                let agy_changed = full_tick || agy_notified || hub.agy.changed();
+                if agy_changed {
+                    let managed_native: Vec<String> = hub
+                        .managed
+                        .read()
+                        .values()
+                        .filter_map(|m| m.native_session_id())
+                        .collect();
+                    let mut now_agy = HashMap::new();
+                    for r in hub
+                        .agy
+                        .live_sessions()
+                        .iter()
+                        .filter(|r| !managed_native.contains(&r.conversation_id))
+                    {
+                        let Some(summary) = hub.observed_agy_summary(r) else {
+                            continue;
+                        };
+                        let id = summary.id.clone();
+                        let state = (
+                            Some(summary.status.clone()),
+                            summary.waiting_for.clone(),
+                            summary.title.clone(),
+                            summary.active_tasks,
+                        );
+                        if prev_agy.get(&id) != Some(&state) {
+                            if !prev_agy.contains_key(&id) {
+                                hub.follow_loaded(&summary);
+                            }
+                            hub.bus.publish("session.upserted", json!(summary));
+                        }
+                        now_agy.insert(id, state);
+                    }
+                    missing_agy.retain(|id, _| !now_agy.contains_key(id));
+                    let gone_agy: Vec<(String, ObservedState)> = prev_agy
+                        .into_iter()
+                        .filter(|(k, _)| !now_agy.contains_key(k))
+                        .collect();
+                    for (id, state) in gone_agy {
+                        let since = *missing_agy.entry(id.clone()).or_insert_with(Instant::now);
+                        if since.elapsed() >= MISSING_GRACE {
+                            missing_agy.remove(&id);
+                            hub.bus.publish(
+                                "session.removed",
+                                json!({ "id": id, "liveness": "ended" }),
+                            );
+                        } else {
+                            now_agy.insert(id, state);
+                        }
+                    }
+                    prev_agy = now_agy;
+                }
+
                 let changed = hub.claude.registry_changed();
                 let live = if full_tick {
                     hub.claude.live_sessions().await
@@ -2970,7 +3488,7 @@ impl AgentHub {
                     .managed
                     .read()
                     .iter()
-                    .filter(|(_, m)| matches!(m.agent(), "claude_code" | "codex"))
+                    .filter(|(_, m)| matches!(m.agent(), "claude_code" | "codex" | "agy"))
                     .map(|(k, m)| (k.clone(), m.clone()))
                     .collect();
                 managed_titles.retain(|id, _| claude_managed.iter().any(|(k, _)| k == id));
@@ -3061,7 +3579,7 @@ impl AgentHub {
                 let Some(hub) = hub.upgrade() else { break };
                 let m = hub.managed.read().get(id).cloned();
                 if m.is_none()
-                    && id.starts_with("dsh:")
+                    && (id.starts_with("dsh:") || id.starts_with("agy:"))
                     && frame.data.get("kind").and_then(|k| k.as_str()) == Some("status")
                 {
                     // An observed DeepSeek Harness session open on the phone: its tailed log just
@@ -3142,6 +3660,7 @@ impl AgentHub {
 }
 
 /// Capabilities of a history-only agent's (not live) session, as `capabilities_for` reports it.
+#[allow(dead_code)]
 fn history_caps(agent: &str) -> Capabilities {
     let mut c = observed_caps(agent);
     c.live_events = None;
@@ -3149,23 +3668,23 @@ fn history_caps(agent: &str) -> Capabilities {
 }
 
 fn observed_caps(agent: &str) -> Capabilities {
-    let known = agent == "claude_code" || agent == "codex";
-    // Agents whose conversations SwitchTether can continue in a process of its own.
-    let dsh = agent == "dsh" || agent == "agy";
+    let rich = matches!(agent, "claude_code" | "codex" | "agy");
+    let live = matches!(agent, "claude_code" | "codex" | "dsh" | "agy");
+    let continuable = matches!(agent, "claude_code" | "codex" | "dsh" | "agy");
     Capabilities {
-        read_history: Some(if known { CapStatus::Verified } else { CapStatus::Partial }),
-        live_events: Some(if known || agent == "dsh" { CapStatus::Partial } else { CapStatus::Blocked }),
+        read_history: Some(if rich { CapStatus::Verified } else { CapStatus::Partial }),
+        live_events: Some(if live { CapStatus::Partial } else { CapStatus::Blocked }),
         send_message: Some(CapStatus::Blocked),
         approve: Some(CapStatus::Blocked),
         answer_question: Some(CapStatus::Blocked),
         interrupt: Some(CapStatus::Blocked),
-        continue_session: (known || dsh).then_some(CapStatus::Partial),
+        continue_session: continuable.then_some(CapStatus::Partial),
         change_model: None,
         reason: Some(match agent {
             "claude_code" => "The original Claude Code process (CLI / VS Code) cannot be controlled from another program. Use \"Continue on phone\": the same conversation continues in a SwitchTether process (only while the original is idle; the original window will not show the new turns).".into(),
             "codex" => "The original Codex process (CLI / Desktop) cannot be controlled from another program. Use \"Continue on phone\": the thread continues on SwitchTether's own app-server, which Codex allows only when the thread is not open elsewhere.".into(),
             "dsh" => "A DeepSeek Harness window (web / desktop / terminal) cannot be controlled from another program without the opt-in plugin. Use \"Continue on phone\": the session is resumed on SwitchTether's own `dsh --profile acp` process once it is no longer active elsewhere.".into(),
-            "agy" => "An Antigravity window (agy CLI / IDE) cannot be watched or controlled from another program. Use \"Continue on phone\": the conversation is resumed on SwitchTether's own `agy acp` process (Antigravity's Agent Client Protocol server) and stays in Antigravity's history.".into(),
+            "agy" => "The original Antigravity process (agy CLI / IDE) cannot be controlled from another program unless started with `st-agy`. Its transcript is tailed live read-only; use \"Continue on phone\" (once idle) to resume the conversation on SwitchTether's own `agy acp` process.".into(),
             _ => "History only.".into(),
         }),
     }
@@ -3391,8 +3910,7 @@ fn backend_messages_into_log(v: &Value, log: &Mutex<SessionLog>) {
 /// A conversation on SwitchTether's own `agy acp` process (docs/AGY_REMOTE.md, verification).
 fn agy_managed_caps() -> Capabilities {
     Capabilities {
-        // History of a continued conversation comes from CC Switch's parser (answers it keeps).
-        read_history: Some(CapStatus::Partial),
+        read_history: Some(CapStatus::Verified),
         live_events: Some(CapStatus::Verified),
         send_message: Some(CapStatus::Verified),
         approve: Some(CapStatus::Verified),
@@ -3439,7 +3957,7 @@ fn observed_task_output_path(lg: &SessionLog, task: &str) -> Option<PathBuf> {
 }
 
 /// The newest 64 KiB of a task output file, redacted.
-fn read_task_output(path: &Path) -> ApiResult<Value> {
+pub(crate) fn read_task_output(path: &Path) -> ApiResult<Value> {
     use std::io::{Read, Seek, SeekFrom};
     const KEEP: u64 = 64 * 1024;
     let mut f = std::fs::File::open(path).map_err(|e| ApiError::internal("task output", e))?;
@@ -3460,7 +3978,7 @@ fn read_task_output(path: &Path) -> ApiResult<Value> {
 
 /// A session log as plain text, like Claude Code's own export: prompts (`❯`), answers (`●`) and
 /// one line per tool call.
-fn export_text(lg: &SessionLog) -> String {
+pub(crate) fn export_text(lg: &SessionLog) -> String {
     let mut out = String::new();
     for e in lg.iter().filter(|e| e.parent_id.is_none()) {
         let text = e
@@ -3830,7 +4348,7 @@ fn dsh_subagent_nodes(s: &SessionSummary) -> Vec<Value> {
         .collect()
 }
 
-fn valid_agent_id(id: &str) -> bool {
+pub(crate) fn valid_agent_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id
@@ -5157,11 +5675,12 @@ mod tests {
         assert_eq!(hits[0].match_count, 2);
         assert!(hits[0].snippet.contains("Orbit is ready"));
 
-        // History of a window on the computer: no live view, no control in place; it can be
-        // continued in SwitchTether's own `agy acp` process (resumable once agy is installed).
+        // History of a window on the computer: rich JSONL transcripts (with CC Switch fallback for
+        // legacy trajectory DBs), no control in place; it can be continued in SwitchTether's own
+        // `agy acp` process (resumable once agy is installed).
         let s = hub.summary("agy:a1").await.unwrap();
         let caps = hub.capabilities_for(&s);
-        assert_eq!(caps.read_history, Some(CapStatus::Partial));
+        assert_eq!(caps.read_history, Some(CapStatus::Verified));
         assert_eq!(caps.live_events, None);
         assert_eq!(caps.send_message, Some(CapStatus::Blocked));
         assert_eq!(caps.continue_session, Some(CapStatus::Partial));
@@ -5170,10 +5689,16 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|e| e["agent"] == "agy")
+            .find(|e| e["agent"] == "agy" && e.get("takeover").is_none() && e["origin"] == "cli")
             .unwrap();
-        assert_eq!(agy["capabilities"], json!(caps));
+        assert_eq!(agy["capabilities"]["readHistory"], "VERIFIED");
+        assert_eq!(agy["capabilities"]["liveEvents"], "PARTIAL");
 
+        assert!(matrix
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["agent"] == "agy" && e["takeover"] == "st-agy"));
         assert!(matrix
             .as_array()
             .unwrap()
@@ -5191,6 +5716,179 @@ mod tests {
             .iter()
             .map(|x| x["id"].as_str().unwrap())
             .collect();
-        assert_eq!(modes, ["default", "acceptEdits", "auto", "plan"]);
+        assert_eq!(
+            modes,
+            [
+                "default",
+                "acceptEdits",
+                "auto",
+                "plan",
+                "bypassPermissions"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn agy_live_sessions_tail_transcripts_subagents_and_read_tools() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("antigravity-cli");
+        let parent_logs = root
+            .join("brain")
+            .join("parent-1")
+            .join(".system_generated")
+            .join("logs");
+        let child_logs = root
+            .join("brain")
+            .join("child-1")
+            .join(".system_generated")
+            .join("logs");
+        std::fs::create_dir_all(&parent_logs).unwrap();
+        std::fs::create_dir_all(&child_logs).unwrap();
+
+        let db = root.join("conversation_summaries.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                preview TEXT,
+                workspace_uris TEXT,
+                status TEXT,
+                not_fully_idle INTEGER,
+                killed INTEGER,
+                parent_conversation_id TEXT,
+                nesting_depth INTEGER,
+                agent_name TEXT,
+                last_modified_time TEXT,
+                last_user_input_time TEXT
+            );",
+        )
+        .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO conversation_summaries VALUES ('parent-1', 'Live Agy Task', '', '[\"file:///d:/proj\"]', 'CASCADE_RUN_STATUS_RUNNING', 1, 0, '', 0, '', ?1, ?1)",
+            [&now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversation_summaries VALUES ('child-1', '', '', '[]', 'CASCADE_RUN_STATUS_IDLE', 0, 0, 'parent-1', 1, 'research', ?1, '')",
+            [&now],
+        )
+        .unwrap();
+        drop(conn);
+
+        std::fs::write(
+            parent_logs.join("transcript_full.jsonl"),
+            format!(
+                "{}\n{}\n",
+                json!({ "step_index": 0, "type": "USER_INPUT", "status": "DONE", "created_at": &now, "content": "<USER_REQUEST>\nAudit auth\n</USER_REQUEST>" }),
+                json!({
+                    "step_index": 1,
+                    "type": "PLANNER_RESPONSE",
+                    "status": "DONE",
+                    "created_at": &now,
+                    "model": "gemini-4-carbon-high",
+                    "content": "Spawning subagent.",
+                    "tool_calls": [
+                        { "name": "update_steps", "args": { "steps": [{ "title": "Audit tokens", "status": "in_progress" }] } },
+                        { "name": "invoke_subagent", "args": { "TypeName": "research", "Role": "Token Auditor", "Prompt": "Check JWT" } }
+                    ]
+                })
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            child_logs.join("transcript_full.jsonl"),
+            format!(
+                "{}\n{}\n",
+                json!({ "step_index": 0, "type": "USER_INPUT", "status": "DONE", "created_at": &now, "content": "Check JWT" }),
+                json!({ "step_index": 1, "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": &now, "content": "JWT uses EdDSA." })
+            ),
+        )
+        .unwrap();
+
+        let bus = EventBus::new(64);
+        let hub = Arc::new(AgentHub {
+            bus: bus.clone(),
+            backend: Arc::new(UnavailableBackend),
+            claude: ClaudeObserver::new(tmp.path().join("claude"), None),
+            agy: agy::live::AgyObserver::new(vec![root]),
+            managed: RwLock::new(HashMap::new()),
+            codex_bin: None,
+            dsh_bin: None,
+            agy_bin: None,
+            loaded: Mutex::new(HashMap::new()),
+            dsh_children: Mutex::new(HashMap::new()),
+            dsh_turns: Mutex::new(HashMap::new()),
+            probe_log: Arc::new(Mutex::new(SessionLog::new("probe", None))),
+            subagent_logs: Mutex::new(HashMap::new()),
+            next_start: Mutex::new(HashMap::new()),
+            model_lists: Mutex::new(HashMap::new()),
+            index_cache: Mutex::new(None),
+            title_cache: Mutex::new(HashMap::new()),
+            ttys: RwLock::new(HashMap::new()),
+            attachments: RwLock::new(None),
+        });
+
+        let (items, _) = hub
+            .list(&SessionQuery {
+                agent: Some("agy".into()),
+                ..Default::default()
+            })
+            .await;
+        assert_eq!(
+            items.len(),
+            1,
+            "child subagent is excluded from top-level list"
+        );
+        assert_eq!(items[0].id, "agy:parent-1");
+        assert_eq!(items[0].liveness, Liveness::Live);
+        assert_eq!(items[0].status, "busy");
+        assert_eq!(items[0].control, Control::Observe);
+
+        // Continuing a busy external Antigravity session is refused.
+        let busy_err = hub
+            .create_managed(CreateSession {
+                agent: "agy".into(),
+                cwd: String::new(),
+                prompt: None,
+                model: None,
+                permission_mode: None,
+                resume_from: Some("agy:parent-1".into()),
+                mode: Some("continue".into()),
+                effort: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(busy_err.code, crate::error::ErrorCode::Conflict);
+
+        // Read-only session tools work on observed Antigravity sessions.
+        let plan = hub
+            .claude_tool("agy:parent-1", "plan", &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(plan["exists"], true);
+        assert!(plan["content"].as_str().unwrap().contains("Audit tokens"));
+
+        let exported = hub
+            .claude_tool("agy:parent-1", "export", &json!({}))
+            .await
+            .unwrap();
+        assert!(exported["text"].as_str().unwrap().contains("Audit auth"));
+
+        // Subagent tree & child events endpoint.
+        let tree = hub.subagent_tree("agy:parent-1").await.unwrap();
+        assert_eq!(tree["agents"][0]["agentId"], "child-1");
+        assert_eq!(tree["agents"][0]["agentType"], "research");
+
+        let sub_ev = hub
+            .subagent_events("agy:parent-1", "child-1", None, None, 50)
+            .await
+            .unwrap();
+        assert!(sub_ev["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "assistant_message" && e["data"]["text"] == "JWT uses EdDSA."));
     }
 }

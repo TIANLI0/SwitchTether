@@ -5658,9 +5658,9 @@
         "enabledToast": "已開啟。結束並重新開啟 Codex Desktop 後生效。"
       },
       "cli": {
-        "label": "終端機 · st-claude / st-codex",
-        "description": "新增 st-claude 與 st-codex 指令（{{dir}}）。想在手機上接管的工作階段改用它們代替 claude / codex 啟動；claude 與 codex 本身不變。",
-        "enabledToast": "已開啟。開啟新的終端機執行 st-claude 或 st-codex。"
+        "label": "終端機 · st-claude / st-codex / st-agy",
+        "description": "新增 st-claude、st-codex 與 st-agy 指令（{{dir}}）。想在手機上接管的工作階段改用它們代替 claude / codex / agy 啟動；claude、codex 與 agy 本身不變。",
+        "enabledToast": "已開啟。開啟新的終端機執行 st-claude、st-codex 或 st-agy。"
       },
       "dsh": {
         "label": "DeepSeek Harness · Web",

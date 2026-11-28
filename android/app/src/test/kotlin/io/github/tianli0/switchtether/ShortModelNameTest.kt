@@ -18,5 +18,9 @@ class ShortModelNameTest {
     fun otherModelsAreKept() {
         assertEquals("gpt-5.1-codex", shortModelName("gpt-5.1-codex"))
         assertEquals("deepseek-v4", shortModelName("deepseek-v4"))
+        assertEquals("Gemini 4 Carbon", shortModelName("gemini-4-carbon-high"))
+        assertEquals("Gemini 3.8 Flash", shortModelName("gemini-3.8-flash"))
+        assertEquals("Orchestrator Neon", shortModelName("gemini-pro-orchestrator-neon"))
+        assertEquals("Sonnet 5.5", shortModelName("claude-sonnet-5-5-low"))
     }
 }

@@ -51,7 +51,8 @@ enum class SlashAction {
 }
 
 /** Agents the phone knows slash commands for. Nothing is invented for the others. */
-fun supportsSlashCommands(agent: String?): Boolean = agent == "claude_code" || agent == "claude" || agent == "codex"
+fun supportsSlashCommands(agent: String?): Boolean =
+    agent == "claude_code" || agent == "claude" || agent == "codex" || agent == "agy"
 
 /**
  * Codex: the phone's own screens only (model, permission mode, rename, help). Its commands —
@@ -67,6 +68,25 @@ private val CODEX_BUILTINS: List<SlashEntry> = listOf(
 
 /** Names that are the phone's own screen for a Codex session; every other Codex command is a message. */
 private val CODEX_PHONE_SIDE = setOf("model", "permissions", "rename", "help")
+
+/**
+ * Antigravity (`agy`): the phone's own screens (model, permissions, context, MCP, rename, export,
+ * help) plus Antigravity's slash commands and skills reported by `agy acp` (`/goal`, `/compact`,
+ * `/plan`, `/grill-me`, `/teamwork`, `/learn`, `/boost`, `/swarm`, …). Note that `/plan` is an
+ * Antigravity prompt command, so it is sent/inserted as a message rather than opening the plan sheet.
+ */
+private val AGY_BUILTINS: List<SlashEntry> = listOf(
+    SlashEntry("model", descriptionRes = R.string.slash_model),
+    SlashEntry("permissions", descriptionRes = R.string.slash_permissions),
+    SlashEntry("context", descriptionRes = R.string.slash_context),
+    SlashEntry("mcp", descriptionRes = R.string.slash_mcp),
+    SlashEntry("rename", descriptionRes = R.string.slash_rename),
+    SlashEntry("export", descriptionRes = R.string.slash_export),
+    SlashEntry("help", descriptionRes = R.string.slash_help),
+)
+
+private val AGY_PHONE_SIDE = setOf("model", "permissions", "context", "mcp", "rename", "export", "help")
+private val AGY_NEEDS_ARGS = setOf("goal", "schedule", "browser", "plan", "grill-me", "teamwork", "boost", "swarm")
 
 /**
  * The phone's list. Commands that are messages here are only those Claude Code runs headless:
@@ -91,17 +111,26 @@ private val CLAUDE_BUILTINS: List<SlashEntry> = listOf(
     SlashEntry("help", descriptionRes = R.string.slash_help),
 )
 
-/** The phone's own list for [agent]: Claude Code's commands, Codex's phone screens, empty for every other agent. */
+/** The phone's own list for [agent]: Claude Code's commands, Codex's / Antigravity's phone screens, empty for every other agent. */
 fun builtinSlashCommands(agent: String?): List<SlashEntry> = when (agent) {
     "claude_code", "claude" -> CLAUDE_BUILTINS
     "codex" -> CODEX_BUILTINS
+    "agy" -> AGY_BUILTINS
     else -> emptyList()
 }
 
-/** Codex's commands from the desktop are messages (a skill named `plan` is not Claude Code's plan viewer). */
-fun forAgent(entries: List<SlashEntry>, agent: String?): List<SlashEntry> = if (agent != "codex") entries else entries.map { e ->
-    if (e.action != null || e.name.lowercase() in CODEX_PHONE_SIDE) e
-    else e.copy(action = if (e.argumentHint.isNotBlank()) SlashAction.INSERT else SlashAction.SEND)
+/** Codex's and Antigravity's commands from the desktop are messages (e.g. `/plan` is a prompt command, not Claude's plan viewer). */
+fun forAgent(entries: List<SlashEntry>, agent: String?): List<SlashEntry> = when (agent) {
+    "codex" -> entries.map { e ->
+        if (e.action != null || e.name.lowercase() in CODEX_PHONE_SIDE) e
+        else e.copy(action = if (e.argumentHint.isNotBlank()) SlashAction.INSERT else SlashAction.SEND)
+    }
+    "agy" -> entries.map { e ->
+        val lower = e.name.lowercase()
+        if (e.action != null || lower in AGY_PHONE_SIDE) e
+        else e.copy(action = if (e.argumentHint.isNotBlank() || lower in AGY_NEEDS_ARGS) SlashAction.INSERT else SlashAction.SEND)
+    }
+    else -> entries
 }
 
 /** Whether tapping [action] is the phone's own screen rather than a message to the agent. */
@@ -192,16 +221,28 @@ fun filterSlashCommands(all: List<SlashEntry>, query: String, limit: Int = SLASH
     return (prefix + rest.filter { it.name.lowercase().contains(q) }).take(limit)
 }
 
-/** The "/" commands this session offers: only Claude Code, only where the composer can send. */
+/** The "/" commands this session offers: Claude Code, Codex and Antigravity, where the composer can send. */
 val SessionDetailState.slashCommands: List<SlashEntry>
     get() {
         val agent = detail.valueOrNull?.summary?.agent
         if (!supportsSlashCommands(agent) || !(canSend || canQueue)) return emptyList()
         // Codex: nothing to offer until its own list arrived (it holds every command it runs).
         if (agent == "codex" && desktopSlashCommands.isEmpty()) return emptyList()
-        val tools = claudeTools || hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.COMMANDS)
         return forAgent(mergeSlashCommands(builtinSlashCommands(agent), desktopSlashCommands), agent)
-            .filter { slashActionAvailable(slashActionFor(it), tools, canChangeModel) }
+            .filter { entry ->
+                when (val a = slashActionFor(entry)) {
+                    SlashAction.SEND, SlashAction.INSERT, SlashAction.HELP -> true
+                    SlashAction.OPEN_MODEL -> canChangeModel || claudeTools
+                    SlashAction.OPEN_PERMISSION -> canPickPermission
+                    SlashAction.CONTEXT -> hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.CONTEXT_USAGE)
+                    SlashAction.MCP -> hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.MCP_STATUS)
+                    SlashAction.PLAN -> hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.PLAN)
+                    SlashAction.EXPORT -> hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.EXPORT)
+                    SlashAction.RENAME -> hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.RENAME)
+                    SlashAction.SIDE_QUESTION -> hasSessionTool(io.github.tianli0.switchtether.remote.session.ClaudeTools.SIDE_QUESTION)
+                    SlashAction.OPEN_TOOLS -> hasAnyToolsPage
+                }
+            }
     }
 
 /** Rows of the panel over the composer for the current draft (empty = no panel). */

@@ -5658,9 +5658,9 @@
         "enabledToast": "Açıldı. Codex Desktop'tan çıkıp yeniden başlat."
       },
       "cli": {
-        "label": "Terminal · st-claude / st-codex",
-        "description": "st-claude ve st-codex komutlarını ekler ({{dir}}). Telefondan erişmek istediğin oturumlar için claude / codex yerine bunları kullan; claude ve codex'in kendisi değişmez.",
-        "enabledToast": "Açıldı. Yeni bir terminal açıp st-claude veya st-codex çalıştır."
+        "label": "Terminal · st-claude / st-codex / st-agy",
+        "description": "st-claude, st-codex ve st-agy komutlarını ekler ({{dir}}). Telefondan erişmek istediğin oturumlar için claude / codex / agy yerine bunları kullan; claude, codex ve agy'nin kendisi değişmez.",
+        "enabledToast": "Açıldı. Yeni bir terminal açıp st-claude, st-codex veya st-agy çalıştır."
       },
       "dsh": {
         "label": "DeepSeek Harness · Web",

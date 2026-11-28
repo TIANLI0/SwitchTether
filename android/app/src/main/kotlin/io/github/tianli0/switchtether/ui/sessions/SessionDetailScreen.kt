@@ -467,7 +467,7 @@ fun SessionDetailScreen(
         onRemoveImage = vm::removeImage,
         onRemoveAttachment = vm::removeAttachment,
         onWithdrawOutgoing = vm::withdrawOutgoing,
-        onOpenTools = if (state.claudeTools || state.claudeReadTools) {
+        onOpenTools = if (state.hasAnyToolsPage) {
             { onOpenRoute(io.github.tianli0.switchtether.ui.nav.Route.SessionTools(sessionId)) }
         } else null,
         // DeepSeek Harness sessions: its own web UI, through the desktop (feature dsh_web).

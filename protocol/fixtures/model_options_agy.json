@@ -11,6 +11,7 @@
     {"id": "default", "label": "Default", "description": "Asks before edits and commands, per your Antigravity permission settings.", "dangerous": false},
     {"id": "acceptEdits", "label": "Accept edits", "description": "Approves file edits in the workspace without asking.", "dangerous": false},
     {"id": "auto", "label": "Auto", "description": "Approves edits and safe commands; asks before irreversible actions.", "dangerous": false},
-    {"id": "plan", "label": "Plan", "description": "Plans carefully before executing a task.", "dangerous": false}
+    {"id": "plan", "label": "Plan", "description": "Plans carefully before executing a task.", "dangerous": false},
+    {"id": "bypassPermissions", "label": "Bypass permissions", "description": "Runs everything without asking (--dangerously-skip-permissions). Like a remote terminal.", "dangerous": true}
   ]
 }

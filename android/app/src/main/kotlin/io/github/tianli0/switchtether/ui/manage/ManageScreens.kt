@@ -151,6 +151,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
                         ProviderCard(
                             p = p,
                             current = p.id == view.currentId,
+                            canSwitch = state.app != "agy",
                             test = state.testResults[p.id],
                             busy = busy,
                             onSwitch = { confirmSwitchId = p.id },
@@ -213,6 +214,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
 private fun ProviderCard(
     p: ProviderView,
     current: Boolean,
+    canSwitch: Boolean = true,
     test: io.github.tianli0.switchtether.remote.protocol.OperationResult?,
     busy: String?,
     onSwitch: () -> Unit,
@@ -282,7 +284,7 @@ private fun ProviderCard(
             // A card's actions: compact, end-aligned, the switch as the one filled capsule.
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                 SmallButton(stringResource(R.string.provider_test), onTest, enabled = busy == null)
-                if (!current) SmallButton(stringResource(R.string.provider_switch), onSwitch, enabled = busy == null, tone = ActionTone.Primary)
+                if (!current && canSwitch) SmallButton(stringResource(R.string.provider_switch), onSwitch, enabled = busy == null, tone = ActionTone.Primary)
             }
         }
     }

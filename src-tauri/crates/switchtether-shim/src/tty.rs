@@ -27,13 +27,15 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 pub fn run(mut argv: Vec<OsString>) -> ExitCode {
     if argv.is_empty() {
-        eprintln!("usage: switchtether-shim tty <claude|codex> [args…]");
+        eprintln!("usage: switchtether-shim tty <claude|codex|agy> [args…]");
         return ExitCode::from(2);
     }
     let program = argv.remove(0);
     let prog_s = program.to_string_lossy().to_ascii_lowercase();
     let agent = if prog_s.contains("codex") {
         "codex"
+    } else if prog_s.contains("agy") || prog_s.contains("antigravity") {
+        "agy"
     } else {
         "claude_code"
     };
@@ -271,12 +273,13 @@ pub fn run(mut argv: Vec<OsString>) -> ExitCode {
     ExitCode::from(code.clamp(0, 255) as u8)
 }
 
-/// Resolve `claude` / `codex` on PATH (including `.cmd` shims on Windows).
+/// Resolve `claude` / `codex` / `agy` on PATH (including `.cmd` shims on Windows).
 fn resolve_program(p: &OsString) -> std::path::PathBuf {
     let pb = std::path::PathBuf::from(p);
     if pb.components().count() > 1 || pb.is_file() {
         return pb;
     }
+    let is_agy = p.to_string_lossy().eq_ignore_ascii_case("agy");
     let exts: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".bat", ""]
     } else {
@@ -284,11 +287,30 @@ fn resolve_program(p: &OsString) -> std::path::PathBuf {
     };
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
+            if is_agy
+                && dir
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .contains("/.gemini/antigravity-cli/bin")
+            {
+                continue;
+            }
             for e in exts {
                 let c = dir.join(format!("{}{e}", p.to_string_lossy()));
                 if c.is_file() {
                     return c;
                 }
+            }
+        }
+    }
+    if is_agy {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let win_bin = std::path::PathBuf::from(local)
+                .join("agy")
+                .join("bin")
+                .join("agy.exe");
+            if win_bin.is_file() {
+                return win_bin;
             }
         }
     }

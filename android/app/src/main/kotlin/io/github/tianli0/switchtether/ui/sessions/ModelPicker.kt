@@ -101,8 +101,8 @@ fun ModelEffortChooser(
     val listed = options?.models.orEmpty()
     val official = listed.firstOrNull { it.id == "default" }
     // Rows: the default (with the agent's own description of it), the main models, then pinned versions.
-    val main = listed.filter { it.id != "default" && !isPinnedVersion(it.id) }
-    val pinned = listed.filter { isPinnedVersion(it.id) }
+    val main = listed.filter { it.id != "default" && !isPinnedVersion(agent, it.id) }
+    val pinned = listed.filter { isPinnedVersion(agent, it.id) }
     val extra = (recent + listOfNotNull(model.takeIf { it.isNotBlank() }))
         .distinct().filter { r -> listed.none { it.id == r } }
     var showPinned by rememberSaveable(agent) { mutableStateOf(pinned.any { it.id == model }) }
@@ -179,8 +179,10 @@ fun ModelEffortChooser(
     }
 }
 
-/** Claude Code's dated / numbered model ids (`claude-opus-4-8`, `claude-haiku-4-5-20251001`). */
-private fun isPinnedVersion(id: String): Boolean = id.startsWith("claude-")
+/** Claude Code's dated / numbered model ids (`claude-opus-4-8`, `claude-haiku-4-5-20251001`).
+ *  Antigravity's main list uses `claude-opus-5-5` / `claude-sonnet-5-5` directly, so those stay in `main`. */
+private fun isPinnedVersion(agent: String, id: String): Boolean =
+    (agent == "claude_code" || agent == "claude") && id.startsWith("claude-")
 
 /**
  * Effort as a horizontal stepped slider: the agent's default at the left end, then each level
@@ -308,21 +310,35 @@ fun ModelEffortSheet(
 }
 
 /** `claude-opus-5-5` / `claude-sonnet-4-5-20250929` / `claude-opus-4-8[1m]` → `Opus 5.5` / `Sonnet 4.5` / `Opus 4.8 1M`. */
-private val CLAUDE_MODEL = Regex("""^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m])?$""", RegexOption.IGNORE_CASE)
+private val CLAUDE_MODEL = Regex("""^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:-(?:low|medium|high|xhigh))?(\[1m])?$""", RegexOption.IGNORE_CASE)
+private val GEMINI_MODEL = Regex("""^gemini-(\d+(?:\.\d+)?)-([a-z0-9]+)(?:-(?:low|medium|high|xhigh))?$""", RegexOption.IGNORE_CASE)
+private val ORCHESTRATOR_MODEL = Regex("""^gemini-pro-orchestrator(?:-([a-z0-9]+))?$""", RegexOption.IGNORE_CASE)
 
 /**
- * A model id short enough for a capsule: Claude ids become family and version; others (aliases such
- * as `opus`, Codex's `gpt-5.1-codex`) are kept, with a known alias capitalised.
+ * A model id short enough for a capsule: Claude and Antigravity Gemini ids become family and
+ * version; others (aliases such as `opus`, Codex's `gpt-5.1-codex`) are kept.
  */
 fun shortModelName(model: String): String {
-    val m = CLAUDE_MODEL.matchEntire(model.trim())
+    val trimmed = model.trim()
+    val m = CLAUDE_MODEL.matchEntire(trimmed)
     if (m != null) {
         val family = m.groupValues[1].replaceFirstChar { it.uppercase() }
         val version = listOf(m.groupValues[2], m.groupValues[3]).filter { it.isNotEmpty() }.joinToString(".")
         return listOfNotNull(family, version, "1M".takeIf { m.groupValues[4].isNotEmpty() }).joinToString(" ")
     }
-    return when (model.lowercase()) {
-        "opus", "sonnet", "haiku", "fable" -> model.replaceFirstChar { it.uppercase() }
-        else -> model
+    val g = GEMINI_MODEL.matchEntire(trimmed)
+    if (g != null) {
+        val ver = g.groupValues[1]
+        val variant = g.groupValues[2].replaceFirstChar { it.uppercase() }
+        return "Gemini $ver $variant"
+    }
+    val orch = ORCHESTRATOR_MODEL.matchEntire(trimmed)
+    if (orch != null) {
+        val tier = orch.groupValues[1].takeIf { it.isNotEmpty() }?.replaceFirstChar { it.uppercase() }
+        return if (tier != null) "Orchestrator $tier" else "Orchestrator"
+    }
+    return when (trimmed.lowercase()) {
+        "opus", "sonnet", "haiku", "fable" -> trimmed.replaceFirstChar { it.uppercase() }
+        else -> trimmed
     }
 }
