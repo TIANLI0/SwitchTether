@@ -136,7 +136,6 @@
     <string name="composer_offline">离线：草稿保存在本机，不会自动发送。</string>
     <string name="composer_offline_snapshot">离线快照：发送、审批和会话工具都需要连接电脑。草稿保存在本机。</string>
     <string name="offline_snapshot_label">离线快照 · %1$s</string>
-    <string name="offline_snapshot_detail">只读，电脑恢复连接后自动更新。</string>
     <string name="session_not_in_snapshot">这个对话不在离线快照中</string>
     <string name="session_not_in_snapshot_detail">只保留本次启动后打开过的对话（仅在内存中，不写入磁盘）。电脑恢复连接后显示。</string>
     <string name="offline_needs_computer">需要连接电脑，当前未连接</string>
@@ -465,10 +464,7 @@
     <string name="conn_wake_action">唤醒并重试</string>
     <string name="composer_attach">添加附件</string>
     <string name="attach_photos">照片和视频</string>
-    <string name="attach_photos_hint">从系统相册选择</string>
     <string name="attach_files">文件</string>
-    <string name="attach_files_hint">任意文件：文档、日志、压缩包…</string>
-    <string name="attach_where">文件会复制到电脑上 SwitchTether 的文件夹（保留 7 天），以路径形式交给智能体。每次最多 10 个，每个不超过 1 GB。</string>
     <string name="attach_too_large">超过 1 GB</string>
     <string name="attach_empty">空文件</string>
     <string name="attach_old_desktop">请先更新电脑端</string>

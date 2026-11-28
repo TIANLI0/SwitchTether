@@ -82,6 +82,8 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.files.TextDocument
 import io.github.tianli0.switchtether.files.TextMatch
 import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
+import io.github.tianli0.coui17.patterns.LocalPageTopInset
+import io.github.tianli0.coui17.patterns.pageScroll
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.icons.AppIcons
@@ -166,6 +168,7 @@ fun CodeViewer(
     }
     val listState = rememberLazyListState()
     io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
+    io.github.tianli0.switchtether.ui.common.TrackPageList(listState)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
@@ -212,7 +215,9 @@ fun CodeViewer(
         }
     }
 
-    Column(modifier.fillMaxSize()) {
+    val fixedControls = controls == null || findOpen || doc.display.length > CodeHighlighting.MAX_CHARS
+    val top = LocalPageTopInset.current
+    Column(modifier.fillMaxSize().padding(top = if (fixedControls) top else 0.dp)) {
         // Action row (only when the caller does not draw the controls in its own title bar).
         // Tools of the viewer: the label lines up with the code card's text, keys 4dp from the edge.
         if (controls == null) Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -303,6 +308,7 @@ fun CodeViewer(
                 style = style,
                 gutterWidth = gutterWidth,
                 listState = listState,
+                topInset = if (fixedControls) 0.dp else top,
                 shortenedNote = shortened,
                 onLongPress = { line ->
                     scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(path, doc.line(line)))) }
@@ -341,6 +347,7 @@ private fun CodeLines(
     style: androidx.compose.ui.text.TextStyle,
     gutterWidth: androidx.compose.ui.unit.Dp,
     listState: LazyListState,
+    topInset: androidx.compose.ui.unit.Dp,
     shortenedNote: String,
     onLongPress: (Int) -> Unit,
 ) {
@@ -350,9 +357,9 @@ private fun CodeLines(
     // Matches grouped by line once, so each row looks up only its own.
     val byLine = remember(matches) { matches.groupBy { it.line } }
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().pageScroll(),
         state = listState,
-        contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp + LocalBottomBarSpace.current),
+        contentPadding = PaddingValues(top = 12.dp + topInset, bottom = 24.dp + LocalBottomBarSpace.current),
     ) {
         items(doc.lineCount, key = { it }) { line ->
             val lineStart = doc.lineStart(line)

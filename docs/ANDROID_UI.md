@@ -1205,19 +1205,14 @@ capsules) and of the composer; the "new messages" pill sits above the composer.
    navigation capsule only, so `Page` records its own content as a `LayerBackdrop` and provides it
    to the title bar (the bar is the content's sibling, never inside the recording). With the flag
    but without the backdrop the bar draws only its translucent colour ramp and the list shows
-   through sharp — the state of the first 0.1.14 build, reported from the device. **The session page paints its own header material** (`Page(ownBarMaterial = true)`, the bar is
-transparent). coui's gradient material is thin by design: in the dark theme 40 % colour at the very
-top and a ~6dp blur, both gone by the bar's bottom edge. Over list cards that reads as glass; over
-a conversation the running text stayed sharp under the title, the subtitle and the capsules and
-nothing could be read (seen on the device). `glassHeader(pageColor, holdFraction)` lies behind the
-title bar, the notices and the capsules as one band: a 26dp progressive blur at full strength down
-to the title bar's bottom edge, tapering to nothing just below the capsules, under the page colour
-at the plain bar's strength (60 % dark / 80 % light) fading over the same stretch.
+   through sharp — the state of the first 0.1.14 build, reported from the device.
 
-Every other immersive page with a small title bar (Home, the settings sub-pages, port forwarding,
-downloads, session tools, the agent map) gets the same material from `Page` itself: a band of the
-bar's height plus 16dp behind the transparent bar. A large collapsing bar (Manage, Workspace)
-keeps coui's material, which follows the collapse.
+App pages use COUI's `AppBarBlurOverlay`, the material used by the Sessions search header.
+The shared page layout captures the scrolling body and fades the material in over its first
+24dp of scroll. Pinned filters share the header's material. Session detail draws one band
+behind the title, notices and capsules, with a 24dp fade below the capsules. The fade extends
+past the band without adding to the conversation's top inset. The embedded WebView and fixed
+media viewports start below the header.
 
 A first version laid a page-coloured gradient under the capsules, on top of the title bar's blur:
 an opaque fade over a translucent one, visible as a band on the device. A second version put a
@@ -2125,16 +2120,12 @@ not reported yet.
 
 ## 40. Quota caching and the usage trend chart (2026-11-28)
 
-**Quota is read at most every 5 minutes.** Each quota read makes the desktop ask Anthropic,
-OpenAI or Google, and the phone used to read all three on every reconnect (each return to the app
-after the 45 s background grace), on every Home refresh and on every range or app change on the
-Usage page. Now `ManagementRepository` keeps one answer per tool for `QUOTA_TTL_MS` (5 minutes, the
-desktop's own quota card interval), shared by Home and the Usage page; reads asked at the same time
-share one request; an unavailable answer is asked again after 30 s. Only pull-to-refresh on Home
-and the Usage page's refresh button ask again (still reusing an answer younger than 30 s), and
-changing the range or app no longer touches quota. The desktop keeps its own cache in front of the
-providers (PROTOCOL.md §7.3, `maxAge`, `cachedAtMs`); the Usage page says how old the quota is
-("2 分钟前更新").
+**Quota refreshes at the next window reset or after 5 minutes.** Home and the Usage page share
+one answer per tool and one in-flight request. While either page is visible and connected, it
+schedules a read for each tool's next deadline. The desktop cache also expires at the reset
+(PROTOCOL.md §7.3, `maxAge`, `cachedAtMs`). Pull-to-refresh and the Usage refresh button reuse
+answers up to 30 s old. Changing the range or app leaves quota alone. The Usage page shows the
+age of the oldest available quota in the section heading ("2 分钟前更新").
 
 **Trend chart: bars below "全部".** The GitHub-style grid was hard to read on a phone for short
 ranges — a week was one column of seven squares, today a strip of 24 tiny ones, and every value

@@ -62,11 +62,11 @@ import io.github.tianli0.switchtether.remote.session.SubagentNode
 import io.github.tianli0.switchtether.remote.session.SubagentTree
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.common.loadable
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.nav.Route

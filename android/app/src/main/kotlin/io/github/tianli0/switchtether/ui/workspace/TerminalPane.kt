@@ -9,6 +9,7 @@ import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -210,24 +211,30 @@ fun TerminalActions(state: TerminalUiState, vm: TerminalViewModel, controller: T
     }
 }
 
+@Composable
+internal fun TerminalTabs(state: TerminalUiState, vm: TerminalViewModel) {
+    // Tabs only when there is a choice; actions live in the page toolbar.
+    if (state.terminals.size > 1) {
+        ChipTabGroup(
+            tabs = state.terminals.map { ChipTabData(shortShellName(it.title.ifBlank { it.shell }).take(18)) },
+            selectedIndex = state.terminals.indexOfFirst { it.id == state.selectedId }.coerceAtLeast(0),
+            onSelectedChange = { vm.select(state.terminals[it].id) },
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+    }
+    state.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = 16.dp)) }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: TerminalController = remember { TerminalController() }) {
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
-    Column(Modifier.fillMaxSize()) {
-        // Tabs only when there is a choice; actions live in the page toolbar.
-        if (state.terminals.size > 1) {
-            ChipTabGroup(
-                tabs = state.terminals.map { ChipTabData(shortShellName(it.title.ifBlank { it.shell }).take(18)) },
-                selectedIndex = state.terminals.indexOfFirst { it.id == state.selectedId }.coerceAtLeast(0),
-                onSelectedChange = { vm.select(state.terminals[it].id) },
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                modifier = Modifier.padding(bottom = 6.dp),
-            )
-        }
-        state.error?.let { Text(it, style = COUITheme.textStyles.footnote1, color = LocalDevColors.current.danger, modifier = Modifier.padding(horizontal = 16.dp)) }
+    val hasGrid = state.selectedId != null && state.link != TermLink.NO_STEP_UP_KEY && state.link != TermLink.NEEDS_STEP_UP
+    val top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current
+    Column(Modifier.fillMaxSize().padding(top = if (hasGrid) 0.dp else top)) {
         when {
             // Terminals need the fingerprint key made at pairing; without a screen lock there is none.
             // Say so in full (the one-line card cut the instruction off) and offer the way there,
@@ -269,7 +276,7 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: Term
             else -> {
                 TerminalSurface(
                     state = state,
-                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp).clip(SquircleShape(14.dp)).background(TermBg)
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp).clip(SquircleShape(14.dp))
                         .clickable { focus.requestFocus(); keyboard?.show() },
                     onSize = vm::resize,
                     onCopyLine = { clipboard.setText(AnnotatedString(it)) },
@@ -326,6 +333,8 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
     // (otherwise the shell wraps lines well before the right edge).
     val cellWidthPx = remember(state.fontSp) { measurer.measure("M".repeat(128), style).size.width / 128f }
     val listState = rememberLazyListState()
+    io.github.tianli0.switchtether.ui.common.TrackPageList(listState)
+    val top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current
     val lines = state.scrollback + state.screen.lines
     val cursor: TermCursor = state.screen.cursor
     val screenStart = state.scrollback.size
@@ -335,7 +344,7 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
         // A fixed width only when it is wider than the screen; otherwise the screen's own width.
         val wide = state.columns > fitCols
         val cols = if (wide) state.columns else fitCols
-        val rows = with(density) { ((maxHeight - 8.dp).toPx() / cell.size.height).toInt() }
+        val rows = with(density) { ((maxHeight - top - 8.dp).toPx() / cell.size.height).toInt() }
         // The grid's width when it scrolls sideways: every row the same, so the range does not
         // change with whichever lines happen to be on screen.
         val gridWidth = with(density) { (cols * cellWidthPx).toDp() + 16.dp }
@@ -356,8 +365,13 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
         }
         LazyColumn(
             state = listState,
+            contentPadding = PaddingValues(top = top),
             modifier = Modifier.fillMaxSize().horizontalScroll(sideways)
                 .then(if (wide) Modifier.width(gridWidth) else Modifier)
+                .drawBehind {
+                    val inset = top.toPx().coerceAtMost(size.height)
+                    drawRect(TermBg, topLeft = androidx.compose.ui.geometry.Offset(0f, inset), size = androidx.compose.ui.geometry.Size(size.width, size.height - inset))
+                }
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             item(key = "sb") {

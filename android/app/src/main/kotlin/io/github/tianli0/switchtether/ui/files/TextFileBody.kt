@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -22,6 +23,7 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.files.FileTypes
 import io.github.tianli0.switchtether.remote.protocol.FileContent
 import io.github.tianli0.switchtether.ui.common.Formatters
+import io.github.tianli0.coui17.patterns.LocalPageTopInset
 
 /** How much of a text file `fs/read` returns (RemoteApi.fsRead's default `maxBytes`). */
 const val TEXT_READ_LIMIT: Long = 2L * 1024 * 1024
@@ -44,7 +46,11 @@ fun TextFileBody(
      */
     controls: CodeViewerState? = null,
 ) {
-    Column(modifier.fillMaxSize()) {
+    val text = file.text
+    val markdown = text != null && FileTypes.isMarkdown(file.path)
+    val fixedControls = file.truncated || text == null || (markdown && controls == null)
+    val top = LocalPageTopInset.current
+    Column(modifier.fillMaxSize().padding(top = if (fixedControls) top else 0.dp)) {
         if (file.truncated && file.text != null) {
             PreviewNotice(
                 stringResource(R.string.files_truncated_banner, Formatters.bytes(TEXT_READ_LIMIT), Formatters.bytes(file.size)),
@@ -53,22 +59,23 @@ fun TextFileBody(
                 if (onDownload != null) NoticeAction(stringResource(R.string.files_download), onDownload)
             }
         }
-        val text = file.text
         if (text == null) {
             BinaryNotice(file, onDownload, onOpenBinary)
             return@Column
         }
-        if (FileTypes.isMarkdown(file.path)) {
-            // Rich text or source; the choice carries over to the next Markdown file.
-            val rendered = MarkdownPreviewMode.rendered
-            if (controls == null) MarkdownModeSwitch(rendered, onChange = { MarkdownPreviewMode.rendered = it })
-            if (rendered) {
-                MarkdownDocView(text, file.path, onOpenPath, Modifier.weight(1f).fillMaxWidth())
+        CompositionLocalProvider(LocalPageTopInset provides if (fixedControls) 0.dp else top) {
+            if (markdown) {
+                // Rich text or source; the choice carries over to the next Markdown file.
+                val rendered = MarkdownPreviewMode.rendered
+                if (controls == null) MarkdownModeSwitch(rendered, onChange = { MarkdownPreviewMode.rendered = it })
+                if (rendered) {
+                    MarkdownDocView(text, file.path, onOpenPath, Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    CodeViewer(text, file.path, file.language ?: "markdown", Modifier.weight(1f), controls = controls)
+                }
             } else {
-                CodeViewer(text, file.path, file.language ?: "markdown", Modifier.weight(1f), controls = controls)
+                CodeViewer(text, file.path, file.language, Modifier.weight(1f), controls = controls)
             }
-        } else {
-            CodeViewer(text, file.path, file.language, Modifier.weight(1f), controls = controls)
         }
     }
 }

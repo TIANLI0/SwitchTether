@@ -34,6 +34,7 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.QuotaTier
 import io.github.tianli0.switchtether.remote.protocol.QuotaView
 import io.github.tianli0.switchtether.ui.common.Formatters
+import io.github.tianli0.switchtether.ui.common.MinuteClock
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
 /**
@@ -145,9 +146,10 @@ private fun shortTierLabel(name: String): String {
 @Composable
 private fun resetIn(raw: String?): String? {
     val at = Formatters.parseInstant(raw) ?: return null
-    val mins = java.time.Duration.between(java.time.Instant.now(), at).toMinutes()
+    val left = java.time.Duration.between(java.time.Instant.ofEpochMilli(MinuteClock.now.longValue), at)
+    if (left.isNegative || left.isZero) return null
+    val mins = left.toMinutes().coerceAtLeast(1)
     return when {
-        mins <= 0 -> null
         mins < 60 -> stringResource(R.string.home_reset_minutes, mins.toInt())
         mins < 48 * 60 -> stringResource(R.string.home_reset_hours, ((mins + 30) / 60).toInt())
         else -> stringResource(R.string.home_reset_days, ((mins + 720) / 1440).toInt())

@@ -33,10 +33,10 @@ import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.coui17.patterns.KeyValueRow
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.BuildConfig
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.ui.appContainer

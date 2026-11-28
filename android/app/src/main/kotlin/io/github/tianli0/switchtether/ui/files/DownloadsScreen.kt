@@ -49,11 +49,11 @@ import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.coui17.patterns.GroupCard
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors

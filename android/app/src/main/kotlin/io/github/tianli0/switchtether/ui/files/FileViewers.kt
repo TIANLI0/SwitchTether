@@ -29,6 +29,8 @@ import android.view.SurfaceView
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import io.github.tianli0.coui17.patterns.LocalPageTopInset
+import io.github.tianli0.coui17.patterns.pageScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,9 +41,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -197,9 +199,9 @@ private fun MediaFileViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDown
     // Pictures, PDF pages and video sit on black: the page around them goes dark too.
     val dark = ref.kind == FileKind.IMAGE || ref.kind == FileKind.VIDEO
 
-    Column(modifier.fillMaxSize()) {
-        val where = ready?.let { stringResource(if (it.fromDownload) R.string.viewer_saved_copy else R.string.viewer_temp_copy) }
-        var menuOpen by remember { mutableStateOf(false) }
+    val where = ready?.let { stringResource(if (it.fromDownload) R.string.viewer_saved_copy else R.string.viewer_temp_copy) }
+    var menuOpen by remember { mutableStateOf(false) }
+    io.github.tianli0.switchtether.ui.common.ProgressivePageLayout(modifier, immersive = ref.kind == FileKind.PDF, topBar = { _ ->
         // Same bar as the text viewer: name, "folder · size", where the copy lives on its own quiet
         // line (it was squeezed into the subtitle and cut mid-phrase), Download as the one key and
         // the rest under ⋮ (four keys crowded the name before).
@@ -234,6 +236,7 @@ private fun MediaFileViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDown
         io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.state.running || save.state.error != null || save.state.record != null) {
             SaveRow(save.state, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
         }
+    }) {
         Box(Modifier.weight(1f).fillMaxWidth().then(if (dark && phase is Phase.Ready) Modifier.background(Color.Black) else Modifier)) {
             when (val p = phase) {
                 is Phase.Loading -> LoadingBody(p.done, p.total)
@@ -295,7 +298,7 @@ private fun HandOffViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDownlo
         }
     }
     val local = (opening as? Phase.Ready)?.file
-    Column(modifier.fillMaxSize()) {
+    io.github.tianli0.switchtether.ui.common.ProgressivePageLayout(modifier, topBar = { _ ->
         FilePreviewHeader(
             title = ref.name,
             subtitle = listOfNotNull(previewFolder(ref.path), ref.size?.let(Formatters::bytes)).joinToString(" · "),
@@ -303,7 +306,9 @@ private fun HandOffViewer(ref: RemoteFileRef, onBack: () -> Unit, onManageDownlo
         ) {
             if (local != null) ToolbarIcon(AppIcons.Share, stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(local), noApp) })
         }
-        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+    }) {
+        Box(Modifier.weight(1f).fillMaxWidth().pageScroll().verticalScroll(rememberScrollState())
+            .padding(top = LocalPageTopInset.current)) {
             val saving = save.state.running
             val fetching = opening as? Phase.Loading
             val saved = save.state.record
@@ -381,7 +386,7 @@ private fun RemoteTextFileViewer(
         }
     }
     val loaded = content.valueOrNull
-    Column(modifier.fillMaxSize()) {
+    io.github.tianli0.switchtether.ui.common.ProgressivePageLayout(modifier, topBar = { _ ->
         FilePreviewHeader(
             title = ref.name,
             subtitle = listOfNotNull(
@@ -397,6 +402,7 @@ private fun RemoteTextFileViewer(
         io.github.tianli0.switchtether.ui.common.NoticeVisibility(save.state.running || save.state.error != null || save.state.record != null) {
             SaveRow(save.state, onManageDownloads) { r -> startSafely(context, store.viewIntent(store.asLocal(r)), noApp) }
         }
+    }) {
         io.github.tianli0.switchtether.ui.common.LoadableContent(content, onRetry = { reload++ }) { file ->
             // A large file's notice and a binary file both offer Download; a binary also "Open with…".
             TextFileBody(file, Modifier.weight(1f), onOpenPath = onOpenPath, onDownload = save::start, onOpenBinary = onBinary)
@@ -591,12 +597,12 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
         }
         else -> {
             val pdf = d.getOrThrow()
-            val listState = rememberLazyListState()
+            val listState = io.github.tianli0.switchtether.ui.common.rememberPageListState()
             io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
             var zoomedPage by remember(file.uri) { mutableStateOf<Int?>(null) }
             BoxWithConstraints(modifier.background(COUITheme.colorScheme.surfaceContainer)) {
                 val widthPx = constraints.maxWidth.coerceAtMost(2000)
-                LazyColumn(Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(Modifier.fillMaxSize().pageScroll(), state = listState, contentPadding = PaddingValues(top = LocalPageTopInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items((0 until pdf.pageCount).toList(), key = { it }) { index ->
                         val page by produceState<ImageBitmap?>(null, index, widthPx) {
                             value = withContext(Dispatchers.IO) { pdf.render(index, widthPx)?.asImageBitmap() }

@@ -2,7 +2,8 @@
 //! §7.3). Every read on the desktop asks the provider's own usage endpoint (Anthropic, OpenAI,
 //! Google), so phones opening Home, the Usage page or reconnecting must not each cause one: an
 //! answer is reused while it is younger than the caller's `maxAge` (at least
-//! [MIN_MAX_AGE]), and callers asking at the same time share one read.
+//! [MIN_MAX_AGE]) and no quota window has reset since it was read. Callers asking at
+//! the same time share one read.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -23,6 +24,7 @@ pub const FAILURE_TTL: Duration = Duration::from_secs(30);
 struct Entry {
     at: Instant,
     at_ms: i64,
+    next_reset_ms: Option<i64>,
     value: Value,
     ok: bool,
 }
@@ -63,21 +65,59 @@ impl QuotaCache {
             } else {
                 max_age.min(FAILURE_TTL)
             };
-            if e.at.elapsed() < ttl {
+            if e.at.elapsed() < ttl
+                && e.next_reset_ms
+                    .is_none_or(|reset| crate::util::now_ms() < reset)
+            {
                 return with_time(e.value.clone(), e.at_ms);
             }
         }
         let value = fetch().await;
-        let ok = value.get("available").and_then(Value::as_bool) != Some(false);
+        let ok = value
+            .get("available")
+            .and_then(Value::as_bool)
+            .or_else(|| value.get("success").and_then(Value::as_bool))
+            != Some(false);
         let at_ms = crate::util::now_ms();
+        let next_reset_ms = ok.then(|| next_reset_ms(&value, at_ms)).flatten();
         *entry = Some(Entry {
             at: Instant::now(),
             at_ms,
+            next_reset_ms,
             value: value.clone(),
             ok,
         });
         with_time(value, at_ms)
     }
+}
+
+fn next_reset_ms(value: &Value, fetched_at: i64) -> Option<i64> {
+    value
+        .get("tiers")?
+        .as_array()?
+        .iter()
+        .filter_map(|tier| reset_ms(tier.get("resetsAt")?))
+        .filter(|&at| at > fetched_at)
+        .min()
+}
+
+fn reset_ms(value: &Value) -> Option<i64> {
+    let raw = value.as_str().map(str::trim);
+    if let Some(n) = value.as_i64().or_else(|| raw?.parse::<i64>().ok()) {
+        return if n >= 1_000_000_000_000 {
+            Some(n)
+        } else {
+            n.checked_mul(1_000)
+        };
+    }
+    let raw = raw?;
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|at| at.timestamp_millis())
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(&raw.replace(' ', "T"), "%Y-%m-%dT%H:%M:%S%.f")
+                .map(|at| at.and_utc().timestamp_millis())
+        })
+        .ok()
 }
 
 fn with_time(mut v: Value, at_ms: i64) -> Value {
@@ -137,6 +177,36 @@ mod tests {
         }
         cache.get("codex", MAX_MAX_AGE, failing).await;
         assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_reset_invalidates_even_a_young_answer_once() {
+        let cache = QuotaCache::default();
+        let now = crate::util::now_ms();
+        let old = json!({
+            "available": true,
+            "tiers": [{ "resetsAt": (now + 60_000).to_string(), "utilization": 100 }]
+        });
+        cache.get("claude", MAX_MAX_AGE, || async { old }).await;
+        let slot = cache.slots.lock().get("claude").unwrap().clone();
+        {
+            let mut entry = slot.lock().await;
+            let entry = entry.as_mut().unwrap();
+            assert_eq!(entry.next_reset_ms, Some(now + 60_000));
+            entry.next_reset_ms = Some(now);
+        }
+        let fresh = cache
+            .get("claude", MAX_MAX_AGE, || async {
+                json!({ "tiers": [{ "resetsAt": now.to_string(), "utilization": 0 }] })
+            })
+            .await;
+        assert_eq!(fresh["tiers"][0]["utilization"], 0);
+        let cached = cache
+            .get("claude", MAX_MAX_AGE, || async {
+                panic!("the new answer should be reused")
+            })
+            .await;
+        assert_eq!(fresh, cached);
     }
 
     #[test]

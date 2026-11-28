@@ -34,7 +34,6 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.LocalNetworkAccess
 import io.github.tianli0.switchtether.remote.pairing.LocalNetwork
 import io.github.tianli0.switchtether.ui.appContainer
-import io.github.tianli0.coui17.patterns.NoticeBanner
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -138,12 +137,11 @@ fun LocalNetworkStrip(modifier: Modifier = Modifier) {
     val d = rememberLast(missing)
     NoticeVisibility(missing != null) {
         if (d != null) {
-            NoticeBanner(
+            StatusNoticeRow(
                 text = stringResource(if (d.relayUrl != null) R.string.lan_perm_strip_relay else R.string.lan_perm_strip),
                 color = LocalDevColors.current.warn,
                 modifier = modifier.testTag("lan-perm-strip"),
-                action = stringResource(R.string.lan_perm_grant),
-                onAction = { localNetworkAsk.value = LocalNetworkAsk() },
+                action = stringResource(R.string.lan_perm_grant) to { localNetworkAsk.value = LocalNetworkAsk() },
             )
         }
     }

@@ -105,36 +105,32 @@ fun UpdateSheet(
             else -> null to null
         }
         Column(Modifier.fillMaxWidth()) {
-          Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                listOfNotNull(r.name.takeIf { it != r.tag }, r.publishedAt?.take(10), r.apk?.size?.takeIf { it > 0 }?.let(Formatters::bytes)).joinToString(" · "),
-                style = COUITheme.textStyles.footnote1,
-                color = COUITheme.colorScheme.onSurfaceVariantSummary,
-            )
-            val chinese = androidx.compose.ui.platform.LocalConfiguration.current.locales[0].language == "zh"
-            val notes = remember(r.notes, chinese) { io.github.tianli0.switchtether.update.ReleaseNotes.forDisplay(r.notes, chinese) }
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            Column(
+                Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp),
+            ) {
+                val chinese = androidx.compose.ui.platform.LocalConfiguration.current.locales[0].language == "zh"
+                val notes = remember(r.notes, chinese) { io.github.tianli0.switchtether.update.ReleaseNotes.forDisplay(r.notes, chinese) }
                 MarkdownView(notes.ifBlank { stringResource(R.string.update_no_notes) })
             }
-            when (state) {
-                is UpdateState.Downloading -> {
-                    LinearProgressIndicator(
-                        progress = androidx.compose.animation.core.animateFloatAsState(if (state.total > 0) (state.done.toFloat() / state.total).coerceIn(0f, 1f) else 0f, label = "download").value,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(stringResource(R.string.update_progress, Formatters.bytes(state.done), Formatters.bytes(state.total)), style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                when (state) {
+                    is UpdateState.Downloading -> {
+                        LinearProgressIndicator(
+                            progress = androidx.compose.animation.core.animateFloatAsState(if (state.total > 0) (state.done.toFloat() / state.total).coerceIn(0f, 1f) else 0f, label = "download").value,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(stringResource(R.string.update_progress, Formatters.bytes(state.done), Formatters.bytes(state.total)), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                    }
+                    is UpdateState.Verifying -> Text(stringResource(R.string.update_verifying), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                    is UpdateState.Failed -> Text(failureText(state), style = COUITheme.textStyles.body2, fontWeight = FontWeight.Medium, color = dev.danger)
+                    is UpdateState.NeedsInstallPermission -> Text(stringResource(R.string.update_grant_hint), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
+                    else -> Unit
                 }
-                is UpdateState.Verifying -> Text(stringResource(R.string.update_verifying), style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurface)
-                is UpdateState.Failed -> {
-                    Text(failureText(state), style = COUITheme.textStyles.body2, fontWeight = FontWeight.Medium, color = dev.danger)
-                    state.detail?.let { Text(it, style = COUITheme.textStyles.footnote2, color = COUITheme.colorScheme.onSurfaceVariantSummary) }
-                }
-                else -> Unit
             }
-            if (state is UpdateState.NeedsInstallPermission) {
-                Text(stringResource(R.string.update_grant_hint), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
-            }
-          }
             if (label != null && action != null) {
                 SheetButtons(primary = DialogButtonBarAction(text = label, onClick = action), modifier = Modifier.testTag("update-action"))
             } else {

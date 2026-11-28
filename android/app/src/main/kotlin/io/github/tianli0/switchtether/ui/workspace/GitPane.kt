@@ -53,12 +53,12 @@ import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.coui17.patterns.FormDialog
 import io.github.tianli0.coui17.patterns.GlassMenu
 import io.github.tianli0.coui17.patterns.MenuEntry
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
-import io.github.tianli0.coui17.patterns.rememberPageScrollState
+import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.GitOps
 import io.github.tianli0.switchtether.remote.protocol.GitStatusEntry

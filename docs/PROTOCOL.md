@@ -204,10 +204,11 @@ secret is ≥ 16 chars). The redaction reuses CC Switch's sensitive-key classifi
   `agy_third_party_weekly` (Claude / GPT models in Antigravity).
   Every quota read on the desktop asks the provider's own usage endpoint, so answers are reused:
   `GET /v1/usage/quota/{tool}?maxAge=<seconds>` returns the last answer while it is younger than
-  `maxAge` (clamped to 30 s … 1 h; default 60 s; an unavailable answer at most 30 s), callers
-  asking at the same time share one read, and the answer carries `cachedAtMs` (when the desktop
-  read it). The phone keeps quotas for 5 minutes, shared by Home and the Usage page (`maxAge=300`),
-  and asks with `maxAge=30` on pull-to-refresh or the refresh button.
+  `maxAge` (clamped to 30 s … 1 h; default 60 s; an unavailable answer at most 30 s) and its
+  quota windows have yet to reset. Callers asking at the same time share one read, and the answer
+  carries `cachedAtMs` (when the desktop read it). The phone keeps quotas for up to 5 minutes,
+  shared by Home and the Usage page (`maxAge=300`). It asks with `maxAge=30` when a window resets
+  or the user refreshes manually.
 - Usage ranges are epoch seconds; buckets and "today" use the **desktop's time zone**
   (`GET /v1/status` → `timeZone` (IANA, may be null) and `utcOffsetMinutes`). Trend buckets carry
   `date` (RFC 3339, desktop offset), `startMs` and `realTotalTokens`; the response has `timeZone`.

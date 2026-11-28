@@ -146,7 +146,6 @@
     <string name="composer_offline">Offline — drafts are kept on this phone and never sent automatically.</string>
     <string name="composer_offline_snapshot">Offline snapshot — sending, approvals and session tools need the computer. Drafts stay on this phone.</string>
     <string name="offline_snapshot_label">Offline snapshot · %1$s</string>
-    <string name="offline_snapshot_detail">Read-only. Updates by itself when the computer is reachable again.</string>
     <string name="session_not_in_snapshot">This conversation is not in the offline snapshot</string>
     <string name="session_not_in_snapshot_detail">Only conversations opened since the app started are kept (in memory, never on disk). It appears once the computer is reachable.</string>
     <string name="offline_needs_computer">Needs the computer — not connected</string>
@@ -481,10 +480,7 @@
     <string name="conn_wake_action">Wake and retry</string>
     <string name="composer_attach">Attach</string>
     <string name="attach_photos">Photos and videos</string>
-    <string name="attach_photos_hint">From the system photo picker</string>
     <string name="attach_files">Files</string>
-    <string name="attach_files_hint">Any file: documents, logs, archives…</string>
-    <string name="attach_where">Files are copied to a SwitchTether folder on the computer (kept for 7 days) and given to the agent as paths. Up to 10 files, 1 GB each.</string>
     <string name="attach_too_large">Over 1 GB</string>
     <string name="attach_empty">Empty file</string>
     <string name="attach_old_desktop">Update the desktop app</string>

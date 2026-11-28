@@ -2,8 +2,10 @@ package io.github.tianli0.switchtether.ui.files
 
 import android.content.Context
 import androidx.compose.foundation.background
+import io.github.tianli0.coui17.patterns.LocalPageTopInset
+import io.github.tianli0.coui17.patterns.pageScroll
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
@@ -53,12 +55,13 @@ fun LocalFileViewer(
     val context = LocalContext.current
     val noApp = stringResource(R.string.viewer_no_app)
     val textLike = kind == FileKind.TEXT || (kind == FileKind.OTHER && FileTypes.extension(file.name).isEmpty())
-    Column(modifier.fillMaxSize()) {
+    io.github.tianli0.switchtether.ui.common.ProgressivePageLayout(modifier, immersive = kind != FileKind.VIDEO, topBar = { _ ->
         FilePreviewHeader(file.name, subtitle, onBack) {
             ToolbarIcon(AppIcons.Share, stringResource(R.string.viewer_share), { startSafely(context, store.shareIntent(file), noApp) })
             ToolbarIcon(AppIcons.OpenWith, stringResource(R.string.viewer_open_with), { startSafely(context, store.viewIntent(file), noApp) })
             if (onSave != null) ToolbarIcon(AppIcons.Download, stringResource(R.string.lightbox_save), onSave)
         }
+    }) {
         Box(Modifier.weight(1f).fillMaxWidth().then(if (kind == FileKind.VIDEO) Modifier.background(Color.Black) else Modifier)) {
             when {
                 kind.isMedia -> LocalFileBody(file, kind, Modifier.fillMaxSize())
@@ -70,7 +73,7 @@ fun LocalFileViewer(
                         TextFileBody(c, Modifier.fillMaxSize(), onOpenBinary = { startSafely(context, store.viewIntent(file), noApp) })
                     }
                 }
-                else -> Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                else -> Box(Modifier.fillMaxSize().pageScroll().verticalScroll(rememberScrollState()).padding(top = LocalPageTopInset.current)) {
                     FileHandOffCard(
                         name = file.name,
                         detail = listOfNotNull(Formatters.bytes(file.size), FileTypes.extension(file.name).takeIf { it.isNotEmpty() }?.uppercase()).joinToString(" · "),

@@ -1,6 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import io.github.tianli0.coui17.patterns.glassHeader
+import io.github.suqi8.coui.kmp.basic.AppBarBlurOverlay
 import io.github.tianli0.coui17.patterns.glassSurface
 import io.github.tianli0.coui17.patterns.LocalGlassBackdrop
 import io.github.suqi8.coui.kmp.blur.rememberLayerBackdrop
@@ -119,7 +119,7 @@ import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.capColor
 import io.github.tianli0.switchtether.ui.common.capStatusLabel
@@ -793,36 +793,33 @@ fun SessionDetailContent(
                 }
             }
             CompositionLocalProvider(LocalGlassBackdrop provides chatBackdrop) {
-                // Notices and capsules float over the top of the conversation, below the title bar.
-                // One material lies behind the bar and them: full blur and tint behind the title,
-                // tapering to nothing just below the capsules, so both stay readable over text.
-                // Full material down to the capsules' bottom edge, tapering only in the strip below
-                // them: tapering from the title bar down left the capsules on nearly clear glass,
-                // with bright message text running through their labels (dark theme above all).
-                val taperPx = with(density) { HEADER_TAPER.toPx() }
-                val barFraction = ((topOverlayPx - taperPx) / topOverlayPx.coerceAtLeast(1).toFloat())
-                    .coerceAtLeast(with(density) { topInset.toPx() } / topOverlayPx.coerceAtLeast(1))
-                Column(
-                    Modifier.align(Alignment.TopStart).fillMaxWidth().onSizeChanged { topOverlayPx = it.height }
-                        .glassHeader(pageColor, barFraction)
-                        .padding(top = topInset, bottom = HEADER_TAPER),
+                // One COUI material behind the title, notices and capsules. The fade extends
+                // below the controls without adding padding to the conversation.
+                AppBarBlurOverlay(
+                    modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().onSizeChanged { topOverlayPx = it.height },
+                    backdrop = chatBackdrop,
+                    containerColor = pageColor,
+                    extraHeight = HEADER_TAPER,
+                    platformRenderer = false,
                 ) {
-                    topNotices()
-                    StatusChipRow(
-                        state,
-                        onInfo = { showInfo = true },
-                        onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
-                        subagentCount = subagentCount,
-                        subagentRunning = subagentRunning,
-                        agentsDot = agentsDot,
-                        backgroundTasks = backgroundTasks,
-                        onOpenTools = onOpenTools,
-                        onOpenDshWeb = onOpenDshWeb,
-                        onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
-                        onOpenChanges = onOpenChanges,
-                        costLabel = usageBreakdown?.let { costChipLabel(it) },
-                        onOpenCost = { showCost = true },
-                    )
+                    Column(Modifier.fillMaxWidth().padding(top = topInset)) {
+                        topNotices()
+                        StatusChipRow(
+                            state,
+                            onInfo = { showInfo = true },
+                            onOpenSubagents = onOpenSubagentTree?.takeIf { hasAgents },
+                            subagentCount = subagentCount,
+                            subagentRunning = subagentRunning,
+                            agentsDot = agentsDot,
+                            backgroundTasks = backgroundTasks,
+                            onOpenTools = onOpenTools,
+                            onOpenDshWeb = onOpenDshWeb,
+                            onOpenTerminal = summary?.terminalId?.let { tid -> { onOpenTerminal(tid) } },
+                            onOpenChanges = onOpenChanges,
+                            costLabel = usageBreakdown?.let { costChipLabel(it) },
+                            onOpenCost = { showCost = true },
+                        )
+                    }
                 }
                 // "Back to latest" floats with the other controls, outside the recorded list, so its
                 // glass has the conversation to blur (inside the list it could only paint a flat fill).
@@ -911,7 +908,6 @@ private fun StatusChipRow(
     val terminalLabel = stringResource(R.string.open_terminal)
     val toolsLabel = stringResource(R.string.tools_open)
     val bg = io.github.tianli0.coui17.patterns.pageContainerColor().compositeOver(COUITheme.colorScheme.background)
-    // No fade of their own: the header's material behind them (glassHeader) is the page's only one.
     Column(
         modifier.padding(horizontal = 8.dp, vertical = 2.dp).clip(SquircleShape(18.dp))
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.session_info), onClick = onInfo).padding(vertical = 4.dp)
@@ -1397,28 +1393,18 @@ private fun ComposerNote(text: String, color: Color) {
 @Composable
 private fun AttachSheet(show: Boolean, onImages: () -> Unit, onFiles: () -> Unit, onDismiss: () -> Unit) {
     PanelSheet(show = show, title = stringResource(R.string.composer_attach), onDismissRequest = onDismiss, imePadding = false) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-            GroupCard {
-                BasicComponent(
-                    title = stringResource(R.string.attach_photos),
-                    summary = stringResource(R.string.attach_photos_hint),
-                    startAction = { Icon(AppIcons.Image, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.padding(end = 12.dp).size(22.dp)) },
-                    onClick = onImages,
-                    cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Head,
-                )
-                BasicComponent(
-                    title = stringResource(R.string.attach_files),
-                    summary = stringResource(R.string.attach_files_hint),
-                    startAction = { Icon(AppIcons.File, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.padding(end = 12.dp).size(22.dp)) },
-                    onClick = onFiles,
-                    cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Tail,
-                )
-            }
-            Text(
-                stringResource(R.string.attach_where),
-                style = COUITheme.textStyles.footnote2,
-                color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = PageDefaults.TextGutter),
+        GroupCard {
+            BasicComponent(
+                title = stringResource(R.string.attach_photos),
+                startAction = { Icon(AppIcons.Image, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
+                onClick = onImages,
+                cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Head,
+            )
+            BasicComponent(
+                title = stringResource(R.string.attach_files),
+                startAction = { Icon(AppIcons.File, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
+                onClick = onFiles,
+                cardListPosition = io.github.suqi8.coui.kmp.basic.CardListPosition.Tail,
             )
         }
     }

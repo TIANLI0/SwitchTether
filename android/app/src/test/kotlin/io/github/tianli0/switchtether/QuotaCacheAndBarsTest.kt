@@ -1,9 +1,13 @@
 package io.github.tianli0.switchtether
 
+import io.github.tianli0.switchtether.connection.ConnectionController
 import io.github.tianli0.switchtether.domain.QUOTA_FAILURE_TTL_MS
 import io.github.tianli0.switchtether.domain.QUOTA_REFRESH_MIN_MS
 import io.github.tianli0.switchtether.domain.QUOTA_TTL_MS
+import io.github.tianli0.switchtether.domain.RemoteManagementRepository
 import io.github.tianli0.switchtether.domain.quotaFresh
+import io.github.tianli0.switchtether.domain.quotaRefreshAt
+import io.github.tianli0.switchtether.remote.api.RemoteApi
 import io.github.tianli0.switchtether.remote.protocol.QuotaTier
 import io.github.tianli0.switchtether.remote.protocol.QuotaView
 import io.github.tianli0.switchtether.ui.chart.barLabelIndices
@@ -11,8 +15,18 @@ import io.github.tianli0.switchtether.ui.chart.niceAxisMax
 import io.github.tianli0.switchtether.ui.manage.usageBarLabels
 import java.time.LocalDate
 import java.util.Locale
+import java.util.concurrent.ConcurrentLinkedQueue
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -44,6 +58,63 @@ class QuotaCacheAndBarsTest {
         assertEquals(1795863270260L, QuotaView.parse(withTime, "claude").cachedAtMs)
         val older = Json.parseToJsonElement("""{"tool":"claude","success":true,"tiers":[{"name":"five_hour","utilization":12}]}""") as JsonObject
         assertNull(QuotaView.parse(older, "claude").cachedAtMs)
+    }
+
+    @Test
+    fun quotaRefreshUsesTheEarliestResetAndBacksOffOnAnOldAnswer() {
+        val fetched = 1795863270000L
+        val due = fetched + 60_000
+        val q = ok.copy(
+            cachedAtMs = fetched,
+            tiers = listOf(
+                QuotaTier("past", 12.0, (fetched - 1000).toString()),
+                QuotaTier("week", 50.0, (fetched + 10 * QUOTA_TTL_MS).toString()),
+                QuotaTier("hour", 100.0, java.time.Instant.ofEpochMilli(due).toString()),
+            ),
+        )
+        assertEquals(due, quotaRefreshAt(q, fetched, QUOTA_TTL_MS))
+        assertEquals(due, quotaRefreshAt(q.copy(cachedAtMs = null), fetched, QUOTA_TTL_MS))
+        assertEquals(due + QUOTA_REFRESH_MIN_MS, quotaRefreshAt(q, due, QUOTA_TTL_MS))
+        assertEquals(due + QUOTA_TTL_MS, quotaRefreshAt(q.copy(cachedAtMs = due), due, QUOTA_TTL_MS))
+    }
+
+    @Test
+    fun foregroundQuotaRefreshReadsAgainAtResetWithoutManualAction() = runBlocking {
+        val resetsAt = System.currentTimeMillis() + 2_000
+        val claudeReads = ConcurrentLinkedQueue<Pair<Long, String?>>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val tool = request.url.pathSegments.last()
+            val now = System.currentTimeMillis()
+            if (tool == "claude") claudeReads.add(now to request.url.queryParameter("maxAge"))
+            val tiers = if (tool == "claude") {
+                val used = if (now < resetsAt) 100 else 0
+                """[{"name":"five_hour","utilization":$used,"resetsAt":"$resetsAt"}]"""
+            } else {
+                """[{"name":"five_hour","utilization":50}]"""
+            }
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"available":true,"tiers":$tiers,"cachedAtMs":$now}""".toResponseBody())
+                .build()
+        }.build()
+        val api = RemoteApi(client, ONLINE.endpoint)
+        val conn = object : ConnectionController by FakeConnection() {
+            override fun apiOrNull() = api
+        }
+        val repo = RemoteManagementRepository(conn)
+        val refresh = launch { repo.followQuotaRefresh() }
+        try {
+            withTimeout(10_000) {
+                repo.quotas.first { it["claude"]?.tiers?.single()?.utilizationPercent == 100.0 }
+                repo.quotas.first { it["claude"]?.tiers?.single()?.utilizationPercent == 0.0 }
+            }
+            val reads = claudeReads.toList()
+            assertEquals(listOf("300", "30"), reads.map { it.second })
+            assertTrue(reads[0].first < resetsAt)
+            assertTrue(reads[1].first >= resetsAt)
+        } finally {
+            refresh.cancelAndJoin()
+        }
     }
 
     @Test

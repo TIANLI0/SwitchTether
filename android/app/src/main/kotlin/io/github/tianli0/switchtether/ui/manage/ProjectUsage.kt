@@ -37,13 +37,13 @@ import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.coui17.patterns.EmptyMessage
 import io.github.tianli0.coui17.patterns.GroupCard
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.SectionHeader
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.LocalMoney
 import io.github.tianli0.switchtether.remote.protocol.ProjectUsage
@@ -182,9 +182,12 @@ fun ProjectUsageScreen(project: String, onBack: () -> Unit, onOpen: (Route) -> U
         onBack = onBack,
         large = false,
         actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) },
+        header = {
+            ConnectionBanner(conn, { container.connection.retryNow() })
+            ProjectUsageFilters(state.preset, vm::setPreset)
+        },
     ) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
-        ProjectUsageContent(state, onPreset = vm::setPreset, onRetry = vm::load, onOpenSession = { id, title -> onOpen(Route.SessionDetail(id, title)) })
+        ProjectUsageList(state, onRetry = vm::load, onOpenSession = { id, title -> onOpen(Route.SessionDetail(id, title)) })
     }
 }
 
@@ -195,18 +198,28 @@ fun ProjectUsageContent(
     onRetry: () -> Unit,
     onOpenSession: (String, String?) -> Unit,
 ) = Column(Modifier.fillMaxSize()) {
+    ProjectUsageFilters(state.preset, onPreset)
+    ProjectUsageList(state, onRetry, onOpenSession)
+}
+
+@Composable
+private fun ProjectUsageFilters(preset: UsageRangePreset, onPreset: (UsageRangePreset) -> Unit) {
     val presets = listOf(UsageRangePreset.TODAY, UsageRangePreset.DAYS_7, UsageRangePreset.DAYS_30, UsageRangePreset.ALL)
     ChipTabGroup(
         tabs = presets.map { ChipTabData(stringResource(presetRes(it))) },
-        selectedIndex = presets.indexOf(state.preset).coerceAtLeast(0),
+        selectedIndex = presets.indexOf(preset).coerceAtLeast(0),
         onSelectedChange = { onPreset(presets[it]) },
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
         modifier = Modifier.padding(vertical = 4.dp).testTag("project-usage-range"),
     )
+}
+
+@Composable
+private fun ProjectUsageList(state: ProjectUsageState, onRetry: () -> Unit, onOpenSession: (String, String?) -> Unit) {
     val usage = state.usage
     if (usage == null) {
-        EmptyMessage(stringResource(R.string.project_usage_unsupported))
-        return@Column
+        EmptyMessage(stringResource(R.string.project_usage_unsupported), Modifier.padding(top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current))
+        return
     }
     LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll().testTag("project-usage"), contentPadding = pageListPadding(top = 4.dp)) {
         item(key = "hero") {

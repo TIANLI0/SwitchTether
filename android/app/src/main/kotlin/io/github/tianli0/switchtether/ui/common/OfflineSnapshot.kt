@@ -6,7 +6,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import io.github.tianli0.coui17.patterns.NoticeBanner
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -61,8 +60,8 @@ fun OfflineSnapshotNotice(snapshotAtMs: Long?, modifier: Modifier = Modifier) {
     }
     NoticeVisibility(snapshotAtMs != null && settled) {
         if (shown != null) {
-            NoticeBanner(
-                text = stringResource(R.string.offline_snapshot_label, snapshotTimeLabel(shown)) + "\n" + stringResource(R.string.offline_snapshot_detail),
+            StatusNoticeRow(
+                text = stringResource(R.string.offline_snapshot_label, snapshotTimeLabel(shown)),
                 color = LocalDevColors.current.neutral,
                 modifier = modifier.testTag("offline-snapshot"),
             )

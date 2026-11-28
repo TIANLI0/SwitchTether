@@ -26,6 +26,8 @@ import io.github.tianli0.switchtether.remote.protocol.Hello
 import io.github.tianli0.coui17.patterns.NoticeBanner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,6 +42,8 @@ import io.github.suqi8.coui.kmp.anim.COUIInEase
 import io.github.suqi8.coui.kmp.anim.COUIOutEase
 import io.github.suqi8.coui.kmp.basic.TopTips
 import io.github.suqi8.coui.kmp.basic.TopTipsDefaults
+import io.github.suqi8.coui.kmp.theme.COUITheme
+import io.github.tianli0.coui17.patterns.LinkButton
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.switchtether.ui.theme.DevColors
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
@@ -120,7 +124,7 @@ fun <T : Any> rememberLast(value: T?): T? {
     return last.value
 }
 
-/** Thin banner for non-online states, used at the top of pages. */
+/** A quiet status row for non-online states. */
 @Composable
 fun ConnectionBanner(state: ConnectionState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     // Android 17: LAN access not granted → say what still works and offer to fix it.
@@ -136,32 +140,48 @@ fun ConnectionBanner(state: ConnectionState, onRetry: () -> Unit, modifier: Modi
 
 @Composable
 private fun ConnectionNotice(state: ConnectionState, onRetry: () -> Unit, modifier: Modifier) {
+    StatusNoticeRow(connectionText(state), connectionColor(state), modifier, connectionRetryAction(state, onRetry))
+}
+
+@Composable
+internal fun StatusNoticeRow(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    action: Pair<String, () -> Unit>? = null,
+) {
+    Row(
+        modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter, vertical = 4.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(6.dp).clip(CircleShape).background(color))
+        Text(text, style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceSecondary,
+            modifier = Modifier.weight(1f))
+        action?.let { (label, run) -> LinkButton(label, run) }
+    }
+}
+
+@Composable
+internal fun connectionRetryAction(state: ConnectionState, onRetry: () -> Unit): Pair<String, () -> Unit>? {
+    if (state !is ConnectionState.Offline) return null
     // The computer reported Wake-on-LAN targets: "唤醒并重试" sends magic packets on this network
     // (only effective when the phone is on the computer's LAN and the computer allows it), then retries.
-    val wake = (state as? ConnectionState.Offline)?.desktop?.wake.orEmpty()
+    val wake = state.desktop.wake
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    NoticeBanner(
-        text = connectionText(state),
-        color = connectionColor(state),
-        modifier = modifier,
-        action = when {
-            state !is ConnectionState.Offline -> null
-            wake.isNotEmpty() -> stringResource(R.string.conn_wake_action)
-            else -> stringResource(R.string.action_retry)
-        },
-        onAction = {
-            if (wake.isEmpty()) {
-                onRetry()
-            } else {
-                scope.launch {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        io.github.tianli0.switchtether.remote.wake.WakeOnLan.send(wake)
-                    }
-                    onRetry()
+    return stringResource(if (wake.isEmpty()) R.string.action_retry else R.string.conn_wake_action) to {
+        if (wake.isEmpty()) {
+            onRetry()
+        } else {
+            scope.launch {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    io.github.tianli0.switchtether.remote.wake.WakeOnLan.send(wake)
                 }
+                onRetry()
             }
-        },
-    )
+        }
+    }
 }
 
 @Composable

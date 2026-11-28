@@ -63,7 +63,7 @@ import io.github.tianli0.switchtether.ui.home.RowIcon
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.remote.protocol.DailyUsage
 import io.github.tianli0.switchtether.remote.protocol.ProviderView
 import io.github.tianli0.switchtether.remote.protocol.QuotaView
@@ -77,7 +77,7 @@ import io.github.tianli0.switchtether.ui.common.ConnectionBanner
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.switchtether.ui.common.UiError
 import io.github.tianli0.switchtether.ui.common.title
@@ -140,9 +140,11 @@ fun ProvidersScreen(onBack: () -> Unit) {
         title = stringResource(R.string.manage_providers),
         onBack = onBack,
         actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) },
+        header = {
+            ConnectionBanner(conn, { container.connection.retryNow() })
+            AppTabs(state.apps, state.app, vm::selectApp)
+        },
     ) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
-        AppTabs(state.apps, state.app, vm::selectApp)
         LoadableContent(state.providers, onRetry = vm::load) { view ->
             LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 if (view.providers.isEmpty()) item { EmptyMessage(stringResource(R.string.provider_empty)) }
@@ -299,29 +301,36 @@ fun UsageScreen(onBack: () -> Unit, onOpen: (io.github.tianli0.switchtether.ui.n
     val vm = containerViewModel { UsageViewModel(it.connection, it.management) }
     val state by vm.state.collectAsStateWithLifecycle()
     val conn by container.connection.state.collectAsStateWithLifecycle()
+    io.github.tianli0.switchtether.ui.common.FollowQuotaRefresh()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // The desktop's currency may have changed since we connected: re-read it with the numbers.
     androidx.compose.runtime.LaunchedEffect(Unit) { container.money.refresh() }
     val refresh = { vm.refresh(); scope.launch { container.money.refresh() }; Unit }
-    Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(refresh) }) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
-        val presets = io.github.tianli0.switchtether.remote.usage.UsageRangePreset.entries
-        io.github.suqi8.coui.kmp.basic.ChipTabGroup(
-            tabs = presets.map { io.github.suqi8.coui.kmp.basic.ChipTabData(presetLabel(it)) },
-            selectedIndex = presets.indexOf(state.preset),
-            onSelectedChange = { vm.setPreset(presets[it]) },
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-            modifier = Modifier.padding(vertical = 4.dp).testTag("usage-range"),
-        )
-        // Apps switched off on the desktop (`visibleApps`) are not offered here either.
-        val apps = listOf<String?>(null) + state.apps
-        io.github.suqi8.coui.kmp.basic.ChipTabGroup(
-            tabs = apps.map { io.github.suqi8.coui.kmp.basic.ChipTabData(if (it == null) stringResource(R.string.usage_all_apps) else Formatters.agentLabel(it)) },
-            selectedIndex = apps.indexOf(state.app).coerceAtLeast(0),
-            onSelectedChange = { vm.setApp(apps[it]) },
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-            modifier = Modifier.padding(vertical = 2.dp),
-        )
+    Page(
+        title = stringResource(R.string.manage_usage),
+        onBack = onBack,
+        actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(refresh) },
+        header = {
+            ConnectionBanner(conn, { container.connection.retryNow() })
+            val presets = io.github.tianli0.switchtether.remote.usage.UsageRangePreset.entries
+            io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+                tabs = presets.map { io.github.suqi8.coui.kmp.basic.ChipTabData(presetLabel(it)) },
+                selectedIndex = presets.indexOf(state.preset),
+                onSelectedChange = { vm.setPreset(presets[it]) },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                modifier = Modifier.padding(vertical = 4.dp).testTag("usage-range"),
+            )
+            // Apps switched off on the desktop (`visibleApps`) are not offered here either.
+            val apps = listOf<String?>(null) + state.apps
+            io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+                tabs = apps.map { io.github.suqi8.coui.kmp.basic.ChipTabData(if (it == null) stringResource(R.string.usage_all_apps) else Formatters.agentLabel(it)) },
+                selectedIndex = apps.indexOf(state.app).coerceAtLeast(0),
+                onSelectedChange = { vm.setApp(apps[it]) },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
+            )
+        },
+    ) {
         UsageContent(state, vm::load, vm::setMetric, onMoreLogs = vm::loadMoreLogs, onOpenLog = vm::openLog, onOpenProject = { onOpen(io.github.tianli0.switchtether.ui.nav.Route.ProjectUsage(it)) })
     }
     RequestLogSheet(state.selectedLog, state.zone, onDismiss = { vm.openLog(null) })
@@ -357,21 +366,23 @@ fun UsageContent(
         item { GroupCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
         item { SyncNote(state.lastSyncMs, state.zone) }
         // Remaining quota right under the totals: it is what one checks first, not after every table.
-        if (state.quotas.isNotEmpty()) {
-            item { SectionHeader(stringResource(R.string.usage_quota)) }
-            // Quotas are read at most every few minutes (each read asks the provider): say how old they are.
-            state.quotas.mapNotNull { (it.second as? Loadable.Ready)?.value?.cachedAtMs }.minOrNull()?.let { at ->
-                item(key = "quota-age") {
-                    Text(
-                        stringResource(R.string.quota_updated, io.github.tianli0.switchtether.ui.common.relativeTime(at)),
-                        style = COUITheme.textStyles.footnote2,
-                        color = COUITheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 6.dp).testTag("usage-quota-age"),
-                    )
+        val visibleQuotas = state.quotas.filter { it.first !in state.hiddenApps }
+        if (visibleQuotas.isNotEmpty()) {
+            item(key = "quota-heading") {
+                val at = visibleQuotas.mapNotNull { (_, q) -> q.valueOrNull?.takeIf { it.available }?.cachedAtMs }.minOrNull()
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    SectionHeader(stringResource(R.string.usage_quota), Modifier.weight(1f))
+                    if (at != null) {
+                        Text(
+                            stringResource(R.string.quota_updated, io.github.tianli0.switchtether.ui.common.relativeTime(at)),
+                            style = COUITheme.textStyles.footnote2,
+                            color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(end = PageDefaults.TextGutter).testTag("usage-quota-age"),
+                        )
+                    }
                 }
             }
-            // A tool switched off on the desktop (`visibleApps`) is not shown here either.
-            items(state.quotas.filter { it.first !in state.hiddenApps }, key = { it.first }) { (_, q) ->
+            items(visibleQuotas, key = { it.first }) { (_, q) ->
                 Box(Modifier.animateItem()) { GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } } }
             }
         }
@@ -717,16 +728,17 @@ internal fun quotaTierLabel(name: String): String {
 @Composable
 internal fun quotaResetText(raw: String?): String? {
     val at = Formatters.parseInstant(raw) ?: return raw?.takeIf { it.isNotBlank() }?.let { stringResource(R.string.quota_resets, it) }
-    val now = java.time.Instant.now()
+    val now = java.time.Instant.ofEpochMilli(io.github.tianli0.switchtether.ui.common.MinuteClock.now.longValue)
+    val remaining = java.time.Duration.between(now, at)
+    if (remaining.isNegative || remaining.isZero) return stringResource(R.string.quota_reset_due)
     val (days, clock) = Formatters.localDayAndTime(at, now)
     val whenText = when (days) {
         0 -> stringResource(R.string.quota_day_today, clock)
         1 -> stringResource(R.string.quota_day_tomorrow, clock)
         else -> clock
     }
-    val mins = java.time.Duration.between(now, at).toMinutes()
+    val mins = remaining.toMinutes().coerceAtLeast(1)
     val left = when {
-        mins <= 0 -> return stringResource(R.string.quota_reset_due)
         mins < 60 -> stringResource(R.string.quota_left_minutes, mins.toInt())
         mins < 24 * 60 -> stringResource(R.string.quota_left_hours, (mins / 60).toInt(), (mins % 60).toInt())
         else -> stringResource(R.string.quota_left_days, (mins / 1440).toInt(), ((mins % 1440) / 60).toInt())
@@ -789,9 +801,15 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
             ToggleListKind.PROMPTS -> R.string.manage_prompts
         },
     )
-    Page(title = title, onBack = onBack, actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) }) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
-        AppTabs(state.apps, state.app, vm::selectApp)
+    Page(
+        title = title,
+        onBack = onBack,
+        actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::load) },
+        header = {
+            ConnectionBanner(conn, { container.connection.retryNow() })
+            AppTabs(state.apps, state.app, vm::selectApp)
+        },
+    ) {
         if (kind == ToggleListKind.PROMPTS) {
             LoadableContent(state.prompts, onRetry = vm::load) { prompts ->
                 LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {

@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.domain
 
 import io.github.tianli0.switchtether.connection.ConnectionController
+import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.connection.NotConnectedException
 import io.github.tianli0.switchtether.remote.api.RemoteApi
 import io.github.tianli0.switchtether.remote.command.CommandOutcome
@@ -28,6 +29,11 @@ import io.github.tianli0.switchtether.remote.protocol.UsageSummary
 import io.github.tianli0.switchtether.remote.protocol.parseAppTypes
 import io.github.tianli0.switchtether.remote.protocol.long
 import io.github.tianli0.switchtether.remote.protocol.str
+import io.github.tianli0.switchtether.ui.common.Formatters
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +41,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.serialization.json.JsonObject
@@ -189,6 +198,22 @@ const val QUOTA_FAILURE_TTL_MS = 30_000L
 fun quotaFresh(q: QuotaView, ageMs: Long, maxAgeMs: Long): Boolean =
     ageMs in 0 until if (q.available) maxAgeMs else minOf(maxAgeMs, QUOTA_FAILURE_TTL_MS)
 
+/** Earliest reset of a tier that was still in its previous window when this answer was fetched. */
+private fun QuotaView.nextResetAfter(fetchedAt: Long): Long? =
+    tiers.mapNotNull { Formatters.parseInstant(it.resetsAt) }
+        .mapNotNull { runCatching { it.toEpochMilli() }.getOrNull() }
+        .filter { it > fetchedAt }
+        .minOrNull()
+
+internal fun quotaRefreshAt(q: QuotaView, receivedAt: Long, maxAgeMs: Long): Long {
+    if (!q.available) return receivedAt + minOf(maxAgeMs, QUOTA_FAILURE_TTL_MS)
+    val expiresAt = receivedAt + maxAgeMs
+    val reset = q.nextResetAfter(q.cachedAtMs ?: receivedAt) ?: return expiresAt
+    // An older desktop can still return its pre-reset cache. Wait before trying it again.
+    val retryAt = if (reset <= receivedAt) receivedAt + QUOTA_REFRESH_MIN_MS else reset
+    return minOf(expiresAt, retryAt)
+}
+
 /** One usage total: Home's "today" and the Usage page's "today" (all apps) share a key. */
 data class UsageSummaryKey(val fromSec: Long, val app: String?)
 
@@ -219,6 +244,9 @@ interface ManagementRepository {
     suspend fun quota(tool: String): QuotaView
     /** Pull-to-refresh / refresh button: a new read unless the last one is younger than [QUOTA_REFRESH_MIN_MS]. */
     suspend fun refreshQuota(tool: String): QuotaView = quota(tool)
+
+    /** Refreshes expiring quotas while the caller's page is in the foreground. */
+    suspend fun followQuotaRefresh() = Unit
 
     // Newer desktops (PROTOCOL.md §7.3); older ones answer 404 and the UI hides the feature.
     suspend fun usageLogs(fromSec: Long, toSec: Long, app: String?, page: Int, pageSize: Int = 20): io.github.tianli0.switchtether.remote.protocol.RequestLogPage =
@@ -480,13 +508,47 @@ class RemoteManagementRepository(
     override suspend fun quota(tool: String): QuotaView = readQuota(tool, QUOTA_TTL_MS)
     override suspend fun refreshQuota(tool: String): QuotaView = readQuota(tool, QUOTA_REFRESH_MIN_MS)
 
+    override suspend fun followQuotaRefresh() {
+        conn.state.map { it is ConnectionState.Online }.distinctUntilChanged().collectLatest { online ->
+            if (online) coroutineScope {
+                QUOTA_TOOLS.forEach { tool -> launch { followQuota(tool) } }
+            }
+        }
+    }
+
+    private suspend fun followQuota(tool: String) {
+        while (true) {
+            var current = quotas.value[tool]
+            val wait = try {
+                quota(tool)
+                val answer = quotas.value.getValue(tool)
+                current = answer
+                val at = quotaAt.getValue(tool)
+                quotaRefreshAt(answer, at, QUOTA_TTL_MS) - nowMs()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                QUOTA_FAILURE_TTL_MS
+            }
+            // A manual refresh can return an earlier reset than the one we were waiting for.
+            withTimeoutOrNull(wait.coerceIn(1, QUOTA_TTL_MS)) {
+                quotas.first { it[tool] != current }
+            }
+        }
+    }
+
     /** Home and the Usage page asking at the same time share one read (the second waits for it). */
     private suspend fun readQuota(tool: String, maxAgeMs: Long): QuotaView =
         quotaLocks.getOrPut(tool) { kotlinx.coroutines.sync.Mutex() }.withLock {
             val kept = _quotas.value[tool]
             val at = quotaAt[tool]
-            if (kept != null && at != null && quotaFresh(kept, nowMs() - at, maxAgeMs)) return@withLock kept
-            val q = conn.withApi { QuotaView.parse(it.quota(tool, maxAgeMs / 1000), tool) }
+            val now = nowMs()
+            if (kept != null && at != null && quotaFresh(kept, now - at, maxAgeMs) &&
+                now < quotaRefreshAt(kept, at, maxAgeMs)
+            ) return@withLock kept
+            val reset = kept?.nextResetAfter(kept.cachedAtMs ?: at ?: now)
+            val remoteAge = if (reset != null && reset <= now) QUOTA_REFRESH_MIN_MS else maxAgeMs
+            val q = conn.withApi { QuotaView.parse(it.quota(tool, remoteAge / 1000), tool) }
             quotaAt[tool] = nowMs()
             _quotas.update { it + (tool to q) }
             q

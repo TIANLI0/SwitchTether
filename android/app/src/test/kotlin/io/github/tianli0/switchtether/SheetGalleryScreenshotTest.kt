@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -29,6 +30,8 @@ import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.remote.pairing.PairingLink
+import io.github.tianli0.switchtether.remote.update.ReleaseInfo
+import io.github.tianli0.switchtether.remote.update.SemVer
 import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.coui17.patterns.SheetButtons
@@ -43,8 +46,10 @@ import io.github.tianli0.switchtether.ui.onboarding.PairingUiState
 import io.github.tianli0.switchtether.ui.sessions.NewSessionContent
 import io.github.tianli0.switchtether.ui.sessions.NewSessionState
 import io.github.tianli0.switchtether.ui.sessions.RecentProject
+import io.github.tianli0.switchtether.ui.settings.UpdateSheet
 import io.github.tianli0.switchtether.ui.theme.SwitchTetherTheme
 import io.github.tianli0.switchtether.ui.theme.ThemeMode
+import io.github.tianli0.switchtether.update.UpdateState
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -179,6 +184,30 @@ class SheetGalleryScreenshotTest {
     fun decisionPanelDark() {
         page(ThemeMode.DARK) { Decision() }
         shot("ui-decision-panel-dark")
+    }
+
+    @Test
+    fun longReleaseNotesKeepTheDownloadActionVisible() {
+        val release = ReleaseInfo(
+            tag = "v1.2.3",
+            version = requireNotNull(SemVer.parse("1.2.3")),
+            name = "版本元数据",
+            notes = (1..45).joinToString("\n\n") { "更新说明第 $it 项。" },
+            prerelease = false,
+            htmlUrl = null,
+            publishedAt = "2026-11-28T12:00:00Z",
+            assets = emptyList(),
+        )
+        var download: ReleaseInfo? = null
+        page(ThemeMode.LIGHT) {
+            UpdateSheet(true, UpdateState.Available(release), { download = it }, {}, {}, {})
+        }
+        rule.onNodeWithText("更新说明第 1 项。").assertIsDisplayed()
+        rule.onNodeWithText("版本元数据").assertDoesNotExist()
+        val action = rule.activity.getString(R.string.update_download)
+        rule.onNodeWithText(action).assertIsDisplayed().performClick()
+        assertEquals(release, download)
+        shot("ui-update-notes-light")
     }
 
     @Composable

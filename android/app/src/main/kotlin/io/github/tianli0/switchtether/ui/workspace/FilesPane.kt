@@ -71,8 +71,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -111,7 +109,7 @@ import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageFlingBehavior
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.diff.DiffView
 import io.github.tianli0.switchtether.ui.files.RemoteFileRef
@@ -303,7 +301,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         onBack = goBack,
     )
     val allLabel = stringResource(R.string.files_all)
-    Column(Modifier.fillMaxSize().then(back)) {
+    io.github.tianli0.switchtether.ui.common.ProgressivePageLayout(modifier = Modifier.then(back), topBar = { _ ->
         if (searching && !showRoots) {
             // The search replaces the folder header: COUI's search capsule with its cancel key, and
             // what to search (names or contents) as a chip row under it, like Sessions' search.
@@ -474,6 +472,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         NoticeVisibility(state.transfer != null) {
             if (transfer != null) TransferRow(transfer, vm, onOpenDownloads)
         }
+    }) {
         if (showRoots) {
             LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("files-roots"), state = rememberPageListState(),
                 flingBehavior = pageFlingBehavior(), contentPadding = pageListPadding(top = 4.dp)) {
@@ -491,7 +490,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                     )
                 }
             }
-            return@Column
+            return@ProgressivePageLayout
         }
         val results = state.results
         if (results != null) {
@@ -520,7 +519,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                     }
                 }
             }
-            return@Column
+            return@ProgressivePageLayout
         }
         when (val l = state.listing) {
             null -> Unit
@@ -536,7 +535,8 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 val query = state.query.trim()
                 LaunchedEffect(searching, query) { if (searching) listState.scrollToItem(0) }
                 io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
-                io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = vm::refreshListing, topAppBarScrollBehavior = null) {
+                io.github.tianli0.switchtether.ui.common.TrackPageList(listState)
+                io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = vm::refreshListing, topAppBarScrollBehavior = null, contentPadding = PaddingValues(top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current)) {
                     LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("file-list"), state = listState,
                         flingBehavior = pageFlingBehavior(), contentPadding = pageListPadding(top = 4.dp)) {
                         if (visible.isEmpty()) {
@@ -810,99 +810,101 @@ private fun TransferRow(t: TransferState, vm: FilesViewModel, onOpenDownloads: (
 @Composable
 private fun FileScreen(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Unit) {
     val back = rememberPredictiveBack(onBack = vm::requestCloseFile)
-    Column(Modifier.fillMaxSize().then(back)) {
-        val f = (state.file as? Loadable.Ready)?.value
-        val name = f?.path?.let(FileTypes::fileName).orEmpty()
-        val controls = io.github.tianli0.switchtether.ui.files.rememberCodeViewerState(f?.path.orEmpty())
-        val markdown = f?.text != null && FileTypes.isMarkdown(f.path)
-        val rendered = markdown && io.github.tianli0.switchtether.ui.files.MarkdownPreviewMode.rendered
-        // Lines of code are searchable; rendered Markdown is not (search the source instead).
-        val codeShown = f?.text != null && !rendered && !state.editing
-        var menuOpen by remember { mutableStateOf(false) }
-        val context = LocalContext.current
-        val clipboard = androidx.compose.ui.platform.LocalClipboard.current
-        val scope = rememberCoroutineScope()
-        // One title bar for the open file, like a file viewer's app bar (Material Files, Squircle):
-        // back, name, "folder · size · modified", a quiet "kind · lines · encoding" line, and at
-        // most three keys — Markdown rich text / source, find, and ⋮ for the rest. It used to be
-        // a second back bar under the Files page's own, plus two loose meta rows and keys in
-        // three places.
-        io.github.tianli0.switchtether.ui.files.FilePreviewHeader(
-            title = name,
-            subtitle = f?.let { file ->
-                listOfNotNull(
-                    io.github.tianli0.switchtether.ui.files.previewFolder(file.path),
-                    Formatters.bytes(file.size),
-                    file.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) },
-                ).joinToString(" · ")
-            },
-            meta = f?.text?.let { text ->
-                listOfNotNull(
-                    io.github.tianli0.switchtether.ui.files.CodeHighlighting.label(f.path, f.language)?.replaceFirstChar { it.uppercase() },
-                    stringResource(R.string.files_lines, text.count { it == '\n' } + 1),
-                    f.encoding.uppercase(),
-                    f.lineEnding.uppercase(),
-                ).joinToString(" · ")
-            },
-            onBack = vm::requestCloseFile,
-        ) {
-            if (state.editing) {
-                SmallButton(
-                    text = if (state.saving) "…" else stringResource(R.string.files_save),
-                    onClick = vm::save,
-                    enabled = !state.saving,
-                    tone = ActionTone.Primary,
-                    modifier = Modifier.testTag("save"),
-                )
-            } else if (f != null) {
-                if (markdown) {
-                    ToolbarIcon(
-                        if (rendered) com.adamglin.PhosphorIcons.Regular.Code else com.adamglin.PhosphorIcons.Regular.Article,
-                        stringResource(if (rendered) R.string.files_md_show_source else R.string.files_md_show_rendered),
-                        { io.github.tianli0.switchtether.ui.files.MarkdownPreviewMode.rendered = !rendered },
+    val f = (state.file as? Loadable.Ready)?.value
+    val name = f?.path?.let(FileTypes::fileName).orEmpty()
+    val controls = io.github.tianli0.switchtether.ui.files.rememberCodeViewerState(f?.path.orEmpty())
+    val markdown = f?.text != null && FileTypes.isMarkdown(f.path)
+    val rendered = markdown && io.github.tianli0.switchtether.ui.files.MarkdownPreviewMode.rendered
+    // Lines of code are searchable; rendered Markdown is not (search the source instead).
+    val codeShown = f?.text != null && !rendered && !state.editing
+    var menuOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    io.github.tianli0.switchtether.ui.common.ProgressivePageLayout(
+        modifier = Modifier.then(back),
+        immersive = !state.editing,
+        topBar = { _ ->
+            // One title bar for the open file, like a file viewer's app bar (Material Files, Squircle):
+            // back, name, "folder · size · modified", a quiet "kind · lines · encoding" line, and at
+            // most three keys — Markdown rich text / source, find, and ⋮ for the rest. It used to be
+            // a second back bar under the Files page's own, plus two loose meta rows and keys in
+            // three places.
+            io.github.tianli0.switchtether.ui.files.FilePreviewHeader(
+                title = name,
+                subtitle = f?.let { file ->
+                    listOfNotNull(
+                        io.github.tianli0.switchtether.ui.files.previewFolder(file.path),
+                        Formatters.bytes(file.size),
+                        file.modifiedMs?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) },
+                    ).joinToString(" · ")
+                },
+                meta = f?.text?.let { text ->
+                    listOfNotNull(
+                        io.github.tianli0.switchtether.ui.files.CodeHighlighting.label(f.path, f.language)?.replaceFirstChar { it.uppercase() },
+                        stringResource(R.string.files_lines, text.count { it == '\n' } + 1),
+                        f.encoding.uppercase(),
+                        f.lineEnding.uppercase(),
+                    ).joinToString(" · ")
+                },
+                onBack = vm::requestCloseFile,
+            ) {
+                if (state.editing) {
+                    SmallButton(
+                        text = if (state.saving) "…" else stringResource(R.string.files_save),
+                        onClick = vm::save,
+                        enabled = !state.saving,
+                        tone = ActionTone.Primary,
+                        modifier = Modifier.testTag("save"),
                     )
-                }
-                if (codeShown) {
-                    ToolbarIcon(AppIcons.Search, stringResource(R.string.files_find), { controls.findOpen = !controls.findOpen })
-                }
-                Box {
-                    ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { menuOpen = true })
-                    val copied = stringResource(R.string.files_copied)
-                    val editLabel = stringResource(R.string.files_edit)
-                    val downloadLabel = stringResource(R.string.files_download)
-                    val wrapLabel = stringResource(if (controls.wrap) R.string.command_scroll else R.string.command_wrap)
-                    val gotoLabel = stringResource(R.string.files_goto_line)
-                    val largerLabel = stringResource(R.string.files_text_larger)
-                    val smallerLabel = stringResource(R.string.files_text_smaller)
-                    val copyAllLabel = stringResource(R.string.files_copy_all)
-                    val entries = buildList {
-                        add(io.github.tianli0.coui17.patterns.MenuEntry(editLabel, onClick = vm::startEdit))
-                        if (!state.transferRunning) {
-                            add(io.github.tianli0.coui17.patterns.MenuEntry(downloadLabel, onClick = { vm.download(FsEntry(name, f.path, "file", f.size)) }))
-                        }
-                        if (codeShown) {
-                            add(io.github.tianli0.coui17.patterns.MenuEntry(wrapLabel, onClick = { controls.wrap = !controls.wrap }))
-                            add(io.github.tianli0.coui17.patterns.MenuEntry(gotoLabel, onClick = { controls.gotoOpen = true }))
-                            add(io.github.tianli0.coui17.patterns.MenuEntry(largerLabel, onClick = controls::larger))
-                            add(io.github.tianli0.coui17.patterns.MenuEntry(smallerLabel, onClick = controls::smaller))
-                        }
-                        f.text?.let { text ->
-                            add(
-                                io.github.tianli0.coui17.patterns.MenuEntry(copyAllLabel, onClick = {
-                                    scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(name, text))) }
-                                    android.widget.Toast.makeText(context, copied, android.widget.Toast.LENGTH_SHORT).show()
-                                }),
-                            )
-                        }
+                } else if (f != null) {
+                    if (markdown) {
+                        ToolbarIcon(
+                            if (rendered) com.adamglin.PhosphorIcons.Regular.Code else com.adamglin.PhosphorIcons.Regular.Article,
+                            stringResource(if (rendered) R.string.files_md_show_source else R.string.files_md_show_rendered),
+                            { io.github.tianli0.switchtether.ui.files.MarkdownPreviewMode.rendered = !rendered },
+                        )
                     }
-                    io.github.tianli0.coui17.patterns.GlassMenu(show = menuOpen, onDismiss = { menuOpen = false }, entries = entries)
+                    if (codeShown) {
+                        ToolbarIcon(AppIcons.Search, stringResource(R.string.files_find), { controls.findOpen = !controls.findOpen })
+                    }
+                    Box {
+                        ToolbarIcon(AppIcons.More, stringResource(R.string.files_more), { menuOpen = true })
+                        val copied = stringResource(R.string.files_copied)
+                        val editLabel = stringResource(R.string.files_edit)
+                        val downloadLabel = stringResource(R.string.files_download)
+                        val wrapLabel = stringResource(if (controls.wrap) R.string.command_scroll else R.string.command_wrap)
+                        val gotoLabel = stringResource(R.string.files_goto_line)
+                        val largerLabel = stringResource(R.string.files_text_larger)
+                        val smallerLabel = stringResource(R.string.files_text_smaller)
+                        val copyAllLabel = stringResource(R.string.files_copy_all)
+                        val entries = buildList {
+                            add(io.github.tianli0.coui17.patterns.MenuEntry(editLabel, onClick = vm::startEdit))
+                            if (!state.transferRunning) {
+                                add(io.github.tianli0.coui17.patterns.MenuEntry(downloadLabel, onClick = { vm.download(FsEntry(name, f.path, "file", f.size)) }))
+                            }
+                            if (codeShown) {
+                                add(io.github.tianli0.coui17.patterns.MenuEntry(wrapLabel, onClick = { controls.wrap = !controls.wrap }))
+                                add(io.github.tianli0.coui17.patterns.MenuEntry(gotoLabel, onClick = { controls.gotoOpen = true }))
+                                add(io.github.tianli0.coui17.patterns.MenuEntry(largerLabel, onClick = controls::larger))
+                                add(io.github.tianli0.coui17.patterns.MenuEntry(smallerLabel, onClick = controls::smaller))
+                            }
+                            f.text?.let { text ->
+                                add(
+                                    io.github.tianli0.coui17.patterns.MenuEntry(copyAllLabel, onClick = {
+                                        scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(name, text))) }
+                                        android.widget.Toast.makeText(context, copied, android.widget.Toast.LENGTH_SHORT).show()
+                                    }),
+                                )
+                            }
+                        }
+                        io.github.tianli0.coui17.patterns.GlassMenu(show = menuOpen, onDismiss = { menuOpen = false }, entries = entries)
+                    }
                 }
             }
-        }
-        state.transfer?.let { TransferRow(it, vm, onOpenDownloads) }
-        // Text scrolling up fades out under the title bar instead of being sliced right below the
-        // "kind · lines · encoding" line, where the cut half-line read as part of the header.
-        Box(Modifier.fillMaxSize().topEdgeFade(14.dp)) {
+            state.transfer?.let { TransferRow(it, vm, onOpenDownloads) }
+        },
+    ) {
         LoadableContent(state.file!!, onRetry = { (state.file as? Loadable.Ready)?.value?.path?.let(vm::openPath) }) { file ->
             val dev = LocalDevColors.current
             if (state.editing) {
@@ -924,29 +926,19 @@ private fun FileScreen(state: FilesUiState, vm: FilesViewModel, onOpenDownloads:
                 )
             }
         }
-        }
     }
 }
-
-/** Fades the top [height] of the content to transparent (offscreen layer, DstIn gradient). */
-private fun Modifier.topEdgeFade(height: androidx.compose.ui.unit.Dp): Modifier =
-    graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
-        .drawWithContent {
-            drawContent()
-            val h = height.toPx().coerceAtMost(size.height)
-            drawRect(
-                androidx.compose.ui.graphics.Brush.verticalGradient(0f to androidx.compose.ui.graphics.Color.Transparent, 1f to androidx.compose.ui.graphics.Color.Black, startY = 0f, endY = h),
-                size = androidx.compose.ui.geometry.Size(size.width, h),
-                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
-            )
-        }
 
 @Composable
 private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
     val c = state.conflict ?: return
     var confirmOverwrite by remember { mutableStateOf(false) }
     val back = rememberPredictiveBack(onBack = vm::dismissConflict)
-    LazyColumn(Modifier.fillMaxSize().then(back).testTag("conflict"), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().then(back).pageScroll().testTag("conflict"),
+        state = rememberPageListState(),
+        contentPadding = pageListPadding(top = 0.dp),
+    ) {
         item { SmallTitle(stringResource(R.string.files_conflict_title)) }
         item {
             GroupCard {

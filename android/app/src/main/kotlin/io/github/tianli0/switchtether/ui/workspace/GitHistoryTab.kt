@@ -28,7 +28,7 @@ import io.github.tianli0.coui17.patterns.MenuEntry
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.GitStatusEntry
 import io.github.tianli0.switchtether.remote.protocol.RepoStatus

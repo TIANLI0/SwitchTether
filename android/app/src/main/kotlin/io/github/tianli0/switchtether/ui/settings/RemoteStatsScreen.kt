@@ -35,12 +35,12 @@ import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.coui17.patterns.EmptyMessage
 import io.github.tianli0.coui17.patterns.GroupCard
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.SectionHeader
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.domain.LocalMoney
 import io.github.tianli0.switchtether.remote.protocol.DayStats
@@ -68,26 +68,39 @@ fun RemoteStatsScreen(onBack: () -> Unit) {
         onBack = onBack,
         large = false,
         actions = { RefreshToolbarIcon(vm::load, refreshing = (state.stats as? Loadable.Ready<*>)?.refreshing == true) },
+        header = {
+            ConnectionBanner(conn, { container.connection.retryNow() })
+            if (state.supported != false) StatsFilters(state.preset, vm::setPreset)
+        },
     ) {
-        ConnectionBanner(conn, { container.connection.retryNow() })
-        RemoteStatsContent(state, onPreset = vm::setPreset, onRetry = vm::load)
+        StatsContent(state, onRetry = vm::load)
     }
 }
 
 @Composable
 fun RemoteStatsContent(state: RemoteStatsState, onPreset: (StatsPreset) -> Unit, onRetry: () -> Unit) = Column(Modifier.fillMaxSize()) {
-    if (state.supported == false) {
-        EmptyMessage(stringResource(R.string.stats_unsupported))
-        return@Column
-    }
+    if (state.supported != false) StatsFilters(state.preset, onPreset)
+    StatsContent(state, onRetry)
+}
+
+@Composable
+private fun StatsFilters(preset: StatsPreset, onPreset: (StatsPreset) -> Unit) {
     val presets = StatsPreset.entries
     ChipTabGroup(
         tabs = presets.map { ChipTabData(stringResource(presetRes(it))) },
-        selectedIndex = presets.indexOf(state.preset).coerceAtLeast(0),
+        selectedIndex = presets.indexOf(preset).coerceAtLeast(0),
         onSelectedChange = { onPreset(presets[it]) },
         contentPadding = PaddingValues(horizontal = 16.dp),
         modifier = Modifier.padding(vertical = 4.dp).testTag("stats-range"),
     )
+}
+
+@Composable
+private fun StatsContent(state: RemoteStatsState, onRetry: () -> Unit) {
+    if (state.supported == false) {
+        EmptyMessage(stringResource(R.string.stats_unsupported), Modifier.padding(top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current))
+        return
+    }
     LoadableContent(state.stats, onRetry) { v -> StatsList(v) }
 }
 

@@ -73,7 +73,7 @@ import io.github.tianli0.coui17.patterns.GlassMenu
 import io.github.tianli0.coui17.patterns.LoadingState
 import io.github.tianli0.coui17.patterns.LocalIsDarkTheme
 import io.github.tianli0.coui17.patterns.MenuEntry
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageContainerColor
@@ -109,6 +109,7 @@ private fun DshWebStatePage(ui: DshWebUi, onBack: () -> Unit, onOpen: () -> Unit
         onBack = onBack,
         large = false,
         actions = { ToolbarIcon(AppIcons.Refresh, stringResource(R.string.action_refresh), onRetry) },
+        immersive = false,
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             when (ui) {
@@ -227,41 +228,47 @@ private fun DshWebBrowser(ready: DshWebUi.Ready, onBack: () -> Unit, onStop: () 
 
     val pageColor = pageContainerColor()
     val chromeColor = if (fullScreen) page.pageColor?.let { Color(it) } ?: pageColor else pageColor
-    Column(Modifier.fillMaxSize().then(back).background(chromeColor)) {
-        if (!fullScreen) {
-            SmallTopAppBar(
-                title = stringResource(R.string.dsh_web_title),
-                subtitle = stringResource(if (viaRelay) R.string.dsh_web_subtitle_relay else R.string.dsh_web_subtitle, localPort, ready.remotePort),
-                color = pageColor,
-                showDivider = false,
-                navigationIcon = { BackArrow(onBack) },
-                actions = {
-                    ToolbarIcon(AppIcons.Refresh, stringResource(R.string.dsh_web_reload), {
-                        page.loadError = null
-                        webView.reload()
-                    })
-                    Box {
-                        ToolbarIcon(AppIcons.More, stringResource(R.string.dsh_web_more), { menu = true })
-                        GlassMenu(
-                            show = menu,
-                            entries = listOfNotNull(
-                                MenuEntry(stringResource(R.string.dsh_web_full_screen)) {
-                                    fullScreen = true
-                                    Toast.makeText(context, exitHint, Toast.LENGTH_SHORT).show()
-                                },
-                                MenuEntry(stringResource(R.string.dsh_web_open_in_browser)) { openExternal(context, webView.url ?: "$origin/") },
-                                MenuEntry(stringResource(R.string.dsh_web_copy_link)) { copyText(context, webView.url ?: "$origin/") },
-                                MenuEntry(stringResource(R.string.dsh_web_sign_in)) { signIn = true },
-                                if (ready.owned) MenuEntry(stringResource(R.string.dsh_web_stop), danger = true) { confirmStop = true } else null,
-                            ),
-                            onDismiss = { menu = false },
-                        )
-                    }
-                },
-            )
-        } else {
-            Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars))
-        }
+    io.github.tianli0.switchtether.ui.common.ProgressivePageLayout(
+        modifier = Modifier.then(back),
+        immersive = false,
+        containerColor = chromeColor,
+        topBar = { _ ->
+            if (!fullScreen) {
+                SmallTopAppBar(
+                    title = stringResource(R.string.dsh_web_title),
+                    subtitle = stringResource(if (viaRelay) R.string.dsh_web_subtitle_relay else R.string.dsh_web_subtitle, localPort, ready.remotePort),
+                    color = Color.Transparent,
+                    showDivider = false,
+                    navigationIcon = { BackArrow(onBack) },
+                    actions = {
+                        ToolbarIcon(AppIcons.Refresh, stringResource(R.string.dsh_web_reload), {
+                            page.loadError = null
+                            webView.reload()
+                        })
+                        Box {
+                            ToolbarIcon(AppIcons.More, stringResource(R.string.dsh_web_more), { menu = true })
+                            GlassMenu(
+                                show = menu,
+                                entries = listOfNotNull(
+                                    MenuEntry(stringResource(R.string.dsh_web_full_screen)) {
+                                        fullScreen = true
+                                        Toast.makeText(context, exitHint, Toast.LENGTH_SHORT).show()
+                                    },
+                                    MenuEntry(stringResource(R.string.dsh_web_open_in_browser)) { openExternal(context, webView.url ?: "$origin/") },
+                                    MenuEntry(stringResource(R.string.dsh_web_copy_link)) { copyText(context, webView.url ?: "$origin/") },
+                                    MenuEntry(stringResource(R.string.dsh_web_sign_in)) { signIn = true },
+                                    if (ready.owned) MenuEntry(stringResource(R.string.dsh_web_stop), danger = true) { confirmStop = true } else null,
+                                ),
+                                onDismiss = { menu = false },
+                            )
+                        }
+                    },
+                )
+            } else {
+                Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars))
+            }
+        },
+    ) {
         // Progress while a page loads; a hairline of the same height otherwise keeps the layout still.
         Box(Modifier.fillMaxWidth().height(2.dp)) {
             if (page.progress in 1..99) LinearProgressIndicator(Modifier.fillMaxWidth(), progress = page.progress / 100f, height = 2.dp)

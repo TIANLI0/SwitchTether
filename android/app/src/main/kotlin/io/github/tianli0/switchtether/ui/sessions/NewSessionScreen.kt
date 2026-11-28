@@ -46,9 +46,9 @@ import androidx.lifecycle.viewModelScope
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import androidx.compose.runtime.saveable.rememberSaveable
-import io.github.tianli0.coui17.patterns.rememberPageScrollState
+import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
 import io.github.tianli0.switchtether.domain.SessionQuery
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 import io.github.tianli0.switchtether.ui.home.RowIcon
 import io.github.suqi8.coui.kmp.basic.TabRowWithContour
@@ -459,10 +459,14 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
                 modifier = Modifier.padding(end = 12.dp).testTag("start-session"),
             )
         },
+        header = { ConnectionBanner(state.connection, { container.connection.retryNow() }) },
     ) {
-        ConnectionBanner(state.connection, { container.connection.retryNow() })
         // The options fold out and the keyboard takes half the screen: the launcher must scroll.
-        Column(Modifier.weight(1f, fill = false).pageScroll().verticalScroll(rememberPageScrollState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior())) {
+        Column(
+            Modifier.weight(1f, fill = false).pageScroll()
+                .verticalScroll(rememberPageScrollState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior())
+                .padding(top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current),
+        ) {
             NewSessionContent(
                 state = state,
                 busy = busy != null,
@@ -694,7 +698,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
         },
     ) {
         Column(Modifier.fillMaxSize()) {
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = pageListPadding()) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().pageScroll(), state = io.github.tianli0.switchtether.ui.common.rememberPageListState(), contentPadding = pageListPadding()) {
                 when (val l = state.listing) {
                     null -> when (val roots = state.roots) {
                         Loadable.Loading -> item { Text(stringResource(R.string.state_loading), color = dev.gutter, modifier = Modifier.padding(16.dp)) }

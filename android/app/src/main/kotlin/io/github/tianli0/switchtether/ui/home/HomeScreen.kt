@@ -16,8 +16,8 @@ import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,9 +55,10 @@ import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.remote.protocol.UsageSummary
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.common.Formatters
+import io.github.tianli0.switchtether.ui.common.FollowQuotaRefresh
 import io.github.tianli0.switchtether.ui.common.Loadable
-import io.github.tianli0.coui17.patterns.Page
 import io.github.tianli0.switchtether.ui.common.UiError
 import io.github.tianli0.switchtether.ui.common.connectionColor
 import io.github.tianli0.switchtether.ui.common.connectionText
@@ -80,6 +81,7 @@ fun HomeScreen(onOpen: (Route) -> Unit, onSelectTab: (Tab) -> Unit) {
     androidx.compose.runtime.LaunchedEffect(vm, lifecycle) {
         lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) { vm.followActivity() }
     }
+    FollowQuotaRefresh()
     HomeContent(state, onOpen, onSelectTab, onRetry = vm::retryConnection, onRefresh = vm::pullRefresh)
 }
 
@@ -93,7 +95,6 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
     Page(
         title = online?.desktop?.name ?: stringResource(R.string.tab_home),
         large = false,
-        immersive = true,
         actions = { io.github.tianli0.coui17.patterns.ToolbarIcon(AppIcons.Settings, settingsLabel, { onOpen(Route.Manage) }, modifier = Modifier.testTag("home-settings")) },
     ) {
         io.github.suqi8.coui.kmp.basic.PullToRefresh(

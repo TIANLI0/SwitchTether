@@ -37,6 +37,8 @@ import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.files.FileTypes
 import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
+import io.github.tianli0.coui17.patterns.LocalPageTopInset
+import io.github.tianli0.coui17.patterns.pageScroll
 import io.github.tianli0.switchtether.ui.theme.DevType
 import io.github.tianli0.switchtether.ui.theme.LocalDevColors
 
@@ -124,10 +126,10 @@ fun MarkdownDocView(text: String, path: String, onOpenPath: ((String) -> Unit)?,
                 typography = typography,
                 components = components,
                 imageTransformer = NoRemoteImages,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().pageScroll(),
                 loading = { m -> Box(m.padding(16.dp)) { Text(stringResource(R.string.state_loading), color = scheme.onSurfaceVariantSummary) } },
                 success = { state, comps, m ->
-                    LazyMarkdownSuccess(state, comps, m, contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 12.dp, bottom = bottom))
+                    LazyMarkdownSuccess(state, comps, m, contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 12.dp + LocalPageTopInset.current, bottom = bottom))
                 },
             )
         }

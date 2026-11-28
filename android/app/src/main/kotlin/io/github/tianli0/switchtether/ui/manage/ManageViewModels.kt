@@ -186,6 +186,13 @@ class UsageViewModel(
     init {
         onOnline(conn) { load() }
         viewModelScope.launch { repo.changes.collect { if (it == "usage.updated") load() } }
+        viewModelScope.launch {
+            repo.quotas.collect { quotas ->
+                _state.update { st ->
+                    st.copy(quotas = st.quotas.map { (tool, old) -> tool to (quotas[tool]?.let { Loadable.Ready(it) } ?: old) })
+                }
+            }
+        }
     }
 
     // Quota does not depend on the range or app: changing them reloads the range only.
@@ -268,7 +275,10 @@ class UsageViewModel(
                 _state.update { st ->
                     st.copy(
                         quotas = st.quotas.map { (tool, old) ->
-                            tool to if (tool != t) old else if (r is Loadable.Failed && old is Loadable.Ready) old else r
+                            tool to if (tool != t) old else {
+                                repo.quotas.value[t]?.let { Loadable.Ready(it) }
+                                    ?: if (r is Loadable.Failed && old is Loadable.Ready) old else r
+                            }
                         },
                     )
                 }

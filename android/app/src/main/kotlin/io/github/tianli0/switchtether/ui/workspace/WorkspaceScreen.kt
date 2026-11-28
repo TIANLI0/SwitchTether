@@ -6,9 +6,9 @@ import io.github.tianli0.coui17.patterns.GlassMenu
 import io.github.tianli0.switchtether.ui.icons.AppIcons
 
 import io.github.tianli0.switchtether.ui.nav.Route
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageScrollState
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageScrollState
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 
 
@@ -69,7 +69,7 @@ import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.LoadableContent
 import io.github.tianli0.coui17.patterns.LocalBottomBarSpace
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
@@ -127,8 +127,6 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
     val sizeEstimate = rememberTerminalSizeEstimate(term.fontSp, term.columns)
     Page(
         title = stringResource(R.string.tab_workspace),
-        // The same small title bar as Home and Sessions: the tabs cross-fade, so a large title here
-        // made the header grow and shrink on every switch.
         large = false,
         actions = {
             io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon({
@@ -136,7 +134,6 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
                 filesVm.loadRoots()
             })
         },
-        immersive = true,
     ) {
         LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { ConnectionBanner(conn, { container.connection.retryNow() }) }
@@ -260,6 +257,7 @@ fun TerminalPage(initialId: String?, onBack: () -> Unit) {
         large = false,
         actions = { TerminalActions(st, vm, controller) },
         modifier = Modifier.imePadding(),
+        header = { TerminalTabs(st, vm) },
     ) {
         TerminalPane(st, vm, controller)
     }

@@ -6,7 +6,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
-import io.github.tianli0.switchtether.ui.common.ConnectionBanner
+import io.github.tianli0.switchtether.ui.common.LocalNetworkStrip
+import io.github.tianli0.switchtether.ui.common.connectionRetryAction
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -36,7 +37,7 @@ import io.github.tianli0.switchtether.R
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.connection.ConnectionManager
 import io.github.tianli0.switchtether.connection.ConnectionState
 import io.github.tianli0.switchtether.notify.Notifier
@@ -54,7 +55,7 @@ import io.github.tianli0.coui17.patterns.ConfirmDialog
 import io.github.tianli0.coui17.patterns.ChoiceDialog
 import io.github.tianli0.coui17.patterns.ChoiceEntry
 import io.github.tianli0.switchtether.ui.common.Formatters
-import io.github.tianli0.coui17.patterns.Page
+import io.github.tianli0.switchtether.ui.common.Page
 import io.github.tianli0.switchtether.ui.common.connectionText
 import io.github.tianli0.coui17.patterns.KeyValueRow
 import io.github.tianli0.coui17.patterns.SectionHeader
@@ -106,13 +107,30 @@ fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manage
     val roomy = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480
     Page(title = stringResource(R.string.tab_manage), onBack = onBack, immersive = true, large = roomy) {
         LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
-            item { ConnectionBanner(conn, { container.connection.retryNow() }) }
+            item { LocalNetworkStrip() }
             item {
                 GroupCard {
-                    ArrowPreference(
-                        title = desktop?.name ?: "—",
+                    val statusDot: @Composable () -> Unit = {
+                        Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(androidx.compose.animation.animateColorAsState(io.github.tianli0.switchtether.ui.common.connectionColor(conn), label = "conn-dot").value))
+                    }
+                    val paired = desktop
+                    if (paired == null) {
+                        io.github.suqi8.coui.kmp.basic.BasicComponent(
+                            title = stringResource(R.string.field_desktop),
+                            summary = connectionText(conn),
+                            startAction = statusDot,
+                            cardListPosition = CardListPosition.Full,
+                        )
+                    } else ArrowPreference(
+                        title = paired.name,
                         summary = connectionText(conn),
-                        startAction = { Box(Modifier.padding(end = 12.dp).size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.animation.animateColorAsState(io.github.tianli0.switchtether.ui.common.connectionColor(conn), label = "conn-dot").value)) },
+                        startAction = statusDot,
+                        endActions = {
+                            connectionRetryAction(conn, container.connection::retryNow)?.let { (label, run) ->
+                                io.github.tianli0.coui17.patterns.LinkButton(label, run)
+                            }
+                        },
                         onClick = { onOpen(Route.DesktopInfo) },
                         cardListPosition = CardListPosition.Full,
                     )

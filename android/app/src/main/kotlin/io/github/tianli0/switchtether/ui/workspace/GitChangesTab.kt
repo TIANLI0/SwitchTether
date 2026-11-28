@@ -41,7 +41,7 @@ import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
 import io.github.tianli0.coui17.patterns.pageScroll
-import io.github.tianli0.coui17.patterns.rememberPageListState
+import io.github.tianli0.switchtether.ui.common.rememberPageListState
 import io.github.tianli0.switchtether.R
 import io.github.tianli0.switchtether.remote.protocol.GitOps
 import io.github.tianli0.switchtether.remote.protocol.GitStatusEntry
