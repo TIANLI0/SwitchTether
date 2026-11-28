@@ -1178,10 +1178,9 @@ fn strip_attachment_trailer(text: &str) -> (String, Vec<Value>) {
     for item in trailer[..end].split(',') {
         let p = item.trim();
         if !p.is_empty() {
-            let name = std::path::Path::new(p)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(p);
+            // Either separator: a Windows desktop writes `C:\…` paths, and `Path::file_name`
+            // on Unix would keep the whole string.
+            let name = p.rsplit(['/', '\\']).find(|n| !n.is_empty()).unwrap_or(p);
             ctx.push(json!({ "kind": "file", "name": name, "path": p }));
         }
     }
