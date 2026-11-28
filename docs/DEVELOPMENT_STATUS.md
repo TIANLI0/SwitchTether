@@ -994,3 +994,19 @@ on this machine, the phone UI on a device.
 - Not verified: Gemini model answers (Google's API refused the machine's region), image prompts,
   ACP `plan` / thought updates (not sent in these runs), the phone UI on a device, macOS / Linux,
   CC Switch API-key profile conversations.
+
+## Phone activity statistics (2026-11-28)
+
+- Core: `stats.rs` + `api/stats.rs` — `GET /v1/stats/remote`, `POST /v1/stats/foreground`, feature
+  `remote_stats` (PROTOCOL.md §7.15). Daily counters per device in `remote.db` (`stats_daily`,
+  `stats_sessions`, kept for good); first start backfills tasks / messages / approvals / answers from
+  the 90-day audit log. Agent working time is timed from `session.upserted` statuses of turns a phone
+  started (busy time only, waiting excluded). Cost = usage-log rows of the sessions phones drove.
+- Android: Settings → 使用统计 (`Route.RemoteStats`, `ui/settings/RemoteStats*`), periods this week /
+  last week / this month / all in the desktop's time zone; foreground time measured with
+  `ProcessLifecycleOwner` (`data/ForegroundTime.kt`, checkpoint every minute, idempotent reports).
+- Checked: clippy (core and desktop), `cargo test -p switchtether-core --lib --tests`, `cargo test --lib
+  switchtether`, Gradle unit tests, `:core:remote:test`, assembleDebug, lint and detekt. Not verified on a
+  device or against a real desktop session yet.
+- Also fixed: the Kotlin fixture test still expected agy without `bypassPermissions`; agy offers it
+  (`agy acp --dangerously-skip-permissions`, the only dangerous agy mode) since `298cff9d0`.

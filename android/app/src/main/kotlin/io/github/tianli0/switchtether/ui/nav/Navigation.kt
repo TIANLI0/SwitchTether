@@ -50,6 +50,8 @@ sealed interface Route {
     /** About → 诊断记录: process-exit records (docs/ANDROID_UI.md §37). */
     @Serializable data object Diagnostics : Route
     @Serializable data object DesktopInfo : Route
+    /** Settings → 使用统计: what the paired phones did (PROTOCOL.md §7.15). */
+    @Serializable data object RemoteStats : Route
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true }

@@ -1142,3 +1142,62 @@ async fn dsh_web_open_starts_forwards_and_stops() {
     drop(web);
     f.handle.shutdown().await;
 }
+
+#[tokio::test]
+async fn phone_statistics_count_foreground_time_once_and_list_devices() {
+    let f = start().await;
+    let c = Client::new(&f);
+    let device = pair(&f, &c, None).await;
+    let (s, caps) = c.get("/v1/capabilities").await;
+    assert_eq!(s, 200);
+    assert!(caps["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x == "remote_stats"));
+
+    // Nothing yet: an empty view of today, cost zero (no phone sessions to sum).
+    let (s, v) = c.get("/v1/stats/remote").await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["totals"]["tasks"], 0);
+    assert_eq!(v["since"], Value::Null);
+    assert_eq!(v["days"].as_array().unwrap().len(), 1);
+    assert_eq!(v["sessions"], 0);
+
+    // Ten minutes in front, reported twice under the same command id: counted once.
+    let now = switchtether_core::util::now_ms();
+    let body = json!({ "commandId": "fg-1", "intervals": [{ "startMs": now - 600_000, "endMs": now }] });
+    let (s, r) = c.post("/v1/stats/foreground", body.clone()).await;
+    assert_eq!(s, 200, "{r}");
+    assert_eq!(r["countedMs"], 600_000);
+    let (s, _) = c.post("/v1/stats/foreground", body).await;
+    assert_eq!(s, 200);
+    // Without a command id it is refused.
+    let (s, _) = c
+        .post("/v1/stats/foreground", json!({ "intervals": [] }))
+        .await;
+    assert_eq!(s, 400);
+
+    let from = now / 1000 - 6 * 24 * 3600;
+    let (s, v) = c.get(&format!("/v1/stats/remote?from={from}")).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["totals"]["foregroundMs"], 600_000);
+    assert_eq!(v["days"].as_array().unwrap().len(), 7);
+    let devices = v["devices"].as_array().unwrap();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0]["deviceId"], device);
+    assert_eq!(devices[0]["name"], "Phone");
+    assert_eq!(devices[0]["revoked"], false);
+    assert!(v["since"].is_string());
+
+    // A message to an unknown session fails and counts nothing.
+    let (s, _) = c
+        .post(
+            "/v1/sessions/claude:nope/messages",
+            json!({ "commandId": "m-1", "text": "hi" }),
+        )
+        .await;
+    assert_ne!(s, 200);
+    let (_, v) = c.get("/v1/stats/remote").await;
+    assert_eq!(v["totals"]["messages"], 0);
+}

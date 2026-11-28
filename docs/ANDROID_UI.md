@@ -2105,3 +2105,20 @@ a UI-process record never counts as "monitor running".
 **Thumbnails.** In the same change, images in conversations and the composer strip are decoded at their
 slot size (`ui/common/Thumbnails.kt`, power-of-two sample, off the main thread) instead of at full
 size — a 4000×3000 photo was a 48 MB bitmap for a 120 dp square.
+
+## 39. Phone activity statistics (2026-11-28)
+
+Settings → 使用统计 (`Route.RemoteStats`, `ui/settings/RemoteStatsScreen.kt`) shows what all paired
+phones did through SwitchTether (`GET /v1/stats/remote`, PROTOCOL.md §7.15). Chips pick this week,
+last week, this month or everything, computed in the desktop's time zone (weeks start on Monday).
+The hero card has the task count with messages, approvals, answered questions and sessions; tasks per
+day as bars (up to a month); agent working time and time in the app; the cost of the sessions phones
+drove; and one row per device. A desktop without the `remote_stats` feature gets a short "update the
+computer" message instead.
+
+Time in the app is measured in the UI process (`data/ForegroundTime.kt`): `ProcessLifecycleOwner`
+start / stop, a checkpoint every minute (a process killed in front loses at most that minute),
+intervals kept in `files/stats/foreground.json` and reported with `POST /v1/stats/foreground` when the
+connection comes up, when the app goes to the background and every ten minutes in front. A report
+keeps its command id until the computer has it, so a retry is counted once. Unpairing drops what was
+not reported yet.

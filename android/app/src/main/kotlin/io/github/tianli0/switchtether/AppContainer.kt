@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -145,6 +146,10 @@ class AppContainer(private val context: Context) {
     /** Read synchronously before any transfer can start, so the journal of a dead process is never overwritten. */
     private val transferRecovery = transfers.recover()
 
+    /** Foreground time not yet counted by the computer (PROTOCOL.md §7.15). */
+    val foregroundTime = io.github.tianli0.switchtether.data.ForegroundTime(java.io.File(context.filesDir, "stats/foreground.json"), appScope)
+    private var foregroundTicker: kotlinx.coroutines.Job? = null
+
     /** Why earlier app processes ended (About → 诊断记录, docs/ANDROID_UI.md §37). */
     val diagnostics = io.github.tianli0.switchtether.diag.ExitDiagnostics(context)
 
@@ -160,6 +165,18 @@ class AppContainer(private val context: Context) {
                 .collect { publishProcessState() }
         }
         cleanUpInterruptedTransfers()
+        appScope.launch {
+            connection.state.map { it is io.github.tianli0.switchtether.connection.ConnectionState.Online }
+                .distinctUntilChanged()
+                .collect { online -> if (online) reportForegroundTime() }
+        }
+    }
+
+    /** Hands the foreground time to a computer that counts it (feature `remote_stats`). */
+    private suspend fun reportForegroundTime() {
+        val api = connection.apiOrNull() ?: return
+        val supported = runCatching { "remote_stats" in api.features() }.getOrDefault(false)
+        if (supported) foregroundTime.flush(api)
     }
 
     /** Hands the system a summary of this process (foreground, connected, transfers) for its exit record. */
@@ -249,6 +266,16 @@ class AppContainer(private val context: Context) {
 
     fun onForeground() {
         isForeground = true
+        foregroundTime.onStart()
+        foregroundTicker?.cancel()
+        foregroundTicker = appScope.launch {
+            var ticks = 0
+            while (true) {
+                kotlinx.coroutines.delay(FOREGROUND_CHECKPOINT_MS)
+                foregroundTime.checkpoint()
+                if (++ticks % FOREGROUND_REPORT_TICKS == 0) reportForegroundTime()
+            }
+        }
         publishProcessState()
         backgroundStop?.cancel()
         backgroundStop = null
@@ -261,6 +288,10 @@ class AppContainer(private val context: Context) {
 
     fun onBackground() {
         isForeground = false
+        foregroundTime.onStop()
+        foregroundTicker?.cancel()
+        foregroundTicker = null
+        appScope.launch { reportForegroundTime() }
         publishProcessState()
         link.setForeground(false)
         // After a short grace, so a quick look at another app (copying a code, a glance at a
@@ -345,6 +376,7 @@ class AppContainer(private val context: Context) {
         clearCaches()
         stepUpGate.clear()
         linkPrefs.setPendingWipe(null)
+        foregroundTime.clear()
     }
 
     fun clearCaches() {
@@ -405,5 +437,9 @@ class AppContainer(private val context: Context) {
     private companion object {
         /** Connection kept after leaving the app when nothing else keeps it (below the desktop's 60 s idle close). */
         const val BACKGROUND_GRACE_MS = 45_000L
+        const val FOREGROUND_CHECKPOINT_MS = 60_000L
+
+        /** Foreground time is reported every this many checkpoints while in front. */
+        const val FOREGROUND_REPORT_TICKS = 10
     }
 }

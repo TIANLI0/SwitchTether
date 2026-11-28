@@ -119,6 +119,17 @@ fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manage
                 }
             }
             manageItems()
+            item {
+                GroupCard {
+                    ArrowPreference(
+                        title = stringResource(R.string.stats_title),
+                        summary = stringResource(R.string.stats_settings_summary),
+                        onClick = { onOpen(Route.RemoteStats) },
+                        cardListPosition = CardListPosition.Full,
+                        modifier = Modifier.testTag("remote-stats"),
+                    )
+                }
+            }
             item { SectionHeader(stringResource(R.string.settings_security)) }
             item {
                 GroupCard {

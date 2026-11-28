@@ -52,6 +52,23 @@ class ProtocolFixturesTest {
     }
 
     @Test
+    fun remoteStatsFixture() {
+        val v = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.RemoteStatsView.serializer(), fixture("remote_stats.json"))
+        assertEquals(5L, v.totals.tasks)
+        assertEquals(16L, v.totals.approvals)
+        assertEquals(5_400_000L, v.totals.taskMs)
+        assertEquals(3, v.days.size)
+        assertEquals("2026-11-24", v.days[1].date)
+        assertEquals(0L, v.days[1].counters.messages)
+        assertEquals(v.totals.tasks, v.days.sumOf { it.tasks })
+        assertEquals(v.totals.foregroundMs, v.devices.sumOf { it.foregroundMs })
+        assertNull(v.devices[1].name)
+        assertEquals(true, v.devices[1].revoked)
+        assertEquals(6, v.sessions)
+        assertEquals(7.8125, v.cost!!.costUsd, 1e-9)
+    }
+
+    @Test
     fun hello() {
         val h = ProtocolJson.decodeFromString(Hello.serializer(), fixture("hello.json"))
         assertEquals(1, h.protocolVersion)

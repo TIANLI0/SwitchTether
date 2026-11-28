@@ -260,6 +260,7 @@ async fn create(
         "session.create",
         || async move {
             let cwd = req.cwd.clone();
+            let prompt = req.prompt.as_deref().is_some_and(|p| !p.trim().is_empty());
             let s = c.agents.create_managed(req).await?;
             c.registry.audit(
                 Some(dev.id()),
@@ -268,6 +269,7 @@ async fn create(
                 "ok",
                 Some(&s.id),
             );
+            c.stats.task_started(dev.id(), &s.id, prompt);
             Ok(json!(s))
         },
     )
@@ -324,6 +326,7 @@ async fn send_message(
                     body.attachments.len()
                 )),
             );
+            c.stats.message_sent(dev.id(), &id);
             Ok(r)
         },
     )
@@ -537,6 +540,7 @@ async fn approve(
             &body.decision,
             Some(&request_id),
         );
+        c.stats.approval(dev.id(), &id, &body.decision);
         c.events.publish(
             "approval.resolved",
             json!({ "sessionId": id, "requestId": request_id, "decision": body.decision, "by": "phone" }),
@@ -593,6 +597,7 @@ async fn answer(
                 decision,
                 Some(&request_id),
             );
+            c.stats.answered(dev.id(), &id);
             Ok(r)
         },
     )

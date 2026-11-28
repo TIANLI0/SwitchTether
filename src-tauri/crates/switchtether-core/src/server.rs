@@ -274,6 +274,7 @@ impl RemoteServer {
             }),
         );
         ctx.push.start(ctx.events.clone(), shutdown.child_token());
+        ctx.stats.start(ctx.events.clone(), shutdown.child_token());
 
         Ok(RemoteServerHandle {
             ctx,

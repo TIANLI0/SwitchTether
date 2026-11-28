@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 手机使用统计（设置 → 使用统计，PROTOCOL.md §7.15） -->
+    <string name="stats_title">使用统计</string>
+    <string name="stats_settings_summary">手机处理的任务、审批和使用时长</string>
+    <string name="stats_preset_this_week">本周</string>
+    <string name="stats_preset_last_week">上周</string>
+    <string name="stats_preset_this_month">本月</string>
+    <string name="stats_preset_all">全部</string>
+    <string name="stats_tasks">任务</string>
+    <string name="stats_tasks_hint">在手机上新建或继续的会话</string>
+    <string name="stats_messages">消息</string>
+    <string name="stats_approvals">审批</string>
+    <string name="stats_approvals_detail">同意 %1$d · 拒绝 %2$d</string>
+    <string name="stats_answers">回答问题</string>
+    <string name="stats_sessions">会话</string>
+    <string name="stats_time_section">时长</string>
+    <string name="stats_task_time">处理任务时长</string>
+    <string name="stats_task_time_summary">手机发起的轮次中 agent 实际工作的时间，不含等待你回复的时间</string>
+    <string name="stats_foreground_time">App 前台时长</string>
+    <string name="stats_foreground_time_summary">SwitchTether 在手机屏幕上打开的时间</string>
+    <string name="stats_cost_section">费用</string>
+    <string name="stats_cost">手机参与的会话</string>
+    <string name="stats_cost_summary">%1$s tokens · %2$d 次请求</string>
+    <string name="stats_cost_unavailable">电脑的用量数据暂不可用</string>
+    <string name="stats_daily">每日任务</string>
+    <string name="stats_devices">设备</string>
+    <string name="stats_device_unknown">已移除的设备</string>
+    <string name="stats_device_revoked">已解除配对</string>
+    <string name="stats_device_summary">%1$d 个任务 · %2$d 条消息 · 前台 %3$s</string>
+    <string name="stats_since">统计始于 %1$s</string>
+    <string name="stats_note">数据由电脑记录，所有配对手机合计，按电脑时区分日。任务、消息和审批包含电脑在此版本之前 90 天内的记录；处理时长和前台时长从此版本开始统计。费用为这些会话在此期间的全部用量，包括在电脑上进行的轮次。</string>
+    <string name="stats_none">这段时间手机还没有处理过任务</string>
+    <string name="stats_unsupported">电脑上的 SwitchTether 版本较旧，暂不支持统计。请先更新电脑端。</string>
+    <string name="stats_duration_hm">%1$d 小时 %2$d 分</string>
+    <string name="stats_duration_m">%1$d 分钟</string>
+    <string name="stats_duration_lt1">不到 1 分钟</string>
+</resources>

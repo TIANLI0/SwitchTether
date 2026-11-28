@@ -546,6 +546,7 @@ private fun Destination(
         Route.Licenses -> LicensesScreen(onBack)
         Route.About -> io.github.tianli0.switchtether.ui.settings.AboutScreen(onBack, onOpen = nav::open)
         Route.Diagnostics -> io.github.tianli0.switchtether.ui.settings.DiagnosticsScreen(onBack)
+        Route.RemoteStats -> io.github.tianli0.switchtether.ui.settings.RemoteStatsScreen(onBack)
         Route.DesktopInfo -> DesktopInfoScreen(onBack)
         null -> when (tab) {
             Tab.HOME -> HomeScreen(onOpen = onOpenRoot, onSelectTab = { shell?.select(it) })

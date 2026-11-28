@@ -9,6 +9,7 @@ mod files;
 mod forward;
 mod push;
 mod sessions;
+mod stats;
 mod terminals;
 
 use std::collections::HashMap;
@@ -64,6 +65,8 @@ pub struct ApiContext {
     pub dsh_web: Arc<crate::dsh_web::DshWeb>,
     /// Push wake subscriptions and sending (docs/PROTOCOL.md §7.12).
     pub push: Arc<crate::push::PushWaker>,
+    /// What the phones did (docs/PROTOCOL.md §7.15).
+    pub stats: Arc<crate::stats::StatsTracker>,
     limiter: RateLimiter,
 }
 
@@ -86,6 +89,7 @@ impl ApiContext {
             registry.clone(),
             Arc::new(crate::push::HttpSender::default()),
         );
+        let stats = crate::stats::StatsTracker::new(registry.clone());
         Arc::new(Self {
             config: RwLock::new(config),
             server_id,
@@ -106,6 +110,7 @@ impl ApiContext {
             forwards: Default::default(),
             dsh_web: Default::default(),
             push,
+            stats,
             limiter: RateLimiter::default(),
         })
     }
@@ -376,6 +381,7 @@ pub fn router(ctx: Arc<ApiContext>) -> Router {
         .merge(forward::routes())
         .merge(dsh_web::routes())
         .merge(push::routes())
+        .merge(stats::routes())
         .layer(axum::extract::DefaultBodyLimit::max(MAX_JSON_BODY))
         .layer(axum::middleware::from_fn(request_id_layer))
         .fallback(|| async { ApiError::not_found("no such endpoint") })

@@ -417,6 +417,21 @@ class RemoteApi(
         return get(u)
     }
 
+    // ---- §7.15 phone activity statistics (feature `remote_stats`) -----------------------------------
+
+    /** `GET /v1/stats/remote?from&to` — epoch seconds; null `from` = since the first day with data. */
+    suspend fun remoteStats(fromEpochSec: Long?, toEpochSec: Long?): io.github.tianli0.switchtether.remote.protocol.RemoteStatsView {
+        val u = url("v1/stats/remote").newBuilder().apply {
+            fromEpochSec?.let { addQueryParameter("from", it.toString()) }
+            toEpochSec?.let { addQueryParameter("to", it.toString()) }
+        }.build()
+        return get(u)
+    }
+
+    /** `POST /v1/stats/foreground` — idempotent per [report]'s commandId. */
+    suspend fun reportForeground(report: io.github.tianli0.switchtether.remote.protocol.ForegroundReport): CommandResponse =
+        command(report.commandId, url("v1/stats/foreground"), report)
+
     /** `GET /v1/usage/last-sync` → `{ lastSyncMs }`. */
     suspend fun usageLastSync(): JsonElement = getJson(url("v1/usage/last-sync"))
 

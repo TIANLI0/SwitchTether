@@ -186,6 +186,20 @@ impl Registry {
                 p256dh TEXT NOT NULL,
                 auth TEXT NOT NULL,
                 updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS stats_daily(
+                day TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                value INTEGER NOT NULL,
+                PRIMARY KEY(day, device_id, metric)
+             );
+             CREATE TABLE IF NOT EXISTS stats_sessions(
+                session_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                first_ms INTEGER NOT NULL,
+                last_ms INTEGER NOT NULL,
+                PRIMARY KEY(session_id, device_id)
              );",
         )?;
         let version: Option<String> = conn
@@ -220,6 +234,9 @@ impl Registry {
         });
         reg.reload_cache()?;
         reg.purge_expired()?;
+        if let Err(e) = reg.stats_backfill() {
+            log::warn!("[remote] stats backfill failed: {e}");
+        }
         Ok(reg)
     }
 
@@ -508,11 +525,152 @@ impl Registry {
             .flatten()
     }
 
+    #[cfg(test)]
+    pub(crate) fn delete_meta(&self, key: &str) {
+        let _ = self
+            .conn
+            .lock()
+            .execute("DELETE FROM meta WHERE key=?1", params![key]);
+    }
+
     pub fn set_meta(&self, key: &str, value: &str) -> anyhow::Result<()> {
         self.conn.lock().execute(
             "INSERT INTO meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    // ---------------- phone activity statistics (crate::stats) ----------------
+
+    /// Adds `value` to one daily counter (`day` = desktop-local `YYYY-MM-DD`).
+    pub fn stats_add(&self, day: &str, device_id: &str, metric: &str, value: i64) {
+        if value == 0 {
+            return;
+        }
+        if let Err(e) = self.conn.lock().execute(
+            "INSERT INTO stats_daily(day,device_id,metric,value) VALUES(?1,?2,?3,?4)
+             ON CONFLICT(day,device_id,metric) DO UPDATE SET value=value+excluded.value",
+            params![day, device_id, metric, value],
+        ) {
+            log::warn!("[remote] stats write failed: {e}");
+        }
+    }
+
+    /// Records that `device_id` drove `session_id` at `at_ms`.
+    pub fn stats_touch_session(&self, session_id: &str, device_id: &str, at_ms: i64) {
+        if let Err(e) = self.conn.lock().execute(
+            "INSERT INTO stats_sessions(session_id,device_id,first_ms,last_ms) VALUES(?1,?2,?3,?3)
+             ON CONFLICT(session_id,device_id) DO UPDATE SET
+               first_ms=MIN(first_ms,excluded.first_ms), last_ms=MAX(last_ms,excluded.last_ms)",
+            params![session_id, device_id, at_ms],
+        ) {
+            log::warn!("[remote] stats write failed: {e}");
+        }
+    }
+
+    /// Daily counters with `from_day <= day <= to_day`: `(day, device, metric, value)`.
+    pub fn stats_daily(
+        &self,
+        from_day: &str,
+        to_day: &str,
+    ) -> anyhow::Result<Vec<(String, String, String, i64)>> {
+        let c = self.conn.lock();
+        let mut st = c.prepare(
+            "SELECT day,device_id,metric,value FROM stats_daily WHERE day>=?1 AND day<=?2",
+        )?;
+        let rows = st
+            .query_map(params![from_day, to_day], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Earliest day with any counter.
+    pub fn stats_first_day(&self) -> Option<String> {
+        self.conn
+            .lock()
+            .query_row("SELECT MIN(day) FROM stats_daily", [], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
+    }
+
+    /// Sessions a phone drove at some time within `[from_ms, to_ms]`.
+    pub fn stats_session_ids(&self, from_ms: i64, to_ms: i64) -> anyhow::Result<Vec<String>> {
+        let c = self.conn.lock();
+        let mut st = c.prepare(
+            "SELECT DISTINCT session_id FROM stats_sessions WHERE first_ms<=?2 AND last_ms>=?1",
+        )?;
+        let rows = st
+            .query_map(params![from_ms, to_ms], |r| r.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Once per database: counts the phone actions the audit log still holds (90 days) into the
+    /// statistics, so the page does not start empty. Task time and foreground time are not in
+    /// the audit log and start at zero.
+    pub(crate) fn stats_backfill(&self) -> anyhow::Result<()> {
+        if self.meta("stats_backfilled").is_some() {
+            return Ok(());
+        }
+        type Row = (i64, String, String, Option<String>, String, Option<String>);
+        let rows: Vec<Row>;
+        {
+            let c = self.conn.lock();
+            let mut st = c.prepare(
+                "SELECT ts,device_id,action,target,outcome,detail FROM audit_log
+                 WHERE device_id IS NOT NULL AND action IN
+                 ('session.create','session.message','session.approval','session.answer')",
+            )?;
+            rows = st
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+        }
+        {
+            let mut c = self.conn.lock();
+            let tx = c.transaction()?;
+            for (ts, device, action, target, outcome, detail) in rows {
+                let day = crate::stats::local_day(ts);
+                let (metric, session) = match action.as_str() {
+                    "session.create" => (crate::stats::M_TASKS, detail),
+                    "session.message" => (crate::stats::M_MESSAGES, target),
+                    "session.approval" => (crate::stats::approval_metric(&outcome), target),
+                    _ => (crate::stats::M_ANSWERS, target),
+                };
+                tx.execute(
+                    "INSERT INTO stats_daily(day,device_id,metric,value) VALUES(?1,?2,?3,1)
+                     ON CONFLICT(day,device_id,metric) DO UPDATE SET value=value+1",
+                    params![day, device, metric],
+                )?;
+                if let Some(s) = session.filter(|s| !s.is_empty()) {
+                    tx.execute(
+                        "INSERT INTO stats_sessions(session_id,device_id,first_ms,last_ms) VALUES(?1,?2,?3,?3)
+                         ON CONFLICT(session_id,device_id) DO UPDATE SET
+                           first_ms=MIN(first_ms,excluded.first_ms), last_ms=MAX(last_ms,excluded.last_ms)",
+                        params![s, device, ts],
+                    )?;
+                }
+            }
+            tx.execute(
+                "INSERT INTO meta(key,value) VALUES('stats_backfilled',?1)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![now_ms().to_string()],
+            )?;
+            tx.commit()?;
+        }
         Ok(())
     }
 

@@ -554,6 +554,39 @@ keeps working across restarts of `dsh web`. The token is handed only to a device
 `dsh web` the user started the desktop does not know the token: the phone asks the user to paste the
 line dsh printed (or works directly when the WebView still holds a valid cookie).
 
+### 7.15 Phone activity statistics (feature `remote_stats`)
+
+What the paired phones did through SwitchTether, summed over all devices (revoked ones included)
+and per device. Counters are kept per **desktop-local day** in `remote.db` and never expire; no
+message text, path or secret is stored. The first start of a desktop with this feature counts the
+phone actions its audit log still holds (90 days); task and foreground time start at zero.
+
+- `GET /v1/stats/remote?from&to` (epoch seconds, inclusive; the days they fall on in the desktop's
+  time zone are the first and last day; no `from` = the first day with data, no `to` = today) →
+  `RemoteStatsView` (fixture `protocol/fixtures/remote_stats.json`):
+  `{ timeZone, utcOffsetMinutes, since (first day with data, or null), fromDate, toDate,
+  totals: Counters, days: [Counters + { date, startMs }], devices: [Counters + { deviceId, name,
+  platform, revoked }], sessions, cost: Totals|null }`.
+  `days` lists every day of the range (zeros included) for ranges up to 92 days, otherwise only days
+  with data. `devices` lists devices with activity in the range, most tasks first (`name` /
+  `platform` null for a device no longer in the registry). `sessions` counts the sessions a phone
+  drove in the range; `cost` is their usage in the range (`Totals` of §7.3 usage per project, summed
+  from the request logs of those sessions, including turns of the same session typed on the
+  computer), null when usage is unavailable.
+- `Counters = { tasks, messages, approvalsAllowed, approvalsDenied, answers, taskMs, foregroundMs }`:
+  `tasks` — sessions started or continued from a phone (`POST /v1/sessions`); `messages` — messages
+  sent (`POST …/messages`, plus the first prompt of a new session); `approvalsAllowed` /
+  `approvalsDenied` — approvals answered (`allow*` / anything else); `answers` — agent questions
+  answered or declined; `taskMs` — how long agents worked on turns a phone started: from the
+  message until the session leaves `busy`, without the time it spent `waiting` for the user (a
+  stretch counts at most 6 h; a turn whose session never reports `busy` within 30 s ends at once);
+  `foregroundMs` — time the app was in the foreground, as reported by the phones.
+- `POST /v1/stats/foreground` `{commandId, intervals: [{startMs, endMs}]}` (≤ 200 intervals, epoch
+  ms) → `{ countedMs }` — the calling phone's foreground time. Idempotent per `commandId` (§5), so a
+  report that is retried counts once. Intervals are split at desktop-local midnights; parts older
+  than 35 days, more than 5 minutes in the future, longer than 24 h or overlapping another interval
+  of the same report are dropped. The phone keeps unsent intervals and reports them when connected.
+
 ## 8. Capability negotiation
 
 `GET /v1/capabilities`:
@@ -569,7 +602,7 @@ line dsh printed (or works directly when the WebView still holds a valid cookie)
 
 Further features: `push_wake` (§7.12), `session_search` (§7.13), `dsh_web` (§7.14), `managed_agy` (the desktop starts
 and continues Google Antigravity sessions, `POST /v1/sessions {agent: "agy"}`; the phone offers Antigravity in its launcher
-only when this is listed).
+only when this is listed), `remote_stats` (§7.15).
 
 Session-level `capabilities` override the agent defaults (e.g. a managed session has
 `sendMessage: "VERIFIED"`).

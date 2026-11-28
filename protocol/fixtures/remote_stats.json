@@ -1,0 +1,89 @@
+{
+  "timeZone": "Asia/Shanghai",
+  "utcOffsetMinutes": 480,
+  "since": "2026-09-01",
+  "fromDate": "2026-11-23",
+  "toDate": "2026-11-25",
+  "totals": {
+    "tasks": 5,
+    "messages": 23,
+    "approvalsAllowed": 14,
+    "approvalsDenied": 2,
+    "answers": 3,
+    "taskMs": 5400000,
+    "foregroundMs": 3720000
+  },
+  "days": [
+    {
+      "date": "2026-11-23",
+      "startMs": 1795363200000,
+      "tasks": 2,
+      "messages": 9,
+      "approvalsAllowed": 6,
+      "approvalsDenied": 1,
+      "answers": 1,
+      "taskMs": 2400000,
+      "foregroundMs": 1500000
+    },
+    {
+      "date": "2026-11-24",
+      "startMs": 1795449600000,
+      "tasks": 0,
+      "messages": 0,
+      "approvalsAllowed": 0,
+      "approvalsDenied": 0,
+      "answers": 0,
+      "taskMs": 0,
+      "foregroundMs": 0
+    },
+    {
+      "date": "2026-11-25",
+      "startMs": 1795536000000,
+      "tasks": 3,
+      "messages": 14,
+      "approvalsAllowed": 8,
+      "approvalsDenied": 1,
+      "answers": 2,
+      "taskMs": 3000000,
+      "foregroundMs": 2220000
+    }
+  ],
+  "devices": [
+    {
+      "deviceId": "9c1f2e7a-41d3-4b8e-a0c5-3e6f7d8a9b10",
+      "name": "OnePlus 13",
+      "platform": "android",
+      "revoked": false,
+      "tasks": 4,
+      "messages": 20,
+      "approvalsAllowed": 13,
+      "approvalsDenied": 2,
+      "answers": 3,
+      "taskMs": 4800000,
+      "foregroundMs": 3300000
+    },
+    {
+      "deviceId": "2b7d0c4e-8f61-4a2d-9e3b-5c6d7e8f9a01",
+      "name": null,
+      "platform": null,
+      "revoked": true,
+      "tasks": 1,
+      "messages": 3,
+      "approvalsAllowed": 1,
+      "approvalsDenied": 0,
+      "answers": 0,
+      "taskMs": 600000,
+      "foregroundMs": 420000
+    }
+  ],
+  "sessions": 6,
+  "cost": {
+    "requests": 412,
+    "costUsd": 7.8125,
+    "inputTokens": 120000,
+    "outputTokens": 64000,
+    "cacheReadTokens": 5200000,
+    "cacheCreationTokens": 210000,
+    "lastMs": 1795600000000
+  }
+}

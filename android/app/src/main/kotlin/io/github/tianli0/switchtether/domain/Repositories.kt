@@ -207,6 +207,11 @@ interface ManagementRepository {
     /** Usage per project (`GET /v1/usage/projects`); [project] narrows it to one. 404 on older desktops. */
     suspend fun usageProjects(fromSec: Long?, toSec: Long?, app: String?, project: String? = null): io.github.tianli0.switchtether.remote.protocol.ProjectUsageView =
         throw UnsupportedOperationException()
+    /** What the paired phones did (`GET /v1/stats/remote`, feature `remote_stats`); null [fromSec] = since the first day. */
+    suspend fun remoteStats(fromSec: Long?, toSec: Long?): io.github.tianli0.switchtether.remote.protocol.RemoteStatsView =
+        throw UnsupportedOperationException()
+    /** Whether the desktop keeps phone statistics (feature `remote_stats`). */
+    suspend fun supportsRemoteStats(): Boolean = false
     /** First usage day (desktop-local midnight, epoch ms), null without data. */
     suspend fun usageFirstDateMs(app: String?): Long? = null
     /** Last completed session-log scan (epoch ms), null if none since the desktop started. */
@@ -456,6 +461,8 @@ class RemoteManagementRepository(private val conn: ConnectionController) : Manag
         conn.withApi { io.github.tianli0.switchtether.remote.protocol.RequestLog.parse(it.usageLog(requestId) as kotlinx.serialization.json.JsonObject) }
     override suspend fun usageProjects(fromSec: Long?, toSec: Long?, app: String?, project: String?) =
         conn.withApi { it.usageProjects(fromSec, toSec, app, project) }
+    override suspend fun remoteStats(fromSec: Long?, toSec: Long?) = conn.withApi { it.remoteStats(fromSec, toSec) }
+    override suspend fun supportsRemoteStats() = conn.withApi { "remote_stats" in it.features() }
     override suspend fun usageFirstDateMs(app: String?) = conn.withApi {
         (it.usageFirstDate(app) as? kotlinx.serialization.json.JsonObject)?.let { o -> o.long("firstDateMs") }
     }

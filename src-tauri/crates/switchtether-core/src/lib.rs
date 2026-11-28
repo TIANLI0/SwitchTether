@@ -41,6 +41,7 @@ pub mod registry;
 pub mod relay;
 pub mod secret_store;
 pub mod server;
+pub mod stats;
 pub mod stepup;
 pub mod terminal;
 pub mod tls;

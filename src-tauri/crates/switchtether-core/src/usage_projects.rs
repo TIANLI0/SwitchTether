@@ -53,7 +53,7 @@ pub struct UsageTotals {
 }
 
 impl UsageTotals {
-    fn add(&mut self, r: &SessionUsageRow) {
+    pub(crate) fn add(&mut self, r: &SessionUsageRow) {
         self.requests += r.requests.max(0);
         if r.cost_usd.is_finite() && r.cost_usd > 0.0 {
             self.cost_usd += r.cost_usd;
