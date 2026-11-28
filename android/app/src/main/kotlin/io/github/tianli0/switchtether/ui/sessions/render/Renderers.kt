@@ -322,30 +322,41 @@ private fun ImageStrip(items: List<JsonObject>, ctx: RenderContext) {
         Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Every picture of the message, so the lightbox swipes through them (pictures from the computer
-        // are loaded by the lightbox itself when they were not loaded here yet).
-        val gallery = remember(items) {
-            items.mapNotNull { img ->
-                when (img.str("kind")) {
-                    "base64" -> runCatching { android.util.Base64.decode(img.str("data").orEmpty(), android.util.Base64.DEFAULT) }.getOrNull()?.let { ImagePreview(bytes = it) }
-                    "local" -> img.str("path")?.takeIf { it.isNotBlank() }?.let { ImagePreview(alt = it, path = it) }
-                    "url" -> img.str("url")?.takeIf { it.startsWith("data:image/") }?.let { url ->
-                        runCatching { android.util.Base64.decode(url.substringAfter("base64,", ""), android.util.Base64.DEFAULT) }.getOrNull()?.let { ImagePreview(bytes = it) }
+        // Decode inline base64 images once off the main thread; both the thumbnails and the
+        // lightbox gallery share the decoded ByteArrays instead of decoding twice on the UI thread.
+        val decoded by androidx.compose.runtime.produceState<Map<Int, ByteArray>>(emptyMap(), items) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                buildMap {
+                    items.forEachIndexed { idx, img ->
+                        val b64 = when (img.str("kind")) {
+                            "base64" -> img.str("data").orEmpty()
+                            "url" -> img.str("url")?.takeIf { it.startsWith("data:image/") }?.substringAfter("base64,", "")
+                            else -> null
+                        } ?: return@forEachIndexed
+                        runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()?.let { put(idx, it) }
                     }
+                }
+            }
+        }
+        val gallery = remember(items, decoded) {
+            items.mapIndexedNotNull { idx, img ->
+                when (img.str("kind")) {
+                    "base64" -> decoded[idx]?.let { ImagePreview(bytes = it) }
+                    "local" -> img.str("path")?.takeIf { it.isNotBlank() }?.let { ImagePreview(alt = it, path = it) }
+                    "url" -> img.str("url")?.takeIf { it.startsWith("data:image/") }?.let { decoded[idx]?.let { b -> ImagePreview(bytes = b) } }
                     else -> null
                 }
             }
         }
         var galleryIndex = 0
         fun open(p: ImagePreview, at: Int) = ctx.onViewImage?.invoke(p.copy(gallery = gallery, index = at))
-        items.forEach { img ->
+        items.forEachIndexed { idx, img ->
             val kind = img.str("kind")
             val at = galleryIndex
             when (kind) {
                 "base64" -> {
-                    galleryIndex++
-                    val b64 = img.str("data").orEmpty()
-                    val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
+                    val bytes = decoded[idx]
+                    if (bytes != null) galleryIndex++
                     ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) open(ImagePreview(bytes = bytes), at) })
                 }
                 "local" -> {
@@ -362,9 +373,8 @@ private fun ImageStrip(items: List<JsonObject>, ctx: RenderContext) {
                 "url" -> {
                     val url = img.str("url").orEmpty()
                     if (url.startsWith("data:image/")) {
-                        galleryIndex++
-                        val b64 = url.substringAfter("base64,", "")
-                        val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
+                        val bytes = decoded[idx]
+                        if (bytes != null) galleryIndex++
                         ImageThumb(bytes = bytes, label = null, onClick = { if (bytes != null) open(ImagePreview(bytes = bytes), at) })
                     } else {
                         SubtleMeta("[image: $url]")
@@ -381,7 +391,11 @@ private fun MarkdownImageBlock(alt: String, url: String, ctx: RenderContext) {
     when {
         url.startsWith("data:image/") -> {
             val b64 = url.substringAfter("base64,", "")
-            val bytes = remember(b64) { runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() }
+            val bytes by androidx.compose.runtime.produceState<ByteArray?>(null, b64) {
+                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
+                }
+            }
             ImageThumb(bytes = bytes, label = alt.ifBlank { null }, onClick = { if (bytes != null) ctx.onViewImage?.invoke(ImagePreview(alt = alt, bytes = bytes)) })
         }
         !url.startsWith("http://") && !url.startsWith("https://") && url.isNotBlank() -> {
@@ -531,7 +545,6 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
         ExpandBody(open) {
             Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
                 val input = d["input"]
-                val isRead = d.str("category") == "read"
                 if (files.isNotEmpty()) {
                     SectionLabel(stringResource(if (files.size > 1) R.string.render_files else R.string.render_file))
                     files.forEachIndexed { i, f ->
@@ -550,7 +563,7 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                             SectionLabel(stringResource(R.string.command_directory))
                             SelectionContainer { CodeBlockView(cwd, null, softWrap = true) }
                         }
-                    } else CodeBlockView(prettyJson(input).take(PREVIEW_CHARS * 2), "json")
+                    } else CodeBlockView(remember(input) { prettyJson(input).take(PREVIEW_CHARS * 2) }, "json")
                 }
                 d.str("backgroundSummary")?.let { summary ->
                     SectionLabel(stringResource(R.string.render_background_task))
@@ -941,7 +954,10 @@ fun ApprovalRequest(item: RenderItem, ctx: RenderContext) {
         d.str("command")?.let { Spacer(Modifier.size(8.dp)); CodeBlockView(it, "bash", maxLines = if (resolved) 3 else Int.MAX_VALUE) }
         d.str("cwd")?.let { SubtleMeta(stringResource(R.string.render_cwd, it), Modifier.padding(top = 4.dp)) }
         if (!resolved && d.str("command") == null) {
-            d["input"]?.takeIf { it.toString() != "{}" }?.let { Spacer(Modifier.size(8.dp)); CodeBlockView(prettyJson(it).take(PREVIEW_CHARS), "json") }
+            d["input"]?.takeIf { (it as? JsonObject)?.isNotEmpty() ?: (it.toString() != "{}") }?.let { inp ->
+                Spacer(Modifier.size(8.dp))
+                CodeBlockView(remember(inp) { prettyJson(inp).take(PREVIEW_CHARS) }, "json")
+            }
         }
         if (resolved) {
             ResolvedLine(resolutionLabel(d.str("decision") ?: resolution?.str("decision"), d.str("by") ?: resolution?.str("by")))
@@ -1435,7 +1451,7 @@ fun UiComponent(item: RenderItem, ctx: RenderContext) {
     } else {
         TimelineCard {
             SubtleMeta(stringResource(R.string.render_ui_unsupported, name))
-            CodeBlockView(prettyJson(props).take(PREVIEW_CHARS), "json")
+            CodeBlockView(remember(props) { prettyJson(props).take(PREVIEW_CHARS) }, "json")
         }
     }
 }
@@ -1445,7 +1461,7 @@ fun UiComponent(item: RenderItem, ctx: RenderContext) {
 fun GenericEventCard(item: RenderItem) {
     TimelineCard {
         SubtleMeta(stringResource(R.string.render_unknown_kind, item.event.kind))
-        CodeBlockView(prettyJson(item.event.data).take(PREVIEW_CHARS), "json")
+        CodeBlockView(remember(item.event.data) { prettyJson(item.event.data).take(PREVIEW_CHARS) }, "json")
     }
 }
 

@@ -59,6 +59,7 @@ data class PairedDesktop(
  */
 internal object SharedPreferencesStore {
     @Volatile private var instance: DataStore<Preferences>? = null
+    @Volatile private var draftsInstance: DataStore<Preferences>? = null
 
     fun get(context: Context): DataStore<Preferences> = instance ?: synchronized(this) {
         instance ?: MultiProcessDataStoreFactory.create(
@@ -67,10 +68,19 @@ internal object SharedPreferencesStore {
         ).also { instance = it }
     }
 
+    /** UI-process-only store for unsent composer drafts so typing never contends on multi-process locks or wakes `:link`. */
+    fun drafts(context: Context): DataStore<Preferences> = draftsInstance ?: synchronized(this) {
+        draftsInstance ?: androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(
+            produceFile = { context.applicationContext.preferencesDataStoreFile(DRAFTS_FILE_NAME) },
+        ).also { draftsInstance = it }
+    }
+
     const val FILE_NAME = "switchtether"
+    const val DRAFTS_FILE_NAME = "switchtether_drafts"
 }
 
 private val Context.dataStore: DataStore<Preferences> get() = SharedPreferencesStore.get(this)
+private val Context.draftsDataStore: DataStore<Preferences> get() = SharedPreferencesStore.drafts(this)
 
 interface PairingStore {
     val desktop: Flow<PairedDesktop?>
@@ -163,10 +173,10 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
     /** Default ON (best-effort continuous monitoring), user can turn it off. */
     override val backgroundConnection: Flow<Boolean> = store.data.map { it[keyBackground] ?: true }
 
-    override val notifyPrefs: Flow<NotifyPrefs> = store.data.map { p ->
+    private fun parseNotifyPrefs(p: androidx.datastore.preferences.core.Preferences): NotifyPrefs {
         val d = NotifyPrefs()
         val quiet = p[keyQuiet]?.split('|')
-        NotifyPrefs(
+        return NotifyPrefs(
             enabled = p[keyNotifyOn]?.let { saved ->
                 val known = p[keyNotifyKnown] ?: LEGACY_NOTIFY_TYPES
                 val chosen = saved.mapNotNull { v -> NotifyType.entries.firstOrNull { it.name == v } }.toSet()
@@ -179,6 +189,8 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
             quietEndMin = quiet?.getOrNull(2)?.toIntOrNull() ?: d.quietEndMin,
         )
     }
+
+    override val notifyPrefs: Flow<NotifyPrefs> = store.data.map(::parseNotifyPrefs)
 
     override suspend fun setThemeMode(mode: ThemeMode) {
         store.edit { it[keyTheme] = mode.name }
@@ -195,8 +207,8 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
     }
 
     override suspend fun updateNotifyPrefs(transform: (NotifyPrefs) -> NotifyPrefs) {
-        val n = transform(notifyPrefs.first())
         store.edit { p ->
+            val n = transform(parseNotifyPrefs(p))
             p[keyNotifyOn] = n.enabled.map { it.name }.toSet()
             p[keyNotifyKnown] = NotifyType.entries.map { it.name }.toSet()
             p[keyMutedAgents] = n.mutedAgents
@@ -231,18 +243,20 @@ class DataStoreStores(private val context: Context) : PairingStore, SettingsStor
         }
     }
 
+    private val draftsStore: DataStore<Preferences> = context.draftsDataStore
+
     override fun draft(sessionId: String): Flow<String> =
-        store.data.map { it[stringPreferencesKey(draftPrefix + sessionId)].orEmpty() }
+        draftsStore.data.map { it[stringPreferencesKey(draftPrefix + sessionId)].orEmpty() }
 
     override suspend fun setDraft(sessionId: String, text: String) {
-        store.edit {
+        draftsStore.edit {
             val k = stringPreferencesKey(draftPrefix + sessionId)
             if (text.isBlank()) it.remove(k) else it[k] = text.take(20_000)
         }
     }
 
     override suspend fun clearAll() {
-        store.edit { p -> p.asMap().keys.filter { it.name.startsWith(draftPrefix) }.forEach { p.remove(it) } }
+        draftsStore.edit { p -> p.asMap().keys.filter { it.name.startsWith(draftPrefix) }.forEach { p.remove(it) } }
     }
 }
 

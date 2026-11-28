@@ -118,8 +118,7 @@ class MonitorService : Service() {
             if (watching) return START_STICKY
         }
         val notification = build(container.connection.state.value is ConnectionState.Online)
-        val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
-        runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type) }
+        runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) }
             .onFailure {
                 stopSelf()
                 return START_NOT_STICKY

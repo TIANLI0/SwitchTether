@@ -121,7 +121,7 @@ class ConnectionManager(
     @Volatile private var api: RemoteApi? = null
     @Volatile private var cursor: StreamCursor = StreamCursor.INITIAL
     @Volatile private var streamJob: Job? = null
-    private var clientFor: Pair<String, OkHttpClient>? = null
+    @Volatile private var clientFor: Pair<String, OkHttpClient>? = null
 
     override fun apiOrNull(): RemoteApi? = api.takeIf { _state.value is ConnectionState.Online }
 
@@ -139,12 +139,12 @@ class ConnectionManager(
         synchronized(jobLock) {
             job?.cancel()
             job = null
-        }
-        api = null
-        when (val s = _state.value) {
-            is ConnectionState.Online -> _state.value = ConnectionState.Offline(s.desktop, null, null)
-            is ConnectionState.Connecting -> _state.value = ConnectionState.Offline(s.desktop, null, null)
-            else -> Unit
+            api = null
+            when (val s = _state.value) {
+                is ConnectionState.Online -> _state.value = ConnectionState.Offline(s.desktop, null, null)
+                is ConnectionState.Connecting -> _state.value = ConnectionState.Offline(s.desktop, null, null)
+                else -> Unit
+            }
         }
     }
 
@@ -273,12 +273,12 @@ class ConnectionManager(
 
     private suspend fun connectOnce(desktop: PairedDesktop, identity: ClientIdentity): Outcome {
         val client = clientFor(desktop, identity)
-        var authFailure: ApiException? = null
+        val authFailure = java.util.concurrent.atomic.AtomicReference<ApiException?>(null)
         val makeApiFor = { c: OkHttpClient ->
             { ep: Endpoint ->
                 RemoteApi(c, ep) {
                     // Any REST call of any screen answered unpaired/device_revoked: end the session.
-                    authFailure = it
+                    authFailure.compareAndSet(null, it)
                     streamJob?.cancel()
                 }
             }
@@ -411,7 +411,7 @@ class ConnectionManager(
                         is StreamDecision.Apply -> {
                             val ev = decision.event
                             if (ev.topic == "device.revoked" && (ev.data as? JsonObject)?.str("deviceId") == desktop.deviceId) {
-                                authFailure = ApiException(403, ApiErrorBody(ErrorCodes.DEVICE_REVOKED, "revoked on the desktop"), null)
+                                authFailure.compareAndSet(null, ApiException(403, ApiErrorBody(ErrorCodes.DEVICE_REVOKED, "revoked on the desktop"), null))
                             }
                             _events.tryEmit(ev)
                         }
@@ -420,24 +420,27 @@ class ConnectionManager(
                     }
                 }
                 is StreamSignal.Closed -> when (signal.code) {
-                    CloseCodes.UNPAIRED -> authFailure = ApiException(401, ApiErrorBody(ErrorCodes.UNPAIRED, signal.reason), null)
-                    CloseCodes.REVOKED -> authFailure = ApiException(403, ApiErrorBody(ErrorCodes.DEVICE_REVOKED, signal.reason), null)
+                    CloseCodes.UNPAIRED -> authFailure.compareAndSet(null, ApiException(401, ApiErrorBody(ErrorCodes.UNPAIRED, signal.reason), null))
+                    CloseCodes.REVOKED -> authFailure.compareAndSet(null, ApiException(403, ApiErrorBody(ErrorCodes.DEVICE_REVOKED, signal.reason), null))
                     else -> Unit
                 }
                 is StreamSignal.Failure -> {
                     if (signal.httpCode == 401 || signal.httpCode == 403) {
                         val code = signal.body?.let { b -> if (b.contains(ErrorCodes.DEVICE_REVOKED)) ErrorCodes.DEVICE_REVOKED else if (b.contains(ErrorCodes.UNPAIRED)) ErrorCodes.UNPAIRED else null }
-                        if (code != null) authFailure = ApiException(signal.httpCode ?: 401, ApiErrorBody(code, "event stream refused"), null)
+                        if (code != null) authFailure.compareAndSet(null, ApiException(signal.httpCode ?: 401, ApiErrorBody(code, "event stream refused"), null))
                     }
                 }
             }
         }
             }
             streamJob = j
-            j.join()
-            streamJob = null
+            try {
+                j.join()
+            } finally {
+                streamJob = null
+            }
         }
-        authFailure?.let { return Outcome.Revoked(it.body.message.ifEmpty { it.code }) }
+        authFailure.get()?.let { return Outcome.Revoked(it.body.message.ifEmpty { it.code }) }
         return Outcome.Failed(if (opened) "event stream closed" else "event stream could not be opened", wasOnline = opened)
     }
 

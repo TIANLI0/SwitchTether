@@ -9,6 +9,7 @@ import io.github.tianli0.switchtether.ui.sessions.SessionDetailViewModel
 import io.github.tianli0.switchtether.ui.sessions.builtinSlashCommands
 import io.github.tianli0.switchtether.ui.sessions.slashCommands
 import io.github.tianli0.switchtether.ui.sessions.slashSuggestions
+import io.github.tianli0.switchtether.ui.sessions.slashSuggestionsFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -53,7 +54,7 @@ class SlashCommandsViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     private fun names(vm: SessionDetailViewModel) = vm.state.value.slashCommands.map { it.name }
-    private fun suggested(vm: SessionDetailViewModel) = vm.state.value.slashSuggestions.map { it.name }
+    private fun suggested(vm: SessionDetailViewModel) = vm.state.value.slashSuggestionsFor(vm.draft.value).map { it.name }
     private val builtin = builtinSlashCommands("claude_code").map { it.name }
     private val phoneSide = listOf("context", "model", "permissions", "plan", "mcp", "rename", "export", "btw", "help")
 
@@ -127,25 +128,25 @@ class SlashCommandsViewModelTest {
         assertEquals(SlashAction.SEND, vm.pickSlashCommand(entry("compact")))
         advanceUntilIdle()
         assertEquals(listOf("/compact"), base.sent.map { it.second })
-        assertEquals("", vm.state.value.draft)
+        assertEquals("", vm.draft.value)
 
         // Arguments: the draft is ready for them and the panel is gone.
         vm.setDraft("/rev")
         assertEquals(SlashAction.INSERT, vm.pickSlashCommand(entry("review")))
-        assertEquals("/review ", vm.state.value.draft)
+        assertEquals("/review ", vm.draft.value)
         assertTrue(suggested(vm).isEmpty())
         assertEquals(1, base.sent.size)
 
         // /clear is never sent by one tap.
         vm.setDraft("/cl")
         assertEquals(SlashAction.INSERT, vm.pickSlashCommand(entry("clear")))
-        assertEquals("/clear ", vm.state.value.draft)
+        assertEquals("/clear ", vm.draft.value)
         assertEquals(1, base.sent.size)
 
         // The phone's own: nothing is sent, the typed text is cleared, the screen opens it.
         vm.setDraft("/mod")
         assertEquals(SlashAction.OPEN_MODEL, vm.pickSlashCommand(entry("model")))
-        assertEquals("", vm.state.value.draft)
+        assertEquals("", vm.draft.value)
         assertEquals(1, base.sent.size)
 
         // Typed by hand and sent with the send key: a normal message, unchanged.

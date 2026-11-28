@@ -41,7 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -103,8 +103,8 @@ fun SwitchTetherRoot() {
     val container = appContainer()
     AppWindow {
         val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = LOADING_SENTINEL)
-        val conn by container.connection.state.collectAsState()
-        val pending by container.pendingVerification.collectAsState()
+        val conn by container.connection.state.collectAsStateWithLifecycle()
+        val pending by container.pendingVerification.collectAsStateWithLifecycle()
         when {
             desktop === LOADING_SENTINEL -> Unit // first DataStore read (a few ms): draw background only
             desktop == null || pending != null -> OnboardingScreen(revokedReason = (conn as? ConnectionState.Revoked)?.let { it.reason to it.desktopName })
@@ -125,7 +125,7 @@ fun PageRoot(route: Route) {
     val activity = LocalActivity.current
     AppWindow {
         val desktop by container.pairingStore.desktop.collectAsStateWithLifecycle(initialValue = LOADING_SENTINEL)
-        val pending by container.pendingVerification.collectAsState()
+        val pending by container.pendingVerification.collectAsStateWithLifecycle()
         val paired = desktop !== LOADING_SENTINEL && desktop != null && pending == null
         androidx.compose.runtime.LaunchedEffect(desktop, pending) {
             if (desktop !== LOADING_SENTINEL && !paired) activity?.finish()
@@ -176,7 +176,7 @@ private fun AppWindow(content: @Composable () -> Unit) {
         io.github.suqi8.coui.kmp.basic.LocalTopAppBarTitleMarquee provides true,
         io.github.tianli0.switchtether.ui.code.LocalCodeCopyLabel provides stringResource(R.string.action_copy),
         io.github.tianli0.switchtether.ui.code.LocalCodeWrapLabels provides (stringResource(R.string.command_wrap) to stringResource(R.string.command_scroll)),
-        io.github.tianli0.switchtether.domain.LocalMoney provides container.money.display.collectAsState().value,
+        io.github.tianli0.switchtether.domain.LocalMoney provides container.money.display.collectAsStateWithLifecycle().value,
         io.github.tianli0.switchtether.ui.common.LocalPredictiveBack provides predictiveBack,
       ) {
         io.github.tianli0.switchtether.ui.common.LocalNetworkPermissionHost()
@@ -220,8 +220,8 @@ fun MainShell() {
             io.github.tianli0.switchtether.ui.common.localNetworkAsk.value = io.github.tianli0.switchtether.ui.common.LocalNetworkAsk()
         }
     }
-    val openRequest by container.openSessionRequest.collectAsState()
-    val openTerminal by container.openTerminalRequest.collectAsState()
+    val openRequest by container.openSessionRequest.collectAsStateWithLifecycle()
+    val openTerminal by container.openTerminalRequest.collectAsStateWithLifecycle()
     // Switch to Workspace; WorkspaceScreen consumes the request and attaches (with step-up).
     androidx.compose.runtime.LaunchedEffect(openTerminal) {
         if (openTerminal != null) nav.select(Tab.WORKSPACE)
@@ -316,7 +316,7 @@ fun MainShell() {
             }
             true
         }
-        val reopen by container.newSessionReopen.collectAsState()
+        val reopen by container.newSessionReopen.collectAsStateWithLifecycle()
         androidx.compose.runtime.LaunchedEffect(reopen) {
             if (reopen) {
                 container.newSessionReopen.value = false

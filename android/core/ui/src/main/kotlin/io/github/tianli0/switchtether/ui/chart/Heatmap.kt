@@ -136,6 +136,9 @@ fun ContributionHeatmap(
                     if (o.y < topPx || o.x < 0 || c !in firstColumn until columns || r !in 0 until rows) return
                     index[c to r]?.let { select(it) }
                 }
+                val colLabelLayouts = remember(columnLabels, labelStyle) {
+                    columnLabels.mapValues { (_, text) -> measurer.measure(text, labelStyle) }
+                }
                 Canvas(
                     Modifier
                         .size(gridW, headerH + gridH)
@@ -152,9 +155,8 @@ fun ContributionHeatmap(
                     val gap = (p * 0.18f).coerceAtLeast(2f)
                     val side = p - gap
                     val radius = CornerRadius(side * 0.26f)
-                    columnLabels.forEach { (c, text) ->
+                    colLabelLayouts.forEach { (c, layout) ->
                         if (c < firstColumn) return@forEach
-                        val layout = measurer.measure(text, labelStyle)
                         // Keep the last label inside the grid.
                         val x = ((c - firstColumn) * p).coerceAtMost(size.width - layout.size.width).coerceAtLeast(0f)
                         drawText(layout, topLeft = Offset(x, 0f))

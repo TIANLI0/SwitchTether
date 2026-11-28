@@ -106,6 +106,32 @@ class StepUpGate(
         }
     }
 
+    /**
+     * Ensures [scope] and runs [op]; if the desktop rejects with `step_up_required` (e.g. its grant
+     * expired or it restarted), invalidates the cached grant and asks the user once more.
+     */
+    suspend fun ensureAndRun(
+        scope: String,
+        onStepUpFailed: () -> Unit = {},
+        op: suspend () -> io.github.tianli0.switchtether.remote.command.CommandOutcome,
+    ): io.github.tianli0.switchtether.remote.command.CommandOutcome? {
+        repeat(2) { attempt ->
+            if (ensure(scope).isFailure) {
+                onStepUpFailed()
+                return null
+            }
+            val outcome = op()
+            if (attempt == 0 && outcome is io.github.tianli0.switchtether.remote.command.CommandOutcome.Rejected &&
+                outcome.error.code == io.github.tianli0.switchtether.remote.protocol.ErrorCodes.STEP_UP_REQUIRED
+            ) {
+                invalidate(scope)
+                return@repeat
+            }
+            return outcome
+        }
+        return null
+    }
+
     private suspend fun ask(scope: String): Result<Unit> {
         val req = Request(scope, CompletableDeferred())
         pending.value = req

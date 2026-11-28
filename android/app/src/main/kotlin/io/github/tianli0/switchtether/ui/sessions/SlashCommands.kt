@@ -245,6 +245,10 @@ val SessionDetailState.slashCommands: List<SlashEntry>
             }
     }
 
+/** Rows of the panel over the composer for [draftText] (empty = no panel). */
+fun SessionDetailState.slashSuggestionsFor(draftText: String): List<SlashEntry> =
+    slashQuery(draftText)?.let { q -> filterSlashCommands(slashCommands, q) }.orEmpty()
+
 /** Rows of the panel over the composer for the current draft (empty = no panel). */
 val SessionDetailState.slashSuggestions: List<SlashEntry>
-    get() = slashQuery(draft)?.let { q -> filterSlashCommands(slashCommands, q) }.orEmpty()
+    get() = slashSuggestionsFor(draft)

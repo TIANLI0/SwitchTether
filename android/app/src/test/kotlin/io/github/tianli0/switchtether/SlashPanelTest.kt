@@ -48,6 +48,7 @@ class SlashPanelTest {
                     onBack = {}, onReload = {}, onLoadOlder = {}, onToggleSteps = {}, onDraft = vm::setDraft, onSend = vm::send, onInterrupt = {},
                     onContinue = {}, onRetryConnection = {},
                     onSlashCommand = { picked += vm.pickSlashCommand(it) },
+                    draftFlow = vm.draft,
                 )
             }
         }
@@ -74,7 +75,7 @@ class SlashPanelTest {
         rule.waitForIdle()
         assertEquals(listOf("/compact"), base.sent.map { it.second })
         assertEquals(listOf(SlashAction.SEND), picked)
-        assertEquals("", vm.state.value.draft)
+        assertEquals("", vm.draft.value)
         rule.mainClock.advanceTimeBy(1_000)
         rule.waitForIdle()
         assertTrue("the panel closes with the draft", !panelShown())
@@ -107,12 +108,12 @@ class SlashPanelTest {
 
         rule.onNodeWithTag("slash-review").performClick()
         rule.waitForIdle()
-        assertEquals("/review ", vm.state.value.draft)
+        assertEquals("/review ", vm.draft.value)
         assertTrue("nothing is sent yet", base.sent.isEmpty())
         // The caret is behind the inserted command, not where it was in "/rev".
         rule.onNodeWithTag("composer").performTextInput("42")
         rule.waitForIdle()
-        assertEquals("/review 42", vm.state.value.draft)
+        assertEquals("/review 42", vm.draft.value)
 
         rule.onNodeWithTag("send").performClick()
         rule.waitForIdle()

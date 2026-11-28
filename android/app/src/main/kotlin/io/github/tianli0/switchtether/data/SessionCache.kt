@@ -79,18 +79,19 @@ class SessionCache(
 
     fun saveList(serverId: String, items: List<SessionSummary>) = synchronized(lock) {
         dropLegacy()
+        val savedAtMs = now()
         var keep = items.take(maxListItems)
-        var json = encodeList(keep)
+        var encoded = ProtocolJson.encodeToString(StoredList.serializer(), StoredList(savedAtMs, keep))
         // A list too large for the budget keeps its newest rows (the desktop sends them first).
-        while (json.length > MAX_LIST_BYTES && keep.isNotEmpty()) {
+        while (encoded.length > MAX_LIST_BYTES && keep.isNotEmpty()) {
             keep = keep.take(keep.size * 3 / 4)
-            json = encodeList(keep)
+            encoded = ProtocolJson.encodeToString(StoredList.serializer(), StoredList(savedAtMs, keep))
         }
-        val snap = ListSnapshot(keep, now())
+        val snap = ListSnapshot(keep, savedAtMs)
         lists[serverId] = snap
         val c = cipher ?: return@synchronized
         runCatching {
-            val sealed = c.seal(ProtocolJson.encodeToString(StoredList.serializer(), StoredList(snap.savedAtMs, keep)).toByteArray(Charsets.UTF_8), aad(serverId))
+            val sealed = c.seal(encoded.toByteArray(Charsets.UTF_8), aad(serverId))
             if (sealed != null) write(listFile(serverId), sealed) else listFile(serverId).delete()
         }
         Unit
@@ -168,9 +169,6 @@ class SessionCache(
             File(server, "sessions.json").delete()
         }
     }
-
-    private fun encodeList(items: List<SessionSummary>) =
-        ProtocolJson.encodeToString(StoredList.serializer(), StoredList(0, items))
 
     private fun sizeOf(e: AgentEvent): Long = runCatching { ProtocolJson.encodeToString(AgentEvent.serializer(), e).length.toLong() }.getOrDefault(1024L)
 

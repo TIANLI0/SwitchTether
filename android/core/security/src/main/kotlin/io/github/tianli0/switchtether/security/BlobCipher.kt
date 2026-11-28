@@ -63,11 +63,12 @@ open class AesGcmBlobCipher(
  */
 class KeystoreBlobCipher(alias: String) : AesGcmBlobCipher(
     keyFor = { create -> keystoreKey(alias, create) },
-    onDestroy = { KeyStore.getInstance(PROVIDER).apply { load(null) }.deleteEntry(alias) },
+    onDestroy = { deleteKey(alias) },
 ) {
     private companion object {
         const val PROVIDER = "AndroidKeyStore"
 
+        @Synchronized
         fun keystoreKey(alias: String, create: Boolean): SecretKey? {
             val ks = KeyStore.getInstance(PROVIDER).apply { load(null) }
             (ks.getKey(alias, null) as? SecretKey)?.let { return it }
@@ -81,6 +82,11 @@ class KeystoreBlobCipher(alias: String) : AesGcmBlobCipher(
                     .build(),
             )
             return gen.generateKey()
+        }
+
+        @Synchronized
+        fun deleteKey(alias: String) {
+            KeyStore.getInstance(PROVIDER).apply { load(null) }.deleteEntry(alias)
         }
     }
 }

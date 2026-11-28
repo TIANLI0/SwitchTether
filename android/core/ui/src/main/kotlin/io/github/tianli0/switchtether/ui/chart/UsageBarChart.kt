@@ -90,8 +90,13 @@ fun UsageBarChart(
     val density = LocalDensity.current
     val top = remember(values) { niceAxisMax(values.maxOrNull() ?: 0.0) }
     val ticks = remember(top, axisLabel) { listOf(top, top / 2, 0.0).map { it to axisLabel(it) } }
-    val axisWidth = remember(ticks, labelStyle) { ticks.maxOf { measurer.measure(it.second, labelStyle).size.width } }
+    val tickLayouts = remember(ticks, labelStyle) { ticks.map { (v, text) -> v to measurer.measure(text, labelStyle) } }
+    val labelLayouts = remember(labels, labelStyle) { labels.mapValues { (_, text) -> measurer.measure(text, labelStyle) } }
+    val axisWidth = remember(tickLayouts) { tickLayouts.maxOf { it.second.size.width } }
     val labelHeight = remember(labelStyle) { measurer.measure("0", labelStyle).size.height }
+    val gridDash = remember { PathEffect.dashPathEffect(floatArrayOf(6f, 6f)) }
+    val guideDash = remember { PathEffect.dashPathEffect(floatArrayOf(5f, 5f)) }
+    val barPath = remember { Path() }
     var pressed by remember(values) { mutableStateOf<Int?>(null) }
     var width by remember { mutableFloatStateOf(0f) }
     val start = axisWidth + with(density) { 8.dp.toPx() }
@@ -131,16 +136,15 @@ fun UsageBarChart(
             val plotBottom = size.height - labelHeight - 6.dp.toPx()
             val plotH = (plotBottom - plotTop).coerceAtLeast(1f)
             // Gridlines with their values on the start edge.
-            ticks.forEach { (v, text) ->
+            tickLayouts.forEach { (v, layout) ->
                 val y = plotBottom - (v / top).toFloat() * plotH
-                val layout = measurer.measure(text, labelStyle)
                 drawText(layout, topLeft = Offset(axisWidth - layout.size.width.toFloat(), y - layout.size.height / 2f))
                 drawLine(
                     grid,
                     Offset(start, y),
                     Offset(size.width, y),
                     strokeWidth = 1.dp.toPx(),
-                    pathEffect = if (v > 0) PathEffect.dashPathEffect(floatArrayOf(6f, 6f)) else null,
+                    pathEffect = if (v > 0) gridDash else null,
                 )
             }
             if (values.isEmpty()) return@Canvas
@@ -151,29 +155,27 @@ fun UsageBarChart(
             if (held != null) {
                 // The dashed guide from the bubble down to the held bar.
                 val cx = centerOf(held, size.width)
-                drawLine(guide, Offset(cx, 0f), Offset(cx, plotBottom), strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f)))
+                drawLine(guide, Offset(cx, 0f), Offset(cx, plotBottom), strokeWidth = 1.dp.toPx(), pathEffect = guideDash)
             }
             values.forEachIndexed { i, v ->
                 val cx = centerOf(i, size.width)
                 val h = ((v / top).toFloat() * plotH).coerceIn(0f, plotH)
                 if (h > 0f) {
                     val color = if (held == null || i == held) accent else accent.copy(alpha = 0.32f)
-                    val shape = Path().apply {
-                        addRoundRect(
-                            RoundRect(
-                                left = cx - barW / 2f,
-                                top = plotBottom - h,
-                                right = cx + barW / 2f,
-                                bottom = plotBottom,
-                                topLeftCornerRadius = CornerRadius(radius),
-                                topRightCornerRadius = CornerRadius(radius),
-                            ),
-                        )
-                    }
-                    drawPath(shape, color)
+                    barPath.rewind()
+                    barPath.addRoundRect(
+                        RoundRect(
+                            left = cx - barW / 2f,
+                            top = plotBottom - h,
+                            right = cx + barW / 2f,
+                            bottom = plotBottom,
+                            topLeftCornerRadius = CornerRadius(radius),
+                            topRightCornerRadius = CornerRadius(radius),
+                        ),
+                    )
+                    drawPath(barPath, color)
                 }
-                labels[i]?.let { text ->
-                    val layout = measurer.measure(text, labelStyle)
+                labelLayouts[i]?.let { layout ->
                     val x = (cx - layout.size.width / 2f).coerceIn(start, size.width - layout.size.width)
                     drawText(layout, topLeft = Offset(x, size.height - layout.size.height))
                 }

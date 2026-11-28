@@ -676,18 +676,23 @@ private fun entrySummary(e: FsEntry): String? {
     return if (e.isDir) date else listOfNotNull(Formatters.bytes(e.size), date).joinToString(" | ")
 }
 
+private val shortDateFormatters = java.util.concurrent.ConcurrentHashMap<Pair<java.util.Locale, String>, java.time.format.DateTimeFormatter>()
+
 /** "5月30日" this year, "2025年5月30日" before, "14:05" today, in the phone's locale. */
 private fun shortDate(epochMs: Long): String {
     val locale = java.util.Locale.getDefault()
-    val then = java.util.Calendar.getInstance().apply { timeInMillis = epochMs }
-    val now = java.util.Calendar.getInstance()
+    val zone = java.time.ZoneId.systemDefault()
+    val then = java.time.Instant.ofEpochMilli(epochMs).atZone(zone)
+    val now = java.time.ZonedDateTime.now(zone)
     val skeleton = when {
-        then.get(java.util.Calendar.YEAR) != now.get(java.util.Calendar.YEAR) -> "yMMMd"
-        then.get(java.util.Calendar.DAY_OF_YEAR) == now.get(java.util.Calendar.DAY_OF_YEAR) -> "Hm"
+        then.year != now.year -> "yMMMd"
+        then.dayOfYear == now.dayOfYear -> "Hm"
         else -> "MMMd"
     }
-    val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, skeleton)
-    return java.text.SimpleDateFormat(pattern, locale).format(java.util.Date(epochMs))
+    val fmt = shortDateFormatters.computeIfAbsent(locale to skeleton) { (loc, skel) ->
+        java.time.format.DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(loc, skel), loc)
+    }
+    return fmt.format(then)
 }
 
 /** The large entry icon of a flat row: a filled folder in the accent colour, or the file-type glyph on a soft tile. */

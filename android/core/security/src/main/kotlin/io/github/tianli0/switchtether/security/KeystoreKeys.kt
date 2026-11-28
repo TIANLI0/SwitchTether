@@ -2,7 +2,6 @@ package io.github.tianli0.switchtether.security
 
 import android.app.KeyguardManager
 import android.content.Context
-import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
@@ -80,15 +79,10 @@ class KeystoreKeys(private val context: Context) {
             .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setUserAuthenticationRequired(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setUserAuthenticationParameters(
+            .setUserAuthenticationParameters(
                 0,
                 KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
             )
-        } else {
-            @Suppress("DEPRECATION")
-            builder.setUserAuthenticationValidityDurationSeconds(STEP_UP_VALIDITY_SECONDS)
-        }
         return runCatching {
             KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE).apply {
                 initialize(builder.build())
@@ -125,16 +119,11 @@ class KeystoreKeys(private val context: Context) {
         val key = runCatching { keyStore.getKey(alias, null) as? PrivateKey }.getOrNull() ?: return "missing"
         return runCatching {
             val info = KeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE).getKeySpec(key, KeyInfo::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                when (info.securityLevel) {
-                    KeyProperties.SECURITY_LEVEL_STRONGBOX -> "strongbox"
-                    KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "tee"
-                    KeyProperties.SECURITY_LEVEL_SOFTWARE -> "software"
-                    else -> "unknown"
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                if (info.isInsideSecureHardware) "tee" else "software"
+            when (info.securityLevel) {
+                KeyProperties.SECURITY_LEVEL_STRONGBOX -> "strongbox"
+                KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "tee"
+                KeyProperties.SECURITY_LEVEL_SOFTWARE -> "software"
+                else -> "unknown"
             }
         }.getOrDefault("unknown")
     }

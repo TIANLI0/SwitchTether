@@ -436,6 +436,12 @@ private fun folderName(path: String) = path.trimEnd('/', '\\').substringAfterLas
 fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (String, String?) -> Unit) {
     val container = appContainer()
     val vm = newSessionViewModel()
+    val pickedFolder by container.pickedNewSessionFolder.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(pickedFolder) {
+        val p = pickedFolder ?: return@LaunchedEffect
+        vm.select(p)
+        container.pickedNewSessionFolder.value = null
+    }
     val state by vm.state.collectAsStateWithLifecycle()
     val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
     val busy by vm.commands.busy.collectAsStateWithLifecycle()
@@ -689,6 +695,7 @@ fun PickFolderScreen(onBack: () -> Unit) {
                     text = stringResource(R.string.new_session_use_folder),
                     onClick = {
                         vm.select(listing.path)
+                        container.pickedNewSessionFolder.value = listing.path
                         done()
                     },
                     tone = ActionTone.Primary,
@@ -832,6 +839,13 @@ private fun FolderRow(name: String, path: String?, sensitive: Boolean, position:
 @Composable
 fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Unit, onCreated: (String, String?) -> Unit, onOpenDshWeb: (() -> Unit)? = null) {
     val vm = newSessionViewModel()
+    val sheetContainer = io.github.tianli0.switchtether.ui.appContainer()
+    val pickedFolder by sheetContainer.pickedNewSessionFolder.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(pickedFolder) {
+        val p = pickedFolder ?: return@LaunchedEffect
+        vm.select(p)
+        sheetContainer.pickedNewSessionFolder.value = null
+    }
     val state by vm.state.collectAsStateWithLifecycle()
     val prompt by vm.commands.prompt.collectAsStateWithLifecycle()
     val busy by vm.commands.busy.collectAsStateWithLifecycle()

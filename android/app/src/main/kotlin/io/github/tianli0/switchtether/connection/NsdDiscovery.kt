@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
-import android.os.Build
 import io.github.tianli0.switchtether.remote.api.Endpoint
 import io.github.tianli0.switchtether.remote.discovery.DiscoveredDesktop
 import io.github.tianli0.switchtether.remote.discovery.DiscoveryTxt
@@ -45,12 +44,7 @@ class NsdDiscovery(context: Context) {
         fun publish() = trySend(found.values.flatten())
 
         fun accept(name: String, info: NsdServiceInfo) {
-            val hosts = if (Build.VERSION.SDK_INT >= 34) {
-                info.hostAddresses.mapNotNull { it.hostAddress }
-            } else {
-                @Suppress("DEPRECATION")
-                listOfNotNull(info.host?.hostAddress)
-            }
+            val hosts = info.hostAddresses.mapNotNull { it.hostAddress }
             val attrs: Map<String, ByteArray?> = info.attributes
             val parsed = hosts.mapNotNull { DiscoveryTxt.parse(name, it, info.port, attrs) }
             if (parsed.isEmpty()) found.remove(name) else found[name] = parsed
@@ -65,36 +59,21 @@ class NsdDiscovery(context: Context) {
 
             override fun onServiceFound(info: NsdServiceInfo) {
                 val name = info.serviceName
-                if (Build.VERSION.SDK_INT >= 34) {
-                    if (infoCallbacks.containsKey(name)) return
-                    val cb = object : NsdManager.ServiceInfoCallback {
-                        override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
-                        override fun onServiceUpdated(serviceInfo: NsdServiceInfo) = accept(name, serviceInfo)
-                        override fun onServiceLost() {
-                            found.remove(name)
-                            publish()
-                        }
-                        override fun onServiceInfoCallbackUnregistered() = Unit
+                lateinit var cb: NsdManager.ServiceInfoCallback
+                cb = object : NsdManager.ServiceInfoCallback {
+                    override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
+                        infoCallbacks.remove(name, cb)
                     }
-                    infoCallbacks[name] = cb
-                    runCatching { manager.registerServiceInfoCallback(info, resolveExecutor, cb) }
-                } else {
-                    // Before Android 14 only one resolve may run at a time: serialize them.
-                    resolveExecutor.execute {
-                        val done = java.util.concurrent.CountDownLatch(1)
-                        @Suppress("DEPRECATION")
-                        runCatching {
-                            manager.resolveService(info, object : NsdManager.ResolveListener {
-                                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = done.countDown()
-                                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                                    accept(name, serviceInfo)
-                                    done.countDown()
-                                }
-                            })
-                        }.onFailure { done.countDown() }
-                        done.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                    override fun onServiceUpdated(serviceInfo: NsdServiceInfo) = accept(name, serviceInfo)
+                    override fun onServiceLost() {
+                        found.remove(name)
+                        publish()
                     }
+                    override fun onServiceInfoCallbackUnregistered() = Unit
                 }
+                if (infoCallbacks.putIfAbsent(name, cb) != null) return
+                runCatching { manager.registerServiceInfoCallback(info, resolveExecutor, cb) }
+                    .onFailure { infoCallbacks.remove(name, cb) }
             }
 
             override fun onServiceLost(info: NsdServiceInfo) {
@@ -107,7 +86,8 @@ class NsdDiscovery(context: Context) {
             .onFailure { publish() }
         awaitClose {
             runCatching { manager.stopServiceDiscovery(discoveryListener) }
-            if (Build.VERSION.SDK_INT >= 34) infoCallbacks.values.forEach { runCatching { manager.unregisterServiceInfoCallback(it) } }
+            infoCallbacks.values.forEach { runCatching { manager.unregisterServiceInfoCallback(it) } }
+            infoCallbacks.clear()
             runCatching { if (lock?.isHeld == true) lock.release() }
         }
     }

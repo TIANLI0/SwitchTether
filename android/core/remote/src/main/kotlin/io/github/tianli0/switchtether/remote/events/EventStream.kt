@@ -172,7 +172,11 @@ class EventStreamClient(
                 } else {
                     withTimeoutOrNull(pingIntervalMs) { checks.receive() } != null
                 }
-                ws.send("""{"type":"ping"}""")
+                if (!ws.send("""{"type":"ping"}""")) {
+                    trySend(StreamSignal.Failure(java.io.IOException("event stream send failed"), null, null))
+                    channel.close()
+                    break
+                }
                 if (!asked && nowMs() - lastRx.get() <= stallTimeoutMs) continue
                 // Suspect: confirm with the ping just sent before giving up on the socket (after a
                 // freeze or a long sleep it is usually still fine, and reconnecting costs far more).

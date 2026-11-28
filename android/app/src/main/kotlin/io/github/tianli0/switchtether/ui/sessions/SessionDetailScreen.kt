@@ -450,6 +450,7 @@ fun SessionDetailScreen(
         initialTitle = initialTitle,
         ctx = ctx,
         busy = busy,
+        draftFlow = vm.draft,
         onBack = onBack,
         onReload = vm::load,
         onLoadOlder = vm::loadOlder,
@@ -642,6 +643,7 @@ fun SessionDetailContent(
      * whether the text field already inserted its text. Null = the page takes no drops.
      */
     onIntake: ((DropPayload, Boolean) -> Unit)? = null,
+    draftFlow: kotlinx.coroutines.flow.StateFlow<String>? = null,
 ) {
     val summary = state.detail.valueOrNull?.summary
     var showInfo by rememberSaveable { mutableStateOf(false) }
@@ -844,7 +846,7 @@ fun SessionDetailContent(
                         Composer(
                             state, busy, onDraft, onSend, onInterrupt, onContinue, onPickImage, onRemoveImage, onRemoveAttachment, onModelClick, onPermissionClick,
                             onViewImage = { ctx.onViewImage?.invoke(it) }, onSlashCommand = onSlashCommand, onSlashPanelHeight = { slashPanelPx = it },
-                            onIntake = onIntake, onDropHover = { fieldDropHover = it },
+                            onIntake = onIntake, onDropHover = { fieldDropHover = it }, draftFlow = draftFlow,
                         )
                     }
                 }
@@ -1169,7 +1171,9 @@ private fun Composer(
     onSlashPanelHeight: (Int) -> Unit = {},
     onIntake: ((DropPayload, Boolean) -> Unit)? = null,
     onDropHover: (Boolean) -> Unit = {},
+    draftFlow: kotlinx.coroutines.flow.StateFlow<String>? = null,
 ) {
+    val draft = draftFlow?.collectAsStateWithLifecycle()?.value ?: state.draft
     val s = state.detail.valueOrNull?.summary
     Column(
         Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
@@ -1324,7 +1328,10 @@ private fun Composer(
         }
         // Slash commands matching the "/…" being typed, directly above the input row.
         if (onSlashCommand != null) {
-            SlashSuggestionPanel(state.slashSuggestions, onSlashCommand, Modifier.onSizeChanged { onSlashPanelHeight(it.height) })
+            val suggestions = remember(draft, state.desktopSlashCommands, state.detail, state.connection) {
+                state.slashSuggestionsFor(draft)
+            }
+            SlashSuggestionPanel(suggestions, onSlashCommand, Modifier.onSizeChanged { onSlashPanelHeight(it.height) })
         }
         // The input row, as a ColorOS toolbar: attach key, field, send key.
         Row(verticalAlignment = Alignment.Bottom) {
@@ -1343,14 +1350,14 @@ private fun Composer(
                 Spacer(Modifier.size(io.github.tianli0.coui17.patterns.ComposerKeyGap))
             }
             val sendEnabled = (state.canSend || state.canQueue) &&
-                (state.draft.isNotBlank() || state.attachedImages.isNotEmpty() || state.draftAttachments.isNotEmpty()) &&
+                (draft.isNotBlank() || state.attachedImages.isNotEmpty() || state.draftAttachments.isNotEmpty()) &&
                 state.draftAttachments.all { it.ready }
             val receiver = remember(onIntake) {
                 onIntake?.let { intake -> composerContentListener(onHover = onDropHover, onFiles = { intake(it, true) }) }
             }
             // InputPill with a caret that follows a draft set from outside (a picked slash command).
             DraftInputPill(
-                value = state.draft,
+                value = draft,
                 onValueChange = onDraft,
                 placeholder = when {
                     state.canSend || state.canQueue -> stringResource(R.string.composer_hint)

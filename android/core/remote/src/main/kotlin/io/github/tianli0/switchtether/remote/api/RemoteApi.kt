@@ -1,6 +1,7 @@
 package io.github.tianli0.switchtether.remote.api
 
 import io.github.tianli0.switchtether.remote.protocol.AgentEvent
+import kotlinx.coroutines.ensureActive
 import io.github.tianli0.switchtether.remote.protocol.AnswersBody
 import io.github.tianli0.switchtether.remote.protocol.ApiErrorBody
 import io.github.tianli0.switchtether.remote.protocol.ApiErrorEnvelope
@@ -600,21 +601,30 @@ class RemoteApi(
     suspend fun download(path: String, sink: java.io.OutputStream, onProgress: (Long, Long?) -> Unit = { _, _ -> }): Long =
         withContext(Dispatchers.IO) {
             val req = Request.Builder().url(url("v1/fs/download").newBuilder().addQueryParameter("path", path).build()).get().tagged().build()
-            readClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) throw toApiException(Fetched(resp.code, resp.headers, resp.body.string()))
-                val total = resp.body.contentLength().takeIf { it >= 0 }
-                var n = 0L
-                resp.body.byteStream().use { input ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val r = input.read(buf)
-                        if (r < 0) break
-                        sink.write(buf, 0, r)
-                        n += r
-                        onProgress(n, total)
+            val call = readClient.newCall(req)
+            val handle = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { cause ->
+                if (cause != null) call.cancel()
+            }
+            try {
+                call.execute().use { resp ->
+                    if (!resp.isSuccessful) throw toApiException(Fetched(resp.code, resp.headers, resp.body.string()))
+                    val total = resp.body.contentLength().takeIf { it >= 0 }
+                    var n = 0L
+                    resp.body.byteStream().use { input ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            ensureActive()
+                            val r = input.read(buf)
+                            if (r < 0) break
+                            sink.write(buf, 0, r)
+                            n += r
+                            onProgress(n, total)
+                        }
                     }
+                    n
                 }
-                n
+            } finally {
+                handle?.dispose()
             }
         }
 
@@ -749,12 +759,27 @@ class RemoteApi(
                             cont.resumeWithException(toApiException(Fetched(r.code, r.headers, r.body.string())))
                             return
                         }
-                        val bytes = r.body.bytes()
-                        if (bytes.size > maxBytes) {
+                        val declared = r.body.contentLength()
+                        if (declared > maxBytes) {
                             cont.resumeWithException(ApiException(413, ApiErrorBody(io.github.tianli0.switchtether.remote.protocol.ErrorCodes.PAYLOAD_TOO_LARGE, "image too large"), r.headers["X-Request-Id"]))
                             return
                         }
-                        cont.resume(bytes) {}
+                        val out = java.io.ByteArrayOutputStream(if (declared > 0) declared.toInt() else 16 * 1024)
+                        val buf = ByteArray(16 * 1024)
+                        var total = 0
+                        r.body.byteStream().use { input ->
+                            while (true) {
+                                val read = input.read(buf)
+                                if (read < 0) break
+                                total += read
+                                if (total > maxBytes) {
+                                    cont.resumeWithException(ApiException(413, ApiErrorBody(io.github.tianli0.switchtether.remote.protocol.ErrorCodes.PAYLOAD_TOO_LARGE, "image too large"), r.headers["X-Request-Id"]))
+                                    return
+                                }
+                                out.write(buf, 0, read)
+                            }
+                        }
+                        cont.resume(out.toByteArray()) {}
                     }
                 } catch (e: IOException) {
                     cont.resumeWithException(BodyReadException(e))

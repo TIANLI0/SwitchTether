@@ -116,7 +116,9 @@ class Notifier(
     val activeSessions: StateFlow<Int> = _activeSessions
 
     private fun refreshActive() {
-        _activeSessions.value = sessions.values.count { it.isLive && (it.status == "busy" || it.status == "waiting" || it.waitingFor != null) }
+        // Only actively busy sessions need the monitor service to hold a wake lock; waiting
+        // sessions are idle on the desktop until the user replies.
+        _activeSessions.value = sessions.values.count { it.isLive && it.status == "busy" }
     }
 
     fun start() {
@@ -248,7 +250,16 @@ class Notifier(
         scope.launch {
             while (isActive) {
                 delay(60_000)
-                synchronized(this@Notifier) { engine.longRunning(sessions.values) }.forEach(::post)
+                if (sessions.values.any { it.isLive && it.status == "busy" }) {
+                    synchronized(this@Notifier) { engine.longRunning(sessions.values) }.forEach(::post)
+                }
+                // Keep long-lived `:link` maps bounded by pruning ended sessions when large.
+                if (sessions.size > 200) {
+                    sessions.entries.removeIf { !it.value.isLive }
+                }
+                if (postedWhen.size > 256) {
+                    postedWhen.clear()
+                }
             }
         }
     }
@@ -351,7 +362,6 @@ class Notifier(
     }
 
     private fun createChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val mgr = context.getSystemService(NotificationManager::class.java)
         NotifyType.entries.filter { it != NotifyType.LIVE_UPDATE }.forEach { t ->
             val importance = when (t) {
@@ -388,9 +398,7 @@ class Notifier(
             silent = n.silent,
             live = live,
         )
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) return false
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false
         val tap = PendingIntent.getActivity(
             context,
             n.key.hashCode(),

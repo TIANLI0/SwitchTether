@@ -355,7 +355,7 @@ class ViewModelTest {
         vm.send()
         advanceUntilIdle()
         assertTrue(repo.sent.isEmpty())
-        assertEquals("later", vm.state.value.draft)
+        assertEquals("later", vm.draft.value)
     }
 
     @Test

@@ -240,6 +240,8 @@ class AppContainer(private val context: Context) {
 
     /** The new-session sheet was left for the folder picker page; reopen it when the picker closes. */
     val newSessionReopen = MutableStateFlow(false)
+    /** Folder chosen in [PickFolderScreen] (separate PageActivity); consumed by the launcher sheet. */
+    val pickedNewSessionFolder = MutableStateFlow<String?>(null)
     /** One-time hints the user has dismissed (e.g. the read-only session tip). */
     val hintPrefs: android.content.SharedPreferences by lazy { context.getSharedPreferences("ui_hints", Context.MODE_PRIVATE) }
     /** Terminal view preferences (font size only). */
@@ -266,6 +268,7 @@ class AppContainer(private val context: Context) {
 
     fun onForeground() {
         isForeground = true
+        io.github.tianli0.switchtether.ui.common.MinuteClock.setActive(true)
         foregroundTime.onStart()
         foregroundTicker?.cancel()
         foregroundTicker = appScope.launch {
@@ -288,6 +291,7 @@ class AppContainer(private val context: Context) {
 
     fun onBackground() {
         isForeground = false
+        io.github.tianli0.switchtether.ui.common.MinuteClock.setActive(false)
         foregroundTime.onStop()
         foregroundTicker?.cancel()
         foregroundTicker = null
@@ -362,6 +366,7 @@ class AppContainer(private val context: Context) {
         keys.delete(desktop.identityAlias)
         keys.delete(desktop.stepUpAlias)
         keys.deleteAllExcept(emptySet())
+        io.github.tianli0.switchtether.connection.KeystoreRelaySecrets.destroy()
         // The `:link` process stops the monitor service, its forwards and the conversations
         // (session shortcuts) of that computer.
         link.send(io.github.tianli0.switchtether.link.LinkProtocol.message(io.github.tianli0.switchtether.link.LinkProtocol.RESET))

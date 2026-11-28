@@ -38,6 +38,7 @@ object KeystoreRelaySecrets : RelaySecrets {
     private const val PROVIDER = "AndroidKeyStore"
     private val json = Json { ignoreUnknownKeys = true }
 
+    @Synchronized
     private fun key(create: Boolean): SecretKey? {
         val ks = KeyStore.getInstance(PROVIDER).apply { load(null) }
         (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
@@ -51,6 +52,14 @@ object KeystoreRelaySecrets : RelaySecrets {
                 .build(),
         )
         return gen.generateKey()
+    }
+
+    /** Deletes the AndroidKeyStore key on unpair / revocation so sealed relay secrets can never be opened again. */
+    @Synchronized
+    fun destroy() {
+        runCatching {
+            KeyStore.getInstance(PROVIDER).apply { load(null) }.deleteEntry(ALIAS)
+        }
     }
 
     override fun seal(secret: RelaySecret): String? = runCatching {

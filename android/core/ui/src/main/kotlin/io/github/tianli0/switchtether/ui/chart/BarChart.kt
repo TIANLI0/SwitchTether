@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -38,15 +39,16 @@ fun BarChart(
     height: Dp = 140.dp,
     barColor: Color = COUITheme.colorScheme.primary,
 ) {
-    val max = points.maxOfOrNull { it.value }?.takeIf { it > 0 } ?: 1.0
+    val max = remember(points) { points.maxOfOrNull { it.value }?.takeIf { it > 0 } ?: 1.0 }
     val guide = COUITheme.colorScheme.dividerLine
+    val guideDash = remember { PathEffect.dashPathEffect(floatArrayOf(6f, 6f)) }
     Column(modifier.fillMaxWidth().semantics { contentDescription = summary }) {
         Text(formatValue(max), style = DevType.label, color = COUITheme.colorScheme.onSurfaceVariantSummary)
         Canvas(Modifier.fillMaxWidth().height(height).padding(vertical = 4.dp)) {
             val n = points.size.coerceAtLeast(1)
             val slot = size.width / n
             val barW = (slot * 0.62f).coerceAtLeast(2f)
-            drawLine(guide, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+            drawLine(guide, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f, pathEffect = guideDash)
             drawLine(guide, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 1f)
             points.forEachIndexed { i, p ->
                 val h = (p.value / max).toFloat() * size.height

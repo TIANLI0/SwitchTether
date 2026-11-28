@@ -65,9 +65,7 @@ class AndroidLiveUpdateChannel(private val context: Context) : LiveActivityChann
     }
 
     override fun update(spec: LiveUpdateSpec, agent: String, subtitle: String?) {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) return
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val id = notificationId(spec.sessionId)
         val accent = when (spec.tone) {
             LiveUpdateSpec.Tone.NORMAL -> 0xFF1F6BFF.toInt()

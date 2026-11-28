@@ -388,6 +388,9 @@ class SessionDetailViewModel(
 
     val commands = CommandTracker(viewModelScope) { repo.commandStatus(it) }
 
+    private val _draft = MutableStateFlow("")
+    /** Composer draft held outside [SessionDetailState] so keystrokes recompose only the composer. */
+    val draft: StateFlow<String> = _draft.asStateFlow()
     private val draftFlow = MutableStateFlow<String?>(null)
     private var loadJob: Job? = null
 
@@ -436,7 +439,7 @@ class SessionDetailViewModel(
         }
         viewModelScope.launch {
             val saved = drafts.draft(sessionId).first()
-            _state.update { if (it.draft.isEmpty()) it.copy(draft = saved) else it }
+            if (_draft.value.isEmpty() && saved.isNotEmpty()) _draft.value = saved
         }
         viewModelScope.launch {
             draftFlow.drop(1).debounce(400).collect { text -> if (text != null) drafts.setDraft(sessionId, text) }
@@ -741,7 +744,7 @@ class SessionDetailViewModel(
     }
 
     fun setDraft(text: String) {
-        _state.update { it.copy(draft = text) }
+        _draft.value = text
         draftFlow.value = text
     }
 
@@ -773,7 +776,7 @@ class SessionDetailViewModel(
      */
     fun send() {
         val st = _state.value
-        val text = st.draft.trim()
+        val text = _draft.value.trim()
         val imgs = st.attachedImages
         val files = st.draftAttachments
         // Every picked file must be on the computer first; a failed one is removed by the user.
@@ -789,7 +792,8 @@ class SessionDetailViewModel(
             status = if (st.canSend) OutgoingStatus.SENDING else OutgoingStatus.WAITING_CONNECTION,
             afterSeq = st.log.maxSeq ?: 0,
         )
-        _state.update { it.derive(outgoing = it.outgoing + msg).copy(draft = "", attachedImages = emptyList(), draftAttachments = emptyList(), sendTick = it.sendTick + 1) }
+        _draft.value = ""
+        _state.update { it.derive(outgoing = it.outgoing + msg).copy(attachedImages = emptyList(), draftAttachments = emptyList(), sendTick = it.sendTick + 1) }
         draftFlow.value = ""
         viewModelScope.launch { drafts.setDraft(sessionId, "") }
         if (st.canSend) deliver(msg.commandId)
@@ -824,7 +828,7 @@ class SessionDetailViewModel(
     fun editOutgoing(commandId: String) {
         val m = _state.value.outgoing.firstOrNull { it.commandId == commandId } ?: return
         deleteOutgoing(commandId)
-        val current = _state.value.draft
+        val current = _draft.value
         setDraft(if (current.isBlank()) m.text else current.trimEnd() + "\n" + m.text)
     }
 

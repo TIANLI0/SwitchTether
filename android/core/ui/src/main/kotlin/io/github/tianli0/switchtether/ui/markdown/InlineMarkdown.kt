@@ -217,11 +217,14 @@ object InlineMarkdown {
         return Triple(text, url, j + 1)
     }
 
+    private val SCHEME_RE = Regex("^[A-Za-z][A-Za-z0-9+.-]*:")
+    private val WINDOWS_DRIVE_RE = Regex("^[A-Za-z]:[\\\\/]")
+
     /** Desktop files are handled by the caller; unknown application schemes stay inert. */
     fun isSupportedLink(url: String): Boolean = url.isNotBlank() && (
         url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://") ||
-            (!url.startsWith("#") && !url.startsWith("//") && !Regex("^[A-Za-z][A-Za-z0-9+.-]*:").containsMatchIn(url)) ||
-            Regex("^[A-Za-z]:[\\\\/]").containsMatchIn(url)
+            (!url.startsWith("#") && !url.startsWith("//") && !SCHEME_RE.containsMatchIn(url)) ||
+            WINDOWS_DRIVE_RE.containsMatchIn(url)
         )
 
     private fun AnnotatedString.Builder.appendLink(text: String, url: String, colors: InlineColors, onLink: ((String) -> Unit)?) {

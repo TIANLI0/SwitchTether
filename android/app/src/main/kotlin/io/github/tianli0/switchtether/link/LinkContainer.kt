@@ -414,6 +414,7 @@ class LinkContainer(private val context: Context) : LinkHost {
         keys.delete(desktop.identityAlias)
         keys.delete(desktop.stepUpAlias)
         keys.deleteAllExcept(emptySet())
+        KeystoreRelaySecrets.destroy()
         conversations.forgetAll()
         bridge.revoked(desktop.serverId)
     }

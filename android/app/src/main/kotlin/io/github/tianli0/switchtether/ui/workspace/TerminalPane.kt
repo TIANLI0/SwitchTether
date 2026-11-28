@@ -121,14 +121,21 @@ fun termLineAnnotated(line: TermLine, cursorX: Int?): AnnotatedString = buildAnn
             fontStyle = if (run.i) FontStyle.Italic else null,
             textDecoration = if (run.u) TextDecoration.Underline else null,
         )
-        for (ch in run.t) {
-            if (cursorX != null && col == cursorX) {
-                pushStyle(style.copy(color = TermBg, background = TermFg)); append(ch); pop()
-            } else {
-                pushStyle(style); append(ch); pop()
+        val text = run.t
+        val endCol = col + text.length
+        if (cursorX != null && cursorX in col until endCol) {
+            val rel = cursorX - col
+            if (rel > 0) {
+                pushStyle(style); append(text, 0, rel); pop()
             }
-            col++
+            pushStyle(style.copy(color = TermBg, background = TermFg)); append(text[rel]); pop()
+            if (rel + 1 < text.length) {
+                pushStyle(style); append(text, rel + 1, text.length); pop()
+            }
+        } else if (text.isNotEmpty()) {
+            pushStyle(style); append(text); pop()
         }
+        col = endCol
     }
     if (cursorX != null && cursorX >= col) {
         repeat(cursorX - col) { append(' ') }
@@ -374,7 +381,7 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
                 }
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            item(key = "sb") {
+            item(key = "sb", contentType = "scrollback") {
                 // A quiet line, not a button over the output.
                 if (!state.scrollbackDone) {
                     Text(
@@ -385,11 +392,12 @@ private fun TerminalSurface(state: TerminalUiState, modifier: Modifier, onSize: 
                     )
                 }
             }
-            itemsIndexed(lines, key = { i, _ -> i }) { i, line ->
+            itemsIndexed(lines, key = { i, _ -> i }, contentType = { _, _ -> "term-line" }) { i, line ->
                 val y = i - screenStart
                 val cx = if (y >= 0 && y == cursor.y && cursor.visible && !state.screen.exited) cursor.x else null
+                val annotated = remember(line, cx) { termLineAnnotated(line, cx) }
                 Text(
-                    termLineAnnotated(line, cx),
+                    annotated,
                     style = style,
                     softWrap = false,
                     maxLines = 1,

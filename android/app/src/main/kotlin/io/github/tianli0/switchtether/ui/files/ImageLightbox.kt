@@ -11,6 +11,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -168,9 +169,19 @@ internal fun LightboxContent(
             chrome = false
         }
     }
+    // Evict off-screen pages from the raw-bytes cache to keep heap usage bounded when swiping large galleries.
+    LaunchedEffect(pager.currentPage) {
+        val cur = pager.currentPage
+        loaded.keys.filter { kotlin.math.abs(it - cur) > 2 }.forEach { loaded.remove(it) }
+    }
+    val pulling by remember { androidx.compose.runtime.derivedStateOf { flick.offsetFraction >= 0.005f } }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("image-lightbox")) {
-        val pull = (flick.offsetFraction * 2f).coerceIn(0f, 1f)
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 1f - 0.75f * pull)))
+        Box(
+            Modifier.fillMaxSize().drawBehind {
+                val pull = (flick.offsetFraction * 2f).coerceIn(0f, 1f)
+                drawRect(Color.Black.copy(alpha = 1f - 0.75f * pull))
+            },
+        )
         FlickToDismiss(state = flick, enabled = !zoomed, modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pager,
@@ -190,7 +201,7 @@ internal fun LightboxContent(
         }
         val current = images[pager.currentPage]
         AnimatedVisibility(
-            visible = chrome && pull < 0.01f,
+            visible = chrome && !pulling,
             enter = fadeIn() + slideInVertically { -it / 3 },
             exit = fadeOut() + slideOutVertically { -it / 3 },
             modifier = Modifier.align(Alignment.TopCenter),
@@ -213,7 +224,7 @@ internal fun LightboxContent(
         }
         if (store != null) {
             AnimatedVisibility(
-                visible = chrome && pull < 0.01f,
+                visible = chrome && !pulling,
                 enter = fadeIn() + slideInVertically { it / 3 },
                 exit = fadeOut() + slideOutVertically { it / 3 },
                 modifier = Modifier.align(Alignment.BottomCenter),

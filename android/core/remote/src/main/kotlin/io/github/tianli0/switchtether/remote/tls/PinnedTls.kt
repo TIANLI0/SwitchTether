@@ -172,10 +172,11 @@ object TlsClientFactory {
         val sslContext = SSLContext.getInstance("TLSv1.3")
         sslContext.init(arrayOf(SingleIdentityKeyManager(identity)), arrayOf(trustManager), SecureRandom())
         val builder = base?.newBuilder() ?: OkHttpClient.Builder()
-        return builder
             // The desktop (hyper) drops keep-alive connections that stay idle for 30 s
             // (header_read_timeout). Evict ours earlier so a pooled connection is never stale.
+            // When `base` is provided, reuse its shared ConnectionPool so `onTrimMemory()` evicts it.
             .connectionPool(ConnectionPool(4, IDLE_KEEP_ALIVE_SECONDS, TimeUnit.SECONDS))
+        return builder
             .sslSocketFactory(sslContext.socketFactory, trustManager)
             .hostnameVerifier { _, _ -> true }
             .connectionSpecs(listOf(TLS13_ONLY))

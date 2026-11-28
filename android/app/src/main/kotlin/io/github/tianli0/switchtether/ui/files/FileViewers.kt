@@ -600,12 +600,16 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
             val listState = io.github.tianli0.switchtether.ui.common.rememberPageListState()
             io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
             var zoomedPage by remember(file.uri) { mutableStateOf<Int?>(null) }
+            val pageCache = remember(file.uri) { android.util.LruCache<Int, ImageBitmap>(6) }
             BoxWithConstraints(modifier.background(COUITheme.colorScheme.surfaceContainer)) {
                 val widthPx = constraints.maxWidth.coerceAtMost(2000)
                 LazyColumn(Modifier.fillMaxSize().pageScroll(), state = listState, contentPadding = PaddingValues(top = LocalPageTopInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items((0 until pdf.pageCount).toList(), key = { it }) { index ->
-                        val page by produceState<ImageBitmap?>(null, index, widthPx) {
-                            value = withContext(Dispatchers.IO) { pdf.render(index, widthPx)?.asImageBitmap() }
+                    items(pdf.pageCount, key = { it }) { index ->
+                        val page by produceState<ImageBitmap?>(pageCache.get(index), index, widthPx) {
+                            if (value != null) return@produceState
+                            val rendered = withContext(Dispatchers.IO) { pdf.render(index, widthPx)?.asImageBitmap() }
+                            if (rendered != null) pageCache.put(index, rendered)
+                            value = rendered
                         }
                         val bmp = page
                         val label = stringResource(R.string.viewer_pdf_page, index + 1, pdf.pageCount)
@@ -617,7 +621,7 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
                         }
                     }
                 }
-                PageBadge(stringResource(R.string.viewer_pdf_page, listState.firstVisibleItemIndex + 1, pdf.pageCount), Modifier.align(Alignment.BottomCenter))
+                PdfCurrentPageBadge(listState, pdf.pageCount, Modifier.align(Alignment.BottomCenter))
                 zoomedPage?.let { start ->
                     val back = rememberPredictiveBack { zoomedPage = null }
                     PdfZoomPager(pdf, start, (constraints.maxWidth * 2).coerceIn(800, 2400), back) { page ->
@@ -628,6 +632,12 @@ private fun PdfPages(file: LocalFile, modifier: Modifier) {
             }
         }
     }
+}
+
+@Composable
+private fun PdfCurrentPageBadge(listState: androidx.compose.foundation.lazy.LazyListState, pageCount: Int, modifier: Modifier) {
+    val current by remember(listState) { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex + 1 } }
+    PageBadge(stringResource(R.string.viewer_pdf_page, current, pageCount), modifier)
 }
 
 @Composable
@@ -699,6 +709,19 @@ private fun MediaPlayerBody(file: LocalFile, video: Boolean, modifier: Modifier)
             override fun onVideoSizeChanged(size: VideoSize) {
                 if (size.width > 0 && size.height > 0) aspect = size.width * size.pixelWidthHeightRatio / size.height
             }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
+                position = player.currentPosition
+                buffered = player.bufferedPosition
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                buffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
+                duration = player.duration.takeIf { it > 0 } ?: 0L
+                position = player.currentPosition
+                buffered = player.bufferedPosition
+            }
         }
         player.addListener(l)
         onDispose { player.removeListener(l); player.release() }
@@ -709,13 +732,12 @@ private fun MediaPlayerBody(file: LocalFile, video: Boolean, modifier: Modifier)
         owner.lifecycle.addObserver(o)
         onDispose { owner.lifecycle.removeObserver(o) }
     }
-    LaunchedEffect(player) {
+    LaunchedEffect(player, playing, buffering) {
+        if (!playing && !buffering) return@LaunchedEffect
         while (true) {
-            playing = player.isPlaying
             position = player.currentPosition
             duration = player.duration.takeIf { it > 0 } ?: 0L
             buffered = player.bufferedPosition
-            buffering = player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_IDLE
             delay(250)
         }
     }

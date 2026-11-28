@@ -84,6 +84,8 @@ import io.github.tianli0.switchtether.forward.DshWebViewModel
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.containerViewModel
 import io.github.tianli0.switchtether.ui.icons.AppIcons
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
  * DeepSeek Harness Web (docs/ANDROID_UI.md §31): `dsh web` on the computer, through a port forward,
@@ -97,7 +99,13 @@ fun DshWebScreen(onBack: () -> Unit) {
     val vm = containerViewModel { c -> DshWebViewModel(c.connection, c.stepUpGate, { c.pairingStoreStepUpEnabled() }, c.portForwards) }
     val ui by vm.ui.collectAsStateWithLifecycle()
     when (val s = ui) {
-        is DshWebUi.Ready -> DshWebBrowser(s, onBack, onStop = vm::stopServer, onReload = vm::check, viaRelay = container.portForwards.active.collectAsStateWithLifecycle().value.firstOrNull { it.leaseId == s.leaseId }?.viaRelay == true)
+        is DshWebUi.Ready -> {
+            val viaRelayFlow = remember(s.leaseId) {
+                container.portForwards.active.map { list -> list.firstOrNull { it.leaseId == s.leaseId }?.viaRelay == true }.distinctUntilChanged()
+            }
+            val viaRelay by viaRelayFlow.collectAsStateWithLifecycle(initialValue = false)
+            DshWebBrowser(s, onBack, onStop = vm::stopServer, onReload = vm::check, viaRelay = viaRelay)
+        }
         else -> DshWebStatePage(s, onBack, onOpen = vm::open, onRetry = vm::check)
     }
 }
@@ -207,6 +215,18 @@ private fun DshWebBrowser(ready: DshWebUi.Ready, onBack: () -> Unit, onStop: () 
     }
 
     val webView = remember(localPort) { createWebView(context, localPort, page, { cb, p -> launchPicker(cb, p) }) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, webView) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> webView.onPause()
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> webView.onResume()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     DisposableEffect(webView) {
         onDispose {
             pendingFiles?.onReceiveValue(null)

@@ -112,12 +112,34 @@ class ProvidersViewModel(
     fun setCredential(label: String, providerId: String, field: String, value: String, stepUpDone: (Boolean) -> Unit = {}) {
         val app = _state.value.app
         viewModelScope.launch {
-            if (gate != null && gate.ensure(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.CONFIG_WRITE).isFailure) {
-                stepUpDone(false)
+            if (gate == null) {
+                stepUpDone(true)
+                commands.run(label, onSuccess = { load() }) { id -> repo.setCredential(app, providerId, field, value, id) }
                 return@launch
             }
-            stepUpDone(true)
-            commands.run(label, onSuccess = { load() }) { id -> repo.setCredential(app, providerId, field, value, id) }
+            repeat(2) { attempt ->
+                if (gate.ensure(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.CONFIG_WRITE).isFailure) {
+                    stepUpDone(false)
+                    return@launch
+                }
+                if (attempt == 0) stepUpDone(true)
+                var expired = false
+                commands.run(label, onSuccess = { load() }) { id ->
+                    val out = repo.setCredential(app, providerId, field, value, id)
+                    if (attempt == 0 && out is io.github.tianli0.switchtether.remote.command.CommandOutcome.Rejected &&
+                        out.error.code == io.github.tianli0.switchtether.remote.protocol.ErrorCodes.STEP_UP_REQUIRED
+                    ) {
+                        expired = true
+                    }
+                    out
+                }
+                if (expired) {
+                    commands.dismiss()
+                    gate.invalidate(io.github.tianli0.switchtether.remote.protocol.StepUpScopes.CONFIG_WRITE)
+                } else {
+                    return@launch
+                }
+            }
         }
     }
 

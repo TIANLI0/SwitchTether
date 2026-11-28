@@ -113,7 +113,8 @@ class KeepAlive(
     companion object {
         /** Longest wake lock per outage: enough for several relay attempts, bounded for the battery. */
         const val OUTAGE_WAKE_MS = 3 * 60_000L
-        private const val TICK_WAKE_MS = 15_000L
+        /** Slightly longer than EventStreamClient's 10 s probe timeout so a healthy ping releases promptly. */
+        private const val TICK_WAKE_MS = 11_000L
         private const val TICK_RETRY_WAKE_MS = 60_000L
 
         /** Liveness check while asleep (Doze batches allow-while-idle alarms to about every 9 min or more). */

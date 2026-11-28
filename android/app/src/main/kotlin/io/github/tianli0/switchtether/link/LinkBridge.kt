@@ -157,10 +157,14 @@ class LinkBridgeService : Service() {
 class LinkReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val link = (context.applicationContext as? SwitchTetherApp)?.link ?: return
+        if (intent.action != ACTION_RECOVER) return
         val pending = goAsync()
+        val job = link.appScope.launch { link.recover() }
+        // Never hold goAsync() past the ~10 s background BroadcastReceiver ANR budget;
+        // the recovery coroutine finishes in the `:link` process if it needs longer.
         link.appScope.launch {
             try {
-                if (intent.action == ACTION_RECOVER) link.recover()
+                kotlinx.coroutines.withTimeoutOrNull(8_000) { job.join() }
             } finally {
                 pending.finish()
             }

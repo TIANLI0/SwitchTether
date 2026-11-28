@@ -132,14 +132,24 @@ fun UiText.resolve(): String {
  */
 object MinuteClock {
     val now = androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis())
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+    private var ticker: kotlinx.coroutines.Job? = null
 
-    init {
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
-            while (true) {
-                kotlinx.coroutines.delay(30_000)
-                now.longValue = System.currentTimeMillis()
+    /** Advances [now] every 30 s only while the app is in the foreground so backgrounded processes stay idle. */
+    @Synchronized
+    fun setActive(active: Boolean) {
+        if (active) {
+            now.longValue = System.currentTimeMillis()
+            if (ticker?.isActive == true) return
+            ticker = scope.launch {
+                while (true) {
+                    kotlinx.coroutines.delay(30_000)
+                    now.longValue = System.currentTimeMillis()
+                }
             }
+        } else {
+            ticker?.cancel()
+            ticker = null
         }
     }
 }

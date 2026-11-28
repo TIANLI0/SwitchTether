@@ -404,7 +404,12 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val prefs by container.notifyPrefsState.collectAsStateWithLifecycle()
     fun update(t: (NotifyPrefs) -> NotifyPrefs) = container.appScope.launch { container.settingsStore.updateNotifyPrefs(t) }
-    var quietPick by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) }
+    var quietPick by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    var knownProjects by remember { mutableStateOf<List<String>>(emptyList()) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        knownProjects = runCatching { container.sessions.list(io.github.tianli0.switchtether.domain.SessionQuery(), limit = 100).items }
+            .getOrNull().orEmpty().mapNotNull { it.project?.takeIf { p -> p.isNotBlank() } }.distinct()
+    }
     QuietTimeSheet(
         title = when (quietPick) {
             QUIET_START -> stringResource(R.string.notif_quiet_start)
@@ -543,13 +548,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
             }
             item { SectionHeader(stringResource(R.string.notif_muted_projects)) }
             item {
-                val container = io.github.tianli0.switchtether.ui.appContainer()
-                var known by remember { mutableStateOf<List<String>>(emptyList()) }
-                androidx.compose.runtime.LaunchedEffect(Unit) {
-                    known = runCatching { container.sessions.list(io.github.tianli0.switchtether.domain.SessionQuery(), limit = 100).items }
-                        .getOrNull().orEmpty().mapNotNull { it.project?.takeIf { p -> p.isNotBlank() } }.distinct()
-                }
-                val projects = (prefs.mutedProjects.toList() + known).distinct()
+                val projects = (prefs.mutedProjects.toList() + knownProjects).distinct()
                 GroupCard {
                     if (projects.isEmpty()) {
                         io.github.suqi8.coui.kmp.basic.BasicComponent(title = stringResource(R.string.notif_muted_projects_empty), cardListPosition = CardListPosition.Full)

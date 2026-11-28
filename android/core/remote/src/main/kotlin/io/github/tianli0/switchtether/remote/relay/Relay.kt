@@ -195,7 +195,7 @@ class WebSocketRelaySocket(
     private val config: RelayConfig,
     private val fingerprint: String,
 ) : Socket() {
-    private val incoming = LinkedBlockingQueue<ByteArray>()
+    private val incoming = LinkedBlockingQueue<ByteArray>(512)
     private val opened = CountDownLatch(1)
     @Volatile private var ws: WebSocket? = null
     @Volatile private var failure: Throwable? = null
@@ -292,7 +292,7 @@ class WebSocketRelaySocket(
                 finish()
             }
         })
-        val waited = if (timeout > 0) opened.await(timeout.toLong(), TimeUnit.MILLISECONDS) else opened.await(30, TimeUnit.SECONDS).let { true }
+        val waited = if (timeout > 0) opened.await(timeout.toLong(), TimeUnit.MILLISECONDS) else opened.await(30, TimeUnit.SECONDS)
         if (!waited) {
             ws?.cancel()
             throw SocketTimeoutException("relay websocket connect timed out")

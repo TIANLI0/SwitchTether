@@ -9,7 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,8 +62,8 @@ import kotlinx.coroutines.withContext
 fun ShareRootEffects(paired: Boolean, verificationPending: Boolean) {
     val container = appContainer()
     val inbox = container.shareInbox
-    val pending by inbox.state.collectAsState()
-    val conn by container.connection.state.collectAsState()
+    val pending by inbox.state.collectAsStateWithLifecycle()
+    val conn by container.connection.state.collectAsStateWithLifecycle()
     val p = pending ?: return
     val route = shareRoute(paired, verificationPending, conn is ConnectionState.Online)
     val context = LocalContext.current.applicationContext
@@ -100,8 +100,8 @@ private fun cancelShare(context: android.content.Context, inbox: ShareInbox) {
 fun ShareHost(nav: Navigator) {
     val container = appContainer()
     val inbox = container.shareInbox
-    val pending by inbox.state.collectAsState()
-    val conn by container.connection.state.collectAsState()
+    val pending by inbox.state.collectAsStateWithLifecycle()
+    val conn by container.connection.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val newSession = newSessionViewModel()
     /** The prompt this share put into the launcher (taken out again if another target is picked). */
@@ -255,7 +255,7 @@ private fun SharedSummary(content: SharedContent) {
 fun ShareIntoComposer(sessionId: String, vm: SessionDetailViewModel, state: SessionDetailState) {
     val container = appContainer()
     val inbox = container.shareInbox
-    val pending by inbox.state.collectAsState()
+    val pending by inbox.state.collectAsStateWithLifecycle()
     val ui = LocalContext.current
     val context = ui.applicationContext
     val scope = rememberCoroutineScope()

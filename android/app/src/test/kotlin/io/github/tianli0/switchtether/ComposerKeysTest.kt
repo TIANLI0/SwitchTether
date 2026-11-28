@@ -49,6 +49,7 @@ class ComposerKeysTest {
                     onBack = {}, onReload = {}, onLoadOlder = {}, onToggleSteps = {}, onDraft = vm::setDraft, onSend = vm::send, onInterrupt = {},
                     onContinue = {}, onRetryConnection = {},
                     onIntake = { p, inField -> intakes += p to inField },
+                    draftFlow = vm.draft,
                 )
             }
         }
@@ -62,7 +63,7 @@ class ComposerKeysTest {
         val vm = show(repo)
         rule.onNodeWithTag("composer").performTextInput("hello")
         rule.waitForIdle()
-        assertEquals("hello", vm.state.value.draft)
+        assertEquals("hello", vm.draft.value)
 
         rule.onNodeWithTag("composer").performKeyInput { pressKey(Key.Enter) }
         rule.waitForIdle()
@@ -72,10 +73,10 @@ class ComposerKeysTest {
         rule.waitForIdle()
         assertEquals(1, repo.sent.size)
         assertEquals("hello", repo.sent.single().second.trim())
-        assertEquals("the field follows the cleared draft", "", vm.state.value.draft)
+        assertEquals("the field follows the cleared draft", "", vm.draft.value)
         rule.onNodeWithTag("composer").performTextInput("next")
         rule.waitForIdle()
-        assertEquals("next", vm.state.value.draft)
+        assertEquals("next", vm.draft.value)
     }
 
     @Test

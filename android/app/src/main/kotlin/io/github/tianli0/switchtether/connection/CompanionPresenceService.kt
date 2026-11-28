@@ -3,7 +3,6 @@ package io.github.tianli0.switchtether.connection
 import android.companion.AssociationInfo
 import android.companion.CompanionDeviceService
 import android.companion.DevicePresenceEvent
-import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import io.github.tianli0.switchtether.SwitchTetherApp
@@ -14,7 +13,6 @@ import io.github.tianli0.switchtether.SwitchTetherApp
  * (REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND); disappearance lets the monitor
  * stop when the user chose "only while the computer is nearby".
  */
-@RequiresApi(Build.VERSION_CODES.S)
 class CompanionPresenceService : CompanionDeviceService() {
 
     private fun container() = (application as? SwitchTetherApp)?.link
@@ -29,18 +27,10 @@ class CompanionPresenceService : CompanionDeviceService() {
         container()?.onCompanionPresence(false)
     }
 
-    @Deprecated("Replaced by onDeviceAppeared(AssociationInfo) on API 33")
-    override fun onDeviceAppeared(address: String) = appeared("address")
-
-    @Deprecated("Replaced by onDeviceDisappeared(AssociationInfo) on API 33")
-    override fun onDeviceDisappeared(address: String) = disappeared("address")
-
     @Deprecated("Replaced by onDevicePresenceEvent on API 36")
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onDeviceAppeared(associationInfo: AssociationInfo) = appeared("association ${associationInfo.id}")
 
     @Deprecated("Replaced by onDevicePresenceEvent on API 36")
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onDeviceDisappeared(associationInfo: AssociationInfo) = disappeared("association ${associationInfo.id}")
 
     @RequiresApi(36)

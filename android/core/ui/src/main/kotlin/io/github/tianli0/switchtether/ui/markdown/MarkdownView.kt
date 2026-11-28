@@ -84,18 +84,26 @@ private fun MdBlockView(
                 4 -> baseBody.copy(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold)
                 else -> baseBody.copy(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
             }
+            val rendered = remember(block.text, colors, onLinkClick, onImageClick) {
+                InlineMarkdown.render(block.text, colors, onLinkClick, onImageClick)
+            }
             Text(
-                InlineMarkdown.render(block.text, colors, onLinkClick, onImageClick),
+                rendered,
                 style = style,
                 color = textColor,
                 modifier = Modifier.padding(top = 4.dp).semantics { heading() },
             )
         }
-        is MdBlock.Paragraph -> Text(
-            InlineMarkdown.render(block.text, colors, onLinkClick, onImageClick),
-            style = baseBody,
-            color = textColor,
-        )
+        is MdBlock.Paragraph -> {
+            val rendered = remember(block.text, colors, onLinkClick, onImageClick) {
+                InlineMarkdown.render(block.text, colors, onLinkClick, onImageClick)
+            }
+            Text(
+                rendered,
+                style = baseBody,
+                color = textColor,
+            )
+        }
         is MdBlock.Code -> CodeBlockView(code = block.code, language = block.language)
         is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
             Box(Modifier.width(3.dp).fillMaxHeight().background(COUITheme.colorScheme.dividerLine))
@@ -124,8 +132,11 @@ private fun MdBlockView(
             if (imageContent != null) {
                 imageContent(block.alt, block.url)
             } else {
+                val fallback = remember(block.alt, block.url, colors, onLinkClick, onImageClick) {
+                    InlineMarkdown.render("![${block.alt}](${block.url})", colors, onLinkClick, onImageClick)
+                }
                 Text(
-                    InlineMarkdown.render("![${block.alt}](${block.url})", colors, onLinkClick, onImageClick),
+                    fallback,
                     style = baseBody,
                     color = textColor,
                 )
@@ -171,8 +182,12 @@ private fun MdTable(
                             Align.END -> TextAlign.End
                             else -> TextAlign.Start
                         }
+                        val cellText = row.getOrElse(c) { "" }
+                        val cellRendered = remember(cellText, colors, onLinkClick, onImageClick) {
+                            InlineMarkdown.render(cellText, colors, onLinkClick, onImageClick)
+                        }
                         Text(
-                            InlineMarkdown.render(row.getOrElse(c) { "" }, colors, onLinkClick, onImageClick),
+                            cellRendered,
                             style = cellStyle,
                             fontWeight = if (r == 0) FontWeight.Bold else null,
                             textAlign = align,
