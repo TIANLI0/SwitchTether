@@ -205,6 +205,8 @@ interface NewSessionPrefs {
     }
     fun model(agent: String): String
     fun setModel(agent: String, model: String)
+    /** Keep [model] as the current choice for [agent] without adding it to [recentModels]. */
+    fun setCurrentModel(agent: String, model: String) = setModel(agent, model)
     /** Models used before with [agent], newest first. */
     fun recentModels(agent: String): List<String>
     fun effort(agent: String): String = ""
@@ -228,6 +230,9 @@ interface NewSessionPrefs {
             if (model.isNotBlank()) recents[agent] = (listOf(model) + recentModels(agent).filter { it != model }).take(5)
         }
         override fun recentModels(agent: String) = recents[agent].orEmpty()
+        override fun setCurrentModel(agent: String, model: String) {
+            models[agent] = model
+        }
         private val efforts = mutableMapOf<String, String>()
         override fun effort(agent: String) = efforts[agent].orEmpty()
         override fun setEffort(agent: String, effort: String) { efforts[agent] = effort }
@@ -258,6 +263,9 @@ class SharedNewSessionPrefs(context: android.content.Context) : NewSessionPrefs 
     }
     override fun recentModels(agent: String): List<String> =
         p.getString("recent_models.$agent", "").orEmpty().split('\n').filter { it.isNotBlank() }
+    override fun setCurrentModel(agent: String, model: String) {
+        p.edit().putString("model.$agent", model).apply()
+    }
     override fun effort(agent: String): String = p.getString("effort.$agent", "").orEmpty()
     override fun setEffort(agent: String, effort: String) {
         p.edit().putString("effort.$agent", effort).apply()
@@ -372,8 +380,16 @@ class NewSessionViewModel(
         if (_state.value.connection is ConnectionState.Online) loadModelOptions()
     }
     fun setPrompt(t: String) = _state.update { it.copy(prompt = t) }
-    fun setModel(t: String) = _state.update { it.copy(model = t) }
-    fun setEffort(e: String) = _state.update { it.copy(effort = e) }
+    // Kept as soon as they are chosen (like the permission mode), not only when a session starts:
+    // a launcher closed without starting must not forget the choice.
+    fun setModel(t: String) {
+        _state.update { it.copy(model = t) }
+        prefs.setCurrentModel(_state.value.agent, t.trim())
+    }
+    fun setEffort(e: String) {
+        _state.update { it.copy(effort = e) }
+        prefs.setEffort(_state.value.agent, e)
+    }
     fun setPermissionMode(m: String) {
         prefs.setPermissionMode(_state.value.agent, m)
         _state.update { it.copy(permissionMode = m) }

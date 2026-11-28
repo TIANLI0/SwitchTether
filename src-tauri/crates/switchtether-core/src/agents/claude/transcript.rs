@@ -928,23 +928,11 @@ impl ClaudeParser {
                     out.push(fc);
                 }
             }
-            // TaskStop / KillShell stopped a background shell: no notification follows, so the
-            // shell's row is marked interrupted here.
+            // TaskStop / KillShell stopped a background task: no notification follows a stopped
+            // shell, so its row is marked interrupted here (a stopped agent's row too).
             if !is_error && matches!(name.as_str(), "TaskStop" | "KillShell" | "KillBash") {
-                let task = s(st, "task_id").or_else(|| s(st, "shell_id"));
-                if let Some(bg_call) = task.and_then(|t| self.bg_shells.remove(&t)) {
-                    if let Some(tc) = self.tools.get_mut(&bg_call) {
-                        tc.data["status"] = json!("interrupted");
-                        tc.data["finishedAt"] = json!(ts);
-                        let mut d = EventDraft::new(
-                            tc.event_id.clone(),
-                            "tool_call",
-                            tc.ts.clone(),
-                            tc.data.clone(),
-                        );
-                        d.turn_id = tc.turn_id.clone();
-                        out.push(d);
-                    }
+                if let Some(task) = s(st, "task_id").or_else(|| s(st, "shell_id")) {
+                    out.extend(self.task_stopped(&task, ts));
                 }
             }
             // `SendMessage` to a finished (or failed, stopped) agent resumes it: its row runs again
@@ -955,6 +943,45 @@ impl ClaudeParser {
             // Sub-agent result → subagent event (linked under the Task/Agent tool_call).
             if (name == "Task" || name == "Agent") && st.get("agentId").is_some() {
                 out.push(self.subagent_started(call_id, is_error, text, st, turn, ts));
+            }
+        }
+        out
+    }
+
+    /// A background task was stopped — by the model (TaskStop / KillShell) or from the phone's agent
+    /// map (`stop_task`) — and no notification follows a stopped shell: its `tool_call` row, or the
+    /// sub-agent's row, is marked `interrupted` so the session stops counting it as running work.
+    pub fn task_stopped(&mut self, task_id: &str, ts: &str) -> Vec<EventDraft> {
+        let mut out = Vec::new();
+        if let Some(bg_call) = self.bg_shells.remove(task_id) {
+            if let Some(tc) = self.tools.get_mut(&bg_call) {
+                if tc.data.get("status").and_then(Value::as_str) == Some("running") {
+                    tc.data["status"] = json!("interrupted");
+                    tc.data["finishedAt"] = json!(ts);
+                    let mut d = EventDraft::new(
+                        tc.event_id.clone(),
+                        "tool_call",
+                        tc.ts.clone(),
+                        tc.data.clone(),
+                    );
+                    d.turn_id = tc.turn_id.clone();
+                    out.push(d);
+                }
+            }
+        }
+        let call = self.agent_calls.get(task_id).cloned().or_else(|| {
+            self.subagents
+                .iter()
+                .find(|(_, r)| r.data.get("agentId").and_then(Value::as_str) == Some(task_id))
+                .map(|(c, _)| c.clone())
+        });
+        if let Some(call) = call {
+            if let Some(row) = self.subagents.get_mut(&call) {
+                if row.data.get("status").and_then(Value::as_str) == Some("running") {
+                    row.data["status"] = json!("interrupted");
+                    row.data["finishedAt"] = json!(ts);
+                    out.push(Self::subagent_draft(&call, row));
+                }
             }
         }
         out
@@ -2167,6 +2194,33 @@ mod tests {
             .find(|d| d.kind == "tool_call" && d.data["taskId"] == "bg2")
             .expect("background row updated");
         assert_eq!(bg.data["status"], "interrupted");
+    }
+
+    #[test]
+    fn stopping_a_task_from_the_phone_interrupts_its_row() {
+        let mut p = ClaudeParser::new();
+        // A background shell: no notification follows its stop.
+        p.feed(&bash_call("toolu_b"));
+        p.feed(&json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"started"}]},
+            "toolUseResult":{"stdout":"","backgroundTaskId":"bg3"}}));
+        let out = p.task_stopped("bg3", "2026-11-28T15:00:00Z");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].data["status"], "interrupted");
+        assert!(
+            p.task_stopped("bg3", "2026-11-28T15:00:01Z").is_empty(),
+            "only once"
+        );
+        // A background agent, by its agent id.
+        p.feed(&agent_call("toolu_1", true));
+        p.feed(&json!({"type":"user","uuid":"u2",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Async agent launched"}]},
+            "toolUseResult":{"agentId":"a77","status":"async_launched","isAsync":true}}));
+        let out = p.task_stopped("a77", "2026-11-28T15:00:02Z");
+        let row = out
+            .iter()
+            .find(|d| d.kind == "subagent")
+            .expect("agent row updated");
+        assert_eq!(row.data["status"], "interrupted");
     }
 
     #[test]

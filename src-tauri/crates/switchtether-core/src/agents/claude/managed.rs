@@ -983,8 +983,18 @@ impl ManagedClaude {
             json!({ "subtype": "stop_task", "task_id": task_id }),
             Duration::from_secs(15),
         )
-        .await
-        .map(|_| ())
+        .await?;
+        // A stopped shell sends no task notification: mark its row (or the agent's) interrupted
+        // now, or the session keeps showing it as background work still running.
+        let drafts = self
+            .parser
+            .lock()
+            .task_stopped(task_id, &crate::util::now_rfc3339());
+        let mut log = self.log.lock();
+        for d in drafts.into_iter().filter(own_card_only) {
+            log.upsert(d, true);
+        }
+        Ok(())
     }
 
     pub async fn interrupt(&self) -> ApiResult<()> {

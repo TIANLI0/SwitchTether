@@ -241,12 +241,47 @@ fn valid_effort(agent: &str, e: &str) -> bool {
     }
 }
 
-/// Options for the next start of a conversation that is not running (see `AgentHub::next_start`).
-#[derive(Debug, Clone, Default)]
+/// Options for the next start of a conversation that is not running (see `AgentHub::next_start`),
+/// and the options a conversation last ran with (`AgentHub::remembered`).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct NextStart {
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<String>,
+    /// Chosen on the phone while not running (`None` above then means "back to the default",
+    /// not "unchanged"), so the previous run's choice must not fill it in.
+    #[serde(skip)]
+    model_set: bool,
+    #[serde(skip)]
+    effort_set: bool,
+    #[serde(skip)]
+    permission_mode_set: bool,
+}
+
+impl NextStart {
+    /// What a session runs with now (model, effort, permission mode).
+    fn of(m: &dyn ManagedSession) -> Self {
+        Self {
+            model: m.model(),
+            effort: m.effort(),
+            permission_mode: m.permission_mode().filter(|p| p != "default"),
+            ..Self::default()
+        }
+    }
+
+    /// Fill what the phone did not choose from [`previous`].
+    fn or_previous(mut self, previous: NextStart) -> Self {
+        if !self.model_set {
+            self.model = self.model.or(previous.model);
+        }
+        if !self.effort_set {
+            self.effort = self.effort.or(previous.effort);
+        }
+        if !self.permission_mode_set {
+            self.permission_mode = self.permission_mode.or(previous.permission_mode);
+        }
+        self
+    }
 }
 
 pub struct AgentHub {
@@ -271,6 +306,12 @@ pub struct AgentHub {
     /// Model / effort / permission mode chosen on the phone for a conversation that is not
     /// running: applied when sending a message resumes it (session id -> options).
     next_start: Mutex<HashMap<String, NextStart>>,
+    /// The model / effort / permission mode each conversation last ran with under SwitchTether
+    /// (session id -> options), kept in `<data dir>/session-options.json` so a conversation
+    /// resumed after its process ended — even after the desktop restarted — keeps what the phone
+    /// chose instead of falling back to the agent's defaults.
+    remembered: Mutex<HashMap<String, NextStart>>,
+    remembered_path: RwLock<Option<PathBuf>>,
     /// The agents' own model lists (Claude Code initialize, Codex `model/list`), read by a short
     /// SwitchTether-owned probe process and cached (agent -> (when, list)).
     model_lists: Mutex<HashMap<String, (Instant, Value)>>,
@@ -323,6 +364,8 @@ impl AgentHub {
             loaded: Mutex::new(HashMap::new()),
             subagent_logs: Mutex::new(HashMap::new()),
             next_start: Mutex::new(HashMap::new()),
+            remembered: Mutex::new(HashMap::new()),
+            remembered_path: RwLock::new(None),
             model_lists: Mutex::new(HashMap::new()),
             dsh_children: Mutex::new(HashMap::new()),
             dsh_turns: Mutex::new(HashMap::new()),
@@ -338,6 +381,36 @@ impl AgentHub {
     pub fn set_attachment_root(&self, root: PathBuf) {
         let _ = std::fs::create_dir_all(&root);
         *self.attachments.write() = Some(Arc::new(attachments::AttachmentStore::new(root)));
+    }
+
+    /// Where the options conversations last ran with are kept (`<data dir>/session-options.json`).
+    pub fn set_session_options_file(&self, path: PathBuf) {
+        if let Some(map) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<HashMap<String, NextStart>>(&t).ok())
+        {
+            *self.remembered.lock() = map;
+        }
+        *self.remembered_path.write() = Some(path);
+    }
+
+    /// Record what session [`id`] runs with now, for a later resume.
+    fn remember_options(&self, id: &str) {
+        let Some((_, m)) = self.find_managed(id) else {
+            return;
+        };
+        let options = NextStart::of(m.as_ref());
+        let text = {
+            let mut r = self.remembered.lock();
+            r.insert(id.to_string(), options);
+            serde_json::to_string(&*r).ok()
+        };
+        if let (Some(path), Some(text)) = (self.remembered_path.read().clone(), text) {
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, text).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
     }
 
     pub fn attachments(&self) -> ApiResult<Arc<attachments::AttachmentStore>> {
@@ -1730,6 +1803,9 @@ impl AgentHub {
             if matches!(action, "rename" | "permission_mode") {
                 self.publish_session(&key);
             }
+            if action == "permission_mode" {
+                self.remember_options(id);
+            }
             return Ok(match action {
                 "commands" => command_catalog(claude::managed::normalize_commands(&r)),
                 _ => r,
@@ -1768,6 +1844,7 @@ impl AgentHub {
             "commands" => Ok(command_catalog(m.claude_commands())),
             "permission_mode" => {
                 let mode = m.set_permission_mode(&arg("mode")?).await?;
+                self.remember_options(id);
                 Ok(json!({ "mode": mode }))
             }
             "context_usage" => {
@@ -1994,11 +2071,12 @@ impl AgentHub {
                 .and_then(Value::as_str)
                 .and_then(|m| permission::normalize(&s.agent, m))
                 .ok_or_else(|| ApiError::validation("unknown permission mode"))?;
-            self.next_start
-                .lock()
-                .entry(id.to_string())
-                .or_default()
-                .permission_mode = Some(mode.to_string()).filter(|m| m != "default");
+            {
+                let mut pending = self.next_start.lock();
+                let entry = pending.entry(id.to_string()).or_default();
+                entry.permission_mode = Some(mode.to_string()).filter(|m| m != "default");
+                entry.permission_mode_set = true;
+            }
             return Ok(json!({ "mode": mode, "pending": true }));
         }
         if s.agent == "agy" {
@@ -2879,6 +2957,7 @@ impl AgentHub {
         }
         // A history view of this conversation must not tail the transcript a second time.
         self.loaded.lock().remove(&id);
+        self.remember_options(&id);
         if let Some(p) = req.prompt.as_deref().filter(|p| !p.trim().is_empty()) {
             session.send_message(p).await?;
         }
@@ -2897,17 +2976,22 @@ impl AgentHub {
             }
         }
         if let Some(s) = self.resumable(id).await {
-            // What the phone chose while it was not running.
-            let mut next = self.next_start.lock().remove(id).unwrap_or_default();
-            // Antigravity keeps no model or mode with the conversation: a run of it that ended
-            // here passes its own choices on.
-            if let Some((_, m)) = self.find_managed(id).filter(|(_, m)| m.agent() == "agy") {
-                next.model = next.model.or_else(|| m.model());
-                next.effort = next.effort.or_else(|| m.effort());
-                next.permission_mode = next
-                    .permission_mode
-                    .or_else(|| m.permission_mode().filter(|p| p != "default"));
-            }
+            // What the phone chose while it was not running, then what the conversation last ran
+            // with: the run that ended here, or — after the desktop restarted — the remembered
+            // options. `claude --resume`, `thread/resume` and `session/resume` restore the history
+            // but start on the agent's defaults, so a model, effort or mode switched mid-session
+            // was otherwise lost on the next message.
+            let previous = self
+                .find_managed(id)
+                .map(|(_, m)| NextStart::of(m.as_ref()))
+                .or_else(|| self.remembered.lock().get(id).cloned())
+                .unwrap_or_default();
+            let next = self
+                .next_start
+                .lock()
+                .remove(id)
+                .unwrap_or_default()
+                .or_previous(previous);
             let summary = self
                 .create_managed(CreateSession {
                     agent: s.agent.clone(),
@@ -3019,12 +3103,15 @@ impl AgentHub {
             let entry = pending.entry(id.to_string()).or_default();
             if let Some(m) = model {
                 entry.model = m;
+                entry.model_set = true;
             }
             if let Some(e) = effort {
                 entry.effort = e;
+                entry.effort_set = true;
             }
             if let Some(m) = mode {
                 entry.permission_mode = Some(m.to_string()).filter(|m| m != "default");
+                entry.permission_mode_set = true;
             }
             s.model = entry.model.clone().or(s.model);
             s.effort = entry.effort.clone();
@@ -3059,6 +3146,7 @@ impl AgentHub {
             }
             m.set_effort(effort).await?;
         }
+        self.remember_options(id);
         let summary = self.managed_summary(&key, m.as_ref());
         self.bus.publish("session.upserted", json!(summary));
         Ok(summary)
@@ -4490,6 +4578,61 @@ mod tests {
     use super::*;
     use crate::backend::UnavailableBackend;
 
+    #[test]
+    fn resume_options_fill_unchosen_from_the_previous_run() {
+        let previous = NextStart {
+            model: Some("opus".into()),
+            effort: Some("high".into()),
+            permission_mode: Some("acceptEdits".into()),
+            ..NextStart::default()
+        };
+        // Nothing chosen while the conversation was not running: the previous run's options.
+        let next = NextStart::default().or_previous(previous.clone());
+        assert_eq!(next.model.as_deref(), Some("opus"));
+        assert_eq!(next.effort.as_deref(), Some("high"));
+        assert_eq!(next.permission_mode.as_deref(), Some("acceptEdits"));
+        // Chosen on the phone: a new model wins, "back to the default" stays the default.
+        let chosen = NextStart {
+            model: Some("sonnet".into()),
+            model_set: true,
+            effort: None,
+            effort_set: true,
+            ..NextStart::default()
+        };
+        let next = chosen.or_previous(previous);
+        assert_eq!(next.model.as_deref(), Some("sonnet"));
+        assert_eq!(next.effort, None);
+        assert_eq!(next.permission_mode.as_deref(), Some("acceptEdits"));
+    }
+
+    #[test]
+    fn remembered_options_survive_a_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("session-options.json");
+        let mut map = HashMap::new();
+        map.insert(
+            "s1".to_string(),
+            NextStart {
+                model: Some("opus".into()),
+                effort: Some("max".into()),
+                permission_mode: None,
+                ..NextStart::default()
+            },
+        );
+        std::fs::write(&path, serde_json::to_string(&map).unwrap()).unwrap();
+        let hub = AgentHub::new(
+            EventBus::new(8),
+            Arc::new(UnavailableBackend),
+            ClaudeObserver::new(tmp.path().to_path_buf(), None),
+        );
+        hub.set_session_options_file(path);
+        let got = hub.remembered.lock().get("s1").cloned().unwrap();
+        assert_eq!(got.model.as_deref(), Some("opus"));
+        assert_eq!(got.effort.as_deref(), Some("max"));
+        // Loaded options are previous-run values, never phone choices.
+        assert!(!got.model_set && !got.effort_set && !got.permission_mode_set);
+    }
+
     #[tokio::test]
     async fn transcript_tail_appends_live_events() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5823,6 +5966,8 @@ mod tests {
             probe_log: Arc::new(Mutex::new(SessionLog::new("probe", None))),
             subagent_logs: Mutex::new(HashMap::new()),
             next_start: Mutex::new(HashMap::new()),
+            remembered: Mutex::new(HashMap::new()),
+            remembered_path: RwLock::new(None),
             model_lists: Mutex::new(HashMap::new()),
             index_cache: Mutex::new(None),
             title_cache: Mutex::new(HashMap::new()),

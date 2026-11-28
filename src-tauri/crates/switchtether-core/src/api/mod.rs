@@ -81,6 +81,7 @@ impl ApiContext {
     ) -> Arc<Self> {
         // Files attached from the phone live in SwitchTether's own data directory.
         agents.set_attachment_root(config.data_dir.join("attachments"));
+        agents.set_session_options_file(config.data_dir.join("session-options.json"));
         let push = crate::push::PushWaker::new(
             registry.clone(),
             Arc::new(crate::push::HttpSender::default()),
