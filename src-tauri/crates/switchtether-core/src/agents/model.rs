@@ -334,6 +334,215 @@ pub fn diff_stats(diff: &str) -> (u32, u32) {
     (a, d)
 }
 
+#[derive(Clone, Copy)]
+enum DiffOp {
+    Equal(usize, usize),
+    Delete(usize),
+    Insert(usize),
+}
+
+/// Build a standard unified diff (`--- a/…`, `+++ b/…`, `@@ -a,b +c,d @@`) from `old` and `new`
+/// file contents, returning `(diff_text, additions, deletions)`.
+///
+/// When `old` is `None` (a newly added file), emits a single `+` hunk against `/dev/null`.
+/// For modifications, trims unchanged prefix/suffix lines first and computes an LCS diff over
+/// the changed window (falling back to a single replace hunk if the changed window is very large),
+/// emitting hunks with 3 lines of surrounding context.
+pub fn unified_diff(path: &str, old: Option<&str>, new: &str) -> (String, u32, u32) {
+    let new_lines: Vec<&str> = new.lines().collect();
+    let Some(old_text) = old else {
+        if new_lines.is_empty() {
+            return (format!("--- /dev/null\n+++ b/{path}\n"), 0, 0);
+        }
+        let mut out = format!(
+            "--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@\n",
+            new_lines.len()
+        );
+        for l in &new_lines {
+            out.push('+');
+            out.push_str(l);
+            out.push('\n');
+        }
+        return (out, new_lines.len() as u32, 0);
+    };
+
+    let old_lines: Vec<&str> = old_text.lines().collect();
+    if old_lines == new_lines {
+        return (String::new(), 0, 0);
+    }
+
+    let min_len = old_lines.len().min(new_lines.len());
+    let mut pre = 0usize;
+    while pre < min_len && old_lines[pre] == new_lines[pre] {
+        pre += 1;
+    }
+    let mut suf = 0usize;
+    while suf < min_len - pre
+        && old_lines[old_lines.len() - 1 - suf] == new_lines[new_lines.len() - 1 - suf]
+    {
+        suf += 1;
+    }
+
+    let a_end = old_lines.len() - suf;
+    let b_end = new_lines.len() - suf;
+    let a = &old_lines[pre..a_end];
+    let b = &new_lines[pre..b_end];
+
+    let mut ops: Vec<DiffOp> = Vec::with_capacity(old_lines.len() + new_lines.len());
+    for i in 0..pre {
+        ops.push(DiffOp::Equal(i, i));
+    }
+
+    const MAX_LCS_CELLS: usize = 500_000;
+    if !a.is_empty() && !b.is_empty() && a.len().saturating_mul(b.len()) <= MAX_LCS_CELLS {
+        let n = a.len();
+        let m = b.len();
+        let cols = m + 1;
+        let mut dp = vec![0u32; (n + 1) * cols];
+        for i in (0..n).rev() {
+            let row = i * cols;
+            let next_row = (i + 1) * cols;
+            for j in (0..m).rev() {
+                dp[row + j] = if a[i] == b[j] {
+                    dp[next_row + j + 1] + 1
+                } else {
+                    dp[next_row + j].max(dp[row + j + 1])
+                };
+            }
+        }
+        let (mut i, mut j) = (0usize, 0usize);
+        while i < n && j < m {
+            if a[i] == b[j] {
+                ops.push(DiffOp::Equal(pre + i, pre + j));
+                i += 1;
+                j += 1;
+            } else if dp[(i + 1) * cols + j] >= dp[i * cols + j + 1] {
+                ops.push(DiffOp::Delete(pre + i));
+                i += 1;
+            } else {
+                ops.push(DiffOp::Insert(pre + j));
+                j += 1;
+            }
+        }
+        while i < n {
+            ops.push(DiffOp::Delete(pre + i));
+            i += 1;
+        }
+        while j < m {
+            ops.push(DiffOp::Insert(pre + j));
+            j += 1;
+        }
+    } else {
+        for i in pre..a_end {
+            ops.push(DiffOp::Delete(i));
+        }
+        for j in pre..b_end {
+            ops.push(DiffOp::Insert(j));
+        }
+    }
+
+    for k in 0..suf {
+        ops.push(DiffOp::Equal(a_end + k, b_end + k));
+    }
+
+    // Group changes into hunks with 3 lines of context.
+    const CONTEXT: usize = 3;
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut idx = 0usize;
+    while idx < ops.len() {
+        if matches!(ops[idx], DiffOp::Equal(_, _)) {
+            idx += 1;
+            continue;
+        }
+        let start = idx.saturating_sub(CONTEXT);
+        let mut end = idx;
+        while end < ops.len() {
+            if !matches!(ops[end], DiffOp::Equal(_, _)) {
+                end += 1;
+                continue;
+            }
+            // Look ahead: merge if another change appears within 2 * CONTEXT equal lines.
+            let eq_start = end;
+            while end < ops.len() && matches!(ops[end], DiffOp::Equal(_, _)) {
+                end += 1;
+            }
+            if end < ops.len() && end - eq_start <= 2 * CONTEXT {
+                continue;
+            }
+            end = (eq_start + CONTEXT).min(ops.len());
+            break;
+        }
+        ranges.push((start, end));
+        idx = end;
+    }
+
+    let mut out = format!("--- a/{path}\n+++ b/{path}\n");
+    let mut additions = 0u32;
+    let mut deletions = 0u32;
+
+    for (start, end) in ranges {
+        let slice = &ops[start..end];
+        let mut old_count = 0usize;
+        let mut new_count = 0usize;
+        let mut first_old: Option<usize> = None;
+        let mut first_new: Option<usize> = None;
+        for op in slice {
+            match *op {
+                DiffOp::Equal(oi, ni) => {
+                    first_old.get_or_insert(oi);
+                    first_new.get_or_insert(ni);
+                    old_count += 1;
+                    new_count += 1;
+                }
+                DiffOp::Delete(oi) => {
+                    first_old.get_or_insert(oi);
+                    old_count += 1;
+                }
+                DiffOp::Insert(ni) => {
+                    first_new.get_or_insert(ni);
+                    new_count += 1;
+                }
+            }
+        }
+        let old_start = if old_count == 0 {
+            first_old.unwrap_or(0)
+        } else {
+            first_old.unwrap_or(0) + 1
+        };
+        let new_start = if new_count == 0 {
+            first_new.unwrap_or(0)
+        } else {
+            first_new.unwrap_or(0) + 1
+        };
+        out.push_str(&format!(
+            "@@ -{old_start},{old_count} +{new_start},{new_count} @@\n"
+        ));
+        for op in slice {
+            match *op {
+                DiffOp::Equal(oi, _) => {
+                    out.push(' ');
+                    out.push_str(old_lines[oi]);
+                    out.push('\n');
+                }
+                DiffOp::Delete(oi) => {
+                    deletions += 1;
+                    out.push('-');
+                    out.push_str(old_lines[oi]);
+                    out.push('\n');
+                }
+                DiffOp::Insert(ni) => {
+                    additions += 1;
+                    out.push('+');
+                    out.push_str(new_lines[ni]);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    (out, additions, deletions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -236,6 +236,27 @@ fn clip(text: &str, max: usize) -> (String, bool) {
     (p, truncated)
 }
 
+/// Normalize Windows file-URI-style paths ACP emits (`/d:/develop/...` -> `d:/develop/...`).
+pub(crate) fn normalize_acp_path(path: &str) -> String {
+    if let Some(stripped) = path.strip_prefix('/') {
+        let b = stripped.as_bytes();
+        if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+            return stripped.to_string();
+        }
+    }
+    path.to_string()
+}
+
+fn normalize_acp_title(title: &str) -> String {
+    if let Some(rest) = title.strip_prefix("File ") {
+        let norm = normalize_acp_path(rest);
+        if norm != rest {
+            return format!("File {norm}");
+        }
+    }
+    normalize_acp_path(title)
+}
+
 /// Tool category of an ACP tool call (`kind`, with agy's tool name as a hint).
 fn category(kind: Option<&str>, name: Option<&str>) -> &'static str {
     match (kind, name) {
@@ -245,8 +266,8 @@ fn category(kind: Option<&str>, name: Option<&str>) -> &'static str {
         (
             _,
             Some(
-                "invoke_subagent" | "manage_task" | "manage_subagents" | "send_message"
-                | "schedule" | "run_workflow",
+                "invoke_subagent" | "define_subagent" | "manage_task" | "manage_subagents"
+                | "send_message" | "schedule" | "run_workflow" | "swarm",
             ),
         ) => "task",
         (_, Some(n))
@@ -317,7 +338,12 @@ pub struct AcpMapper {
     block: u64,
     turn: u64,
     open: Option<(Open, String, String)>,
+    /// True after [`AcpMapper::start_turn_with_user`] recorded the phone's user message so an
+    /// optional `user_message_chunk` echo from `agy acp` is not duplicated.
+    skip_user_echo: bool,
     tools: HashMap<String, Value>,
+    /// Subagent `conversationId` -> spawning `toolCallId`.
+    subagent_calls: HashMap<String, String>,
     model: Option<String>,
 }
 
@@ -404,18 +430,29 @@ impl AcpMapper {
             .unwrap_or_default()
         {
             "user_message_chunk" => {
+                if self.skip_user_echo {
+                    return;
+                }
                 let t = text();
                 if update.pointer("/content/type").and_then(Value::as_str) == Some("text") {
                     self.chunk(Open::User, &t, log, publish);
                 }
             }
-            "agent_message_chunk" => self.chunk(Open::Assistant, &text(), log, publish),
-            "agent_thought_chunk" => self.chunk(Open::Reasoning, &text(), log, publish),
+            "agent_message_chunk" => {
+                self.skip_user_echo = false;
+                self.chunk(Open::Assistant, &text(), log, publish);
+            }
+            "agent_thought_chunk" => {
+                self.skip_user_echo = false;
+                self.chunk(Open::Reasoning, &text(), log, publish);
+            }
             "tool_call" | "tool_call_update" => {
+                self.skip_user_echo = false;
                 self.close(log, publish);
                 self.tool(update, log, publish);
             }
             "plan" => {
+                self.skip_user_echo = false;
                 self.close(log, publish);
                 let items: Vec<Value> = update
                     .get("entries")
@@ -484,17 +521,19 @@ impl AcpMapper {
             .into_iter()
             .flatten()
             .filter_map(|l| l.get("path").and_then(Value::as_str))
-            .map(|p| json!({ "path": p }))
+            .map(|p| json!({ "path": normalize_acp_path(p) }))
             .collect();
-        let title = merged
-            .get("title")
-            .and_then(Value::as_str)
-            .or(name)
-            .unwrap_or("Tool");
+        let title = normalize_acp_title(
+            merged
+                .get("title")
+                .and_then(Value::as_str)
+                .or(name)
+                .unwrap_or("Tool"),
+        );
         let mut data = json!({
             "callId": call_id,
             "name": name.unwrap_or("tool"),
-            "title": crate::redact::redact_text(title),
+            "title": crate::redact::redact_text(&title),
             "category": category(kind, name),
             "input": input,
             "status": status,
@@ -579,30 +618,33 @@ impl AcpMapper {
             .enumerate()
         {
             emitted_diff = true;
+            let raw_path = diff.get("path").and_then(Value::as_str).unwrap_or("");
+            let path = normalize_acp_path(raw_path);
             let new = diff.get("newText").and_then(Value::as_str).unwrap_or("");
             let old = diff.get("oldText").and_then(Value::as_str);
-            let mut text = String::new();
-            for l in old.unwrap_or("").lines() {
-                text.push_str(&format!("-{l}\n"));
+            let (raw_diff, additions, deletions) = super::model::unified_diff(&path, old, new);
+            if old.is_some() && raw_diff.is_empty() {
+                continue;
             }
-            for l in new.lines() {
-                text.push_str(&format!("+{l}\n"));
-            }
-            let (p, truncated) = clip(&crate::redact::redact_text(&text), 16 * 1024);
+            let redacted = crate::redact::redact_text(&raw_diff);
+            let (p, truncated) = clip(&redacted, 256 * 1024);
             let mut f = EventDraft::new(
                 format!("fc:{call_id}:{i}"),
                 "file_change",
                 crate::util::now_rfc3339(),
                 json!({
                     "callId": call_id,
-                    "path": diff.get("path"),
+                    "path": crate::redact::redact_text(&path),
                     "change": if old.is_none() { "add" } else { "modify" },
                     "diff": p,
-                    "additions": new.lines().count(),
-                    "deletions": old.map_or(0, |o| o.lines().count()),
+                    "additions": additions,
+                    "deletions": deletions,
                     "truncated": truncated,
                 }),
             );
+            if truncated {
+                f.payload = Some(redacted);
+            }
             f.parent_id = Some(tc_event_id.clone());
             f.turn_id = Some(self.turn_id());
             log.upsert(f, publish);
@@ -643,6 +685,12 @@ impl AcpMapper {
                         .get("TypeName")
                         .and_then(Value::as_str)
                         .unwrap_or("subagent");
+                    let model = input
+                        .get("Model")
+                        .and_then(Value::as_str)
+                        .filter(|m| !m.is_empty() && *m != "inherit");
+                    self.subagent_calls
+                        .insert(agent_id.clone(), call_id.clone());
                     let mut sa = EventDraft::new(
                         format!("sa:{call_id}"),
                         "subagent",
@@ -651,6 +699,7 @@ impl AcpMapper {
                             "agentId": agent_id,
                             "description": crate::redact::redact_text(role),
                             "agentType": agent_type,
+                            "model": model,
                             "background": true,
                             "status": if status == "failed" { "failed" } else { "running" },
                             "callId": call_id,
@@ -659,6 +708,44 @@ impl AcpMapper {
                     sa.parent_id = Some(tc_event_id.clone());
                     sa.turn_id = Some(self.turn_id());
                     log.upsert(sa, publish);
+                }
+            } else if name == Some("manage_subagents") && status == "completed" {
+                let action = input.get("Action").and_then(Value::as_str).unwrap_or("");
+                let targets: Vec<String> = if action == "kill_all" {
+                    self.subagent_calls.values().cloned().collect()
+                } else if action == "kill" {
+                    input
+                        .get("ConversationIds")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .filter_map(|aid| self.subagent_calls.get(aid).cloned())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let now = crate::util::now_rfc3339();
+                for target_call in targets {
+                    log.update(&format!("sa:{target_call}"), publish, |e| {
+                        if e.data.get("status").and_then(Value::as_str) == Some("running") {
+                            e.data["status"] = json!("interrupted");
+                            e.data["finishedAt"] = json!(now);
+                        }
+                    });
+                }
+            } else if name == Some("send_message") && status == "completed" {
+                if let Some(recipient) = input.get("Recipient").and_then(Value::as_str) {
+                    if let Some(target_call) = self.subagent_calls.get(recipient).cloned() {
+                        log.update(&format!("sa:{target_call}"), publish, |e| {
+                            if e.data.get("status").and_then(Value::as_str) != Some("running") {
+                                e.data["status"] = json!("running");
+                                if let Some(obj) = e.data.as_object_mut() {
+                                    obj.remove("finishedAt");
+                                }
+                            }
+                        });
+                    }
                 }
             }
             let out = crate::redact::redact_text(&out);
@@ -699,6 +786,7 @@ impl AcpMapper {
         publish: bool,
     ) {
         self.close(log, publish);
+        self.skip_user_echo = false;
         let cancelled = stop_reason == "cancelled";
         let unfinished: Vec<String> = self
             .tools
@@ -761,6 +849,45 @@ impl AcpMapper {
             ),
             publish,
         );
+    }
+
+    /// Record the user's outgoing message immediately when `session/prompt` is sent, so versions
+    /// of `agy acp` that do not echo `user_message_chunk` (or drop image blocks from the echo)
+    /// still show the user's message and reconcile the phone's optimistic bubble.
+    pub fn start_turn_with_user(
+        &mut self,
+        text: &str,
+        images: &[super::managed::ImageAttachment],
+        log: &mut SessionLog,
+        publish: bool,
+    ) {
+        self.close(log, publish);
+        self.turn += 1;
+        self.block += 1;
+        let id = format!("agy-{}-b{}", self.run, self.block);
+        let image_items: Vec<Value> = images
+            .iter()
+            .take(4)
+            .map(|img| {
+                json!({
+                    "mediaType": img.media_type,
+                    "data": img.data_base64,
+                })
+            })
+            .collect();
+        let mut data = json!({
+            "text": text,
+            "source": "phone",
+        });
+        if !image_items.is_empty() {
+            data["images"] = json!(image_items.len());
+            data["imageItems"] = json!(image_items);
+        }
+        let mut d = EventDraft::new(id, "user_message", crate::util::now_rfc3339(), data);
+        d.turn_id = Some(self.turn_id());
+        log.upsert(d, publish);
+        self.skip_user_echo = true;
+        self.start_turn(log, publish);
     }
 }
 
@@ -995,10 +1122,95 @@ mod tests {
         let fc = log.iter().find(|e| e.kind == "file_change").unwrap();
         assert_eq!(fc.data["change"], "add");
         assert_eq!(fc.data["additions"], 1);
+        assert_eq!(fc.data["path"], "C:/w/hello.txt");
+        let diff_str = fc.data["diff"].as_str().unwrap();
+        assert!(diff_str.contains("--- /dev/null"));
+        assert!(diff_str.contains("+++ b/C:/w/hello.txt"));
+        assert!(diff_str.contains("@@ -0,0 +1,1 @@"));
         assert_eq!(fc.parent_id.as_deref(), Some("tc:w1"));
         let tc = log.get("tc:w1").unwrap();
         assert_eq!(tc.data["category"], "write");
-        assert_eq!(tc.data["files"][0]["path"], "/C:/w/hello.txt");
+        assert_eq!(tc.data["files"][0]["path"], "C:/w/hello.txt");
+    }
+
+    #[test]
+    fn acp_whole_file_diff_produces_compact_unified_diff_and_normalizes_windows_paths() {
+        let mut old_lines: Vec<String> = (1..=651).map(|i| format!("line {i}")).collect();
+        let old = old_lines.join("\n");
+        old_lines[54] = "line 55 edited".into();
+        old_lines.insert(55, "inserted A".into());
+        old_lines.insert(56, "inserted B".into());
+        let new = old_lines.join("\n");
+
+        let mut log = SessionLog::new("agy:x", None);
+        let mut m = AcpMapper::new("r1");
+        m.apply(
+            &json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "e1",
+                "name": "edit_file",
+                "status": "completed",
+                "kind": "edit",
+                "title": "File /d:/develop/SwitchTether/live.rs",
+                "locations": [{"path": "/d:/develop/SwitchTether/live.rs"}],
+                "content": [{
+                    "type": "diff",
+                    "path": "/d:/develop/SwitchTether/live.rs",
+                    "oldText": old,
+                    "newText": new,
+                }]
+            }),
+            &mut log,
+            false,
+        );
+        let tc = log.get("tc:e1").unwrap();
+        assert_eq!(tc.data["title"], "File d:/develop/SwitchTether/live.rs");
+        assert_eq!(
+            tc.data["files"][0]["path"],
+            "d:/develop/SwitchTether/live.rs"
+        );
+        let fc = log.get("fc:e1:0").unwrap();
+        assert_eq!(fc.data["change"], "modify");
+        assert_eq!(fc.data["path"], "d:/develop/SwitchTether/live.rs");
+        assert_eq!(fc.data["additions"], 3);
+        assert_eq!(fc.data["deletions"], 1);
+        assert_eq!(fc.data["truncated"], false);
+        let diff = fc.data["diff"].as_str().unwrap();
+        assert!(diff.starts_with(
+            "--- a/d:/develop/SwitchTether/live.rs\n+++ b/d:/develop/SwitchTether/live.rs\n"
+        ));
+        assert!(diff.contains("@@ -52,7 +52,9 @@\n"));
+        assert!(diff.contains("-line 55\n"));
+        assert!(diff.contains("+line 55 edited\n+inserted A\n+inserted B\n"));
+        assert!(
+            diff.len() < 1024,
+            "diff should only contain the hunk, not the whole file"
+        );
+    }
+
+    #[test]
+    fn start_turn_with_user_records_prompt_once_and_skips_duplicate_echo() {
+        let mut log = SessionLog::new("agy:x", None);
+        log.expect_user_message("hello", "cmd-1");
+        let mut m = AcpMapper::new("r1");
+        m.start_turn_with_user("hello", &[], &mut log, false);
+        // Optional echo from older agy acp versions is skipped.
+        m.apply(
+            &json!({"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "hello"}}),
+            &mut log,
+            false,
+        );
+        m.apply(
+            &json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}),
+            &mut log,
+            false,
+        );
+        m.end_turn("end_turn", None, &mut log, false);
+
+        let users: Vec<_> = log.iter().filter(|e| e.kind == "user_message").collect();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].data["text"], "hello");
+        assert_eq!(users[0].data["clientId"], "cmd-1");
     }
 
     #[test]

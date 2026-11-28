@@ -179,11 +179,21 @@ impl AgyParser {
             self.cwd = workspace_from_metadata(&raw);
         }
         let cleaned = extract_user_request(&raw);
-        let (text, context) = strip_attachment_trailer(&cleaned);
+        let (text, attachments, context) =
+            if let Some((user_text, files)) = crate::agents::attachments::split(&cleaned) {
+                (user_text, Some(files), Vec::new())
+            } else {
+                let (t, ctx) = strip_attachment_trailer(&cleaned);
+                (t, None, ctx)
+            };
         let image_items = extract_media_items(rec.get("media"));
         let images = image_items.len();
 
-        if text.is_empty() && images == 0 && context.is_empty() {
+        if text.is_empty()
+            && images == 0
+            && context.is_empty()
+            && attachments.as_ref().is_none_or(Vec::is_empty)
+        {
             return Vec::new();
         }
         if self.title.is_none() && !text.is_empty() && !text.trim_start().starts_with('/') {
@@ -196,19 +206,18 @@ impl AgyParser {
 
         let redacted = redact_text(&text);
         let (p, truncated) = preview(&redacted, 64 * 1024);
-        let mut u = EventDraft::new(
-            turn_id.clone(),
-            "user_message",
-            ts,
-            json!({
-                "text": p,
-                "images": images,
-                "imageItems": image_items,
-                "context": context,
-                "source": "unknown",
-                "truncated": truncated,
-            }),
-        );
+        let mut data = json!({
+            "text": p,
+            "images": images,
+            "imageItems": image_items,
+            "context": context,
+            "source": "unknown",
+            "truncated": truncated,
+        });
+        if let Some(files) = attachments {
+            data["attachments"] = json!(files);
+        }
+        let mut u = EventDraft::new(turn_id.clone(), "user_message", ts, data);
         u.turn_id = Some(turn_id);
         vec![u, self.status_draft("running", None, ts)]
     }
@@ -466,13 +475,74 @@ impl AgyParser {
                 sa.parent_id = Some(call_id);
                 out.push(sa);
             }
+        } else if tool_name == "manage_subagents" && !is_error {
+            let action = s(&tool_args, "Action").unwrap_or_default();
+            let targets: Vec<String> = if action == "kill_all" {
+                self.subagents
+                    .iter()
+                    .filter(|(_, sa)| {
+                        sa.data.get("status").and_then(Value::as_str) == Some("running")
+                    })
+                    .map(|(cid, _)| cid.clone())
+                    .collect()
+            } else if action == "kill" {
+                tool_args
+                    .get("ConversationIds")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter_map(|aid| self.subagent_calls.get(aid).cloned())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            for target_call in targets {
+                if let Some(sa) = self.subagents.get_mut(&target_call) {
+                    if sa.data.get("status").and_then(Value::as_str) == Some("running") {
+                        sa.data["status"] = json!("interrupted");
+                        sa.data["finishedAt"] = json!(ts);
+                        let mut d = EventDraft::new(
+                            format!("sa:{target_call}"),
+                            "subagent",
+                            sa.ts.clone(),
+                            sa.data.clone(),
+                        );
+                        d.turn_id = sa.turn_id.clone();
+                        d.parent_id = Some(target_call);
+                        out.push(d);
+                    }
+                }
+            }
+        } else if tool_name == "send_message" && !is_error {
+            if let Some(recipient) = s(&tool_args, "Recipient") {
+                if let Some(target_call) = self.subagent_calls.get(&recipient).cloned() {
+                    if let Some(sa) = self.subagents.get_mut(&target_call) {
+                        if sa.data.get("status").and_then(Value::as_str) != Some("running") {
+                            sa.data["status"] = json!("running");
+                            if let Some(obj) = sa.data.as_object_mut() {
+                                obj.remove("finishedAt");
+                            }
+                            let mut d = EventDraft::new(
+                                format!("sa:{target_call}"),
+                                "subagent",
+                                sa.ts.clone(),
+                                sa.data.clone(),
+                            );
+                            d.turn_id = sa.turn_id.clone();
+                            d.parent_id = Some(target_call);
+                            out.push(d);
+                        }
+                    }
+                }
+            }
         }
 
         out.push(self.status_draft("running", None, ts));
         out
     }
 
-    fn system_message(&mut self, _idx: u64, rec: &Value, ts: &str) -> Vec<EventDraft> {
+    fn system_message(&mut self, idx: u64, rec: &Value, ts: &str) -> Vec<EventDraft> {
         let raw = s(rec, "content")
             .or_else(|| s(rec, "message"))
             .unwrap_or_default();
@@ -556,6 +626,9 @@ impl AgyParser {
                 let (p, truncated) = preview(&redacted, SUBAGENT_RESULT_LIMIT);
                 sa.data["status"] = json!("completed");
                 sa.data["finishedAt"] = json!(ts);
+                if let Some(sum) = first_summary_line(&redacted) {
+                    sa.data["summary"] = json!(sum);
+                }
                 if !p.is_empty() {
                     sa.data["result"] = json!(p);
                     sa.data["resultTruncated"] = json!(truncated);
@@ -571,6 +644,117 @@ impl AgyParser {
                 out.push(d);
                 out.push(self.status_draft("running", None, ts));
                 return out;
+            }
+        }
+
+        // 3. System notices about sub-agent failures or server restarts stopping background work.
+        if sender.eq_ignore_ascii_case("system") {
+            let redacted = redact_text(body.trim());
+            if let Some(agent_id) = parse_subagent_error_id(&body) {
+                if let Some(call_id) = self.subagent_calls.get(&agent_id).cloned() {
+                    if let Some(sa) = self.subagents.get_mut(&call_id) {
+                        let (p, truncated) = preview(&redacted, SUBAGENT_RESULT_LIMIT);
+                        sa.data["status"] = json!("failed");
+                        sa.data["finishedAt"] = json!(ts);
+                        if let Some(sum) = first_summary_line(&redacted) {
+                            sa.data["summary"] = json!(sum);
+                        }
+                        if !p.is_empty() {
+                            sa.data["result"] = json!(p);
+                            sa.data["resultTruncated"] = json!(truncated);
+                        }
+                        let mut d = EventDraft::new(
+                            format!("sa:{call_id}"),
+                            "subagent",
+                            sa.ts.clone(),
+                            sa.data.clone(),
+                        );
+                        d.turn_id = sa.turn_id.clone();
+                        d.parent_id = Some(call_id);
+                        out.push(d);
+                        out.push(self.status_draft("running", None, ts));
+                        return out;
+                    }
+                }
+            }
+            if body.contains("All your subagents and background tasks have been stopped") {
+                let mut any = false;
+                let summary = first_summary_line(&redacted);
+                for (call_id, sa) in self.subagents.iter_mut() {
+                    if sa.data.get("status").and_then(Value::as_str) == Some("running") {
+                        any = true;
+                        sa.data["status"] = json!("interrupted");
+                        sa.data["finishedAt"] = json!(ts);
+                        if let Some(sum) = &summary {
+                            sa.data["summary"] = json!(sum);
+                        }
+                        let mut d = EventDraft::new(
+                            format!("sa:{call_id}"),
+                            "subagent",
+                            sa.ts.clone(),
+                            sa.data.clone(),
+                        );
+                        d.turn_id = sa.turn_id.clone();
+                        d.parent_id = Some(call_id.clone());
+                        out.push(d);
+                    }
+                }
+                for tc in self.tools.values_mut() {
+                    if tc.data.get("background").and_then(Value::as_bool) == Some(true)
+                        && tc.data.get("status").and_then(Value::as_str) == Some("running")
+                    {
+                        any = true;
+                        tc.data["status"] = json!("interrupted");
+                        tc.data["finishedAt"] = json!(ts);
+                        if let Some(sum) = &summary {
+                            tc.data["backgroundSummary"] = json!(sum);
+                        }
+                        let mut d = EventDraft::new(
+                            tc.event_id.clone(),
+                            "tool_call",
+                            tc.ts.clone(),
+                            tc.data.clone(),
+                        );
+                        d.turn_id = tc.turn_id.clone();
+                        out.push(d);
+                    }
+                }
+                if any {
+                    out.push(self.status_draft("idle", None, ts));
+                }
+                return out;
+            }
+            return out;
+        }
+
+        // 4. Parent / peer agent message delivered into a sub-agent's own transcript (e.g. its
+        // initial task prompt at step 0 or a follow-up `send_message`).
+        if looks_like_conversation_id(&sender) {
+            let redacted = redact_text(body.trim());
+            if !redacted.is_empty() {
+                if self.title.is_none() {
+                    self.title = clean_title(Some(preview(&redacted, 120).0));
+                }
+                let turn_id = format!("step-{idx}:mail");
+                self.current_turn = Some(turn_id.clone());
+                self.pending_calls.clear();
+                let (p, truncated) = preview(&redacted, 64 * 1024);
+                let mut u = EventDraft::new(
+                    turn_id.clone(),
+                    "user_message",
+                    ts,
+                    json!({
+                        "text": p,
+                        "images": 0,
+                        "imageItems": [],
+                        "context": [],
+                        "source": "agent",
+                        "truncated": truncated,
+                    }),
+                );
+                u.turn_id = Some(turn_id);
+                out.push(u);
+                out.push(self.status_draft("running", None, ts));
             }
         }
 
@@ -794,7 +978,28 @@ pub(crate) fn build_tool_call(
                 .unwrap_or_else(|| "Subagent".into());
             ("task", label)
         }
-        "manage_task" | "manage_subagents" | "send_message" | "schedule" | "run_workflow" => {
+        "define_subagent" => {
+            let label = s(args, "Name").unwrap_or_else(|| "Define subagent".into());
+            ("task", label)
+        }
+        "swarm" => {
+            let action = s(args, "action").unwrap_or_else(|| "swarm".into());
+            let target = s(args, "name").or_else(|| s(args, "title"));
+            let label = match target {
+                Some(t) => format!("swarm {action}: {t}"),
+                None => format!("swarm {action}"),
+            };
+            ("task", label)
+        }
+        "send_message" => {
+            let label = s(args, "Message")
+                .and_then(|m| first_summary_line(&m))
+                .map(|l| preview(&l, 80).0)
+                .or_else(|| s(args, "Recipient"))
+                .unwrap_or_else(|| "Send message".into());
+            ("task", label)
+        }
+        "manage_task" | "manage_subagents" | "schedule" | "run_workflow" => {
             let label = s(args, "Action")
                 .or_else(|| s(args, "Description"))
                 .or_else(|| s(args, "Recipient"))
@@ -1007,24 +1212,15 @@ fn append_diff_hunk(
     if old == new {
         return;
     }
-    let old_lines: Vec<&str> = old.lines().collect();
-    let new_lines: Vec<&str> = new.lines().collect();
-    *deletions += old_lines.len() as u32;
-    *additions += new_lines.len() as u32;
-    out.push_str(&format!(
-        "@@ -1,{} +1,{} @@\n",
-        old_lines.len(),
-        new_lines.len()
-    ));
-    for l in old_lines {
-        out.push('-');
-        out.push_str(l);
-        out.push('\n');
+    let (diff, add, del) = crate::agents::model::unified_diff("file", Some(old), new);
+    if diff.is_empty() {
+        return;
     }
-    for l in new_lines {
-        out.push('+');
-        out.push_str(l);
-        out.push('\n');
+    *additions += add;
+    *deletions += del;
+    // Strip the synthetic `--- a/file\n+++ b/file\n` header; the caller writes the real file header.
+    if let Some(hunk_start) = diff.find("@@ ") {
+        out.push_str(&diff[hunk_start..]);
     }
 }
 
@@ -1313,13 +1509,45 @@ pub(crate) fn file_uri_to_path(uri: &str) -> Option<String> {
 pub(crate) fn parse_created_subagent_id(text: &str) -> Option<String> {
     let (_, rest) = text.split_once("Created the following subagent:")?;
     let brace = rest.find('{')?;
-    let end = rest.rfind('}')?;
-    if end <= brace {
-        return None;
-    }
-    let v: Value = serde_json::from_str(&rest[brace..=end]).ok()?;
+    let v: Value = serde_json::Deserializer::from_str(&rest[brace..])
+        .into_iter::<Value>()
+        .next()?
+        .ok()?;
     let id = s(&v, "conversationId")?;
     (id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then_some(id)
+}
+
+/// First non-empty line stripped of leading markdown heading/list markers, clipped to 200 bytes.
+pub(crate) fn first_summary_line(text: &str) -> Option<String> {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?
+        .trim_start_matches(['#', '-', '*', '>', ' '])
+        .trim();
+    if line.is_empty() {
+        return None;
+    }
+    Some(preview(line, 200).0)
+}
+
+/// Parses `The subagent ... with id "<uuid>" encountered an error ...` into `<uuid>`.
+fn parse_subagent_error_id(body: &str) -> Option<String> {
+    let (_, rest) = body.split_once("with id \"")?;
+    let (id, _) = rest.split_once('"')?;
+    let id = id.trim();
+    (looks_like_conversation_id(id)).then(|| id.to_string())
+}
+
+fn looks_like_conversation_id(sender: &str) -> bool {
+    !sender.is_empty()
+        && sender.len() <= 64
+        && !sender.eq_ignore_ascii_case("system")
+        && !sender.contains('/')
+        && sender.contains('-')
+        && sender
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn strip_timestamps_header(text: &str) -> String {
@@ -1345,16 +1573,22 @@ fn strip_task_finished_prefix(text: &str) -> String {
 
 /// Parses `<SYSTEM_MESSAGE>\n[Message] timestamp=... sender=<id> priority=... content=<body...>`
 /// into `(sender, body)`.
+///
+/// Antigravity prefixes every real system message with prose mentioning `<SYSTEM_MESSAGE>`
+/// ("The following is a <SYSTEM_MESSAGE> not actually sent by the user..."), so we locate the
+/// `[Message]` line directly instead of splitting on the first `<SYSTEM_MESSAGE>`.
 fn parse_system_mail(raw: &str) -> Option<(String, String)> {
-    let inner = if let Some((_, rest)) = raw.split_once("<SYSTEM_MESSAGE>") {
-        rest.rsplit_once("</SYSTEM_MESSAGE>")
-            .map(|(b, _)| b)
-            .unwrap_or(rest)
-            .trim()
-    } else {
-        raw.trim()
-    };
-    let rest = inner.strip_prefix("[Message]")?.trim_start();
+    let start = raw.find("\n[Message]").map(|i| i + 1).or_else(|| {
+        raw.trim_start()
+            .starts_with("[Message]")
+            .then(|| raw.find("[Message]"))
+            .flatten()
+    })?;
+    let mut inner = &raw[start..];
+    if let Some((before, _)) = inner.rsplit_once("</SYSTEM_MESSAGE>") {
+        inner = before;
+    }
+    let rest = inner.trim().strip_prefix("[Message]")?.trim_start();
     let sender_idx = rest.find("sender=")?;
     let after_sender = &rest[sender_idx + "sender=".len()..];
     let sender_end = after_sender
@@ -1554,6 +1788,232 @@ mod tests {
             log.get("sa:step-1:call-3").unwrap().data["result"],
             "Token expiry is 15 minutes."
         );
+        assert_eq!(
+            log.get("sa:step-1:call-3").unwrap().data["summary"],
+            "Token expiry is 15 minutes."
+        );
         assert_eq!(log.get(STATUS_ID).unwrap().data["backgroundTasks"], 0);
+    }
+
+    #[test]
+    fn handles_subagent_errors_restart_kill_wakeup_and_child_prompt() {
+        // parse_created_subagent_id tolerates trailing braces in prose.
+        assert_eq!(
+            parse_created_subagent_id(
+                "Created the following subagent:\n{\"conversationId\":\"aaaa1111-2222-3333-4444-555566667777\"}\nNote: use {json} carefully."
+            )
+            .as_deref(),
+            Some("aaaa1111-2222-3333-4444-555566667777")
+        );
+
+        let mut p = AgyParser::new();
+        let mut log = SessionLog::new("agy:parent", None);
+        fn feed(p: &mut AgyParser, log: &mut SessionLog, v: Value) {
+            for d in p.feed(&v) {
+                log.upsert(d, false);
+            }
+        }
+
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 1,
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:00:01Z",
+                "tool_calls": [
+                    { "name": "invoke_subagent", "args": { "TypeName": "research", "Role": "UX Auditor", "Prompt": "Audit UI" } },
+                    { "name": "invoke_subagent", "args": { "TypeName": "research", "Role": "Perf Auditor", "Prompt": "Audit perf" } },
+                    { "name": "swarm", "args": { "action": "add", "name": "worker-1", "brief": "Do work" } }
+                ]
+            }),
+        );
+        assert_eq!(log.get("step-1:call-2").unwrap().data["category"], "task");
+        assert_eq!(
+            log.get("step-1:call-2").unwrap().data["title"],
+            "swarm add: worker-1"
+        );
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 2,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:00:02Z",
+                "content": "Created the following subagent:\n{\"conversationId\":\"5cdf7d0f-4e03-443c-891d-57881aae903c\"}"
+            }),
+        );
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 3,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:00:02Z",
+                "content": "Created the following subagent:\n{\"conversationId\":\"3bb1705d-4171-4775-9ed5-449801d72c9c\"}"
+            }),
+        );
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 4,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:00:02Z",
+                "content": "Added worker-1"
+            }),
+        );
+
+        // Subagent 1 fails via sender=system notice.
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 5,
+                "type": "SYSTEM_MESSAGE",
+                "source": "SYSTEM",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:01:00Z",
+                "content": "<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-28T06:01:00Z sender=system priority=MESSAGE_PRIORITY_HIGH content=The subagent UX Auditor (research) with id \"5cdf7d0f-4e03-443c-891d-57881aae903c\" encountered an error and has either stopped or failed to start execution: RESOURCE_EXHAUSTED (code 429)\n</SYSTEM_MESSAGE>"
+            }),
+        );
+        assert_eq!(
+            log.get("sa:step-1:call-0").unwrap().data["status"],
+            "failed"
+        );
+        assert!(log.get("sa:step-1:call-0").unwrap().data["result"]
+            .as_str()
+            .unwrap()
+            .contains("RESOURCE_EXHAUSTED"));
+
+        // Server restart stops remaining running subagents.
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 6,
+                "type": "SYSTEM_MESSAGE",
+                "source": "SYSTEM",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:02:00Z",
+                "content": "<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-28T06:02:00Z sender=system priority=MESSAGE_PRIORITY_LOW content=[Notice] All your subagents and background tasks have been stopped due to server restart.\n</SYSTEM_MESSAGE>"
+            }),
+        );
+        assert_eq!(
+            log.get("sa:step-1:call-1").unwrap().data["status"],
+            "interrupted"
+        );
+        assert_eq!(log.get(STATUS_ID).unwrap().data["backgroundTasks"], 0);
+
+        // Sending a message to a stopped subagent revives it to running, then manage_subagents kill stops it again.
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 7,
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:03:00Z",
+                "tool_calls": [
+                    { "name": "send_message", "args": { "Recipient": "3bb1705d-4171-4775-9ed5-449801d72c9c", "Message": "Please continue checking." } }
+                ]
+            }),
+        );
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 8,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:03:01Z",
+                "content": "Message sent"
+            }),
+        );
+        assert_eq!(
+            log.get("sa:step-1:call-1").unwrap().data["status"],
+            "running"
+        );
+
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 9,
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:04:00Z",
+                "tool_calls": [
+                    { "name": "manage_subagents", "args": { "Action": "kill", "ConversationIds": ["3bb1705d-4171-4775-9ed5-449801d72c9c"] } }
+                ]
+            }),
+        );
+        feed(
+            &mut p,
+            &mut log,
+            json!({
+                "step_index": 10,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-28T06:04:01Z",
+                "content": "Killed"
+            }),
+        );
+        assert_eq!(
+            log.get("sa:step-1:call-1").unwrap().data["status"],
+            "interrupted"
+        );
+
+        // Child subagent's own transcript starts with SYSTEM_MESSAGE from parent conversation id.
+        let mut child = AgyParser::new();
+        let mut child_log = SessionLog::new("agy:child", None);
+        for d in child.feed(&json!({
+            "step_index": 0,
+            "type": "SYSTEM_MESSAGE",
+            "source": "SYSTEM",
+            "status": "DONE",
+            "created_at": "2026-11-28T06:00:05Z",
+            "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n\n<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-28T06:00:05Z sender=797335f5-5971-4f04-b31f-f69dbc8296a2 priority=MESSAGE_PRIORITY_HIGH content=Audit the Android codebase for Compose performance.\n</SYSTEM_MESSAGE>"
+        })) {
+            child_log.upsert(d, false);
+        }
+        let u = child_log.get("step-0:mail").unwrap();
+        assert_eq!(u.kind, "user_message");
+        assert_eq!(u.data["source"], "agent");
+        assert_eq!(
+            u.data["text"],
+            "Audit the Android codebase for Compose performance."
+        );
+        assert_eq!(
+            child.title.as_deref(),
+            Some("Audit the Android codebase for Compose performance.")
+        );
+    }
+
+    #[test]
+    fn parses_standard_switchtether_attachment_block_without_corrupting_context() {
+        let mut p = AgyParser::new();
+        let mut log = SessionLog::new("agy:att", None);
+        let raw = format!(
+            "<USER_REQUEST>\nFix this\n\n{}\n- C:\\Users\\u\\.switchtether\\remote\\attachments\\2026-11-29\\id1\\shot.jpg\n</USER_REQUEST>",
+            crate::agents::attachments::BLOCK_HEADER
+        );
+        for d in p.feed(&json!({
+            "step_index": 0,
+            "type": "USER_INPUT",
+            "status": "DONE",
+            "created_at": "2026-11-29T00:11:46Z",
+            "content": raw,
+        })) {
+            log.upsert(d, false);
+        }
+        let u = log.get("step-0:user").unwrap();
+        assert_eq!(u.data["text"], "Fix this");
+        assert_eq!(u.data["context"], json!([]));
+        assert_eq!(u.data["attachments"][0]["name"], "shot.jpg");
     }
 }

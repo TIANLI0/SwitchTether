@@ -33,6 +33,7 @@ pub struct AgySummaryRow {
     pub parent_conversation_id: Option<String>,
     pub nesting_depth: i64,
     pub agent_name: Option<String>,
+    pub step_count: i64,
     pub last_modified_ms: Option<i64>,
     pub last_user_input_ms: Option<i64>,
     pub root_dir: PathBuf,
@@ -50,6 +51,18 @@ impl AgySummaryRow {
 
     pub fn is_running(&self) -> bool {
         !self.killed && self.status == "CASCADE_RUN_STATUS_RUNNING"
+    }
+
+    /// True when Antigravity has recorded this conversation as stopped or idle with no
+    /// background work left. An empty `status` with zero steps is treated as still starting.
+    pub fn is_finished(&self) -> bool {
+        if self.killed {
+            return true;
+        }
+        if self.is_running() || self.not_fully_idle {
+            return false;
+        }
+        !self.status.is_empty() || self.step_count > 0
     }
 
     /// `Some((status, background_work_hint))` when this top-level conversation is currently live.
@@ -279,6 +292,16 @@ impl AgyObserver {
         out
     }
 
+    /// Number of currently running descendant sub-agents for `root_conversation_id`.
+    pub fn running_subagent_count(&self, root_conversation_id: &str) -> u32 {
+        let count = self
+            .descendants(root_conversation_id)
+            .into_iter()
+            .filter(|r| r.is_running() || (!r.killed && r.not_fully_idle))
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
     /// OS file-system watcher on existing Antigravity roots for `conversation_summaries.db*`.
     pub fn watch(
         &self,
@@ -459,12 +482,40 @@ fn read_root_summaries(root: &Path) -> Vec<AgySummaryRow> {
         COALESCE(nesting_depth, 0),
         COALESCE(agent_name, ''),
         COALESCE(last_modified_time, ''),
-        COALESCE(last_user_input_time, '')
+        COALESCE(last_user_input_time, ''),
+        COALESCE(step_count, 0)
     FROM conversation_summaries";
 
     let Ok(mut stmt) = conn.prepare(sql) else {
-        return Vec::new();
+        // Older or synthetic test schemas without `step_count`.
+        let fallback_sql = "SELECT
+            conversation_id,
+            COALESCE(title, ''),
+            COALESCE(preview, ''),
+            COALESCE(workspace_uris, ''),
+            COALESCE(status, ''),
+            COALESCE(not_fully_idle, 0),
+            COALESCE(killed, 0),
+            COALESCE(parent_conversation_id, ''),
+            COALESCE(nesting_depth, 0),
+            COALESCE(agent_name, ''),
+            COALESCE(last_modified_time, ''),
+            COALESCE(last_user_input_time, ''),
+            0
+        FROM conversation_summaries";
+        let Ok(mut stmt2) = conn.prepare(fallback_sql) else {
+            return Vec::new();
+        };
+        return collect_summary_rows(&mut stmt2, root, origin);
     };
+    collect_summary_rows(&mut stmt, root, origin)
+}
+
+fn collect_summary_rows(
+    stmt: &mut rusqlite::Statement<'_>,
+    root: &Path,
+    origin: Origin,
+) -> Vec<AgySummaryRow> {
     let Ok(iter) = stmt.query_map([], |r| {
         let cid: String = r.get(0)?;
         let title_raw: String = r.get(1)?;
@@ -478,6 +529,7 @@ fn read_root_summaries(root: &Path) -> Vec<AgySummaryRow> {
         let agent_name: String = r.get(9)?;
         let modified_str: String = r.get(10)?;
         let user_input_str: String = r.get(11)?;
+        let step_count: i64 = r.get(12)?;
         Ok((
             cid,
             title_raw,
@@ -491,6 +543,7 @@ fn read_root_summaries(root: &Path) -> Vec<AgySummaryRow> {
             agent_name,
             modified_str,
             user_input_str,
+            step_count,
         ))
     }) else {
         return Vec::new();
@@ -511,6 +564,7 @@ fn read_root_summaries(root: &Path) -> Vec<AgySummaryRow> {
             agent_name,
             modified_str,
             user_input_str,
+            step_count,
         ) = item;
         if !valid_conv_id(&cid) {
             continue;
@@ -534,6 +588,7 @@ fn read_root_summaries(root: &Path) -> Vec<AgySummaryRow> {
             parent_conversation_id: (!parent.trim().is_empty()).then(|| parent.trim().to_string()),
             nesting_depth: depth,
             agent_name: (!agent_name.trim().is_empty()).then(|| agent_name.trim().to_string()),
+            step_count,
             last_modified_ms: parse_sqlite_time(&modified_str),
             last_user_input_ms: parse_sqlite_time(&user_input_str),
             root_dir: root.to_path_buf(),

@@ -902,11 +902,13 @@ impl AgentHub {
             .filter(|x| x.tail.is_some())
             .map(|x| x.log.clone());
         let from_log = loaded_log.map(|log| active_task_count(&log.lock()));
-        let active_tasks = match (from_log, bg_hint && status != "busy") {
-            (Some(n), true) => Some(n.max(1)),
-            (Some(n), false) => Some(n),
-            (None, true) => Some(1),
-            (None, false) => None,
+        let running_subs = self.agy.running_subagent_count(&r.conversation_id);
+        let active_tasks = match (from_log, running_subs, bg_hint && status != "busy") {
+            (Some(n), subs, true) => Some(n.max(subs).max(1)),
+            (Some(n), subs, false) => Some(n.max(subs)),
+            (None, 0, true) => Some(1),
+            (None, 0, false) => None,
+            (None, subs, _) => Some(subs),
         };
         let cwd = r.cwd.clone();
         Some(SessionSummary {
@@ -1527,14 +1529,16 @@ impl AgentHub {
                     .map(PathBuf::from)
                     .filter(|p| p.extension().is_some_and(|e| e == "jsonl") && p.is_file())
                     .or_else(|| self.agy.transcript_path(&s.native_id));
-                match path {
+                let tail = match path {
                     Some(p) => Some(load_file(
                         &p,
                         Box::new(agy::transcript::AgyParser::new()),
                         &log,
                     )?),
                     None => None,
-                }
+                };
+                self.sync_agy_subagents(&s.native_id, &log, false);
+                tail
             }
             _ => None,
         };
@@ -1773,10 +1777,17 @@ impl AgentHub {
                     });
                 if let (Some(o), Some(extra)) = (n.as_object_mut(), call.and_then(|c| live.get(&c)))
                 {
+                    let already_finished = o.get("finished").and_then(Value::as_bool) == Some(true);
                     for (k, v) in extra.as_object().into_iter().flatten() {
-                        if !v.is_null() && (k != "agentId" || !o.contains_key(k)) {
-                            o.insert(k.clone(), v.clone());
+                        if v.is_null() || (k == "agentId" && o.contains_key(k)) {
+                            continue;
                         }
+                        // Do not let a stale `running` row in the session log override a sub-agent
+                        // that Antigravity's summary DB already recorded as finished.
+                        if already_finished && k == "status" && v.as_str() == Some("running") {
+                            continue;
+                        }
+                        o.insert(k.clone(), v.clone());
                     }
                 }
             }
@@ -2176,7 +2187,14 @@ impl AgentHub {
                 }
             }
             for c in self.agy.descendants(&s.native_id) {
-                let finished = c.killed || (!c.is_running() && !c.not_fully_idle);
+                let finished = c.is_finished();
+                let db_status = if c.killed {
+                    "interrupted"
+                } else if c.is_running() || c.not_fully_idle || !finished {
+                    "running"
+                } else {
+                    "completed"
+                };
                 let parent_agent = c
                     .parent_conversation_id
                     .as_deref()
@@ -2197,6 +2215,12 @@ impl AgentHub {
                         existing.insert("updatedAtMs".into(), json!(c.last_modified_ms));
                         if finished {
                             existing.insert("finished".into(), json!(true));
+                            if existing.get("status").and_then(Value::as_str) != Some("failed") {
+                                existing.insert("status".into(), json!(db_status));
+                            }
+                        } else if c.is_running() {
+                            existing.insert("finished".into(), json!(false));
+                            existing.insert("status".into(), json!("running"));
                         }
                     }
                     None => {
@@ -2208,6 +2232,7 @@ impl AgentHub {
                                 "agentType": c.agent_name.unwrap_or_else(|| "subagent".into()),
                                 "parentAgentId": parent_agent,
                                 "spawnDepth": c.nesting_depth,
+                                "status": db_status,
                                 "finished": finished,
                                 "updatedAtMs": c.last_modified_ms,
                             }),
@@ -2395,7 +2420,7 @@ impl AgentHub {
 
         let finished = db_row
             .as_ref()
-            .map(|c| c.killed || (!c.is_running() && !c.not_fully_idle))
+            .map(agy::live::AgySummaryRow::is_finished)
             .or_else(|| {
                 log_row.as_ref().map(|r| {
                     matches!(
@@ -2409,6 +2434,12 @@ impl AgentHub {
             .as_ref()
             .and_then(|c| c.parent_conversation_id.as_deref())
             .filter(|p| !p.is_empty() && *p != s.native_id);
+        let lg = child_log.lock();
+        let fallback_desc = lg
+            .iter()
+            .find(|e| e.kind == "user_message")
+            .and_then(|e| e.data.get("text").and_then(Value::as_str))
+            .and_then(agy::transcript::first_summary_line);
         let meta = json!({
             "agentType": log_row
                 .as_ref()
@@ -2418,7 +2449,8 @@ impl AgentHub {
             "description": log_row
                 .as_ref()
                 .and_then(|r| r.data.get("description").and_then(Value::as_str))
-                .or_else(|| db_row.as_ref().and_then(|c| c.title.as_deref())),
+                .or_else(|| db_row.as_ref().and_then(|c| c.title.as_deref()))
+                .or(fallback_desc.as_deref()),
             "toolUseId": log_row
                 .as_ref()
                 .and_then(|r| r.data.get("callId").and_then(Value::as_str)),
@@ -2426,7 +2458,6 @@ impl AgentHub {
             "spawnDepth": db_row.as_ref().map(|c| c.nesting_depth),
             "finished": finished,
         });
-        let lg = child_log.lock();
         let (events, more) = lg.page(before, after, limit);
         Ok(json!({
             "sessionId": s.id,
@@ -3668,7 +3699,10 @@ impl AgentHub {
                 let m = hub.managed.read().get(id).cloned();
                 if m.is_none()
                     && (id.starts_with("dsh:") || id.starts_with("agy:"))
-                    && frame.data.get("kind").and_then(|k| k.as_str()) == Some("status")
+                    && (matches!(
+                        frame.data.get("kind").and_then(|k| k.as_str()),
+                        Some("status" | "subagent")
+                    ) || background_call)
                 {
                     // An observed DeepSeek Harness session open on the phone: its tailed log just
                     // started or ended a turn; refresh its summary (busy / idle) at once.
@@ -3731,20 +3765,262 @@ impl AgentHub {
         for k in stale {
             loaded.remove(&k);
         }
-        for l in loaded.values_mut() {
+        let mut agy_loaded: Vec<(String, Arc<Mutex<SessionLog>>)> = Vec::new();
+        for (id, l) in loaded.iter_mut() {
             if let Some(t) = l.tail.as_mut() {
                 if let Err(e) = tail_file(t, &l.log, true) {
                     log::debug!("[agents] tail error: {e}");
                 }
                 add_running_subagents(&t.path, &l.log, true);
             }
+            if let Some(native) = id.strip_prefix("agy:") {
+                agy_loaded.push((native.to_string(), l.log.clone()));
+            }
         }
         drop(loaded);
+        for (native, log) in agy_loaded {
+            self.sync_agy_subagents(&native, &log, true);
+        }
+        let agy_managed: Vec<(String, Arc<Mutex<SessionLog>>)> = self
+            .managed
+            .read()
+            .values()
+            .filter(|m| m.agent() == "agy" && m.liveness() == Liveness::Live)
+            .filter_map(|m| Some((m.native_session_id()?, m.log())))
+            .collect();
+        for (native, log) in agy_managed {
+            self.sync_agy_subagents(&native, &log, true);
+        }
         let ttys: Vec<_> = self.ttys.read().values().cloned().collect();
         for t in ttys {
             t.tail_now();
         }
     }
+
+    /// Reconciles Antigravity sub-agent rows in a session's `SessionLog` against
+    /// `conversation_summaries.db` (and, on completion, the child's own transcript).
+    ///
+    /// Needed for both `ManagedAgy` (ACP does not push `SYSTEM_MESSAGE` wakeups when a
+    /// background sub-agent finishes) and observed sessions (e.g. `swarm` workers or
+    /// sub-agents whose completion notice was never written).
+    fn sync_agy_subagents(&self, native_id: &str, log: &Arc<Mutex<SessionLog>>, publish: bool) {
+        let descendants = self.agy.descendants(native_id);
+        if descendants.is_empty() {
+            return;
+        }
+        let existing: HashMap<String, (String, String, bool)> = {
+            let lg = log.lock();
+            lg.iter()
+                .filter(|e| e.kind == "subagent")
+                .filter_map(|e| {
+                    let aid = e.data.get("agentId").and_then(Value::as_str)?;
+                    let status = e
+                        .data
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let has_result = e
+                        .data
+                        .get("result")
+                        .and_then(Value::as_str)
+                        .is_some_and(|r| !r.is_empty());
+                    Some((aid.to_string(), (e.id.clone(), status, has_result)))
+                })
+                .collect()
+        };
+
+        for c in descendants {
+            let finished = c.is_finished();
+            let running = c.is_running() || (!c.killed && c.not_fully_idle);
+            if let Some((event_id, cur_status, has_result)) = existing.get(&c.conversation_id) {
+                if cur_status == "running" && finished {
+                    let stats = c
+                        .transcript_path()
+                        .as_deref()
+                        .and_then(read_agy_child_stats);
+                    let final_status = if c.killed {
+                        "interrupted"
+                    } else if stats.as_ref().is_some_and(|st| st.failed) {
+                        "failed"
+                    } else {
+                        "completed"
+                    };
+                    let finished_at = c
+                        .last_modified_ms
+                        .and_then(ms_to_rfc3339)
+                        .unwrap_or_else(crate::util::now_rfc3339);
+                    log.lock().update(event_id, publish, |e| {
+                        e.data["status"] = json!(final_status);
+                        if e.data.get("finishedAt").is_none_or(Value::is_null) {
+                            e.data["finishedAt"] = json!(finished_at);
+                        }
+                        if let Some(st) = &stats {
+                            apply_agy_child_stats(&mut e.data, st, *has_result);
+                        }
+                    });
+                } else if cur_status != "running" && running {
+                    log.lock().update(event_id, publish, |e| {
+                        e.data["status"] = json!("running");
+                        if let Some(obj) = e.data.as_object_mut() {
+                            obj.remove("finishedAt");
+                        }
+                    });
+                }
+            } else if c.parent_conversation_id.as_deref() == Some(native_id) {
+                // Direct child not yet represented by a `subagent` row in the log (e.g. `swarm`
+                // workers or history sessions without `invoke_subagent` result steps).
+                let stats = if finished {
+                    c.transcript_path()
+                        .as_deref()
+                        .and_then(read_agy_child_stats)
+                } else {
+                    None
+                };
+                let status = if c.killed {
+                    "interrupted"
+                } else if running || !finished {
+                    "running"
+                } else if stats.as_ref().is_some_and(|st| st.failed) {
+                    "failed"
+                } else {
+                    "completed"
+                };
+                let ts = c
+                    .last_modified_ms
+                    .and_then(ms_to_rfc3339)
+                    .unwrap_or_else(crate::util::now_rfc3339);
+                let mut data = json!({
+                    "agentId": c.conversation_id,
+                    "description": c.title.clone()
+                        .or_else(|| stats.as_ref().and_then(|st| st.title.clone()))
+                        .or_else(|| c.agent_name.clone())
+                        .unwrap_or_else(|| "Subagent".into()),
+                    "agentType": c.agent_name.clone().unwrap_or_else(|| "subagent".into()),
+                    "background": true,
+                    "status": status,
+                });
+                if finished {
+                    data["finishedAt"] = json!(ts);
+                }
+                if let Some(st) = &stats {
+                    apply_agy_child_stats(&mut data, st, false);
+                }
+                let draft = EventDraft::new(
+                    format!("sa:agy:{}", c.conversation_id),
+                    "subagent",
+                    ts,
+                    data,
+                );
+                log.lock().upsert(draft, publish);
+            }
+        }
+    }
+}
+
+struct AgyChildStats {
+    title: Option<String>,
+    model: Option<String>,
+    tool_uses: u64,
+    tokens: Option<u64>,
+    summary: Option<String>,
+    result: Option<String>,
+    result_truncated: bool,
+    failed: bool,
+}
+
+fn read_agy_child_stats(path: &Path) -> Option<AgyChildStats> {
+    let mut parser = agy::transcript::AgyParser::new();
+    let mut child_log = SessionLog::new("agy-child-stats", None);
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    use std::io::BufRead;
+    for line in reader.lines().take(4000).flatten() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+            for d in parser.feed(&v) {
+                child_log.upsert(d, false);
+            }
+        }
+    }
+    let tool_uses = child_log.iter().filter(|e| e.kind == "tool_call").count() as u64;
+    let last_send_msg = child_log
+        .iter()
+        .filter(|e| {
+            e.kind == "tool_call"
+                && e.data.get("name").and_then(Value::as_str) == Some("send_message")
+        })
+        .filter_map(|e| e.data.pointer("/input/Message").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .last()
+        .map(String::from);
+    let last_assistant = child_log
+        .iter()
+        .filter(|e| e.kind == "assistant_message")
+        .filter_map(|e| e.data.get("text").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .last()
+        .map(String::from);
+    let raw_result = last_send_msg.or(last_assistant);
+    let (result, result_truncated, summary) = match raw_result {
+        Some(text) => {
+            let (p, trunc) = model::preview(&text, 16 * 1024);
+            let sum = agy::transcript::first_summary_line(&text);
+            (Some(p), trunc, sum)
+        }
+        None => (None, false, None),
+    };
+    let failed = child_log
+        .get(agy::STATUS_ID)
+        .and_then(|e| e.data.get("state").and_then(Value::as_str))
+        == Some("error");
+    Some(AgyChildStats {
+        title: parser.title,
+        model: parser.model,
+        tool_uses,
+        tokens: parser.total_tokens,
+        summary,
+        result,
+        result_truncated,
+        failed,
+    })
+}
+
+fn apply_agy_child_stats(data: &mut Value, st: &AgyChildStats, has_result: bool) {
+    if data.get("model").is_none_or(Value::is_null) {
+        if let Some(m) = &st.model {
+            data["model"] = json!(m);
+        }
+    }
+    if st.tool_uses > 0 && data.get("toolUses").is_none_or(Value::is_null) {
+        data["toolUses"] = json!(st.tool_uses);
+    }
+    if let Some(tok) = st.tokens {
+        if tok > 0 && data.get("tokens").is_none_or(Value::is_null) {
+            data["tokens"] = json!(tok);
+        }
+    }
+    if !has_result {
+        if let Some(sum) = &st.summary {
+            if data.get("summary").is_none_or(Value::is_null) {
+                data["summary"] = json!(sum);
+            }
+        }
+        if let Some(res) = &st.result {
+            data["result"] = json!(res);
+            data["resultTruncated"] = json!(st.result_truncated);
+        }
+    }
+}
+
+fn ms_to_rfc3339(ms: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
 /// Capabilities of a history-only agent's (not live) session, as `capabilities_for` reports it.
@@ -6035,5 +6311,30 @@ mod tests {
             .unwrap()
             .iter()
             .any(|e| e["kind"] == "assistant_message" && e["data"]["text"] == "JWT uses EdDSA."));
+
+        // sync_agy_subagents reconciles a stale running `subagent` row (e.g. ManagedAgy where ACP
+        // does not emit SYSTEM_MESSAGE wakeups) against the finished summary row + child transcript.
+        let managed_log = Arc::new(Mutex::new(SessionLog::new("agy:parent-1", None)));
+        managed_log.lock().upsert(
+            EventDraft::new(
+                "sa:call-99",
+                "subagent",
+                &now,
+                json!({
+                    "agentId": "child-1",
+                    "description": "Token Auditor",
+                    "agentType": "research",
+                    "background": true,
+                    "status": "running",
+                    "callId": "call-99",
+                }),
+            ),
+            false,
+        );
+        hub.sync_agy_subagents("parent-1", &managed_log, false);
+        let synced = managed_log.lock().get("sa:call-99").cloned().unwrap();
+        assert_eq!(synced.data["status"], "completed");
+        assert_eq!(synced.data["result"], "JWT uses EdDSA.");
+        assert_eq!(synced.data["summary"], "JWT uses EdDSA.");
     }
 }

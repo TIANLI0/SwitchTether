@@ -822,7 +822,7 @@ impl ManagedSession for ManagedAgy {
         self.core
             .mapper
             .lock()
-            .start_turn(&mut self.core.log.lock(), true);
+            .start_turn_with_user(text, images, &mut self.core.log.lock(), true);
         let id = self.core.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.core.replies.lock().insert(id, tx);
