@@ -139,4 +139,25 @@ class TaskInteractionTest {
         rule.onNode(androidx.compose.ui.test.hasTestTag("tool-file")).performClick()
         assertEquals(listOf("/repo/src/lib.rs"), opened)
     }
+
+    /** Direct file reads render as a compact file row (no tool name or raw output) and open directly on tap. */
+    @Test fun directFileReadOpensWithoutToolOutput() {
+        val opened = mutableListOf<String>()
+        val items = AgentEventLog.of(
+            listOf(
+                event("rd", 1, "tool_call", """{"callId":"c3","name":"read_file","title":"/repo/src/App.kt","category":"read","status":"completed","files":[{"path":"/repo/src/App.kt","offset":1,"limit":50}]}"""),
+                event("res", 2, "tool_result", """{"callId":"c3","isError":false,"text":"1: package app\n2: fun main() {}"}"""),
+            ),
+        ).renderItems()
+        rule.setContent { SwitchTetherTheme(ThemeMode.LIGHT) {
+            Column(Modifier.fillMaxSize().background(COUITheme.colorScheme.surface).padding(12.dp)) {
+                ToolCall(items.single(), context().copy(onOpenFile = { opened += it }))
+            }
+        } }
+        rule.onNodeWithText("App.kt").assertExists()
+        rule.onNodeWithText("read_file", substring = true).assertDoesNotExist()
+        rule.onNodeWithText("fun main()", substring = true).assertDoesNotExist()
+        rule.onNode(androidx.compose.ui.test.hasTestTag("tool-file")).performClick()
+        assertEquals(listOf("/repo/src/App.kt"), opened)
+    }
 }

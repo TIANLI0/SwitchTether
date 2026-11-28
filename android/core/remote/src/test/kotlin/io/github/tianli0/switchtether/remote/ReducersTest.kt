@@ -124,17 +124,40 @@ class AgentEventLogTest {
     }
 
     @Test
-    fun subagentRowIsAChildOfItsAgentCallNotItsOwnParent() {
+    fun subagentRowSupersedesItsWrapperToolCallAndPromotesDepth() {
         val items = AgentEventLog.of(
             listOf(
-                e("c1", 1, "tool_call", """{"callId":"k1","name":"Agent","category":"task"}"""),
-                e("sa:k1", 2, "subagent", """{"callId":"k1","status":"running"}""", parent = "k1"),
+                e("c1", 1, "tool_call", """{"callId":"k1","name":"Agent","category":"task","status":"completed"}"""),
+                e("r1", 2, "tool_result", """{"callId":"k1","isError":false,"text":"launched"}"""),
+                e("sa:k1", 3, "subagent", """{"callId":"k1","status":"running"}""", parent = "k1"),
             ),
         ).renderItems()
-        assertEquals(listOf("c1", "sa:k1"), items.map { it.key })
-        assertTrue(items[0].hasChildren)
-        assertEquals(1, items[1].depth)
-        assertTrue(!items[1].hasChildren)
+        assertEquals(listOf("sa:k1"), items.map { it.key })
+        assertEquals(0, items[0].depth)
+        assertTrue(!items[0].hasChildren)
+    }
+
+    @Test
+    fun supersededToolCallsHideDuplicatesButKeepFailures() {
+        val items = AgentEventLog.of(
+            listOf(
+                // Completed edit with file_change -> only file_change is shown.
+                e("tc_edit", 1, "tool_call", """{"callId":"ce1","name":"edit_file","category":"edit","status":"completed"}"""),
+                e("res_edit", 2, "tool_result", """{"callId":"ce1","isError":false,"text":"ok"}"""),
+                e("fc_edit", 3, "file_change", """{"callId":"ce1","path":"a.kt","change":"modify","diff":"+x"}"""),
+                // Failed edit -> tool_call stays visible so the error is shown.
+                e("tc_fail", 4, "tool_call", """{"callId":"ce2","name":"edit_file","category":"edit","status":"failed"}"""),
+                e("res_fail", 5, "tool_result", """{"callId":"ce2","isError":true,"text":"target not found"}"""),
+                e("fc_fail", 6, "file_change", """{"callId":"ce2","path":"b.kt","change":"modify","diff":"+y"}"""),
+                // Question tool_call with question card -> only question is shown.
+                e("tc_q", 7, "tool_call", """{"callId":"cq1","name":"ask_question","category":"question","status":"completed"}"""),
+                e("q1", 8, "question", """{"requestId":"cq1","questions":[]}"""),
+                // Plan tool_call with plan card -> only plan is shown.
+                e("tc_p", 9, "tool_call", """{"callId":"cp1","name":"update_steps","category":"plan","status":"completed"}"""),
+                e("plan", 10, "plan", """{"items":[{"text":"step","status":"in_progress"}]}"""),
+            ),
+        ).renderItems()
+        assertEquals(listOf("fc_edit", "tc_fail", "fc_fail", "q1", "plan"), items.map { it.key })
     }
 
     @Test

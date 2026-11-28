@@ -78,4 +78,21 @@ class TimelineTest {
         ).renderItems(emptySet())
         assertEquals("main.rs", io.github.tianli0.switchtether.ui.sessions.stepTitle(items.single()))
     }
+
+    @Test fun singleSubagentAndFileEditDoNotShowWrapperToolCalls() {
+        val log = AgentEventLog.of(
+            listOf(
+                event("u1", 1, "user_message", """{"text":"fix it"}"""),
+                event("tc1", 2, "tool_call", """{"callId":"k1","name":"invoke_subagent","category":"task","status":"completed"}"""),
+                event("r1", 3, "tool_result", """{"callId":"k1","isError":false,"text":"started"}"""),
+                event("sa:k1", 4, "subagent", """{"callId":"k1","agentId":"a1","description":"Research","status":"completed"}""", parent = "k1"),
+                event("tc2", 5, "tool_call", """{"callId":"k2","name":"edit_file","category":"edit","status":"completed"}"""),
+                event("r2", 6, "tool_result", """{"callId":"k2","isError":false,"text":"ok"}"""),
+                event("fc:k2", 7, "file_change", """{"callId":"k2","path":"src/a.kt","change":"modify","diff":"+1"}"""),
+            ),
+        )
+        val rows = buildTimeline(log.renderItems(), emptySet())
+        // Single subagent stays a standalone card (not folded as "2 steps"), and edit_file is replaced by file_change.
+        assertEquals(listOf("u1", "sa:k1", "fc:k2"), rows.map { it.key })
+    }
 }

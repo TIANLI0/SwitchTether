@@ -71,8 +71,12 @@ class AgentEventLog private constructor(
                 EventKinds.TOOL_RESULT -> resultsBySlot[slot(e, callId)] = e
             }
         }
+        val supersededToolIds = findSupersededToolIds(callsByCallId, resultsBySlot, ::slot)
         val out = ArrayList<RenderItem>(events.size)
         for (e in events) {
+            // A tool_call that already has a dedicated card (subagent, file_change, question, plan)
+            // is redundant unless it failed / was denied / was interrupted.
+            if (e.kind == EventKinds.TOOL_CALL && e.id in supersededToolIds) continue
             // A tool_result whose call is present is rendered inside the call card.
             if (e.kind == EventKinds.TOOL_RESULT) {
                 val callId = e.data.str("callId")
@@ -83,7 +87,7 @@ class AgentEventLog private constructor(
                 val rid = e.data.str("requestId")
                 if (rid != null && events.any { it.kind == EventKinds.APPROVAL_REQUEST && it.data.str("requestId") == rid }) continue
             }
-            val ancestors = ancestorsOf(e, callsByCallId)
+            val ancestors = ancestorsOf(e, callsByCallId, supersededToolIds)
             if (ancestors.any { it in collapsedParents || callsByCallId[it]?.id in collapsedParents }) continue
             out += RenderItem(
                 event = e,
@@ -97,7 +101,7 @@ class AgentEventLog private constructor(
                 hasChildren = false,
             )
         }
-        val parents = events.mapNotNullTo(HashSet()) { it.parentId }
+        val parents = out.mapNotNullTo(HashSet()) { it.event.parentId }
         // A foreground call that never got its result but was followed by the turn ending at the same
         // level (an error such as a rate limit, an interrupt, "turn stopped") is over. Without this its
         // spinner kept turning after the session went idle. Agent text alone is not an end: some
@@ -130,13 +134,82 @@ class AgentEventLog private constructor(
         }
     }
 
-    private fun ancestorsOf(e: AgentEvent, callsByCallId: Map<String, AgentEvent>): List<String> {
+    /**
+     * Tool calls whose work is already represented by a dedicated card (`subagent`, `file_change`,
+     * `question`, `plan`). Suppressing the raw wrapper avoids showing both e.g. an `edit_file` /
+     * `invoke_subagent` tool card and its diff / sub-agent card back-to-back. Failed, denied or
+     * interrupted calls stay visible (except when a `subagent` card already carries the failure),
+     * and wrapper calls that hold inline non-subagent child events stay visible as their group header.
+     */
+    private fun findSupersededToolIds(
+        callsByCallId: Map<String, AgentEvent>,
+        resultsBySlot: Map<Pair<String, String?>, AgentEvent>,
+        slot: (AgentEvent, String) -> Pair<String, String?>,
+    ): Set<String> {
+        val subagentToolIds = HashSet<String>()
+        val fileChangeCallIds = HashSet<String>()
+        val questionRequestIds = HashSet<String>()
+        val planIds = HashSet<String>()
+        var hasPlan = false
+        val nonSubagentChildParents = HashSet<String>()
+        for (e in events) {
+            when (e.kind) {
+                EventKinds.SUBAGENT -> {
+                    e.data.str("callId")?.let { callsByCallId[it]?.id }?.let(subagentToolIds::add)
+                    e.parentId?.let { (byId[it] ?: callsByCallId[it])?.id }?.let(subagentToolIds::add)
+                }
+                EventKinds.FILE_CHANGE -> e.data.str("callId")?.let(fileChangeCallIds::add)
+                EventKinds.QUESTION -> e.data.str("requestId")?.let(questionRequestIds::add)
+                EventKinds.PLAN -> {
+                    hasPlan = true
+                    planIds += e.id
+                }
+            }
+            if (e.kind != EventKinds.SUBAGENT && e.kind != EventKinds.TOOL_RESULT) {
+                e.parentId?.let { (byId[it] ?: callsByCallId[it])?.id }?.let(nonSubagentChildParents::add)
+            }
+        }
+        val superseded = HashSet<String>()
+        for (e in events) {
+            if (e.kind != EventKinds.TOOL_CALL) continue
+            if (e.id in nonSubagentChildParents) continue
+            if (e.id in subagentToolIds) {
+                superseded += e.id
+                continue
+            }
+            val callId = e.data.str("callId")
+            val st = e.data.str("status")
+            val res = callId?.let { resultsBySlot[slot(e, it)] }
+            val failedOrStopped = st == "failed" || st == "denied" || st == "interrupted" || res?.data?.bool("isError") == true
+            if (failedOrStopped) continue
+            val isFileChange = callId != null && callId in fileChangeCallIds
+            val isQuestion = callId != null && callId in questionRequestIds
+            val isPlan = hasPlan && (
+                (callId != null && ("plan:$callId" in planIds || "cx-plan-$callId" in planIds)) ||
+                    e.data.str("category") in PLAN_CATEGORIES
+                )
+            if (isFileChange || isQuestion || isPlan) {
+                superseded += e.id
+            }
+        }
+        return superseded
+    }
+
+    private fun ancestorsOf(
+        e: AgentEvent,
+        callsByCallId: Map<String, AgentEvent>,
+        supersededToolIds: Set<String>,
+    ): List<String> {
         val chain = ArrayList<String>()
+        val seen = HashSet<String>()
         var p = e.parentId
-        while (p != null && p !in chain && chain.size < 8) {
+        while (p != null && seen.add(p) && chain.size < 8) {
             val parentEvent = byId[p] ?: callsByCallId[p]
-            // Each actual parent counts once, even when addressed through its callId alias.
-            chain += p
+            // Each actual visible parent counts once; a suppressed wrapper tool_call is transparent
+            // so its dedicated child (e.g. a `subagent` row) sits at the wrapper's own depth.
+            if (parentEvent == null || parentEvent.id !in supersededToolIds) {
+                chain += p
+            }
             p = parentEvent?.parentId
         }
         return chain
@@ -154,6 +227,7 @@ class AgentEventLog private constructor(
 
     companion object {
         private val ORDER = compareBy<AgentEvent>({ it.seq }, { it.id })
+        private val PLAN_CATEGORIES = setOf("plan", "todo")
         val EMPTY = AgentEventLog(emptyMap(), emptyList())
 
         fun of(events: Collection<AgentEvent>): AgentEventLog = EMPTY.upsert(events)

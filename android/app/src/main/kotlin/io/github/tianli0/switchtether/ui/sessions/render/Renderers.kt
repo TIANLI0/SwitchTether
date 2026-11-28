@@ -484,17 +484,28 @@ fun toolStatus(item: RenderItem): StepStatus {
 fun ToolCall(item: RenderItem, ctx: RenderContext) {
     val d = item.event.data
     val dev = LocalDevColors.current
-    var open by rememberSaveable(item.key) { mutableStateOf(false) }
     val status = toolStatus(item)
     val result = item.attachedResult
+    val category = d.str("category")
     val command = io.github.tianli0.switchtether.remote.session.ToolCommands.raw(d)
     // Read / Edit / Write (or a Codex command that reads files): the files are shown by name and opened from the card.
     val files = remember(item.event) { io.github.tianli0.switchtether.remote.session.ToolFiles.files(d) }
     val filePath = files.singleOrNull()?.path
     val fileRange = files.singleOrNull()?.range
+    val isRead = category == "read"
+    val isFileWrite = category == "edit" || category == "write"
+    val failedOrStopped = status == StepStatus.Failed || status == StepStatus.Denied || status == StepStatus.Interrupted
+    // Direct file reads (and fallback writes without a file_change diff) don't need an expandable
+    // tool-call card with raw tool names, JSON input, or raw output: show a clean file row that
+    // opens the file directly in the viewer. Failed/denied calls and shell commands keep the full card.
+    if ((isRead || isFileWrite) && command == null && files.isNotEmpty() && !failedOrStopped && !item.hasChildren) {
+        CompactFileStep(item, files, isRead, status, ctx)
+        return
+    }
+    var open by rememberSaveable(item.key) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         CollapsibleRow(
-            icon = categoryIcon(d.str("category")),
+            icon = categoryIcon(category),
             iconTint = if (status == StepStatus.Failed) dev.danger else COUITheme.colorScheme.primary,
             title = io.github.tianli0.switchtether.ui.sessions.stepTitle(item),
             subtitle = listOfNotNull(
@@ -571,6 +582,91 @@ fun ToolCall(item: RenderItem, ctx: RenderContext) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 50.dp, end = 12.dp, bottom = 8.dp),
             )
+        }
+    }
+}
+
+/**
+ * Compact row for a direct file read (or a write without a diff card): shows the file name, folder,
+ * line range and time without raw tool names, JSON input, or raw output. Tapping opens the file
+ * directly in the file viewer; a read image shows its thumbnail inline.
+ */
+@Composable
+private fun CompactFileStep(
+    item: RenderItem,
+    files: List<io.github.tianli0.switchtether.remote.session.ToolFiles.FileRef>,
+    isRead: Boolean,
+    status: StepStatus,
+    ctx: RenderContext,
+) {
+    val open = ctx.onOpenFile
+    val openLabel = stringResource(R.string.render_open_file)
+    val clock = shortClock(item.event.ts).ifEmpty { null }
+    val running = status == StepStatus.Running || status == StepStatus.Pending
+    Column(Modifier.fillMaxWidth()) {
+        files.forEachIndexed { idx, f ->
+            val name = io.github.tianli0.switchtether.remote.session.ToolFiles.name(f.path).ifEmpty { f.path }
+            val folder = io.github.tianli0.switchtether.remote.session.ToolFiles.folder(f.path)
+            val isImage = io.github.tianli0.switchtether.files.FileTypes.kindOf(name) == io.github.tianli0.switchtether.files.FileKind.IMAGE
+            val icon = when {
+                !isRead -> AppIcons.Edit
+                isImage -> AppIcons.Image
+                else -> AppIcons.File
+            }
+            val sub = listOfNotNull(
+                folder.ifEmpty { null },
+                f.range,
+                if (idx == 0) clock else null,
+            ).joinToString(" · ")
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (open != null) Modifier.clickable(role = Role.Button, onClickLabel = openLabel) { open(f.path) } else Modifier)
+                    .heightIn(min = 44.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("tool-file"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(28.dp).clip(SquircleShape(8.dp)).background(COUITheme.colorScheme.primary.copy(alpha = 0.10f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = COUITheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.size(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        name,
+                        style = COUITheme.textStyles.body2,
+                        fontWeight = FontWeight.Medium,
+                        color = COUITheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (sub.isNotEmpty()) {
+                        Text(
+                            sub,
+                            style = COUITheme.textStyles.footnote2,
+                            color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                            overflow = TextOverflow.StartEllipsis,
+                        )
+                    }
+                }
+                Spacer(Modifier.size(8.dp))
+                if (running) {
+                    StepStatusIndicator(status, stepStatusLabel(status))
+                } else if (open != null) {
+                    Icon(AppIcons.ChevronRight, contentDescription = null, tint = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(16.dp))
+                } else {
+                    StepStatusIndicator(status, stepStatusLabel(status))
+                }
+            }
+            if (isRead && isImage && ctx.onLoadImageBytes != null) {
+                Box(Modifier.padding(start = 50.dp, end = 12.dp, bottom = 8.dp)) {
+                    ReadImage(f.path, ctx)
+                }
+            }
         }
     }
 }
