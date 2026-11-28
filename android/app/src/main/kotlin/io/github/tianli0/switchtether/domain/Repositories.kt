@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
@@ -172,6 +173,22 @@ data class NewSessionRequest(
 /** Tools whose subscription quota Home and the Usage page show (`GET /v1/usage/quota/{tool}`). */
 val QUOTA_TOOLS = listOf("claude", "codex", "agy")
 
+/**
+ * How long a quota answer is reused before Home or the Usage page reads it again (the desktop's own
+ * quota card refreshes every 5 minutes). Every read makes the desktop ask the provider.
+ */
+const val QUOTA_TTL_MS = 5 * 60_000L
+
+/** A refresh asked for by hand still reuses an answer this young (the desktop has the same floor). */
+const val QUOTA_REFRESH_MIN_MS = 30_000L
+
+/** An unavailable answer (not signed in, provider error) is asked again after this at the latest. */
+const val QUOTA_FAILURE_TTL_MS = 30_000L
+
+/** Whether a kept quota answer [ageMs] old may be shown instead of a new read for [maxAgeMs]. */
+fun quotaFresh(q: QuotaView, ageMs: Long, maxAgeMs: Long): Boolean =
+    ageMs in 0 until if (q.available) maxAgeMs else minOf(maxAgeMs, QUOTA_FAILURE_TTL_MS)
+
 /** One usage total: Home's "today" and the Usage page's "today" (all apps) share a key. */
 data class UsageSummaryKey(val fromSec: Long, val app: String?)
 
@@ -198,7 +215,10 @@ interface ManagementRepository {
     suspend fun usageTrend(fromSec: Long, toSec: Long, app: String? = null): List<DailyUsage>
     suspend fun usageModels(fromSec: Long, toSec: Long, app: String? = null): List<UsageBreakdownRow>
     suspend fun usageProviders(fromSec: Long, toSec: Long, app: String? = null): List<UsageBreakdownRow>
+    /** The tool's quota: the shared answer while it is younger than [QUOTA_TTL_MS], else a new read. */
     suspend fun quota(tool: String): QuotaView
+    /** Pull-to-refresh / refresh button: a new read unless the last one is younger than [QUOTA_REFRESH_MIN_MS]. */
+    suspend fun refreshQuota(tool: String): QuotaView = quota(tool)
 
     // Newer desktops (PROTOCOL.md §7.3); older ones answer 404 and the UI hides the feature.
     suspend fun usageLogs(fromSec: Long, toSec: Long, app: String?, page: Int, pageSize: Int = 20): io.github.tianli0.switchtether.remote.protocol.RequestLogPage =
@@ -412,7 +432,10 @@ class RemoteSessionRepository(
 fun CommandOutcome.Succeeded.createdSession(): SessionSummary? =
     runCatching { ProtocolJson.decodeFromJsonElement(SessionSummary.serializer(), response.body) }.getOrNull()
 
-class RemoteManagementRepository(private val conn: ConnectionController) : ManagementRepository {
+class RemoteManagementRepository(
+    private val conn: ConnectionController,
+    private val nowMs: () -> Long = System::currentTimeMillis,
+) : ManagementRepository {
     override val changes: Flow<String> = conn.events
         .filter { it.topic == "provider.switched" || it.topic == "usage.updated" }
         .map { it.topic }
@@ -450,11 +473,24 @@ class RemoteManagementRepository(private val conn: ConnectionController) : Manag
     override suspend fun usageTrend(fromSec: Long, toSec: Long, app: String?) = conn.withApi { DailyUsage.parseList(it.usage("trends", fromSec, toSec, app)) }
     override suspend fun usageModels(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageBreakdownRow.parseModels(it.usage("models", fromSec, toSec, app)) }
     override suspend fun usageProviders(fromSec: Long, toSec: Long, app: String?) = conn.withApi { UsageBreakdownRow.parseProviders(it.usage("providers", fromSec, toSec, app)) }
-    override suspend fun quota(tool: String): QuotaView {
-        val q = conn.withApi { QuotaView.parse(it.quota(tool), tool) }
-        _quotas.update { it + (tool to q) }
-        return q
-    }
+    /** When each kept quota was read (phone clock). */
+    private val quotaAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val quotaLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
+
+    override suspend fun quota(tool: String): QuotaView = readQuota(tool, QUOTA_TTL_MS)
+    override suspend fun refreshQuota(tool: String): QuotaView = readQuota(tool, QUOTA_REFRESH_MIN_MS)
+
+    /** Home and the Usage page asking at the same time share one read (the second waits for it). */
+    private suspend fun readQuota(tool: String, maxAgeMs: Long): QuotaView =
+        quotaLocks.getOrPut(tool) { kotlinx.coroutines.sync.Mutex() }.withLock {
+            val kept = _quotas.value[tool]
+            val at = quotaAt[tool]
+            if (kept != null && at != null && quotaFresh(kept, nowMs() - at, maxAgeMs)) return@withLock kept
+            val q = conn.withApi { QuotaView.parse(it.quota(tool, maxAgeMs / 1000), tool) }
+            quotaAt[tool] = nowMs()
+            _quotas.update { it + (tool to q) }
+            q
+        }
     override suspend fun usageLogs(fromSec: Long, toSec: Long, app: String?, page: Int, pageSize: Int) =
         conn.withApi { io.github.tianli0.switchtether.remote.protocol.RequestLogPage.parse(it.usageLogs(fromSec, toSec, app, page, pageSize)) }
     override suspend fun usageLog(requestId: String) =

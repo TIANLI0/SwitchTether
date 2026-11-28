@@ -382,22 +382,39 @@ async fn usage_last_sync(
         .map_err(|e| backend_err(&ctx, e))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuotaParams {
+    /// Seconds an earlier answer may be old (clamped to 30 s … 1 h; default 60 s).
+    max_age: Option<u64>,
+}
+
+/// `GET /v1/usage/quota/{tool}?maxAge` — each read asks the provider, so answers are reused
+/// ([`crate::quota_cache`]) and carry `cachedAtMs`.
 async fn quota(
     State(ctx): State<Arc<ApiContext>>,
     _d: AuthDevice,
     Path(tool): Path<String>,
+    Query(p): Query<QuotaParams>,
 ) -> ApiResult<Json<Value>> {
     validate_ident(&tool, "tool")?;
-    match ctx.backend.quota(&tool).await {
-        Ok(v) => Ok(Json(redacted(v))),
-        // Quota sources are often unavailable (not logged in, API not exposed).
-        // Never fabricate numbers: report unavailability with the reason.
-        Err(e) => Ok(Json(json!({
-            "tool": tool,
-            "available": false,
-            "reason": crate::redact::redact_text(&e),
-        }))),
-    }
+    let max_age = crate::quota_cache::max_age(p.max_age);
+    let v = ctx
+        .quota_cache
+        .get(&tool, max_age, || async {
+            match ctx.backend.quota(&tool).await {
+                Ok(v) => redacted(v),
+                // Quota sources are often unavailable (not logged in, API not exposed).
+                // Never fabricate numbers: report unavailability with the reason.
+                Err(e) => json!({
+                    "tool": tool,
+                    "available": false,
+                    "reason": crate::redact::redact_text(&e),
+                }),
+            }
+        })
+        .await;
+    Ok(Json(v))
 }
 
 async fn mcp_servers(State(ctx): State<Arc<ApiContext>>, _d: AuthDevice) -> ApiResult<Json<Value>> {

@@ -385,7 +385,9 @@ class RemoteApi(
         return getJson(u)
     }
 
-    suspend fun quota(tool: String): JsonElement = getJson(url("v1/usage/quota", tool))
+    /** `GET /v1/usage/quota/{tool}?maxAge`: the desktop reuses an answer up to [maxAgeSec] old (≥ 30 s). */
+    suspend fun quota(tool: String, maxAgeSec: Long? = null): JsonElement =
+        getJson(url("v1/usage/quota", tool).newBuilder().apply { maxAgeSec?.let { addQueryParameter("maxAge", it.toString()) } }.build())
 
     /** `GET /v1/usage/logs` (page 0-based, pageSize ≤ 100). 404 on older desktops. */
     suspend fun usageLogs(fromEpochSec: Long?, toEpochSec: Long?, app: String?, page: Int, pageSize: Int): JsonElement {

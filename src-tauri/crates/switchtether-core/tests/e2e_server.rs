@@ -1166,7 +1166,8 @@ async fn phone_statistics_count_foreground_time_once_and_list_devices() {
 
     // Ten minutes in front, reported twice under the same command id: counted once.
     let now = switchtether_core::util::now_ms();
-    let body = json!({ "commandId": "fg-1", "intervals": [{ "startMs": now - 600_000, "endMs": now }] });
+    let body =
+        json!({ "commandId": "fg-1", "intervals": [{ "startMs": now - 600_000, "endMs": now }] });
     let (s, r) = c.post("/v1/stats/foreground", body.clone()).await;
     assert_eq!(s, 200, "{r}");
     assert_eq!(r["countedMs"], 600_000);

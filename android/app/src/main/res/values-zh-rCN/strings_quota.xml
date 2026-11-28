@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 用量页：共享的额度数据多久前读取（最多每 5 分钟读一次） -->
+    <string name="quota_updated">%1$s更新</string>
+    <!-- Usage page: under the trend chart (bars or heatmap show their numbers on long press) -->
+    <string name="usage_chart_hint">长按查看用量，按住左右滑动切换</string>
+</resources>

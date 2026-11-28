@@ -188,15 +188,19 @@ class UsageViewModel(
         viewModelScope.launch { repo.changes.collect { if (it == "usage.updated") load() } }
     }
 
+    // Quota does not depend on the range or app: changing them reloads the range only.
     fun setPreset(p: UsageRangePreset) {
         _state.update { it.copy(preset = p) }
-        load()
+        viewModelScope.launch { loadRange() }
     }
 
     fun setApp(app: String?) {
         _state.update { it.copy(app = app) }
-        load()
+        viewModelScope.launch { loadRange() }
     }
+
+    /** The refresh button: everything, quotas read again unless the last read is very recent. */
+    fun refresh() = load(forceQuota = true)
 
     fun setMetric(m: UsageMetric) = _state.update { it.copy(metric = m) }
 
@@ -206,8 +210,9 @@ class UsageViewModel(
         return io.github.tianli0.switchtether.remote.protocol.desktopZone(status?.timeZone, status?.utcOffsetMinutes, zone)
     }
 
-    fun load() {
+    fun load(forceQuota: Boolean = false) {
         viewModelScope.launch { loadRange() }
+        loadQuotas(forceQuota)
         viewModelScope.launch {
             val sync = runCatching { repo.usageLastSyncMs() }.getOrNull()
             val visible = runCatching { repo.visibleApps() }.getOrDefault(emptyMap())
@@ -244,15 +249,30 @@ class UsageViewModel(
             val r = loadProjects { repo.usageProjects(from, to, app) }
             _state.update { if (gen == rangeGen) it.copy(projects = r) else it }
         }
+    }
+
+    /**
+     * Subscription quotas, shared with Home: an answer younger than
+     * [io.github.tianli0.switchtether.domain.QUOTA_TTL_MS] is shown as it is (no request), so
+     * opening this page right after Home costs nothing. A failed read keeps the answer shown.
+     */
+    private fun loadQuotas(force: Boolean) {
         viewModelScope.launch {
             val tools = io.github.tianli0.switchtether.domain.QUOTA_TOOLS
-            // Start from the quotas Home already read; replace each as its fresh answer arrives.
             val known = repo.quotas.value
             if (_state.value.quotas.isEmpty()) {
                 _state.update { it.copy(quotas = tools.map { t -> t to (known[t]?.let { q -> Loadable.Ready(q) } ?: Loadable.Loading) }) }
             }
-            val quotas = tools.map { t -> t to loadable { repo.quota(t) } }
-            _state.update { it.copy(quotas = quotas) }
+            for (t in tools) {
+                val r = loadable { if (force) repo.refreshQuota(t) else repo.quota(t) }
+                _state.update { st ->
+                    st.copy(
+                        quotas = st.quotas.map { (tool, old) ->
+                            tool to if (tool != t) old else if (r is Loadable.Failed && old is Loadable.Ready) old else r
+                        },
+                    )
+                }
+            }
         }
     }
 

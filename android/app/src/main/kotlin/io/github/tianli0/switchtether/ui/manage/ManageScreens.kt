@@ -9,7 +9,6 @@ import io.github.tianli0.coui17.patterns.SmallButton
 import androidx.compose.foundation.layout.Box
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +29,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
@@ -301,7 +302,7 @@ fun UsageScreen(onBack: () -> Unit, onOpen: (io.github.tianli0.switchtether.ui.n
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // The desktop's currency may have changed since we connected: re-read it with the numbers.
     androidx.compose.runtime.LaunchedEffect(Unit) { container.money.refresh() }
-    val refresh = { vm.load(); scope.launch { container.money.refresh() }; Unit }
+    val refresh = { vm.refresh(); scope.launch { container.money.refresh() }; Unit }
     Page(title = stringResource(R.string.manage_usage), onBack = onBack, actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(refresh) }) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         val presets = io.github.tianli0.switchtether.remote.usage.UsageRangePreset.entries
@@ -358,6 +359,17 @@ fun UsageContent(
         // Remaining quota right under the totals: it is what one checks first, not after every table.
         if (state.quotas.isNotEmpty()) {
             item { SectionHeader(stringResource(R.string.usage_quota)) }
+            // Quotas are read at most every few minutes (each read asks the provider): say how old they are.
+            state.quotas.mapNotNull { (it.second as? Loadable.Ready)?.value?.cachedAtMs }.minOrNull()?.let { at ->
+                item(key = "quota-age") {
+                    Text(
+                        stringResource(R.string.quota_updated, io.github.tianli0.switchtether.ui.common.relativeTime(at)),
+                        style = COUITheme.textStyles.footnote2,
+                        color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 6.dp).testTag("usage-quota-age"),
+                    )
+                }
+            }
             // A tool switched off on the desktop (`visibleApps`) is not shown here either.
             items(state.quotas.filter { it.first !in state.hiddenApps }, key = { it.first }) { (_, q) ->
                 Box(Modifier.animateItem()) { GroupCard { SmallLoadable(q, onRetry) { QuotaCard(it) } } }
@@ -499,9 +511,10 @@ private fun Stat(label: String, value: String, modifier: Modifier) {
 }
 
 /**
- * GitHub-style heatmap of the trend buckets (days, or hours for ranges up to 24 h), shaded by the
- * chosen metric. Tapping a square (or long-press and drag) shows that bucket's numbers below; the
- * latest bucket with usage is shown until then.
+ * The trend buckets (days, or hours for ranges up to 24 h) of the chosen metric: bars with a value
+ * axis for today … 30 days, a GitHub-style calendar heatmap for "全部" (as the desktop does).
+ * Tapping a bar or square (dragging sideways over the bars, long-press and drag on the heatmap)
+ * shows that bucket's numbers below; the latest bucket with usage is shown until then.
  */
 @Composable
 private fun TrendChart(days: List<DailyUsage>, state: UsageState, onMetric: (UsageMetric) -> Unit) {
@@ -540,59 +553,83 @@ private fun TrendChart(days: List<DailyUsage>, state: UsageState, onMetric: (Usa
             UsageMetric.COST -> { v -> UsageFormat.money(v, money, 4) }
             else -> { v -> UsageFormat.tokens(v.toLong()) }
         }
+        // Axis values are short: "1.2M", "$3.5".
+        val fmtAxis: (Double) -> String = when (metric) {
+            UsageMetric.COST -> { v -> UsageFormat.moneyTick(v, money) } // v already converted
+            else -> { v -> UsageFormat.tokens(v.toLong()) }
+        }
         val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
         val grid = remember(days, metric, state.fromSec, state.toSec, state.zone, hourly, locale) {
             buildUsageHeatGrid(days, value, state.fromSec, state.toSec, state.zone, hourly, locale)
         }
-        var selected by rememberSaveable(grid.buckets.map { it.start }) {
-            mutableStateOf(grid.buckets.indexOfLast { it.usage.requests > 0 || it.usage.tokens > 0 }.takeIf { it >= 0 } ?: grid.buckets.lastIndex)
-        }
         val summary = stringResource(R.string.usage_trend_a11y, grid.buckets.size) + " " +
             grid.buckets.filter { it.cell.value > 0 }.joinToString("; ") { "${usageBucketTitle(it.start, hourly, locale)}: ${fmt(it.cell.value)}" }
+        // Long-press a bar or square: its numbers float above the chart while the finger stays down.
+        val tooltip: @Composable (Int) -> Unit = { i -> grid.buckets.getOrNull(i)?.let { HeatBucketTooltip(it, hourly, locale) } }
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            io.github.tianli0.switchtether.ui.chart.ContributionHeatmap(
-                columns = grid.columns,
-                rows = grid.rows,
-                cells = grid.buckets.map { it.cell },
-                selected = selected,
-                onSelect = { selected = it },
-                summary = summary,
-                lessLabel = stringResource(R.string.usage_heat_less),
-                moreLabel = stringResource(R.string.usage_heat_more),
-                rowLabels = grid.rowLabels,
-                columnLabels = grid.columnLabels,
-                rowLabelWidth = if (hourly) 38.dp else 30.dp,
-                modifier = Modifier.testTag("usage-heatmap"),
+            // As on the desktop: bars for today … 30 days (the size of each bucket at a glance),
+            // the calendar heatmap only for "全部".
+            if (state.preset != io.github.tianli0.switchtether.remote.usage.UsageRangePreset.ALL) {
+                io.github.tianli0.switchtether.ui.chart.UsageBarChart(
+                    // Cost bars in the display currency, so the axis picks round numbers in it.
+                    values = grid.buckets.map { it.cell.value * if (metric == UsageMetric.COST) money.rate else 1.0 },
+                    summary = summary,
+                    axisLabel = { v -> if (v == 0.0) "0" else fmtAxis(v) },
+                    tooltip = tooltip,
+                    labels = remember(grid, locale) { usageBarLabels(grid.buckets.map { it.start }, hourly, locale) },
+                    modifier = Modifier.testTag("usage-bars"),
+                )
+            } else {
+                io.github.tianli0.switchtether.ui.chart.ContributionHeatmap(
+                    columns = grid.columns,
+                    rows = grid.rows,
+                    cells = grid.buckets.map { it.cell },
+                    summary = summary,
+                    lessLabel = stringResource(R.string.usage_heat_less),
+                    moreLabel = stringResource(R.string.usage_heat_more),
+                    rowLabels = grid.rowLabels,
+                    columnLabels = grid.columnLabels,
+                    rowLabelWidth = if (hourly) 38.dp else 30.dp,
+                    tooltip = tooltip,
+                    modifier = Modifier.testTag("usage-heatmap"),
+                )
+            }
+            Text(
+                stringResource(R.string.usage_chart_hint),
+                style = COUITheme.textStyles.footnote2,
+                color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 6.dp),
             )
-            grid.buckets.getOrNull(selected)?.let { HeatBucketDetail(it, hourly, locale) }
         }
     }
 }
 
-/** Numbers of the heatmap square the user picked. */
+/**
+ * The bubble of a long-pressed bar or square, in COUI's rich-tooltip colours: the bucket as the
+ * title, then tokens, cost and requests as label / value rows, and the token split underneath.
+ */
 @Composable
-private fun HeatBucketDetail(b: UsageHeatBucket, hourly: Boolean, locale: java.util.Locale) {
+private fun HeatBucketTooltip(b: UsageHeatBucket, hourly: Boolean, locale: java.util.Locale) {
     val u = b.usage
     val money = io.github.tianli0.switchtether.domain.LocalMoney.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp)
-            .clip(SquircleShape(14.dp))
-            .background(COUITheme.colorScheme.onSurface.copy(alpha = 0.05f))
-            .padding(12.dp)
-            .testTag("usage-heat-detail"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(usageBucketTitle(b.start, hourly, locale), style = COUITheme.textStyles.body2, fontWeight = FontWeight.SemiBold, color = COUITheme.colorScheme.onSurface)
+    val title = COUITheme.colorScheme.onSurfaceContainer
+    val body = COUITheme.colorScheme.onSurfaceContainerVariant
+    Column(Modifier.testTag("usage-heat-tooltip"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(usageBucketTitle(b.start, hourly, locale), style = COUITheme.textStyles.body2, fontWeight = FontWeight.SemiBold, color = title, maxLines = 1)
         if (u.requests == 0L && u.tokens == 0L) {
-            Text(stringResource(R.string.usage_heat_none), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+            Text(stringResource(R.string.usage_heat_none), style = COUITheme.textStyles.footnote1, color = body)
             return@Column
         }
-        Row {
-            Stat(stringResource(R.string.usage_requests), UsageFormat.tokens(u.requests), Modifier.weight(1f))
-            Stat(stringResource(R.string.usage_total_tokens), UsageFormat.tokens(u.tokens), Modifier.weight(1f))
-            Stat(stringResource(R.string.usage_cost), u.costUsd?.let { UsageFormat.money(it, money, 4) } ?: "—", Modifier.weight(1f))
+        @Composable
+        fun line(label: String, value: String) = Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = COUITheme.textStyles.footnote1, color = body, modifier = Modifier.padding(end = 16.dp))
+            Spacer(Modifier.weight(1f))
+            Text(value, style = COUITheme.textStyles.footnote1, fontWeight = FontWeight.Medium, color = title)
+        }
+        Column(Modifier.width(IntrinsicSize.Max)) {
+            line(stringResource(R.string.usage_total_tokens), UsageFormat.tokens(u.tokens))
+            line(stringResource(R.string.usage_cost), u.costUsd?.let { UsageFormat.money(it, money, if (it < 0.1) 4 else 2) } ?: "—")
+            line(stringResource(R.string.usage_requests), UsageFormat.tokens(u.requests))
         }
         val parts = listOf(
             R.string.usage_input to u.inputTokens,
@@ -604,7 +641,7 @@ private fun HeatBucketDetail(b: UsageHeatBucket, hourly: Boolean, locale: java.u
             Text(
                 parts.map { (label, n) -> stringResource(label) + " " + UsageFormat.tokens(n) }.joinToString(" · "),
                 style = COUITheme.textStyles.footnote2,
-                color = COUITheme.colorScheme.onSurfaceVariantSummary,
+                color = body,
             )
         }
     }

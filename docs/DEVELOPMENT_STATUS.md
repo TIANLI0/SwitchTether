@@ -1010,3 +1010,16 @@ on this machine, the phone UI on a device.
   device or against a real desktop session yet.
 - Also fixed: the Kotlin fixture test still expected agy without `bypassPermissions`; agy offers it
   (`agy acp --dangerously-skip-permissions`, the only dangerous agy mode) since `298cff9d0`.
+
+## Quota caching, usage trend bars (2026-11-28)
+
+- Quota was read from the providers on every reconnect, Home refresh and Usage range / app change.
+  Core: `quota_cache.rs` in front of `GET /v1/usage/quota/{tool}` (`maxAge`, 30 s floor, shared
+  in-flight reads, `cachedAtMs`). Android: one 5-minute quota cache shared by Home and the Usage page
+  (`QUOTA_TTL_MS`), forced only by pull-to-refresh / the refresh button; range changes no longer
+  reload quota; "N 分钟前更新" under the Usage page's quota header.
+- Usage trend: bars with a value axis for today … 30 days (`ui/chart/UsageBarChart.kt`), the calendar
+  heatmap only for "全部" (same split as the desktop dashboard). No details card: a long press shows
+  the bucket in a floating COUI-style bubble (`ui/chart/ChartTooltip.kt`), dismissed on release.
+- Checked: unit tests (core cache, phone freshness rule, axis and labels), Robolectric screenshots of
+  the four ranges. Not checked against a real provider quota on a device.

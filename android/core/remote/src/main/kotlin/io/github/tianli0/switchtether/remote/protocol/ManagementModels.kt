@@ -222,6 +222,8 @@ data class QuotaView(
     val reason: String?,
     val planName: String?,
     val tiers: List<QuotaTier>,
+    /** When the desktop read it from the provider (epoch ms; older desktops: null). */
+    val cachedAtMs: Long? = null,
 ) {
     companion object {
         fun parse(e: JsonElement, tool: String): QuotaView {
@@ -240,6 +242,7 @@ data class QuotaView(
                     ?: if (available && tiers.isEmpty()) "no quota tiers reported" else null,
                 planName = o.str("planName"),
                 tiers = tiers,
+                cachedAtMs = o.long("cachedAtMs", "queriedAt"),
             )
         }
     }

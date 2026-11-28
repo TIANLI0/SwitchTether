@@ -98,3 +98,16 @@ fun usageBucketTitle(start: LocalDateTime, hourly: Boolean, locale: Locale = Loc
     } else {
         "%04d-%02d-%02d %s".format(start.year, start.monthValue, start.dayOfMonth, start.dayOfWeek.getDisplayName(TextStyle.SHORT, locale))
     }
+
+/**
+ * Labels under the bars of a short range (bars replace the heatmap below "全部", as on the
+ * desktop): hours at 0 / 6 / 12 / 18, weekdays for a week, otherwise "M/d" at most six times,
+ * counted back from the latest day so today is always labelled.
+ */
+fun usageBarLabels(starts: List<LocalDateTime>, hourly: Boolean, locale: Locale = Locale.getDefault()): Map<Int, String> = when {
+    starts.isEmpty() -> emptyMap()
+    hourly -> starts.withIndex().filter { it.value.hour % 6 == 0 }.associate { it.index to it.value.hour.toString() }
+    starts.size <= 7 -> starts.withIndex().associate { it.index to it.value.dayOfWeek.getDisplayName(TextStyle.SHORT, locale) }
+    else -> io.github.tianli0.switchtether.ui.chart.barLabelIndices(starts.size, 6)
+        .associateWith { i -> "${starts[i].monthValue}/${starts[i].dayOfMonth}" }
+}

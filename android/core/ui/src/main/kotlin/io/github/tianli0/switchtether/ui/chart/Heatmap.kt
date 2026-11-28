@@ -2,7 +2,6 @@ package io.github.tianli0.switchtether.ui.chart
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -64,17 +64,16 @@ fun heatLevels(values: List<Double>): List<Int> {
  * GitHub-style contribution heatmap drawn on a Canvas: [rows] × [columns] squares, row labels on
  * the start edge, column labels on top, a "less … more" legend. It never scrolls sideways: the
  * squares shrink to fit down to [minPitch]; a grid still too wide shows its latest columns (the
- * most recent weeks), and a narrow one is centred instead of hugging the start edge. Tapping a
- * square selects it (long-press and drag to scrub); the caller shows the selected cell's
- * details. Cells missing from [cells] are not drawn (outside the range, like GitHub's future days).
+ * most recent weeks), and a narrow one is centred instead of hugging the start edge. Long-press a
+ * square to see its numbers in a floating bubble ([tooltip], [ChartTooltipOverlay]); drag to move
+ * to other squares (a haptic tick on each), lift to dismiss. Cells missing from [cells] are not
+ * drawn (outside the range, like GitHub's future days).
  */
 @Composable
 fun ContributionHeatmap(
     columns: Int,
     rows: Int,
     cells: List<HeatCell>,
-    selected: Int?,
-    onSelect: (Int) -> Unit,
     summary: String,
     lessLabel: String,
     moreLabel: String,
@@ -85,6 +84,7 @@ fun ContributionHeatmap(
     minPitch: Dp = 10.dp,
     maxPitch: Dp = 30.dp,
     accent: Color = COUITheme.colorScheme.primary,
+    tooltip: @Composable (Int) -> Unit = {},
 ) {
     val levels = remember(cells) { heatLevels(cells.map { it.value }) }
     val index = remember(cells) { cells.withIndex().associate { (i, c) -> (c.column to c.row) to i } }
@@ -94,7 +94,18 @@ fun ContributionHeatmap(
     val labelColor = COUITheme.colorScheme.onSurfaceVariantSummary
     val labelStyle = DevType.label.copy(color = labelColor)
     val measurer = rememberTextMeasurer()
-    val select by rememberUpdatedState(onSelect)
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var pressed by remember(cells) { androidx.compose.runtime.mutableStateOf<Int?>(null) }
+    val select by rememberUpdatedState { i: Int? ->
+        if (i != pressed) {
+            if (i != null) {
+                haptics.performHapticFeedback(
+                    if (pressed == null) androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress else androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove,
+                )
+            }
+            pressed = i
+        }
+    }
     val density = LocalDensity.current
     val labelW = if (rowLabels.any { !it.isNullOrEmpty() }) rowLabelWidth else 0.dp
     val headerH = if (columnLabels.isNotEmpty()) 16.dp else 0.dp
@@ -123,14 +134,17 @@ fun ContributionHeatmap(
                     val c = (o.x / pitchPx).toInt() + firstColumn
                     val r = ((o.y - topPx) / pitchPx).toInt()
                     if (o.y < topPx || o.x < 0 || c !in firstColumn until columns || r !in 0 until rows) return
-                    index[c to r]?.let(select)
+                    index[c to r]?.let { select(it) }
                 }
                 Canvas(
                     Modifier
                         .size(gridW, headerH + gridH)
-                        .pointerInput(cells, columns, rows, pitch, firstColumn) { detectTapGestures(onTap = { hit(it) }) }
                         .pointerInput(cells, columns, rows, pitch, firstColumn) {
-                            detectDragGesturesAfterLongPress(onDragStart = { hit(it) }) { change, _ -> hit(change.position) }
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { hit(it) },
+                                onDragEnd = { select(null) },
+                                onDragCancel = { select(null) },
+                            ) { change, _ -> hit(change.position) }
                         },
                 ) {
                     val p = pitch.toPx()
@@ -150,7 +164,7 @@ fun ContributionHeatmap(
                         val origin = Offset((cell.column - firstColumn) * p + gap / 2, top + cell.row * p + gap / 2)
                         drawRoundRect(shades[levels[i]], topLeft = origin, size = Size(side, side), cornerRadius = radius)
                     }
-                    selected?.let(cells::getOrNull)?.takeIf { it.column >= firstColumn }?.let { cell ->
+                    pressed?.let(cells::getOrNull)?.takeIf { it.column >= firstColumn }?.let { cell ->
                         val stroke = 1.5.dp.toPx()
                         drawRoundRect(
                             outline,
@@ -162,6 +176,17 @@ fun ContributionHeatmap(
                     }
                 }
             }
+            // The bubble over the held square, centred on it (the grid row is centred in the width).
+            val rowStart = (maxWidth - labelW - gridW) / 2 + labelW
+            ChartTooltipOverlay(
+                pressed = pressed,
+                anchorX = { i ->
+                    val c = cells.getOrNull(i)?.column ?: firstColumn
+                    with(density) { (rowStart + pitch * (c - firstColumn) + pitch / 2).toPx() }
+                },
+                modifier = Modifier.matchParentSize(),
+                content = tooltip,
+            )
         }
         // Legend: less □□□□□ more, end-aligned like GitHub.
         Row(

@@ -266,7 +266,7 @@ class HomeViewModel(
     fun pullRefresh() {
         if (_state.value.refreshing) return
         _state.update { it.copy(refreshing = true) }
-        refreshUsage()
+        refreshUsage(forceQuota = true)
         viewModelScope.launch {
             try {
                 refreshSessions().join()
@@ -280,7 +280,12 @@ class HomeViewModel(
     @Volatile private var todayKey: UsageSummaryKey? = null
     @Volatile private var monthKey: UsageSummaryKey? = null
 
-    private fun refreshUsage() {
+    /**
+     * Today's and this month's totals, and the quotas: those are shared with the Usage page and
+     * read again only after [io.github.tianli0.switchtether.domain.QUOTA_TTL_MS] (reconnecting
+     * or coming back to Home does not ask the providers again), or on pull-to-refresh.
+     */
+    private fun refreshUsage(forceQuota: Boolean = false) {
         viewModelScope.launch {
             // Same day boundaries as the Usage page (the desktop's zone), so both show the same totals.
             val status = (conn.state.value as? ConnectionState.Online)?.status
@@ -299,7 +304,7 @@ class HomeViewModel(
             // Each answer lands in management.quotas, which fills state.quotas; a failed read keeps the last one.
             for (tool in QUOTA_TOOLS) {
                 try {
-                    management.quota(tool)
+                    if (forceQuota) management.refreshQuota(tool) else management.quota(tool)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (_: Exception) {

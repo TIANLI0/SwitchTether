@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Usage page: how old the shared quota answers are (they are read at most every 5 minutes) -->
+    <string name="quota_updated">Updated %1$s</string>
+    <!-- Usage page: under the trend chart (bars or heatmap show their numbers on long press) -->
+    <string name="usage_chart_hint">Long-press to see the numbers; keep holding and slide to move along</string>
+</resources>

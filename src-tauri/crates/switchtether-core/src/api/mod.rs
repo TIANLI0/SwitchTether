@@ -67,6 +67,8 @@ pub struct ApiContext {
     pub push: Arc<crate::push::PushWaker>,
     /// What the phones did (docs/PROTOCOL.md §7.15).
     pub stats: Arc<crate::stats::StatsTracker>,
+    /// Subscription quota answers reused across phones and screens (docs/PROTOCOL.md §7.3).
+    pub quota_cache: crate::quota_cache::QuotaCache,
     limiter: RateLimiter,
 }
 
@@ -111,6 +113,7 @@ impl ApiContext {
             dsh_web: Default::default(),
             push,
             stats,
+            quota_cache: Default::default(),
             limiter: RateLimiter::default(),
         })
     }

@@ -2122,3 +2122,29 @@ intervals kept in `files/stats/foreground.json` and reported with `POST /v1/stat
 connection comes up, when the app goes to the background and every ten minutes in front. A report
 keeps its command id until the computer has it, so a retry is counted once. Unpairing drops what was
 not reported yet.
+
+## 40. Quota caching and the usage trend chart (2026-11-28)
+
+**Quota is read at most every 5 minutes.** Each quota read makes the desktop ask Anthropic,
+OpenAI or Google, and the phone used to read all three on every reconnect (each return to the app
+after the 45 s background grace), on every Home refresh and on every range or app change on the
+Usage page. Now `ManagementRepository` keeps one answer per tool for `QUOTA_TTL_MS` (5 minutes, the
+desktop's own quota card interval), shared by Home and the Usage page; reads asked at the same time
+share one request; an unavailable answer is asked again after 30 s. Only pull-to-refresh on Home
+and the Usage page's refresh button ask again (still reusing an answer younger than 30 s), and
+changing the range or app no longer touches quota. The desktop keeps its own cache in front of the
+providers (PROTOCOL.md §7.3, `maxAge`, `cachedAtMs`); the Usage page says how old the quota is
+("2 分钟前更新").
+
+**Trend chart: bars below "全部".** The GitHub-style grid was hard to read on a phone for short
+ranges — a week was one column of seven squares, today a strip of 24 tiny ones, and every value
+needed a tap. As on the desktop dashboard, today … 30 days now show bars (`ui/chart/UsageBarChart.kt`)
+with a value axis at round numbers (0, half, top) and weekday / date / hour labels; cost bars are
+in the display currency. "全部" keeps the calendar heatmap. There is no details card under the
+chart any more: long-press a bar or square and its numbers float in a bubble beside it
+(`ui/chart/ChartTooltip.kt`, COUI17's rich-tooltip look — surface-container bubble on the 17 dp
+smooth corner with the system popup shadow), placed on the side away from the held point so it
+stays visible, with a dashed guide to it and the other bars dimmed; keep holding and slide to move
+(a haptic tick per bucket), lift to dismiss. Taps and vertical drags still scroll the page. A one-
+line hint under the chart says so. Screenshots: `UsageTrendScreenshotTest`
+(build/outputs/screenshots/trend-*.png, including the held states).

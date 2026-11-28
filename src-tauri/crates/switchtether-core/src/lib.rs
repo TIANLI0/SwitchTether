@@ -36,6 +36,7 @@ pub mod net;
 pub mod pairing;
 pub mod protocol;
 pub mod push;
+pub mod quota_cache;
 pub mod redact;
 pub mod registry;
 pub mod relay;
