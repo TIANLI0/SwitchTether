@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/TIANLI0/FluentSetup/main/shared/schemas/fluentsetup.project.schema.json",
   "schemaVersion": 1,
-  "variables": { "Version": "0.1.36" },
+  "variables": { "Version": "1.0.0" },
   "app": {
     "id": "TIANLI0.SwitchTether",
     "name": "SwitchTether",
