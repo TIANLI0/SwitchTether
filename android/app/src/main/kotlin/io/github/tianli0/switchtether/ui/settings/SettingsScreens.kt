@@ -90,7 +90,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manage
     // Landscape: the large collapsing title and the space above it took a third of the height.
     val roomy = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480
     Page(title = stringResource(R.string.tab_manage), onBack = onBack, immersive = true, large = roomy) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             item {
                 GroupCard {
@@ -291,6 +291,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manage
             }
         },
         onDismiss = { confirmUnpair = false },
+        destructive = true,
     )
     ConfirmDialog(
         show = confirmClear,
@@ -303,6 +304,7 @@ fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manage
             android.widget.Toast.makeText(toastContext, clearedText, android.widget.Toast.LENGTH_SHORT).show()
         },
         onDismiss = { confirmClear = false },
+        destructive = true,
     )
 }
 
@@ -313,7 +315,7 @@ fun DesktopInfoScreen(onBack: () -> Unit) {
     val conn by container.connection.state.collectAsStateWithLifecycle()
     Page(title = stringResource(R.string.settings_desktop), onBack = onBack, immersive = true) {
         val d = desktop ?: return@Page
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
                 GroupCard {
                     // The visible rows first: the last one is conditional, and each row needs its place in the card.
@@ -389,7 +391,7 @@ fun NotificationPrefsScreen(onBack: () -> Unit) {
         update { if (which == QUIET_START) it.copy(quietStartMin = m) else it.copy(quietEndMin = m) }
     }
     Page(title = stringResource(R.string.settings_notifications), onBack = onBack, immersive = true) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { SectionHeader(stringResource(R.string.live_settings_title)) }
             item {
                 val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -588,7 +590,7 @@ val LICENSES = listOf(
 @Composable
 fun LicensesScreen(onBack: () -> Unit) {
     Page(title = stringResource(R.string.settings_licenses), onBack = onBack, immersive = true) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { Text(stringResource(R.string.licenses_intro), style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter, vertical = 12.dp)) }
             item {
                 GroupCard {

@@ -138,7 +138,7 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
         },
         immersive = true,
     ) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { ConnectionBanner(conn, { container.connection.retryNow() }) }
             item { SmallTitle(stringResource(R.string.ws_terminals)) }
             item {

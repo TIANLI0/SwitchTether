@@ -57,6 +57,7 @@ internal fun GitHistoryTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
     LazyColumn(
         state = rememberPageListState(),
         modifier = Modifier.fillMaxSize().pageScroll().testTag("git-history"),
+        flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(),
         contentPadding = pageListPadding(top = 4.dp),
     ) {
         item(key = "header") { header() }
@@ -142,6 +143,7 @@ internal fun CommitDetailBody(state: FilesUiState, vm: FilesViewModel) {
         LazyColumn(
             state = rememberPageListState(),
             modifier = Modifier.fillMaxSize().pageScroll().testTag("git-commit-detail"),
+            flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(),
             contentPadding = pageListPadding(top = 8.dp),
         ) {
             item(key = "message") {

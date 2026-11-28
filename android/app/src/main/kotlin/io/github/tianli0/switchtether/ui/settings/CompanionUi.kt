@@ -186,5 +186,6 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
             reload()
         },
         onDismiss = { confirmUnbind = null },
+        destructive = true,
     )
 }

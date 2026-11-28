@@ -447,7 +447,7 @@ fun NewSessionScreen(onBack: () -> Unit, onPickFolder: () -> Unit, onCreated: (S
     ) {
         ConnectionBanner(state.connection, { container.connection.retryNow() })
         // The options fold out and the keyboard takes half the screen: the launcher must scroll.
-        Column(Modifier.weight(1f, fill = false).pageScroll().verticalScroll(rememberPageScrollState())) {
+        Column(Modifier.weight(1f, fill = false).pageScroll().verticalScroll(rememberPageScrollState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior())) {
             NewSessionContent(
                 state = state,
                 busy = busy != null,
@@ -859,7 +859,7 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
             intakeReport(dropContext, plan)?.let { android.widget.Toast.makeText(dropContext, it, android.widget.Toast.LENGTH_LONG).show() }
         }
         Box(Modifier.fillMaxWidth().heightIn(max = 620.dp).nestedScroll(keepFlingInside).contentDropTarget(onHover = { dropHover = it }, onDrop = onDrop)) {
-            Column(Modifier.pageScroll().verticalScroll(rememberPageScrollState())) {
+            Column(Modifier.pageScroll().verticalScroll(rememberPageScrollState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior())) {
                 if (heldFiles > 0) {
                     io.github.tianli0.coui17.patterns.NoticeBanner(
                         text = androidx.compose.ui.res.pluralStringResource(R.plurals.new_session_drop_files, heldFiles, heldFiles),

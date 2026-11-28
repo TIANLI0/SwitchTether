@@ -96,6 +96,7 @@ internal fun GitBranchesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMo
             confirmText = stringResource(if (a.force) R.string.git_branch_delete_force else R.string.git_branch_delete),
             onConfirm = { ask = null; vm.deleteBranch(a.name, a.force) },
             onDismiss = { ask = null },
+            destructive = true,
         )
         null -> Unit
     }
@@ -109,6 +110,7 @@ internal fun GitBranchesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMo
     LazyColumn(
         state = rememberPageListState(),
         modifier = Modifier.fillMaxSize().pageScroll().testTag("git-branches"),
+        flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(),
         contentPadding = pageListPadding(top = 4.dp),
     ) {
         item(key = "header") { header() }

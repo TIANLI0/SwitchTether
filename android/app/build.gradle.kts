@@ -19,8 +19,8 @@ android {
         minSdk = 35
         // Android 17. Local network access needs ACCESS_LOCAL_NETWORK (requested at runtime).
         targetSdk = 37
-        versionCode = 32
-        versionName = "0.1.31"
+        versionCode = 33
+        versionName = "0.1.32"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 64-bit ARM (ARMv8) devices only; smaller APK.
         ndk { abiFilters += "arm64-v8a" }

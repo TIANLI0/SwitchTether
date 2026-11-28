@@ -310,6 +310,7 @@ fun TerminalPane(state: TerminalUiState, vm: TerminalViewModel, controller: Term
         confirmText = stringResource(R.string.term_kill),
         onConfirm = { controller.confirmKill = false; vm.kill() },
         onDismiss = { controller.confirmKill = false },
+        destructive = true,
     )
 }
 

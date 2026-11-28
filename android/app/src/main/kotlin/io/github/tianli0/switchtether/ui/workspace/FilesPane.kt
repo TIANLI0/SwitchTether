@@ -14,6 +14,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import com.adamglin.phosphoricons.regular.Article
+import com.adamglin.phosphoricons.regular.ArrowDown
+import com.adamglin.phosphoricons.regular.ArrowUp
 import com.adamglin.phosphoricons.regular.Code
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
@@ -158,7 +160,15 @@ private fun FilesSortEntry(sort: SortOrder, onSort: (SortKey) -> Unit) {
             show = open,
             entries = keys.map { (key, label) ->
                 val active = key == sort.key
-                MenuEntry(if (active) label + direction else label, selected = active) { onSort(key) }
+                // ColorOS Files marks the active key with its direction arrow at the row end, no check.
+                MenuEntry(
+                    label,
+                    trailingIcon = if (active) {
+                        if (sort.descending) PhosphorIcons.Regular.ArrowDown else PhosphorIcons.Regular.ArrowUp
+                    } else {
+                        null
+                    },
+                ) { onSort(key) }
             },
             onDismiss = { open = false },
         )
@@ -226,6 +236,7 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
         confirmText = stringResource(R.string.files_discard),
         onConfirm = vm::discardEdits,
         onDismiss = vm::keepEditing,
+        destructive = true,
     )
     state.pendingSensitive?.let { e ->
         ConfirmDialog(
@@ -634,7 +645,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         }
     }
     confirmDelete?.let { e ->
-        ConfirmDialog(true, stringResource(R.string.files_delete), stringResource(R.string.files_delete_confirm, e.name), stringResource(R.string.files_delete), { confirmDelete = null; vm.delete(e) }, { confirmDelete = null })
+        ConfirmDialog(true, stringResource(R.string.files_delete), stringResource(R.string.files_delete_confirm, e.name), stringResource(R.string.files_delete), { confirmDelete = null; vm.delete(e) }, { confirmDelete = null }, destructive = true)
     }
 }
 
@@ -944,7 +955,7 @@ private fun ConflictScreen(state: FilesUiState, vm: FilesViewModel) {
             }
         }
     }
-    ConfirmDialog(confirmOverwrite, stringResource(R.string.files_overwrite), stringResource(R.string.files_overwrite_confirm), stringResource(R.string.files_overwrite), { confirmOverwrite = false; vm.overwrite() }, { confirmOverwrite = false })
+    ConfirmDialog(confirmOverwrite, stringResource(R.string.files_overwrite), stringResource(R.string.files_overwrite_confirm), stringResource(R.string.files_overwrite), { confirmOverwrite = false; vm.overwrite() }, { confirmOverwrite = false }, destructive = true)
 }
 
 /** Outcome messages that only report success: shown as a toast instead of a dialog. */

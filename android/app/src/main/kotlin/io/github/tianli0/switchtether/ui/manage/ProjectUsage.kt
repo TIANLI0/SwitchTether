@@ -208,7 +208,7 @@ fun ProjectUsageContent(
         EmptyMessage(stringResource(R.string.project_usage_unsupported))
         return@Column
     }
-    LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("project-usage"), contentPadding = pageListPadding(top = 4.dp)) {
+    LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll().testTag("project-usage"), contentPadding = pageListPadding(top = 4.dp)) {
         item(key = "hero") {
             GroupCard(Modifier.animateItem()) {
                 SmallLoadable(usage, onRetry) { p ->

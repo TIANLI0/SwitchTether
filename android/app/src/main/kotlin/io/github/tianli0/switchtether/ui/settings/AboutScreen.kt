@@ -56,7 +56,7 @@ fun AboutScreen(onBack: () -> Unit, onOpen: (Route) -> Unit) {
     val updState by container.updates.state.collectAsStateWithLifecycle()
     var beta by rememberSaveable { mutableStateOf(container.updates.includePrerelease) }
     Page(title = stringResource(R.string.settings_about), onBack = onBack, immersive = true) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item { AppHeader() }
             item {
                 GroupCard {

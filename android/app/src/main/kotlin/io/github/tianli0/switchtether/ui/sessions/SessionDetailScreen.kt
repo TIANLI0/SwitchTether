@@ -507,6 +507,7 @@ fun SessionDetailScreen(
             vm.stopSession(endLabel)
         },
         onDismiss = { confirmStop = false },
+        destructive = true,
     )
 
     AttachSheet(

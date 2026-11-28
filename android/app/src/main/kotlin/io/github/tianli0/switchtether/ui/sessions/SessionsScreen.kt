@@ -177,7 +177,7 @@ fun SessionsContent(
                 )
             }
             if (searching && contentSearch.enabled) {
-                LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 8.dp)) {
+                LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 8.dp)) {
                     item(key = "content") {
                         ContentSearchResults(contentSearch, onOpen = { r -> onOpen(Route.SessionDetail(r.sessionId, r.title)) })
                     }
@@ -187,7 +187,7 @@ fun SessionsContent(
             LoadableContent(state.items, onRetry = onReload) { _ ->
                 val visible = state.visible
                 PullToRefresh(isRefreshing = refreshing, onRefresh = onReload, topAppBarScrollBehavior = null) {
-                    LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().preciseClickAnchor(touch).testTag("session-list"), contentPadding = pageListPadding(top = 8.dp)) {
+                    LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll().preciseClickAnchor(touch).testTag("session-list"), contentPadding = pageListPadding(top = 8.dp)) {
                         if (visible.isEmpty()) {
                             item {
                                 EmptyState(

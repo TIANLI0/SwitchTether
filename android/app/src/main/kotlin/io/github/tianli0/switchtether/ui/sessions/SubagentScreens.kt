@@ -214,7 +214,7 @@ fun SubagentScreen(sessionId: String, agentId: String, title: String?, onBack: (
                 .filter { it.event.kind != EventKinds.STATUS }
             val trail = SubagentTree.trail(state.tree, agentId)
             val children = SubagentTree.flatten(state.tree).filter { it.node.parentAgentId == agentId }
-            LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 item(key = "trail") { Breadcrumb(sessionId, agent, trail, heading, onOpen) }
                 if (page.hasMoreBefore) {
                     item(key = "older") { Note(stringResource(R.string.subagent_older_omitted)) }

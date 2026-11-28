@@ -54,7 +54,7 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
     val shareTitle = stringResource(R.string.diag_share_title)
     val failed = stringResource(R.string.diag_export_failed)
     Page(title = stringResource(R.string.about_diagnostics), onBack = onBack, immersive = true) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             item {
                 Text(
                     stringResource(R.string.diag_intro),

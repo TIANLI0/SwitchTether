@@ -275,6 +275,7 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
             detailVm.stopSession(stopLabel)
         },
         onDismiss = { confirmStop = false },
+        destructive = true,
     )
     val summary = detail.detail.valueOrNull?.summary
     Page(
@@ -286,7 +287,7 @@ fun SessionToolsScreen(sessionId: String, onBack: () -> Unit) {
         // A session started on the computer is observe-only: what its files hold, nothing that needs the process.
         val readOnly = detail.claudeReadTools
         val sessionCost = androidx.compose.runtime.remember(detail.log) { sessionCost(detail.log.events) }
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("session-tools"), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll().testTag("session-tools"), contentPadding = pageListPadding()) {
             if (!detail.online) {
                 item { ToolsNote(stringResource(R.string.tools_offline), LocalDevColors.current.warn) }
             }

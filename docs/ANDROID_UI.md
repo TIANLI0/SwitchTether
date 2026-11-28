@@ -769,8 +769,14 @@ the system refuses to delete (e.g. after a reinstall) are reported and dropped f
   optional fields, secret input, custom answers and cancellation. Multi-select answers use arrays
   for Codex and preserve commas / option values. Submit is disabled while an answer is sending.
   Answer capabilities are PARTIAL (protocol round-trip + Compose tests; live agent/device untested).
-- Confirmation: approvals use the centered COUI WindowAlertDialog and its standard button bar;
-  opaque page/dialog materials are provided at the theme root, including dialogs outside MainShell.
+- Confirmation: approvals use COUI17's `ConfirmDialog` (a WindowAlertDialog with its standard
+  button bar). On phones it sits at the bottom edge and slides up, as ColorOS 17's own
+  confirmations do; from a 480dp smallest window side it is centred. Deleting, discarding,
+  overwriting, ending, killing, clearing and unpairing confirmations pass `destructive = true`
+  (red confirm label, as in ColorOS Files). Page/dialog materials are provided at the theme root,
+  including dialogs outside MainShell.
+- Scrolling: every page's main list passes COUI17's `pageFlingBehavior()`, the friction-only
+  ColorOS list fling (1.6/s above 10,000 px/s, 2.5/s below, measured on a ColorOS 17.0.1 phone).
 - Long commands: collapsed steps show two lines of actual command after a recognized shell launcher;
   expansion retains the full original command, defaults to line wrapping, offers horizontal scroll
   and Copy full command, and displays the working directory. No command is rewritten for execution.

@@ -238,7 +238,7 @@ fun SubagentTreeScreen(sessionId: String, onBack: () -> Unit, onOpen: (Route) ->
         LoadableContent(map, onRetry = vm::retry) { m ->
             val branches = SubagentTree.flatten(m.agents)
             val byId = m.agents.associateBy { it.agentId }
-            LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 item {
                     GroupCard {
                         Column {

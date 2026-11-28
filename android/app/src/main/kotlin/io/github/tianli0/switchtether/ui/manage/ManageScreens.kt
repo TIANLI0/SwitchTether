@@ -143,7 +143,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
         ConnectionBanner(conn, { container.connection.retryNow() })
         AppTabs(state.apps, state.app, vm::selectApp)
         LoadableContent(state.providers, onRetry = vm::load) { view ->
-            LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+            LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                 if (view.providers.isEmpty()) item { EmptyMessage(stringResource(R.string.provider_empty)) }
                 items(view.providers, key = { it.id }) { p ->
                     // Each provider is its own card: it fades in and glides to its place.
@@ -350,7 +350,7 @@ fun UsageContent(
         LoadableContent(failed, onRetry = onRetry) {}
         return
     }
-    LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
+    LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll().testTag("usage-list"), contentPadding = pageListPadding(top = 4.dp)) {
         item { GroupCard { SmallLoadable(state.summary, onRetry) { s -> SummaryHero(s) } } }
         item { SyncNote(state.lastSyncMs, state.zone) }
         // Remaining quota right under the totals: it is what one checks first, not after every table.
@@ -755,7 +755,7 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
         AppTabs(state.apps, state.app, vm::selectApp)
         if (kind == ToggleListKind.PROMPTS) {
             LoadableContent(state.prompts, onRetry = vm::load) { prompts ->
-                LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+                LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                     if (prompts.isEmpty()) item { EmptyMessage(stringResource(R.string.toggle_empty)) }
                     if (prompts.isNotEmpty()) item(key = "prompts") {
                         GroupCard {
@@ -774,7 +774,7 @@ fun ToggleListScreen(kind: ToggleListKind, onBack: () -> Unit) {
             }
         } else {
             LoadableContent(state.items, onRetry = vm::load) { items ->
-                LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+                LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
                     if (items.isEmpty()) item { EmptyMessage(stringResource(R.string.toggle_empty)) }
                     if (items.isNotEmpty()) item(key = "items") {
                         GroupCard {

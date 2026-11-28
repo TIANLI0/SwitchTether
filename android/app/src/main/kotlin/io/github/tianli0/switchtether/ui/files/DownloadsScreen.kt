@@ -149,7 +149,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
             }
         },
     ) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 4.dp)) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding(top = 4.dp)) {
             // Keyed sections: deleting downloads lets what is below the list glide up, and the
             // lines of the list fade when the last file goes.
             item(key = "saved-h") { SmallTitle(stringResource(R.string.downloads_section_saved)) }
@@ -321,6 +321,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
             }
         },
         onDismiss = { pending = null },
+        destructive = true,
     )
     ConfirmDialog(
         show = confirmClearCache,
@@ -329,6 +330,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
         confirmText = stringResource(R.string.downloads_cache_clear),
         onConfirm = { confirmClearCache = false; scope.launch { store.clearCache() } },
         onDismiss = { confirmClearCache = false },
+        destructive = true,
     )
 }
 

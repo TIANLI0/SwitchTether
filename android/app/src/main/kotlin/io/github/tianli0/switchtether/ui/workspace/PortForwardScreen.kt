@@ -261,7 +261,7 @@ fun PortForwardScreen(onBack: () -> Unit) {
         actions = { io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon(vm::refresh) },
         immersive = true,
     ) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll(), contentPadding = pageListPadding()) {
             // Sections are keyed items: a forward that starts or stops fades its section in or
             // out and the sections below glide to their place.
             item(key = "connection") { ConnectionBanner(conn, { container.connection.retryNow() }) }

@@ -75,6 +75,7 @@ internal fun GitChangesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
                 vm.discard(paths)
             },
             onDismiss = { pendingDiscard = null },
+            destructive = true,
         )
     }
     pendingPop?.let { s ->
@@ -97,6 +98,7 @@ internal fun GitChangesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
     LazyColumn(
         state = rememberPageListState(),
         modifier = Modifier.fillMaxSize().pageScroll().testTag("git-list"),
+        flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(),
         contentPadding = pageListPadding(top = 4.dp),
     ) {
         item(key = "header") { header() }

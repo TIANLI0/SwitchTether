@@ -103,7 +103,7 @@ fun HomeContent(state: HomeState, onOpen: (Route) -> Unit, onSelectTab: (Tab) ->
             // The list runs under the title bar; the pull indicator appears below it.
             contentPadding = androidx.compose.foundation.layout.PaddingValues(top = io.github.tianli0.coui17.patterns.LocalPageTopInset.current),
         ) {
-        LazyColumn(state = rememberPageListState(), modifier = Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
+        LazyColumn(state = rememberPageListState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior(), modifier = Modifier.fillMaxSize().pageScroll().testTag("home-list"), contentPadding = pageListPadding(top = 4.dp)) {
             // Only problems are shown (connecting / offline / revoked / incompatible), as a thin strip.
             item(key = "connection") { io.github.tianli0.switchtether.ui.common.ConnectionBanner(state.connection, onRetry) }
             item(key = "offline-snapshot") { io.github.tianli0.switchtether.ui.common.OfflineSnapshotNotice(state.snapshotAtMs) }
