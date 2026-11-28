@@ -169,13 +169,14 @@ class ProtocolFixturesTest {
         assertEquals(5, o.efforts.size)
         assertEquals(listOf("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"), o.permissionModes.map { it.id })
         assertEquals(listOf("bypassPermissions"), o.permissionModes.filter { it.dangerous }.map { it.id })
-        // Antigravity: models with their thinking levels, agy's own modes (none dangerous).
+        // Antigravity: models with their thinking levels; agy's own ACP modes plus `bypassPermissions`
+        // (`agy acp --dangerously-skip-permissions`), the only dangerous one.
         val agy = ProtocolJson.decodeFromString(io.github.tianli0.switchtether.remote.protocol.ModelOptions.serializer(), fixture("model_options_agy.json"))
         assertEquals(listOf("gemini-4-neon", "gemini-pro-orchestrator", "claude-sonnet-5-5"), agy.models.map { it.id })
         assertEquals(listOf("low", "medium", "high", "xhigh"), agy.models[0].efforts)
         assertEquals(emptyList<String>(), agy.models[1].efforts)
-        assertEquals(listOf("default", "acceptEdits", "auto", "plan"), agy.permissionModes.map { it.id })
-        assertTrue(agy.permissionModes.none { it.dangerous })
+        assertEquals(listOf("default", "acceptEdits", "auto", "plan", "bypassPermissions"), agy.permissionModes.map { it.id })
+        assertEquals(listOf("bypassPermissions"), agy.permissionModes.filter { it.dangerous }.map { it.id })
     }
 
     @Test
