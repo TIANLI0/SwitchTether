@@ -19,10 +19,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
+import io.github.suqi8.coui.kmp.anim.COUIEase
 import io.github.suqi8.coui.kmp.nav.core.NavCornerClipMode
 import io.github.suqi8.coui.kmp.nav.core.NavDisplay
 import io.github.suqi8.coui.kmp.nav.core.NavDisplayEffects
@@ -67,11 +70,14 @@ internal fun rememberTabTransition(nav: NavViewModel): Transition<Tab> {
 
 @Composable
 internal fun TabCrossfade(transition: Transition<Tab>, activeTab: Tab, content: @Composable (Tab) -> Unit) {
-    transition.Crossfade(animationSpec = tween(TAB_FADE)) { tab ->
+    transition.Crossfade(animationSpec = tween(TAB_FADE, easing = COUIEase)) { tab ->
         // The Home preview and the outgoing tab can both be composed, with their own back stacks.
         // Only the selected tab may handle back until the gesture commits.
         val owner = rememberNavigationEventDispatcherOwner(enabled = tab == activeTab)
-        CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) { content(tab) }
+        val semantics = if (tab == activeTab) Modifier else Modifier.semantics { hideFromAccessibility() }
+        CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) {
+            Box(semantics) { content(tab) }
+        }
     }
 }
 

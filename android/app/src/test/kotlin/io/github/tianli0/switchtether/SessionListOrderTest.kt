@@ -45,6 +45,36 @@ class SessionListOrderTest {
     } as ManagementRepository
 
     @Test
+    fun closingSearchRestoresTheBrowsePageBeforeTheRefreshCompletes() = runTest(dispatcher) {
+        val first = s("first", at = 10).copy(agent = "claude_code")
+        val match = s("match", at = 5).copy(agent = "codex")
+        val refresh = CompletableDeferred<SessionPage>()
+        val repo = FakeSessionRepository().apply {
+            listHandler = { query, _ ->
+                when {
+                    query.agent == "codex" -> SessionPage(listOf(match))
+                    listCalls > 1 -> refresh.await()
+                    else -> SessionPage(listOf(first, match), nextCursor = "browse-next")
+                }
+            }
+        }
+        val vm = SessionsViewModel(FakeConnection(), repo)
+        advanceUntilIdle()
+        vm.setAgent("codex")
+        advanceUntilIdle()
+        assertEquals(listOf("match"), vm.state.value.visible.map { it.id })
+        vm.setQuery("pending search")
+        vm.closeSearch()
+        assertEquals("", vm.state.value.query)
+        assertNull(vm.state.value.agent)
+        assertEquals("browse-next", vm.state.value.nextCursor)
+        assertEquals(listOf("first", "match"), vm.state.value.visible.map { it.id })
+        refresh.complete(SessionPage(listOf(first, match)))
+        advanceUntilIdle()
+        assertEquals(listOf(null, null, null), repo.listQueries.map { it.text })
+    }
+
+    @Test
     fun theOrderIsTotalWaitingFirstThenNewestThenId() {
         val all = listOf(
             s("h2", at = 5), s("h1", at = 5), s("hn2", at = null), s("hn1", at = null),

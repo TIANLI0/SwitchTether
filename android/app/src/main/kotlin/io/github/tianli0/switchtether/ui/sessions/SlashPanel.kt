@@ -1,17 +1,11 @@
 package io.github.tianli0.switchtether.ui.sessions
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -66,6 +60,8 @@ import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.PanelSheet
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.glassSurface
+import io.github.tianli0.switchtether.ui.common.NoticeVisibility
+import io.github.tianli0.switchtether.ui.common.rememberLast
 import io.github.tianli0.switchtether.R
 
 /** Corner radius of the "/" panel; its first and last rows follow it. */
@@ -93,15 +89,9 @@ private fun slashRowShape(index: Int, count: Int): Shape {
 @Composable
 fun SlashSuggestionPanel(suggestions: List<SlashEntry>, onPick: (SlashEntry) -> Unit, modifier: Modifier = Modifier) {
     // The rows stay while the panel shrinks away (the list is already empty by then).
-    val last = remember { arrayOf(suggestions) }
-    if (suggestions.isNotEmpty()) last[0] = suggestions
-    val rows = last[0]
-    AnimatedVisibility(
-        visible = suggestions.isNotEmpty(),
-        modifier = modifier,
-        enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
-        exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom),
-    ) {
+    val visible = suggestions.isNotEmpty()
+    val rows = rememberLast(suggestions.takeIf { visible }).orEmpty()
+    NoticeVisibility(visible, modifier, anchor = Alignment.Bottom) {
         val shape = SquircleShape(SlashPanelRadius)
         val scroll = rememberScrollState()
         // A narrower or different match list starts at its best match again.
@@ -116,23 +106,22 @@ fun SlashSuggestionPanel(suggestions: List<SlashEntry>, onPick: (SlashEntry) -> 
                 .verticalScroll(scroll)
                 .testTag("slash-panel"),
         ) {
-            rows.forEachIndexed { i, entry -> SlashRow(entry, slashRowShape(i, rows.size), onPick) }
+            rows.forEachIndexed { i, entry ->
+                SlashRow(entry, slashRowShape(i, rows.size), visible, onPick)
+            }
         }
     }
 }
 
 @Composable
-private fun SlashRow(entry: SlashEntry, shape: Shape, onPick: (SlashEntry) -> Unit) {
+private fun SlashRow(entry: SlashEntry, shape: Shape, enabled: Boolean, onPick: (SlashEntry) -> Unit) {
     val description = entry.descriptionText()
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 44.dp)
-            .clip(shape)
-            .clickable(role = Role.Button, onClick = { onPick(entry) })
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .testTag("slash-${entry.name}"),
-        verticalArrangement = Arrangement.Center,
+    BasicComponent(
+        modifier = Modifier.clip(shape).testTag("slash-${entry.name}"),
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        enabled = enabled,
+        role = Role.Button,
+        onClick = { onPick(entry) },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("/${entry.name}", style = COUITheme.textStyles.body1, fontWeight = FontWeight.Medium, color = COUITheme.colorScheme.onSurface, maxLines = 1)

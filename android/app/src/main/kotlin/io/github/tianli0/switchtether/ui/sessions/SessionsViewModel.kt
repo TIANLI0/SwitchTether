@@ -11,15 +11,12 @@ import io.github.tianli0.switchtether.remote.protocol.SessionSummary
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.common.UiError
 import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -59,7 +56,6 @@ data class SessionsState(
             .sortedWith(io.github.tianli0.switchtether.domain.SESSION_ORDER)
 }
 
-@OptIn(FlowPreview::class)
 class SessionsViewModel(private val conn: ConnectionController, private val repo: SessionRepository) : ViewModel() {
     /**
      * The first frame already shows the list Home loaded a moment ago (held in memory by the
@@ -68,7 +64,8 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
      */
     private val _state = MutableStateFlow(initialState(conn.state.value, repo.peekList()))
     val state: StateFlow<SessionsState> = _state.asStateFlow()
-    private val queryFlow = MutableStateFlow("")
+    private var browseBeforeSearch: SessionsState? = null
+    private var queryJob: Job? = null
     private var loadJob: Job? = null
     private var moreJob: Job? = null
 
@@ -95,7 +92,6 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
             }
         }
         viewModelScope.launch { repo.refetch.collect { reload() } }
-        viewModelScope.launch { queryFlow.drop(1).debounce(300).distinctUntilChanged().collect { reload() } }
         viewModelScope.launch {
             repo.changes.collect { ch ->
                 when (ch) {
@@ -122,7 +118,9 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     fun setScope(scope: SessionScope) = _state.update { it.copy(scope = scope) }
 
     fun setAgent(agent: String?) {
-        _state.update { it.copy(agent = agent) }
+        if (agent == _state.value.agent) return
+        rememberBrowse()
+        _state.update { it.copy(agent = agent, nextCursor = null) }
         content.setQuery(_state.value.query, agent)
         reload()
     }
@@ -133,9 +131,43 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     }
 
     fun setQuery(q: String) {
-        _state.update { it.copy(query = q) }
-        queryFlow.value = q
+        if (q == _state.value.query) return
+        rememberBrowse()
+        _state.update { it.copy(query = q, nextCursor = null, loadingMore = false) }
         content.setQuery(q, _state.value.agent)
+        // A result for the old text must not land while the new text is being debounced.
+        loadJob?.cancel()
+        moreJob?.cancel()
+        queryJob?.cancel()
+        queryJob = viewModelScope.launch {
+            delay(300)
+            queryJob = null
+            reload()
+        }
+    }
+
+    private fun rememberBrowse() {
+        val state = _state.value
+        if (browseBeforeSearch == null && state.query.isEmpty() && state.agent == null && state.items is Loadable.Ready) {
+            browseBeforeSearch = state
+        }
+    }
+
+    fun closeSearch() {
+        val browse = browseBeforeSearch
+        browseBeforeSearch = null
+        val current = _state.value
+        if (current.query.isEmpty() && current.agent == null && browse == null) return
+        _state.update {
+            val restored = it.copy(query = "", agent = null, loadingMore = false, nextCursor = null)
+            if (browse != null && browse.project == it.project) {
+                restored.copy(items = browse.items, nextCursor = browse.nextCursor, snapshotAtMs = browse.snapshotAtMs).markedOffline()
+            } else {
+                restored
+            }
+        }
+        content.setQuery("", null)
+        reload()
     }
 
     /**
@@ -148,6 +180,8 @@ class SessionsViewModel(private val conn: ConnectionController, private val repo
     }
 
     fun reload() {
+        queryJob?.cancel()
+        queryJob = null
         loadJob?.cancel()
         // A next page still in flight belongs to the list (and the filters) being replaced.
         moreJob?.cancel()

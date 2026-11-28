@@ -3,6 +3,7 @@ package io.github.tianli0.switchtether.ui.common
 import androidx.compose.ui.platform.testTag
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -34,6 +36,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.Text
+import io.github.suqi8.coui.kmp.anim.COUIInEase
+import io.github.suqi8.coui.kmp.anim.COUIOutEase
 import io.github.suqi8.coui.kmp.basic.TopTips
 import io.github.suqi8.coui.kmp.basic.TopTipsDefaults
 import io.github.tianli0.coui17.patterns.PageDefaults
@@ -92,8 +96,20 @@ fun connectionText(state: ConnectionState): String {
  * from [rememberLast].
  */
 @Composable
-fun NoticeVisibility(visible: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    AnimatedVisibility(visible = visible, modifier = modifier, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) { content() }
+fun NoticeVisibility(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    anchor: Alignment.Vertical = Alignment.Top,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(tween(180, easing = COUIInEase)) +
+            expandVertically(tween(180, easing = COUIInEase), expandFrom = anchor),
+        exit = fadeOut(tween(150, easing = COUIOutEase)) +
+            shrinkVertically(tween(150, easing = COUIOutEase), shrinkTowards = anchor),
+    ) { content() }
 }
 
 /** The last non-null [value]: what a notice keeps showing while it folds away after its data is gone. */
