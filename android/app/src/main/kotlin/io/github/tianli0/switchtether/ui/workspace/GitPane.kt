@@ -22,12 +22,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -218,6 +221,7 @@ private fun opLabel(op: String): String = stringResource(
  */
 @Composable
 fun GitPane(state: FilesUiState, vm: FilesViewModel, ui: GitUi = rememberGitUi()) {
+    val tabStates = key(state.repo) { rememberSaveableStateHolder() }
     if (state.git == null && state.repo != null) LaunchedEffect(state.repo) { vm.loadGit() }
     GitNoticeHost(state, vm)
     val detail = state.gitDiff ?: state.gitShow
@@ -228,7 +232,7 @@ fun GitPane(state: FilesUiState, vm: FilesViewModel, ui: GitUi = rememberGitUi()
         when {
             detail != null -> GitDetailBody(state, vm, detail)
             state.gitCommit != null -> CommitDetailBody(state, vm)
-            else -> GitMain(state, vm, ui)
+            else -> GitMain(state, vm, ui, tabStates)
         }
     }
 }
@@ -258,7 +262,7 @@ private fun GitDetailBody(state: FilesUiState, vm: FilesViewModel, detail: Pair<
 }
 
 @Composable
-private fun GitMain(state: FilesUiState, vm: FilesViewModel, ui: GitUi) {
+private fun GitMain(state: FilesUiState, vm: FilesViewModel, ui: GitUi, tabStates: SaveableStateHolder) {
     val currentListingPath = (state.listing as? Loadable.Ready)?.value?.path
     val rootPaths = (state.roots as? Loadable.Ready)?.value.orEmpty()
     LaunchedEffect(state.repo, currentListingPath, rootPaths) {
@@ -305,10 +309,12 @@ private fun GitMain(state: FilesUiState, vm: FilesViewModel, ui: GitUi) {
             val header: @Composable () -> Unit = {
                 GitListHeader(repoChoices, state, vm, ui)
             }
-            when (ui.tab) {
-                GitTab.HISTORY -> GitHistoryTab(state, st, vm, header)
-                GitTab.BRANCHES -> GitBranchesTab(state, st, vm, header)
-                else -> GitChangesTab(state, st, vm, ui, header)
+            tabStates.SaveableStateProvider(ui.tab) {
+                when (ui.tab) {
+                    GitTab.HISTORY -> GitHistoryTab(state, st, vm, header)
+                    GitTab.BRANCHES -> GitBranchesTab(state, st, vm, header)
+                    else -> GitChangesTab(state, st, vm, ui, header)
+                }
             }
         }
     }

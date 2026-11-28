@@ -2,8 +2,22 @@ package io.github.tianli0.switchtether
 
 import android.graphics.Bitmap
 import android.view.View
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.tianli0.switchtether.remote.protocol.CapStatus
 import io.github.tianli0.switchtether.remote.protocol.SessionDetail
@@ -20,6 +34,7 @@ import io.github.tianli0.switchtether.ui.theme.SwitchTetherTheme
 import io.github.tianli0.switchtether.ui.theme.ThemeMode
 import java.io.File
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -150,6 +165,72 @@ class PageGalleryScreenshotTest {
     }
 
     @Test fun settings() { page { io.github.tianli0.switchtether.ui.settings.SettingsScreen(onOpen = {}) }; shot("page-settings") }
+
+    @Test
+    fun appearanceChoiceUpdatesTheSettingsRow() {
+        page { io.github.tianli0.switchtether.ui.settings.SettingsScreen(onOpen = {}) }
+        val appearance = rule.activity.getString(R.string.settings_appearance)
+        val dark = rule.activity.getString(R.string.theme_dark)
+        rule.onNodeWithText(appearance).performClick()
+        rule.onNodeWithTag("choice-2").assertIsDisplayed().performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(dark).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText(dark).assertIsDisplayed()
+        rule.onNodeWithText(appearance).performClick()
+        rule.onNodeWithTag("choice-0").performClick()
+    }
+
+    @Test
+    fun searchBarCanFinishItsExpandSpring() {
+        val expanded = mutableStateOf(false)
+        page {
+            io.github.suqi8.coui.kmp.basic.SearchBar(
+                inputField = { Box(Modifier.fillMaxWidth().height(36.dp)) },
+                onExpandedChange = { expanded.value = it },
+                expanded = expanded.value,
+                outsideEndAction = { io.github.suqi8.coui.kmp.basic.Text("Cancel") },
+            ) {}
+        }
+        rule.waitForIdle()
+        rule.mainClock.autoAdvance = false
+        try {
+            rule.runOnIdle { expanded.value = true }
+            repeat(50) {
+                rule.mainClock.advanceTimeByFrame()
+                rule.waitForIdle()
+            }
+            rule.onNodeWithText("Cancel").assertIsDisplayed()
+        } finally {
+            rule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun panelWrapsShortContentAndCapsTallContentAtTheTopInset() {
+        val tall = mutableStateOf(false)
+        page {
+            io.github.tianli0.coui17.patterns.PanelSheet(
+                show = true,
+                title = "Panel",
+                onDismissRequest = {},
+                modifier = Modifier.testTag("measured-panel"),
+            ) {
+                Box(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    Box(Modifier.height(if (tall.value) 1_500.dp else 80.dp))
+                }
+            }
+        }
+        val panel = rule.onNodeWithTag("measured-panel")
+        val shortHeight = panel.fetchSemanticsNode().size.height
+        rule.runOnIdle { tall.value = true }
+        val tallHeight = panel.fetchSemanticsNode().size.height
+        val window = rule.activity.window.decorView
+        val topInset = window.rootWindowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.statusBars()).top
+        val gap = 8 * window.resources.displayMetrics.density
+        assertTrue("Short panel should wrap its content", shortHeight < tallHeight / 2)
+        val unfilledTop = window.height - tallHeight
+        assertTrue("Tall panel top was $unfilledTop px with status inset $topInset px",
+            unfilledTop in (topInset - 2)..(topInset + gap + 4).toInt())
+    }
     @Test fun manage() { page { io.github.tianli0.switchtether.ui.manage.ManageScreen(onOpen = {}) }; shot("page-manage") }
     @Test fun workspace() { page { io.github.tianli0.switchtether.ui.workspace.WorkspaceScreen(onOpen = {}) }; shot("page-workspace") }
     @Test fun notifications() { page { io.github.tianli0.switchtether.ui.settings.NotificationPrefsScreen(onBack = {}) }; shot("page-notifications") }

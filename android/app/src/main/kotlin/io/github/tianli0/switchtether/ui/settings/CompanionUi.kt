@@ -2,7 +2,6 @@ package io.github.tianli0.switchtether.ui.settings
 
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.heightIn
 import io.github.tianli0.coui17.patterns.GroupCard
 import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.ActionTone
@@ -110,7 +109,7 @@ private fun CompanionSheet(show: Boolean, onDismiss: () -> Unit) {
     // Unbinding removes the Android association (battery exemption, presence wake-ups): confirm first.
     var confirmUnbind by remember { mutableStateOf<io.github.tianli0.switchtether.connection.CompanionLink.Association?>(null) }
     PanelSheet(show = show, title = stringResource(R.string.companion_title), onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
             Text(
                 stringResource(R.string.companion_intro),
                 style = COUITheme.textStyles.footnote1,

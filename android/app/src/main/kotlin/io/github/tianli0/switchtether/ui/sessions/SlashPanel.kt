@@ -142,7 +142,7 @@ fun SlashHelpSheet(show: Boolean, commands: List<SlashEntry>, onPick: (SlashEntr
     PanelSheet(show = show, title = stringResource(R.string.slash_help_title), onDismissRequest = onDismiss, imePadding = false) {
         // The list itself is what "/help" shows: it is not a row of its own list.
         val rows = commands.filter { slashActionFor(it) != SlashAction.HELP }
-        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp).testTag("slash-help")) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp).testTag("slash-help")) {
             GroupCard {
                 rows.forEachIndexed { i, entry ->
                     BasicComponent(

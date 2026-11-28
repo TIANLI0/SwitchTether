@@ -1,7 +1,6 @@
 package io.github.tianli0.switchtether.ui.sessions
 
 import io.github.tianli0.coui17.patterns.PageDefaults
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -281,7 +280,7 @@ fun ModelEffortSheet(
     onRetryOptions: (() -> Unit)? = null,
 ) {
     PanelSheet(show = show, title = stringResource(R.string.model_sheet_title), onDismissRequest = onDismiss, imePadding = false) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             if (modelNote != null) {
                 Text(modelNote, style = COUITheme.textStyles.footnote1, color = COUITheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp))
             } else ModelEffortChooser(

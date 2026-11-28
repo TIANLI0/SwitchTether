@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import com.adamglin.PhosphorIcons
@@ -108,6 +109,9 @@ import io.github.tianli0.switchtether.ui.common.rememberPredictiveBack
 import io.github.tianli0.coui17.patterns.TextInput
 import io.github.tianli0.coui17.patterns.ToolbarIcon
 import io.github.tianli0.coui17.patterns.pageListPadding
+import io.github.tianli0.coui17.patterns.pageFlingBehavior
+import io.github.tianli0.coui17.patterns.pageScroll
+import io.github.tianli0.coui17.patterns.rememberPageListState
 import io.github.tianli0.coui17.patterns.StatusPill
 import io.github.tianli0.switchtether.ui.diff.DiffView
 import io.github.tianli0.switchtether.ui.files.RemoteFileRef
@@ -230,13 +234,13 @@ fun FilesPane(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: () -> Un
         onDismiss = vm::keepEditing,
         destructive = true,
     )
-    state.pendingSensitive?.let { e ->
+    rememberLast(state.pendingSensitive)?.let { e ->
         ConfirmDialog(
-            show = true,
+            show = state.pendingSensitive != null,
             title = stringResource(R.string.files_sensitive_title),
             message = stringResource(R.string.files_sensitive_body, e.name),
             confirmText = stringResource(R.string.files_open_anyway),
-            onConfirm = { vm.open(e, confirmedSensitive = true) },
+            onConfirm = { if (state.pendingSensitive != null) vm.open(e, confirmedSensitive = true) },
             onDismiss = vm::dismissSensitive,
         )
     }
@@ -271,14 +275,22 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     val clipboard = androidx.compose.ui.platform.LocalClipboard.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val searching = searchExpanded || state.query.isNotEmpty() || state.results != null
+    var barExpanded by remember { mutableStateOf(false) }
     val atRootTop = listing != null && roots.any { FileTypes.samePath(it.path, listing.path) }
-    val closeSearch: () -> Unit = {
-        vm.clearSearch()
-        searchExpanded = false
+    LaunchedEffect(searching) {
+        if (searching) barExpanded = true
+    }
+    val requestSearchClose: () -> Unit = { barExpanded = false }
+    LaunchedEffect(searching, barExpanded) {
+        if (searching && !barExpanded) {
+            kotlinx.coroutines.delay(SEARCH_COLLAPSE_MILLIS)
+            vm.clearSearch()
+            searchExpanded = false
+        }
     }
     val goBack: () -> Unit = {
         when {
-            searching -> closeSearch()
+            searching -> requestSearchClose()
             showRoots -> onBack?.invoke()
             atRootTop && roots.isNotEmpty() -> showRoots = true
             listing?.parent != null -> vm.browse(listing.parent!!)
@@ -299,17 +311,6 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 // COUI17's animated search bar, as in the gallery: it opens collapsed and expands on
                 // the next frame (the capsule narrows, cancel slides in, the field takes focus);
                 // cancel collapses it and the folder header comes back once that has played.
-                var barExpanded by remember { mutableStateOf(false) }
-                var barOpened by remember { mutableStateOf(false) }
-                androidx.compose.runtime.LaunchedEffect(Unit) { barExpanded = true }
-                androidx.compose.runtime.LaunchedEffect(barExpanded) {
-                    if (barExpanded) {
-                        barOpened = true
-                    } else if (barOpened) {
-                        kotlinx.coroutines.delay(SEARCH_COLLAPSE_MILLIS)
-                        closeSearch()
-                    }
-                }
                 androidx.compose.runtime.CompositionLocalProvider(
                     io.github.suqi8.coui.kmp.basic.LocalSearchBarKeyboardType provides androidx.compose.ui.text.input.KeyboardType.Ascii,
                 ) {
@@ -329,7 +330,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                         expanded = barExpanded,
                         onExpandedChange = { barExpanded = it },
                         outsideEndAction = {
-                            io.github.suqi8.coui.kmp.basic.SearchBarActionButton(stringResource(R.string.action_cancel), onClick = { barExpanded = false })
+                            io.github.suqi8.coui.kmp.basic.SearchBarActionButton(stringResource(R.string.action_cancel), onClick = requestSearchClose)
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {}
@@ -474,7 +475,8 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
             if (transfer != null) TransferRow(transfer, vm, onOpenDownloads)
         }
         if (showRoots) {
-            LazyColumn(Modifier.fillMaxSize().testTag("files-roots"), contentPadding = pageListPadding(top = 4.dp)) {
+            LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("files-roots"), state = rememberPageListState(),
+                flingBehavior = pageFlingBehavior(), contentPadding = pageListPadding(top = 4.dp)) {
                 itemsIndexed(roots, key = { _, r -> r.path }) { i, r ->
                     FlatRow(
                         icon = FileIcon.FOLDER,
@@ -494,7 +496,8 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
         val results = state.results
         if (results != null) {
             LoadableContent(results, onRetry = vm::search) { hits ->
-                LazyColumn(Modifier.fillMaxSize().testTag("search-results"), contentPadding = pageListPadding(top = 4.dp)) {
+                LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("search-results"), state = rememberPageListState(),
+                    flingBehavior = pageFlingBehavior(), contentPadding = pageListPadding(top = 4.dp)) {
                     item(key = "h") { SmallTitle(stringResource(R.string.files_results, hits.size)) }
                     if (hits.isEmpty()) item(key = "none") { EmptyNote(stringResource(R.string.files_search_none)) }
                     itemsIndexed(hits, key = { i, h -> "$i:${h.path}:${h.line}" }) { i, h ->
@@ -525,14 +528,17 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                 val visible = remember(list, state.query, state.sort) { FileListing.sort(FileListing.filter(list.entries, state.query), state.sort) }
                 // Each folder remembers where it was scrolled to (also across opening a file), so going back lands where you left.
                 val positions = vm.scrollPositions
-                val listState = remember(list.path) { positions[list.path]?.let { LazyListState(it.first, it.second) } ?: LazyListState() }
-                androidx.compose.runtime.DisposableEffect(list.path) {
-                    onDispose { positions[list.path] = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+                val folderState = remember(list.path) { positions[list.path]?.let { LazyListState(it.first, it.second) } ?: LazyListState() }
+                val listState = if (searching) rememberLazyListState() else folderState
+                androidx.compose.runtime.DisposableEffect(list.path, folderState) {
+                    onDispose { positions[list.path] = folderState.firstVisibleItemIndex to folderState.firstVisibleItemScrollOffset }
                 }
-                io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
                 val query = state.query.trim()
+                LaunchedEffect(searching, query) { if (searching) listState.scrollToItem(0) }
+                io.github.suqi8.coui.kmp.basic.BindScrollToTop(listState)
                 io.github.suqi8.coui.kmp.basic.PullToRefresh(isRefreshing = state.refreshing, onRefresh = vm::refreshListing, topAppBarScrollBehavior = null) {
-                    LazyColumn(Modifier.fillMaxSize().testTag("file-list"), state = listState, contentPadding = pageListPadding(top = 4.dp)) {
+                    LazyColumn(Modifier.fillMaxSize().pageScroll().testTag("file-list"), state = listState,
+                        flingBehavior = pageFlingBehavior(), contentPadding = pageListPadding(top = 4.dp)) {
                         if (visible.isEmpty()) {
                             item(key = "empty") {
                                 if (query.isEmpty()) {
@@ -587,9 +593,9 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
             }
         }
     }
-    actionsFor?.let { e ->
+    rememberLast(actionsFor)?.let { e ->
         val copied = stringResource(R.string.files_copied)
-        PanelSheet(show = true, title = e.name, onDismissRequest = { actionsFor = null }, imePadding = false) {
+        PanelSheet(show = actionsFor != null, title = e.name, onDismissRequest = { actionsFor = null }, imePadding = false) {
             val opts = buildList {
                 if (!e.isDir && !state.transferRunning) add(stringResource(R.string.files_download) to { actionsFor = null; vm.download(e) })
                 add(stringResource(R.string.files_copy_path) to {
@@ -607,7 +613,7 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
                         titleColor = BasicComponentDefaults.titleColor(
                             color = if (i == opts.lastIndex) LocalDevColors.current.danger else COUITheme.colorScheme.onSurface,
                         ),
-                        onClick = act,
+                        onClick = { if (actionsFor != null) act() },
                         cardListPosition = cardListPositionOf(i, opts.size),
                     )
                 }
@@ -645,8 +651,21 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
 
         }
     }
-    confirmDelete?.let { e ->
-        ConfirmDialog(true, stringResource(R.string.files_delete), stringResource(R.string.files_delete_confirm, e.name), stringResource(R.string.files_delete), { confirmDelete = null; vm.delete(e) }, { confirmDelete = null }, destructive = true)
+    rememberLast(confirmDelete)?.let { e ->
+        ConfirmDialog(
+            show = confirmDelete != null,
+            title = stringResource(R.string.files_delete),
+            message = stringResource(R.string.files_delete_confirm, e.name),
+            confirmText = stringResource(R.string.files_delete),
+            onConfirm = {
+                if (confirmDelete != null) {
+                    confirmDelete = null
+                    vm.delete(e)
+                }
+            },
+            onDismiss = { confirmDelete = null },
+            destructive = true,
+        )
     }
 }
 

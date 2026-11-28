@@ -1555,7 +1555,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
     PanelSheet(show = show, title = stringResource(R.string.session_info), onDismissRequest = onDismiss, imePadding = false) {
         val d = detail ?: return@PanelSheet
         val s = d.summary
-        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             val rows = listOfNotNull(
                 stringResource(R.string.session_info_agent) to Formatters.agentLabel(s.agent),
                 s.model?.let { stringResource(R.string.session_info_model) to it },
@@ -1645,7 +1645,7 @@ private fun SessionInfoSheet(show: Boolean, detail: SessionDetail?, activity: St
 private fun ContinueSheet(show: Boolean, agentLabel: String, originalBusy: Boolean, canFork: Boolean, enabled: Boolean, busy: Boolean, onConfirm: (fork: Boolean) -> Unit, onDismiss: () -> Unit) {
     PanelSheet(show = show, title = stringResource(R.string.continue_title), onDismissRequest = onDismiss, imePadding = false) {
         // Scrolls so the continue / fork buttons stay reachable in landscape or with large text.
-        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.TextGutter).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 listOf(
                     stringResource(R.string.continue_point_context, agentLabel),

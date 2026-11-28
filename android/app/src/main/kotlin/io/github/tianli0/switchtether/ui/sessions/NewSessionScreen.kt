@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -891,8 +890,9 @@ fun NewSessionSheet(show: Boolean, onDismiss: () -> Unit, onPickFolder: () -> Un
             }
             intakeReport(dropContext, plan)?.let { android.widget.Toast.makeText(dropContext, it, android.widget.Toast.LENGTH_LONG).show() }
         }
-        Box(Modifier.fillMaxWidth().heightIn(max = 620.dp).nestedScroll(keepFlingInside).contentDropTarget(onHover = { dropHover = it }, onDrop = onDrop)) {
-            Column(Modifier.pageScroll().verticalScroll(rememberPageScrollState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior())) {
+        Box(Modifier.fillMaxWidth().nestedScroll(keepFlingInside).contentDropTarget(onHover = { dropHover = it }, onDrop = onDrop)) {
+            // Wrap short forms. The sheet itself caps the scrolling viewport at the status bar.
+            Column(Modifier.verticalScroll(rememberPageScrollState(), flingBehavior = io.github.tianli0.coui17.patterns.pageFlingBehavior())) {
                 if (heldFiles > 0) {
                     io.github.tianli0.coui17.patterns.NoticeBanner(
                         text = androidx.compose.ui.res.pluralStringResource(R.plurals.new_session_drop_files, heldFiles, heldFiles),

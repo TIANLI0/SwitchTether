@@ -29,7 +29,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
-import io.github.suqi8.coui.kmp.preference.RadioButtonPreference
 import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.tianli0.switchtether.BuildConfig
@@ -52,6 +51,8 @@ import io.github.tianli0.switchtether.remote.tls.Fingerprints
 import io.github.tianli0.switchtether.security.StepUpSignException
 import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.coui17.patterns.ConfirmDialog
+import io.github.tianli0.coui17.patterns.ChoiceDialog
+import io.github.tianli0.coui17.patterns.ChoiceEntry
 import io.github.tianli0.switchtether.ui.common.Formatters
 import io.github.tianli0.coui17.patterns.Page
 import io.github.tianli0.switchtether.ui.common.connectionText
@@ -71,6 +72,20 @@ fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manage
     val conn by container.connection.state.collectAsStateWithLifecycle()
     var confirmUnpair by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    var chooseTheme by remember { mutableStateOf(false) }
+    val themeChoices = listOf(
+        ChoiceEntry(ThemeMode.SYSTEM, stringResource(R.string.theme_system)),
+        ChoiceEntry(ThemeMode.LIGHT, stringResource(R.string.theme_light)),
+        ChoiceEntry(ThemeMode.DARK, stringResource(R.string.theme_dark)),
+    )
+    ChoiceDialog(
+        show = chooseTheme,
+        title = stringResource(R.string.settings_appearance),
+        entries = themeChoices,
+        selected = theme,
+        onSelect = { mode -> scope.launch { container.settingsStore.setThemeMode(mode) } },
+        onDismiss = { chooseTheme = false },
+    )
     var stepUpResult by remember { mutableStateOf<String?>(null) }
     var stepUpBusy by remember { mutableStateOf(false) }
     val stepUpScopeConfig = stringResource(R.string.stepup_scope_config_write)
@@ -143,33 +158,21 @@ fun SettingsScreen(onOpen: (Route) -> Unit, onBack: (() -> Unit)? = null, manage
                     )
                 }
             }
-            item { SectionHeader(stringResource(R.string.settings_appearance)) }
-            item {
-                GroupCard {
-                    val modes = listOf(
-                        ThemeMode.SYSTEM to R.string.theme_system,
-                        ThemeMode.LIGHT to R.string.theme_light,
-                        ThemeMode.DARK to R.string.theme_dark,
-                    )
-                    modes.forEachIndexed { i, (mode, label) ->
-                        RadioButtonPreference(
-                            title = stringResource(label),
-                            selected = theme == mode,
-                            onClick = { scope.launch { container.settingsStore.setThemeMode(mode) } },
-                            cardListPosition = cardListPositionOf(i, modes.size),
-                        )
-                    }
-                }
-            }
             item {
                 val predictive by container.settingsStore.predictiveBack.collectAsStateWithLifecycle(true)
                 GroupCard {
+                    ArrowPreference(
+                        title = stringResource(R.string.settings_appearance),
+                        summary = themeChoices.first { it.value == theme }.text,
+                        cardListPosition = CardListPosition.Head,
+                        onClick = { chooseTheme = true },
+                    )
                     SwitchPreference(
                         checked = predictive,
                         onCheckedChange = { v -> scope.launch { container.settingsStore.setPredictiveBack(v) } },
                         title = stringResource(R.string.settings_predictive_back),
                         summary = stringResource(R.string.settings_predictive_back_summary),
-                        cardListPosition = CardListPosition.Full,
+                        cardListPosition = CardListPosition.Tail,
                     )
                 }
             }

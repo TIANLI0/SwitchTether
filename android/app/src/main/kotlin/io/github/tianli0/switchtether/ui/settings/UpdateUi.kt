@@ -8,7 +8,6 @@ import io.github.tianli0.coui17.patterns.SheetButtons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -114,7 +113,7 @@ fun UpdateSheet(
             )
             val chinese = androidx.compose.ui.platform.LocalConfiguration.current.locales[0].language == "zh"
             val notes = remember(r.notes, chinese) { io.github.tianli0.switchtether.update.ReleaseNotes.forDisplay(r.notes, chinese) }
-            Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 MarkdownView(notes.ifBlank { stringResource(R.string.update_no_notes) })
             }
             when (state) {

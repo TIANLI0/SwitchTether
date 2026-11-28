@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -98,7 +97,7 @@ fun SessionCostSheet(
 ) {
     PanelSheet(show = show, title = stringResource(R.string.cost_sheet_title), onDismissRequest = onDismiss, modifier = Modifier.testTag("cost-sheet"), imePadding = false) {
         val b = breakdown ?: return@PanelSheet
-        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             SessionCostBody(b, partial, project, onOpenProjectUsage)
         }
     }
