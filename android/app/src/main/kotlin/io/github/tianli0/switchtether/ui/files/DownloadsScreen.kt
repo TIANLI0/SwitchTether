@@ -4,7 +4,6 @@ import io.github.tianli0.coui17.patterns.PageDefaults
 import io.github.tianli0.coui17.patterns.ActionTone
 import io.github.tianli0.coui17.patterns.LinkButton
 import io.github.tianli0.coui17.patterns.SmallButton
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

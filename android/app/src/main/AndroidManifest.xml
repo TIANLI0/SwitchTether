@@ -109,6 +109,13 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+        <!-- One detail page per activity: the system draws opening a page and the predictive back
+             gesture to the page under it. -->
+        <activity
+            android:name=".PageActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density" />
         <!--
           The `:link` process (docs/ANDROID_UI.md §38): background connection, notifications, Live
           Updates, widget, port forwards. Everything below with android:process=":link" runs there;

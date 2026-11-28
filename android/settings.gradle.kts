@@ -47,8 +47,6 @@ listOf(
     "coui-ui",
     "coui-preference",
     "coui-icons",
-    // Back-stack host with finger-following predictive back (upstream coui-nav).
-    "coui-nav",
     // Page-level patterns (page scaffold, panels, glass menu, composer, button tiers).
     "coui-patterns",
 ).forEach { name ->

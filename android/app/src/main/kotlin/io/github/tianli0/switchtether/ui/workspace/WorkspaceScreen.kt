@@ -17,7 +17,6 @@ import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.suqi8.coui.kmp.basic.ListPopupColumn
 import io.github.suqi8.coui.kmp.basic.DropdownImpl
 import io.github.tianli0.switchtether.ui.home.RowIcon
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.navigationBarsPadding

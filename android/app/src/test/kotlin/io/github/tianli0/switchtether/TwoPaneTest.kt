@@ -66,11 +66,10 @@ class TwoPaneTest {
         val nav = NavViewModel()
         nav.select(Tab.SESSIONS)
         nav.openFromList(Route.SessionDetail("a", null))
-        nav.push(Route.SessionTools("a"))
         nav.openFromList(Route.SessionDetail("b", null))
-        assertEquals(listOf<Route>(Route.SessionDetail("b", null)), nav.stack)
+        assertEquals(Route.SessionDetail("b", null), nav.selection)
         assertTrue(nav.back())
-        assertTrue(nav.stack.isEmpty())
+        assertEquals(null, nav.selection)
         assertEquals(Tab.SESSIONS, nav.tab)
     }
 

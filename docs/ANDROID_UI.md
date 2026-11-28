@@ -145,8 +145,9 @@ fetched). Links require a confirmation dialog before opening. Code: lightweight 
   appearance (system/light/dark), background-connection toggle (stored; Phase B), notification
   preferences per event type (stored; Phase B delivery), clear cache, version, licenses.
 - **Workspace:** Phase B placeholder (terminal, files, git).
-- **Navigation:** typed back stack in a ViewModel; bottom `NavigationBar` < 600 dp, `NavigationRail`
-  ≥ 600 dp (landscape/tablets); edge-to-edge; predictive back enabled.
+- **Navigation:** tabs in `MainActivity`, one `PageActivity` per detail page (§13.10); bottom
+  `NavigationBar` < 600 dp, `NavigationRail` ≥ 600 dp (landscape/tablets); edge-to-edge; predictive
+  back drawn by the system between pages.
 
 ## 7. Design
 
@@ -669,27 +670,32 @@ Updates only (no OPPO SDK).
   and Compose (follow, pill, own bubble, failed bubble, typing row).
 
 ### 13.10 Navigation, predictive back, language
-- Per-tab back stacks: switching tabs keeps each tab's place; re-selecting a tab returns to its root.
-- `AppNavHost` (`ui/nav/AppNavHost.kt`): one coui-nav `NavDisplay` per tab (COUI17 `coui-nav`,
-  from upstream coui17), cross-faded between tabs; each page's UI state is saved while it is in the
-  stack, also while another tab shows. Push, pop, the system predictive back gesture and an in-page
-  swipe in the reading direction all drive one position. The ColorOS slide (§30) follows the actual
-  edge of the system gesture, revealing the previous page on that side:
-  release finishes the pop from there, cancel slides back, a programmatic push / pop runs 280ms.
-  The in-page swipe is the fallback for systems that do not hand the app the gesture's progress.
-  A swipe in the reading direction can start anywhere. The opposite swipe starts just inside its
-  screen edge. Both yield to horizontal code / chip scrollers and text selection. Settings → Appearance →
-  predictive back off: no swipe, back is a plain pop once committed. Pages keep the activity's
-  ViewModels; the page under the top one stays composed (lifecycle STARTED) and is the one revealed
-  by the gesture. Back at a tab root previews Home with a crossfade driven by the gesture. Only
-  the selected tab handles back while the preview is visible. Home with an empty stack leaves
-  back to the system for its launcher animation.
-  In-page back actions such as leaving a folder, closing a file, leaving a Git diff or navigating
-  WebView history animate the current content during the drag and run the existing action on commit.
+- One activity per page (2026-11-28). `MainActivity` holds onboarding and the tabs; every detail
+  page (`Route`) on a phone is its own `PageActivity`, the route serialized in its intent. Opening a
+  page and the predictive back gesture between pages are the system's activity transitions (on
+  ColorOS its own activity motion, as in any multi-activity app); the app draws no page slide of its
+  own. Back on a page finishes it; a page that replaces itself (a resumed session) starts the new
+  page and finishes. Re-selecting a tab returns to its root; switching tabs cross-fades (150ms).
+- Why: an app with one activity gets predictive back only by drawing it from the progress the
+  system hands to `OnBackAnimationCallback`. On a PKJ110 running ColorOS 17 a minimal callback saw
+  only zero progress during ADB edge swipes (both sides, target SDK 34 and 37), so the app used to
+  add its own in-page swipe as a fallback. Activities get the system's own animation instead and
+  that fallback (in-page and opposite-edge swipes, the imitated ColorOS slide) is gone.
+- The system only animates when the window holds no enabled back callback: pages must enable a
+  back handler only while something in them has to close first (a viewer, a search field, a sheet).
+  `PredictiveBackTest` checks that Home and a page at rest leave back to the system.
+- Back at a tab root previews Home with a crossfade driven by the gesture's progress (when the
+  system hands it over); Home leaves back to the system for its launcher animation. In-page back
+  actions such as leaving a folder, closing a file, leaving a Git diff or navigating WebView history
+  animate the current content during the drag (`rememberPredictiveBack`) and run the existing action
+  on commit. Settings → Appearance → predictive back off turns these in-window previews off; the
+  system's page animation is not the app's to turn off.
+- Pages share state through the `AppContainer` repositories, not activity ViewModels: each window
+  has its own ViewModel store, so e.g. session tools and the session page each hold a
+  `SessionDetailViewModel`. Step-up prompts are claimed by the window in front (collected while
+  STARTED). Notifications, handoff and shares arrive at `MainActivity` (singleTask, so the pages
+  above it close) and open their page from there.
   `enableOnBackInvokedCallback="true"`; edge-to-edge via `enableEdgeToEdge()`.
-  On a PKJ110 running ColorOS 17, a minimal Android `OnBackAnimationCallback` test reported
-  only zero progress during ADB edge swipes on both sides with target SDK 34 and 37. The in-page
-  right swipe was checked on the same device, including preview, cancellation, and commit.
 - Per-app language: `locales_config` (en, zh-CN) and Settings → 语言 opens the system page
   (Android 13+).
 
@@ -1500,14 +1506,15 @@ seen on a device. The per-project numbers were not checked against a real CC Swi
 ## 27. Tablets and unfolded foldables: list | detail (2026-11-25)
 - From a window width of 840dp (`usesTwoPanes`), with the navigation rail that wide windows already
   had: the tab's root (Home, Sessions, Workspace, Manage) stays on the left (40 %, 320–420dp), and
-  what it opens shows on the right with the usual push / pop / predictive-back motion. Narrower
+  the row chosen from it shows on the right (`DetailPane`, a 150ms cross-fade). Narrower
   windows — every phone, a folded foldable, split screen — are unchanged (the same code path as
   before).
 - With nothing open the right pane shows a hint (`PaneEmptyState`). A row opened from the list
   replaces the detail (`NavViewModel.openFromList`), so back clears the selection instead of
-  walking through earlier rows; deeper pages (tools, sub-agents) push as before. The open session's
-  row is marked with a soft accent fill (`LocalSelectedSessionId`). The navigation state lives in
-  the ViewModel, so rotating or folding keeps the selected session (folded, it shows full screen).
+  walking through earlier rows; deeper pages (tools, sub-agents) open as their own activities over
+  the window (§13.10). The open session's row is marked with a soft accent fill
+  (`LocalSelectedSessionId`). The choice lives in the ViewModel, so rotating keeps it; folding hands
+  it over to open as its own page (`NavViewModel.takeSelection`).
 - Files: from 720dp of available width (the tablet's detail pane), an open file or media viewer
   shows beside its folder; back closes the file first.
 - Evidence: `TwoPaneTest` (width gate incl. phone and split-screen widths, list replacement and
@@ -1628,7 +1635,8 @@ real desktop and the offline fallback.
 Values compared against the COUI SDK bundled in OPPO Health 6.7.17 (com.heytap.health, HeyTap-signed),
 read for the numbers only; no SDK code or resources were copied.
 
-- **Page push / pop** (`ui/nav/AnimatedNavHost.kt`, now `AppNavHost.kt` on coui-nav, §13.10) follow `Animation.COUI.Activity` instead of a
+- **Page push / pop** (`ui/nav/AnimatedNavHost.kt`, later `AppNavHost.kt` on coui-nav; since
+  2026-11-28 pages are activities and the system draws this motion, §13.10) followed `Animation.COUI.Activity` instead of a
   Material shared X axis. Push: the new page slides in over the whole width, opaque, 350ms on
   (0.3, 0.1, 0.3, 1); the page underneath moves to −30% on (0.3, 0.15, 0.3, 1) and dims under a black
   scrim to 0.5 on COUIEase (0.33, 0, 0.67, 1) — it stays visible. Pop runs back: the top page leaves to

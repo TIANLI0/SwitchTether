@@ -266,7 +266,7 @@
     <string name="settings_background">后台保持连接</string>
     <string name="settings_background_summary">应用在后台时保持与电脑的连接，以便及时通知审批和任务状态（常驻通知）。</string>
     <string name="settings_predictive_back">预测性返回手势</string>
-    <string name="settings_predictive_back_summary">从屏幕边缘侧滑返回时，页面随手势移动。</string>
+    <string name="settings_predictive_back_summary">侧滑返回时，页面里打开的文件、文件夹和预览随手势移动。页面之间的切换由系统负责。</string>
     <string name="companion_title">通过蓝牙绑定电脑</string>
     <string name="companion_summary_none">绑定后系统会为 SwitchTether 解除后台限制，并在电脑靠近时唤醒它。</string>
     <string name="companion_summary_bound">已绑定：%1$s</string>

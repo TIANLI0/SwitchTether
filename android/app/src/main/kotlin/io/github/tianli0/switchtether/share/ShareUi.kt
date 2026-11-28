@@ -42,7 +42,7 @@ import io.github.tianli0.switchtether.ui.appContainer
 import io.github.tianli0.switchtether.ui.common.Loadable
 import io.github.tianli0.switchtether.ui.home.RowIcon
 import io.github.tianli0.switchtether.ui.icons.AppIcons
-import io.github.tianli0.switchtether.ui.nav.NavViewModel
+import io.github.tianli0.switchtether.ui.nav.Navigator
 import io.github.tianli0.switchtether.ui.nav.Route
 import io.github.tianli0.switchtether.ui.sessions.MAX_ATTACHMENTS
 import io.github.tianli0.switchtether.ui.sessions.SessionDetailState
@@ -97,7 +97,7 @@ private fun cancelShare(context: android.content.Context, inbox: ShareInbox) {
  * cancels.
  */
 @Composable
-fun ShareHost(nav: NavViewModel) {
+fun ShareHost(nav: Navigator) {
     val container = appContainer()
     val inbox = container.shareInbox
     val pending by inbox.state.collectAsState()
@@ -120,7 +120,7 @@ fun ShareHost(nav: NavViewModel) {
         val sessions = runCatching { container.sessions.list(SessionQuery(), limit = 100).items }.getOrNull()
         val id = directShareTarget(direct.sessionId, sessions.orEmpty(), hasFiles)
         inbox.resolveDirect(id)
-        if (id != null) nav.push(Route.SessionDetail(id, sessions?.firstOrNull { it.id == id }?.title))
+        if (id != null) nav.open(Route.SessionDetail(id, sessions?.firstOrNull { it.id == id }?.title))
     }
     LaunchedEffect(show, online, hasFiles) {
         if (!show || !online || direct != null) return@LaunchedEffect
@@ -181,7 +181,7 @@ fun ShareHost(nav: NavViewModel) {
                                         if (promptSet != null && newSession.state.value.prompt == promptSet) newSession.setPrompt("")
                                         promptSet = null
                                         inbox.pickSession(s.id)
-                                        nav.push(Route.SessionDetail(s.id, s.title))
+                                        nav.open(Route.SessionDetail(s.id, s.title))
                                     },
                                 )
                             }
