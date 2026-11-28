@@ -733,11 +733,11 @@ fun PickFolderScreen(onBack: () -> Unit) {
                         }
                         if (all.size > 12) {
                             item(key = "filter") {
-                                TextInput(
-                                    value = filter,
-                                    onValueChange = { filter = it },
+                                io.github.tianli0.coui17.patterns.SearchField(
+                                    query = filter,
+                                    onQueryChange = { filter = it },
                                     label = stringResource(R.string.new_session_filter),
-                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri, autoCorrectEnabled = false),
+                                    fileNames = true,
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
                                 )
                             }

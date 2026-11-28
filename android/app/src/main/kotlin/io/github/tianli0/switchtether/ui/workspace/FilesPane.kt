@@ -63,7 +63,6 @@ import io.github.tianli0.switchtether.ui.files.fileIconVector
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,10 +77,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.BasicComponentDefaults
@@ -90,10 +86,6 @@ import io.github.suqi8.coui.kmp.basic.ExpandArrow
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.LinearProgressIndicator
 import io.github.suqi8.coui.kmp.basic.ListPopupColumn
-import io.github.suqi8.coui.kmp.basic.LocalSearchBarKeyboardType
-import io.github.suqi8.coui.kmp.basic.SearchBar
-import io.github.suqi8.coui.kmp.basic.SearchBarActionButton
-import io.github.suqi8.coui.kmp.basic.SearchBarDefaults
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.cardListPositionOf
@@ -301,48 +293,30 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
     val allLabel = stringResource(R.string.files_all)
     Column(Modifier.fillMaxSize().then(back)) {
         if (searching && !showRoots) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CompositionLocalProvider(LocalSearchBarKeyboardType provides KeyboardType.Ascii) {
-                    SearchBar(
-                        query = state.query,
-                        onQueryChange = vm::setQuery,
-                        onSearch = { vm.search() },
-                        expanded = true,
-                        onExpandedChange = { if (it) searchExpanded = true else closeSearch() },
-                        label = stringResource(R.string.files_filter_hint),
-                        cancelText = stringResource(R.string.action_cancel),
-                        onCancel = closeSearch,
-                        insideMargin = DpSize(0.dp, 6.dp),
-                        clearContentDescription = stringResource(R.string.files_filter_clear),
-                        leadingIcon = {
-                            Icon(
-                                imageVector = COUIIcons.Basic.Search,
-                                contentDescription = null,
-                                tint = SearchBarDefaults.searchBarColors().iconColor,
-                                modifier = Modifier.padding(
-                                    start = SearchBarDefaults.LeadingIconStartPadding,
-                                    end = SearchBarDefaults.LeadingIconEndPadding,
-                                ),
-                            )
-                        },
-                        modifier = Modifier.weight(1f).testTag("files-filter"),
-                    )
-                }
-                SearchBarActionButton(
-                    onClick = { vm.setSearchContent(!state.searchContent) },
-                    modifier = Modifier.size(40.dp).semantics { selected = state.searchContent },
-                ) {
-                    Icon(
-                        PhosphorIcons.Regular.Article,
-                        contentDescription = stringResource(R.string.files_search_content),
-                        tint = if (state.searchContent) COUITheme.colorScheme.primary else COUITheme.colorScheme.onSurface,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
+            // The search replaces the folder header: COUI's search capsule with its cancel key, and
+            // what to search (names or contents) as a chip row under it, like Sessions' search.
+            Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                io.github.tianli0.coui17.patterns.SearchField(
+                    query = state.query,
+                    onQueryChange = vm::setQuery,
+                    label = stringResource(R.string.files_filter_hint),
+                    onSearch = { vm.search() },
+                    onCancel = closeSearch,
+                    alwaysExpanded = true,
+                    autoFocus = state.query.isEmpty(),
+                    fileNames = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("files-filter"),
+                )
+                io.github.suqi8.coui.kmp.basic.ChipTabGroup(
+                    tabs = listOf(
+                        io.github.suqi8.coui.kmp.basic.ChipTabData(stringResource(R.string.files_search_scope_names)),
+                        io.github.suqi8.coui.kmp.basic.ChipTabData(stringResource(R.string.files_search_scope_content)),
+                    ),
+                    selectedIndex = if (state.searchContent) 1 else 0,
+                    onSelectedChange = { vm.setSearchContent(it == 1) },
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp).testTag("files-search-scope"),
+                )
             }
         } else {
             // Header: back, folder name over "共 N 项", then + / search / ⋮.

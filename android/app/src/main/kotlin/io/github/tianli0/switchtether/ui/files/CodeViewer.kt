@@ -423,30 +423,34 @@ private fun FindBar(
     onClose: () -> Unit,
 ) {
     val dev = LocalDevColors.current
-    // Opening find means typing next: the field takes focus and the keyboard comes up.
-    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // COUI's search capsule (the page's one search component), focused on open so the keyboard
+    // comes up; the match count sits inside it, previous / next beside it, and its cancel key
+    // closes find.
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextInput(
-            value = query,
-            onValueChange = onQuery,
+        io.github.tianli0.coui17.patterns.SearchField(
+            query = query,
+            onQueryChange = onQuery,
             label = stringResource(R.string.files_find_hint),
-            modifier = Modifier.weight(1f).focusRequester(focus).testTag("find-input"),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onNext() }),
-        )
-        Text(
-            when {
-                query.isEmpty() -> ""
-                count == 0 -> stringResource(R.string.files_find_none)
-                else -> stringResource(R.string.files_find_count, current + 1, count) + if (capped) "+" else ""
+            onSearch = { onNext() },
+            onCancel = onClose,
+            alwaysExpanded = true,
+            autoFocus = true,
+            modifier = Modifier.weight(1f).testTag("find-input"),
+            trailingIcon = if (query.isEmpty()) {
+                null
+            } else {
+                {
+                    Text(
+                        if (count == 0) stringResource(R.string.files_find_none) else stringResource(R.string.files_find_count, current + 1, count) + if (capped) "+" else "",
+                        style = DevType.label,
+                        color = if (count == 0) dev.danger else dev.gutter,
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    )
+                }
             },
-            style = DevType.label, color = if (query.isNotEmpty() && count == 0) dev.danger else dev.gutter,
-            modifier = Modifier.padding(horizontal = 6.dp),
         )
         ToolbarIcon(PhosphorIcons.Regular.CaretUp, stringResource(R.string.files_find_prev), onPrev, enabled = count > 0)
         ToolbarIcon(PhosphorIcons.Regular.CaretDown, stringResource(R.string.files_find_next), onNext, enabled = count > 0)
-        ToolbarIcon(AppIcons.Close, stringResource(R.string.action_close), onClose)
     }
 }
 

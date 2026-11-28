@@ -104,12 +104,27 @@ fun SessionsContent(
     val agentTabs = agents?.map { ChipTabData(if (it == null) stringResource(R.string.sessions_all_agents) else Formatters.agentLabel(it)) }
     val touch = io.github.suqi8.coui.kmp.basic.rememberPreciseClickState()
     PinMenu(menuFor, menuFor?.id in pins, touch) { menuFor = null }
+    // The agent chips are the search's filter strip: SearchFilterTopAppBar only shows them while
+    // its search row is expanded, but it learns that from the row after the first frame, so a strip
+    // handed over while the search is closed flashes in and collapses the bar on every tab switch.
+    // Hand it over only while searching, and keep it a moment after the search closes so the bar's
+    // own fade-out still plays.
+    val searchOpen = searchExpanded || state.query.isNotEmpty()
+    var filtersShown by androidx.compose.runtime.remember { mutableStateOf(searchOpen) }
+    androidx.compose.runtime.LaunchedEffect(searchOpen) {
+        if (searchOpen) {
+            filtersShown = true
+        } else {
+            kotlinx.coroutines.delay(150)
+            filtersShown = false
+        }
+    }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = containerColor,
         topBar = {
             SearchFilterTopAppBar(
-                filters = agentTabs,
+                filters = agentTabs?.takeIf { filtersShown },
                 selectedFilter = agents?.indexOf(state.agent)?.coerceAtLeast(0) ?: 0,
                 onFilterSelected = { idx -> agents?.getOrNull(idx)?.let(onAgent) ?: onAgent(null) },
                 modifier = Modifier.fillMaxWidth(),

@@ -76,6 +76,7 @@ internal fun GitHistoryTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
                         summaryOverflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         leading = { AuthorDot(c.author) },
                         divider = i < commits.lastIndex,
+                        position = io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, commits.size),
                         onClick = when {
                             state.gitManage -> ({ vm.openCommit(c.hash) })
                             fallbackPath != null -> ({ vm.gitShow(c.hash, fallbackPath) })
@@ -172,6 +173,7 @@ internal fun CommitDetailBody(state: FilesUiState, vm: FilesViewModel) {
                     summary = listOfNotNull(entryFolder(f.path), f.origPath?.let { stringResource(R.string.git_renamed_from, it) }).joinToString(" · ").ifEmpty { null },
                     leading = { StatusBadge(f.status, statusColor(f.status, dev)) },
                     divider = i < d.files.lastIndex,
+                    position = io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, d.files.size),
                     onClick = { vm.commitFileDiff(d.hash, f.path, f.origPath) },
                     menu = buildList {
                         add(MenuEntry(diffLabel, onClick = { vm.commitFileDiff(d.hash, f.path, f.origPath) }))

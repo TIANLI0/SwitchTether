@@ -128,8 +128,9 @@ fun WorkspaceScreen(onOpen: (Route) -> Unit) {
     val sizeEstimate = rememberTerminalSizeEstimate(term.fontSp, term.columns)
     Page(
         title = stringResource(R.string.tab_workspace),
-        // Landscape: a small title, so the content is not pushed below half the height.
-        large = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480,
+        // The same small title bar as Home and Sessions: the tabs cross-fade, so a large title here
+        // made the header grow and shrink on every switch.
+        large = false,
         actions = {
             io.github.tianli0.switchtether.ui.common.RefreshToolbarIcon({
                 termVm.refresh()

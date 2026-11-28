@@ -328,11 +328,13 @@ private fun GitListHeader(repoChoices: List<Pair<String, String>>, state: FilesU
                 )
             }
         }
-        io.github.suqi8.coui.kmp.basic.TabRowWithContour(
+        // Changes / history / branches are three views of the repository, so they take ColorOS's
+        // underlined tab bar; the capsule segmented control is for narrowing one list.
+        io.github.tianli0.coui17.patterns.TabBar(
             tabs = listOf(stringResource(R.string.git_tab_changes), stringResource(R.string.git_tab_history), stringResource(R.string.git_tab_branches)),
-            selectedTabIndex = ui.tab,
-            onTabSelected = { ui.tab = it },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = PageDefaults.CardGutter).testTag("git-tabs"),
+            selectedIndex = ui.tab,
+            onSelect = { ui.tab = it },
+            modifier = Modifier.fillMaxWidth().testTag("git-tabs"),
         )
     }
 }
@@ -486,16 +488,48 @@ internal fun GitRow(
     summaryOverflow: TextOverflow = TextOverflow.StartEllipsis,
     extra: (@Composable () -> Unit)? = null,
     menu: List<MenuEntry> = emptyList(),
+    /** The row's place in its group card; null keeps the flat page row. */
+    position: io.github.suqi8.coui.kmp.basic.CardListPosition? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    Box(modifier) {
+    if (position != null) {
+        io.github.tianli0.coui17.patterns.LazyGroupRow(position, modifier) {
+            GitRowBody(title, summary, leading, divider, onClick, titleColor, titleMaxLines, summaryOverflow, extra, menu, menuOpen, { menuOpen = it }, trailing, inCard = true)
+        }
+    } else {
+        Box(modifier) {
+            GitRowBody(title, summary, leading, divider, onClick, titleColor, titleMaxLines, summaryOverflow, extra, menu, menuOpen, { menuOpen = it }, trailing, inCard = false)
+        }
+    }
+}
+
+@Composable
+private fun GitRowBody(
+    title: String,
+    summary: String?,
+    leading: @Composable () -> Unit,
+    divider: Boolean,
+    onClick: (() -> Unit)?,
+    titleColor: Color,
+    titleMaxLines: Int,
+    summaryOverflow: TextOverflow,
+    extra: (@Composable () -> Unit)?,
+    menu: List<MenuEntry>,
+    menuOpen: Boolean,
+    setMenuOpen: (Boolean) -> Unit,
+    trailing: @Composable RowScope.() -> Unit,
+    inCard: Boolean,
+) {
+    // Inside a card the row keeps the card's own 16dp inset; a flat row sits at the page's text gutter.
+    val start = if (inCard) 16.dp else PageDefaults.TextGutter
+    Box {
         Column(
             Modifier.fillMaxWidth().then(
                 if (onClick != null || menu.isNotEmpty()) {
                     Modifier.combinedClickable(
-                        onClick = { onClick?.invoke() ?: run { menuOpen = true } },
-                        onLongClick = if (menu.isNotEmpty()) ({ menuOpen = true }) else null,
+                        onClick = { onClick?.invoke() ?: setMenuOpen(true) },
+                        onLongClick = if (menu.isNotEmpty()) ({ setMenuOpen(true) }) else null,
                     )
                 } else {
                     Modifier
@@ -503,7 +537,7 @@ internal fun GitRow(
             ),
         ) {
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = PageDefaults.TextGutter, end = 12.dp, top = 9.dp, bottom = 9.dp),
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = start, end = 12.dp, top = 9.dp, bottom = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { leading() }
@@ -526,12 +560,12 @@ internal fun GitRow(
             }
             if (divider) {
                 Box(
-                    Modifier.fillMaxWidth().padding(start = PageDefaults.TextGutter + 54.dp, end = 16.dp).height(0.5.dp)
+                    Modifier.fillMaxWidth().padding(start = start + 54.dp, end = 16.dp).height(0.5.dp)
                         .background(COUITheme.colorScheme.onSurface.copy(alpha = 0.08f)),
                 )
             }
         }
-        if (menu.isNotEmpty()) GlassMenu(show = menuOpen, entries = menu, onDismiss = { menuOpen = false })
+        if (menu.isNotEmpty()) GlassMenu(show = menuOpen, entries = menu, onDismiss = { setMenuOpen(false) })
     }
 }
 

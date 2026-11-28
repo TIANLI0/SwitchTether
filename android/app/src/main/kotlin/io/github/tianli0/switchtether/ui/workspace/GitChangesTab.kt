@@ -113,6 +113,36 @@ internal fun GitChangesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
                 leading = { RowGlyph(AppIcons.Git) },
                 divider = false,
                 onClick = { ui.tab = GitTab.BRANCHES; vm.loadBranches() },
+                position = io.github.suqi8.coui.kmp.basic.CardListPosition.Full,
+                // Fetch / pull / push belong to the branch, so they sit in its card, under the
+                // upstream line, instead of hanging below the card.
+                extra = if (writable) {
+                    {
+                        Row(
+                            Modifier.padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            SmallButton(stringResource(R.string.git_fetch), vm::fetch, enabled = idle, loading = busy == GitOps.FETCH, modifier = Modifier.testTag("git-fetch"))
+                            SmallButton(
+                                stringResource(R.string.git_pull) + if (st.behind > 0) " ↓${st.behind}" else "",
+                                vm::pull,
+                                enabled = idle && st.upstream != null,
+                                loading = busy == GitOps.PULL,
+                                modifier = Modifier.testTag("git-pull"),
+                            )
+                            val publish = st.branch != null && st.upstream == null
+                            SmallButton(
+                                if (publish) stringResource(R.string.git_publish) else stringResource(R.string.git_push) + if (st.ahead > 0) " ↑${st.ahead}" else "",
+                                vm::push,
+                                enabled = idle && st.branch != null && (publish || st.ahead > 0),
+                                loading = busy == GitOps.PUSH,
+                                modifier = Modifier.testTag("git-push"),
+                            )
+                        }
+                    }
+                } else {
+                    null
+                },
                 trailing = {
                     io.github.suqi8.coui.kmp.basic.Icon(
                         AppIcons.ChevronRight,
@@ -122,29 +152,6 @@ internal fun GitChangesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
                     )
                 },
             )
-            if (writable) {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = PageDefaults.TextGutter + 54.dp, end = PageDefaults.CardGutter, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SmallButton(stringResource(R.string.git_fetch), vm::fetch, enabled = idle, loading = busy == GitOps.FETCH, modifier = Modifier.testTag("git-fetch"))
-                    SmallButton(
-                        stringResource(R.string.git_pull) + if (st.behind > 0) " ↓${st.behind}" else "",
-                        vm::pull,
-                        enabled = idle && st.upstream != null,
-                        loading = busy == GitOps.PULL,
-                        modifier = Modifier.testTag("git-pull"),
-                    )
-                    val publish = st.branch != null && st.upstream == null
-                    SmallButton(
-                        if (publish) stringResource(R.string.git_publish) else stringResource(R.string.git_push) + if (st.ahead > 0) " ↑${st.ahead}" else "",
-                        vm::push,
-                        enabled = idle && st.branch != null && (publish || st.ahead > 0),
-                        loading = busy == GitOps.PUSH,
-                        modifier = Modifier.testTag("git-push"),
-                    )
-                }
-            }
         }
         if (st.merging) {
             item(key = "merging") {
@@ -198,6 +205,7 @@ internal fun GitChangesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
                     removed = e.stagedRemoved,
                     turn = if (model.isTurn(e)) turnLabel else null,
                     divider = i < model.staged.lastIndex,
+                    position = io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, model.staged.size),
                     onClick = { vm.gitDiff(e.path, staged = true) },
                     menu = listOf(MenuEntry(viewDiff, onClick = { vm.gitDiff(e.path, staged = true) })),
                 ) {
@@ -247,6 +255,7 @@ internal fun GitChangesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
                     removed = e.removed,
                     turn = if (model.isTurn(e)) turnLabel else null,
                     divider = i < model.unstaged.lastIndex,
+                    position = io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, model.unstaged.size),
                     onClick = open,
                     menu = menu,
                 ) {
@@ -268,6 +277,7 @@ internal fun GitChangesTab(state: FilesUiState, st: RepoStatus, vm: FilesViewMod
                     summary = listOfNotNull("stash@{${s.index}}", s.timeMs.takeIf { it > 0 }?.let { io.github.tianli0.switchtether.ui.common.relativeTime(it) }).joinToString(" · "),
                     leading = { RowGlyph(PhosphorIcons.Regular.Archive) },
                     divider = i < stashes.lastIndex,
+                    position = io.github.suqi8.coui.kmp.basic.cardListPositionOf(i, stashes.size),
                     onClick = if (writable) ({ pendingPop = s }) else null,
                 )
             }
@@ -285,6 +295,7 @@ private fun FileChangeRow(
     divider: Boolean,
     onClick: (() -> Unit)?,
     menu: List<MenuEntry>,
+    position: io.github.suqi8.coui.kmp.basic.CardListPosition? = null,
     action: @Composable () -> Unit,
 ) {
     val dev = LocalDevColors.current
@@ -297,6 +308,7 @@ private fun FileChangeRow(
         divider = divider,
         onClick = onClick,
         menu = menu,
+        position = position,
         // "This turn" stays under the name; the line counts sit at the end beside the key, so a row
         // is two lines (name, folder) like a file manager row, not three.
         extra = turn?.let { t -> { StatusPill(t, dev.info) } },
@@ -318,17 +330,19 @@ private fun CommitBox(state: FilesUiState, st: RepoStatus, vm: FilesViewModel) {
     val busy = state.gitBusy
     val stagedTotal = st.entries.count { it.staged }
     GitSectionHeader(stringResource(R.string.git_commit))
-    Column(Modifier.fillMaxWidth().padding(horizontal = PageDefaults.CardGutter).padding(bottom = PageDefaults.GroupSpacing)) {
+    // The field and the commit key keep the page gutter themselves; the amend card brings its own
+    // (a GroupCard inside a padded column was inset twice).
+    Column(Modifier.fillMaxWidth().padding(bottom = PageDefaults.GroupSpacing)) {
         TextInput(
             state.commitMessage,
             vm::setCommitMessage,
             stringResource(R.string.git_commit_message),
             singleLine = false,
             maxLines = 6,
-            modifier = Modifier.fillMaxWidth().testTag("git-commit-message"),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = PageDefaults.CardGutter).testTag("git-commit-message"),
         )
         if (state.gitManage) {
-            GroupCard(Modifier.padding(top = 8.dp)) {
+            GroupCard(Modifier.padding(top = 8.dp), bottom = 0.dp) {
                 SwitchPreference(
                     checked = state.amend,
                     onCheckedChange = vm::setAmend,
@@ -339,7 +353,7 @@ private fun CommitBox(state: FilesUiState, st: RepoStatus, vm: FilesViewModel) {
                 )
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.End) {
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp).padding(horizontal = PageDefaults.CardGutter), horizontalArrangement = Arrangement.End) {
             SmallButton(
                 if (state.amend) stringResource(R.string.git_commit_amend) else stringResource(R.string.git_commit_n, stagedTotal),
                 vm::commit,

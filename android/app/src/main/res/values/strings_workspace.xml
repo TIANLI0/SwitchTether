@@ -26,6 +26,8 @@
     <string name="files_open_anyway">Open</string>
     <string name="files_search">Search files</string>
     <string name="files_search_content">Search inside files</string>
+    <string name="files_search_scope_names">File names</string>
+    <string name="files_search_scope_content">Contents</string>
     <string name="files_results">%1$d results</string>
     <string name="files_hidden">Show hidden files</string>
     <string name="files_new_file">New file</string>
