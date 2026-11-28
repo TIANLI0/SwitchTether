@@ -733,13 +733,30 @@ fun PickFolderScreen(onBack: () -> Unit) {
                         }
                         if (all.size > 12) {
                             item(key = "filter") {
-                                io.github.tianli0.coui17.patterns.SearchField(
-                                    query = filter,
-                                    onQueryChange = { filter = it },
-                                    label = stringResource(R.string.new_session_filter),
-                                    fileNames = true,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
-                                )
+                                // COUI17's animated search bar (expands on tap, cancel clears and collapses).
+                                var filterExpanded by androidx.compose.runtime.remember { mutableStateOf(filter.isNotEmpty()) }
+                                androidx.compose.runtime.CompositionLocalProvider(
+                                    io.github.suqi8.coui.kmp.basic.LocalSearchBarKeyboardType provides androidx.compose.ui.text.input.KeyboardType.Ascii,
+                                ) {
+                                    io.github.suqi8.coui.kmp.basic.SearchBar(
+                                        inputField = {
+                                            io.github.suqi8.coui.kmp.basic.InputField(
+                                                query = filter,
+                                                onQueryChange = { filter = it },
+                                                onSearch = {},
+                                                expanded = filterExpanded,
+                                                onExpandedChange = { filterExpanded = it },
+                                                label = stringResource(R.string.new_session_filter),
+                                            )
+                                        },
+                                        expanded = filterExpanded,
+                                        onExpandedChange = { filterExpanded = it },
+                                        outsideEndAction = {
+                                            io.github.suqi8.coui.kmp.basic.SearchBarActionButton(stringResource(R.string.action_cancel), onClick = { filterExpanded = false })
+                                        },
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                    ) {}
+                                }
                             }
                         }
                         val parent = l.value.parent

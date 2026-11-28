@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -423,34 +424,67 @@ private fun FindBar(
     onClose: () -> Unit,
 ) {
     val dev = LocalDevColors.current
-    // COUI's search capsule (the page's one search component), focused on open so the keyboard
-    // comes up; the match count sits inside it, previous / next beside it, and its cancel key
-    // closes find.
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        io.github.tianli0.coui17.patterns.SearchField(
-            query = query,
-            onQueryChange = onQuery,
-            label = stringResource(R.string.files_find_hint),
-            onSearch = { onNext() },
-            onCancel = onClose,
-            alwaysExpanded = true,
-            autoFocus = true,
-            modifier = Modifier.weight(1f).testTag("find-input"),
-            trailingIcon = if (query.isEmpty()) {
-                null
-            } else {
-                {
-                    Text(
-                        if (count == 0) stringResource(R.string.files_find_none) else stringResource(R.string.files_find_count, current + 1, count) + if (capped) "+" else "",
-                        style = DevType.label,
-                        color = if (count == 0) dev.danger else dev.gutter,
-                        modifier = Modifier.padding(horizontal = 6.dp),
-                    )
-                }
-            },
+    // COUI17's animated search bar: it opens collapsed and expands on the next frame (the field
+    // takes focus, cancel slides in). The match count and previous / next sit inside the capsule;
+    // cancel collapses the bar and find closes once that has played.
+    var expanded by remember { mutableStateOf(false) }
+    var opened by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { expanded = true }
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            opened = true
+        } else if (opened) {
+            kotlinx.coroutines.delay(300)
+            onClose()
+        }
+    }
+    io.github.suqi8.coui.kmp.basic.SearchBar(
+        inputField = {
+            io.github.suqi8.coui.kmp.basic.InputField(
+                query = query,
+                onQueryChange = onQuery,
+                onSearch = { onNext() },
+                expanded = expanded,
+                onExpandedChange = { expanded = it },
+                label = stringResource(R.string.files_find_hint),
+                modifier = Modifier.testTag("find-input"),
+                trailingIcon = if (query.isEmpty()) {
+                    null
+                } else {
+                    {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (count == 0) stringResource(R.string.files_find_none) else stringResource(R.string.files_find_count, current + 1, count) + if (capped) "+" else "",
+                                style = DevType.label,
+                                color = if (count == 0) dev.danger else dev.gutter,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
+                            FindStep(PhosphorIcons.Regular.CaretUp, stringResource(R.string.files_find_prev), count > 0, onPrev)
+                            FindStep(PhosphorIcons.Regular.CaretDown, stringResource(R.string.files_find_next), count > 0, onNext)
+                        }
+                    }
+                },
+            )
+        },
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        outsideEndAction = {
+            io.github.suqi8.coui.kmp.basic.SearchBarActionButton(stringResource(R.string.action_cancel), onClick = { expanded = false })
+        },
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    ) {}
+}
+
+/** Previous / next match inside the find capsule: a 32dp round key. */
+@Composable
+private fun FindStep(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) {
+    io.github.suqi8.coui.kmp.basic.IconButton(onClick = onClick, enabled = enabled, minWidth = 32.dp, minHeight = 32.dp) {
+        io.github.suqi8.coui.kmp.basic.Icon(
+            icon,
+            contentDescription = description,
+            tint = if (enabled) io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme.onSurface else io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.size(18.dp),
         )
-        ToolbarIcon(PhosphorIcons.Regular.CaretUp, stringResource(R.string.files_find_prev), onPrev, enabled = count > 0)
-        ToolbarIcon(PhosphorIcons.Regular.CaretDown, stringResource(R.string.files_find_next), onNext, enabled = count > 0)
     }
 }
 

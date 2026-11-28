@@ -296,17 +296,44 @@ private fun Browser(state: FilesUiState, vm: FilesViewModel, onOpenDownloads: ()
             // The search replaces the folder header: COUI's search capsule with its cancel key, and
             // what to search (names or contents) as a chip row under it, like Sessions' search.
             Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                io.github.tianli0.coui17.patterns.SearchField(
-                    query = state.query,
-                    onQueryChange = vm::setQuery,
-                    label = stringResource(R.string.files_filter_hint),
-                    onSearch = { vm.search() },
-                    onCancel = closeSearch,
-                    alwaysExpanded = true,
-                    autoFocus = state.query.isEmpty(),
-                    fileNames = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("files-filter"),
-                )
+                // COUI17's animated search bar, as in the gallery: it opens collapsed and expands on
+                // the next frame (the capsule narrows, cancel slides in, the field takes focus);
+                // cancel collapses it and the folder header comes back once that has played.
+                var barExpanded by remember { mutableStateOf(false) }
+                var barOpened by remember { mutableStateOf(false) }
+                androidx.compose.runtime.LaunchedEffect(Unit) { barExpanded = true }
+                androidx.compose.runtime.LaunchedEffect(barExpanded) {
+                    if (barExpanded) {
+                        barOpened = true
+                    } else if (barOpened) {
+                        kotlinx.coroutines.delay(SEARCH_COLLAPSE_MILLIS)
+                        closeSearch()
+                    }
+                }
+                androidx.compose.runtime.CompositionLocalProvider(
+                    io.github.suqi8.coui.kmp.basic.LocalSearchBarKeyboardType provides androidx.compose.ui.text.input.KeyboardType.Ascii,
+                ) {
+                    io.github.suqi8.coui.kmp.basic.SearchBar(
+                        inputField = {
+                            io.github.suqi8.coui.kmp.basic.InputField(
+                                query = state.query,
+                                onQueryChange = vm::setQuery,
+                                onSearch = { vm.search() },
+                                expanded = barExpanded,
+                                onExpandedChange = { barExpanded = it },
+                                label = stringResource(R.string.files_filter_hint),
+                                clearContentDescription = stringResource(R.string.files_filter_clear),
+                                modifier = Modifier.testTag("files-filter"),
+                            )
+                        },
+                        expanded = barExpanded,
+                        onExpandedChange = { barExpanded = it },
+                        outsideEndAction = {
+                            io.github.suqi8.coui.kmp.basic.SearchBarActionButton(stringResource(R.string.action_cancel), onClick = { barExpanded = false })
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {}
+                }
                 io.github.suqi8.coui.kmp.basic.ChipTabGroup(
                     tabs = listOf(
                         io.github.suqi8.coui.kmp.basic.ChipTabData(stringResource(R.string.files_search_scope_names)),
@@ -955,3 +982,6 @@ internal fun rootLabel(r: io.github.tianli0.switchtether.remote.protocol.FsEntry
     val looksLikePath = r.name.isBlank() || r.name.contains('\\') || r.name.contains('/')
     return if (looksLikePath) FileTypes.fileName(r.path).ifBlank { r.path } else r.name
 }
+
+/** How long the search bar's collapse plays before the folder header replaces it. */
+private const val SEARCH_COLLAPSE_MILLIS = 300L

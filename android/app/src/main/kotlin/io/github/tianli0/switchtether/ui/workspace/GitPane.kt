@@ -328,13 +328,11 @@ private fun GitListHeader(repoChoices: List<Pair<String, String>>, state: FilesU
                 )
             }
         }
-        // Changes / history / branches are three views of the repository, so they take ColorOS's
-        // underlined tab bar; the capsule segmented control is for narrowing one list.
-        io.github.tianli0.coui17.patterns.TabBar(
+        io.github.suqi8.coui.kmp.basic.TabRow(
             tabs = listOf(stringResource(R.string.git_tab_changes), stringResource(R.string.git_tab_history), stringResource(R.string.git_tab_branches)),
-            selectedIndex = ui.tab,
-            onSelect = { ui.tab = it },
-            modifier = Modifier.fillMaxWidth().testTag("git-tabs"),
+            selectedTabIndex = ui.tab,
+            onTabSelected = { ui.tab = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = PageDefaults.CardGutter).testTag("git-tabs"),
         )
     }
 }
